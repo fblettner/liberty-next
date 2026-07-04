@@ -1,5 +1,23 @@
 # Liberty Next — Notes de version
 
+## 7.0.50 — 2026-07-04
+
+**Connecteurs**
+- **Liens de base par schéma (`#DBLINK.<NAME>#`)** — un pool peut désormais associer un suffixe de
+  database link à chaque schéma (`[pools.X] dblinks = { SY = "@ORCLPROD", … }`), ajouté à la table
+  *après* son préfixe `#SCHEMA.<NAME>#` (`…F0092#DBLINK.SY#` → `SY920.F0092@ORCLPROD`). Un jeton non
+  mappé ou vide disparaît, si bien que la même requête s'exécute en local quand le schéma n'est pas
+  distant ; une valeur non vide doit être une référence `@link` (protection anti-injection).
+
+**nomaflow**
+- **Les lignes de log des plugins apparaissent enfin dans le journal d'exécution.** Le `RunLogHandler`
+  par exécution n'était attaché qu'à l'arbre `liberty.*` : un espace de noms de plugin enregistré avant
+  le démarrage (ex. `nomasx1`) voyait ses lignes sur la sortie standard mais jamais dans l'interface.
+  `install()` attache désormais *tous* les espaces de noms enregistrés.
+- **Taille du tampon de log configurable** — `[jobs] run_log_max_lines` (5000 par défaut) plafonne le
+  tampon circulaire de log par exécution ; augmentez-le pour les jobs émettant des dizaines de milliers
+  de lignes (ex. un ETL table par table sur des milliers de tables) afin de ne pas perdre le début.
+
 ## 7.0.49 — 2026-06-21
 
 **Documentation**

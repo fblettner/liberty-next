@@ -1,5 +1,23 @@
 # Liberty Next — Release notes
 
+## 7.0.50 — 2026-07-04
+
+**Connectors**
+- **Per-schema DB links (`#DBLINK.<NAME>#`)** — a pool can now map a DB-link suffix per schema
+  (`[pools.X] dblinks = { SY = "@ORCLPROD", … }`), appended to a table *after* its
+  `#SCHEMA.<NAME>#` prefix (`…F0092#DBLINK.SY#` → `SY920.F0092@ORCLPROD`). An unmapped or empty
+  token drops out, so the same query runs locally where the schema isn't remote; a non-empty value
+  must be a bare `@link` reference (config-injection guard).
+
+**nomaflow**
+- **Plugin log lines now reach the UI run log.** The per-run `RunLogHandler` was only bound to the
+  `liberty.*` logger tree, so a plugin namespace registered before startup (e.g. `nomasx1`) had its
+  records appear on stdout but never in the UI run log. `install()` now binds *every* registered
+  namespace, honouring the deferred-attach contract.
+- **Configurable run-log buffer** — `[jobs] run_log_max_lines` (default 5000) caps the per-run log
+  ring buffer; raise it for jobs that legitimately emit tens of thousands of lines (e.g. a per-table
+  ETL over thousands of tables) so the run's head isn't dropped.
+
 ## 7.0.49 — 2026-06-21
 
 **Docs**

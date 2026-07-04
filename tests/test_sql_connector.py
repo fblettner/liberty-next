@@ -85,6 +85,50 @@ async def test_schema_placeholder_substitution(tmp_path) -> None:
     await engine.dispose()
 
 
+def test_apply_dblink_placeholders_unit() -> None:
+    from liberty.connectors.base import ConnectorError
+    from liberty.connectors.sql import _apply_dblink_placeholders
+
+    def sub(sql, links):
+        return _apply_dblink_placeholders(sql, links, connector="c", query="q", pool="p")
+
+    # mapped name → the DB-link suffix appended to the table
+    assert sub("SELECT * FROM SY920.F0092#DBLINK.SY#", {"SY": "@ORCLPROD"}) == "SELECT * FROM SY920.F0092@ORCLPROD"
+    # domain-qualified link is allowed
+    assert sub("F0092#DBLINK.SY#", {"SY": "@ORCLPROD.WORLD"}) == "F0092@ORCLPROD.WORLD"
+    # UNMAPPED name → dropped (a pool without DB links runs locally). This is the core requirement.
+    assert sub("SELECT * FROM SY920.F0092#DBLINK.SY#", {}) == "SELECT * FROM SY920.F0092"
+    # empty value → dropped too
+    assert sub("F0092#DBLINK.SY#", {"SY": ""}) == "F0092"
+    # bare #DBLINK# uses the "" key
+    assert sub("F0092#DBLINK#", {"": "@ORCLPROD"}) == "F0092@ORCLPROD"
+    # case-insensitive on the literal and the name
+    assert sub("F0092#dblink.sy#", {"SY": "@ORCLPROD"}) == "F0092@ORCLPROD"
+    # no placeholder → untouched even when the pool has dblinks
+    assert sub("SELECT * FROM item", {"SY": "@ORCLPROD"}) == "SELECT * FROM item"
+    # injection guard: a value that isn't a bare @link reference raises
+    with pytest.raises(ConnectorError, match="not a bare DB-link reference"):
+        sub("F0092#DBLINK.SY#", {"SY": "@ORCLPROD; DROP TABLE x"})
+    with pytest.raises(ConnectorError, match="not a bare DB-link reference"):
+        sub("F0092#DBLINK.SY#", {"SY": "ORCLPROD"})  # missing the leading @
+
+
+@pytest.mark.asyncio
+async def test_dblink_placeholder_dropped_end_to_end(tmp_path) -> None:
+    """A #DBLINK.<NAME># token with no pool mapping is removed, so the same query runs locally."""
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'dbl.db'}")
+    async with engine.begin() as c:
+        await c.execute(text("CREATE TABLE item (id INTEGER PRIMARY KEY)"))
+        await c.execute(text("INSERT INTO item (id) VALUES (1),(2)"))
+    pools = PoolRegistry({"local": PoolConfig(url="sqlite://")})  # no dblinks configured
+    pools.register_engine("local", engine)
+    assert pools.dblinks("local") == {}
+    q = QueryDef(name="q", sql="SELECT id FROM item#DBLINK.SY# ORDER BY id")
+    r = await SQLConnector("db", SqlConnectorConfig(type="sql", pool="local", queries=[q]), pools).execute("q")
+    assert [row["id"] for row in r.rows] == [1, 2]  # placeholder dropped → ran against local `item`
+    await engine.dispose()
+
+
 @pytest_asyncio.fixture
 async def pools(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")

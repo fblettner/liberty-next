@@ -85,6 +85,14 @@ class PoolConfig(BaseModel):
         "Map ``#SCHEMA.<NAME>#`` placeholders in this pool's queries to real schema names. Lets the "
         "same query target dev vs prod (or several schemas under one DB user) without editing SQL."
     ))
+    dblinks: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "DB Links"}, description=(
+        "Map ``#DBLINK.<NAME>#`` placeholders in this pool's queries to a database-link suffix "
+        "(e.g. ``SY = \"@ORCLPROD\"``) — appended to a table name so the same query reads a remote "
+        "schema over a DB link in one environment and a local table in another (``…F0092#DBLINK.SY#`` "
+        "→ ``…F0092@ORCLPROD``). A token with **no entry or an empty value resolves to nothing** — the "
+        "placeholder is simply dropped, so a pool without DB links runs the query locally. Typically "
+        "paired with a ``#SCHEMA.<NAME>#`` mapping on the same NAME."
+    ))
     pool_size: int = Field(default=5, description="Persistent connections kept open.", json_schema_extra={"x_group": "Pool"})
     max_overflow: int = Field(default=10, description="Extra connections allowed beyond ``pool_size`` under load.", json_schema_extra={"x_group": "Pool"})
     pool_pre_ping: bool = Field(default=True, description="Test connection liveness before handing it out.", json_schema_extra={"x_group": "Pool"})

@@ -59,6 +59,13 @@ class PoolRegistry:
         cfg = self._configs.get(name)
         return dict(cfg.schemas) if cfg else {}
 
+    def dblinks(self, name: str) -> dict[str, str]:
+        """The ``[pools.<name>] dblinks`` map (``#DBLINK.<NAME>#`` placeholder → a DB-link suffix
+        like ``@ORCLPROD``); empty when the pool doesn't define any (or doesn't exist). Unlike
+        ``schemas``, an unmapped / empty token resolves to ``""`` — the placeholder is dropped."""
+        cfg = self._configs.get(name)
+        return dict(cfg.dblinks) if cfg else {}
+
     def dialect(self, name: str) -> str:
         """The SQLAlchemy backend name for pool *name* (``postgresql`` / ``oracle`` / …) —
         a live engine's own dialect if one is registered, else the explicit

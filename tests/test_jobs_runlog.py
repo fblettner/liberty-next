@@ -109,3 +109,63 @@ def test_install_is_idempotent() -> None:
     handlers = [h for h in logging.getLogger("liberty").handlers
                 if isinstance(h, runlog.RunLogHandler)]
     assert len(handlers) == 1
+
+
+def test_install_binds_namespace_registered_before_handler_exists() -> None:
+    """A plugin registers its namespace at import time, which can run BEFORE the
+    nomaflow lifespan calls install(). install() must bind the handler to those
+    pre-registered namespaces — else their records miss the run buffer (visible
+    on stdout, absent from the UI log). Regression for the runlog ordering bug."""
+    ns = "plugintest"
+    lg = logging.getLogger(ns)
+    saved_handler = runlog._handler
+    saved_ns = set(runlog._registered_namespaces)
+    saved_handlers = list(lg.handlers)
+    saved_level = lg.level
+    try:
+        # Fresh-process simulation: no handler yet, plugin imports + registers.
+        runlog._handler = None
+        runlog.register_namespace(ns)
+        assert not any(isinstance(h, runlog.RunLogHandler) for h in lg.handlers), \
+            "attach must defer until the handler exists"
+        # install() now has to pick up the pre-registered namespace.
+        runlog.install()
+        assert any(isinstance(h, runlog.RunLogHandler) for h in lg.handlers), \
+            "install() must bind namespaces registered before it ran"
+        # …and records under that tree reach the run buffer.
+        token = runlog.set_run_context("run-ns")
+        try:
+            logging.getLogger(ns + ".sub").info("plugin progress line")
+        finally:
+            runlog.reset_run_context(token)
+        text = runlog.run_logs("run-ns")
+        assert text is not None and "plugin progress line" in text
+    finally:
+        runlog.discard_run("run-ns")
+        lg.handlers[:] = saved_handlers
+        lg.setLevel(saved_level)
+        runlog._registered_namespaces.clear()
+        runlog._registered_namespaces.update(saved_ns)
+        runlog._handler = saved_handler
+
+
+def test_set_max_lines_caps_new_buffers() -> None:
+    """The per-run ring buffer honours a configured cap — the head drops, the
+    tail survives (so a huge per-table run keeps its most recent lines)."""
+    saved = runlog._MAX_LINES
+    try:
+        runlog.set_max_lines(3)
+        log = logging.getLogger("liberty.jobs.test")
+        token = runlog.set_run_context("run-cap")
+        try:
+            for i in range(6):
+                log.info("line %d", i)
+        finally:
+            runlog.reset_run_context(token)
+        text = runlog.run_logs("run-cap")
+        assert text is not None
+        assert len(text.splitlines()) == 3          # only the last 3 kept
+        assert "line 5" in text and "line 0" not in text
+    finally:
+        runlog._MAX_LINES = saved
+        runlog.discard_run("run-cap")

@@ -946,6 +946,42 @@ def _apply_schema_placeholders(sql: str, schemas: dict[str, str], *, connector: 
     return _SCHEMA_PLACEHOLDER.sub(_sub, sql)
 
 
+# `#DBLINK.<NAME>#` (or bare `#DBLINK#`) in a query's SQL, replaced at execution time with the pool's
+# `dblinks` mapping — a DB-link suffix appended to a table name (e.g. `F0092@ORCLPROD`). UNLIKE the
+# schema token, an unmapped / empty name resolves to "" (the placeholder is dropped), so a pool with
+# no DB links configured runs the query locally. Case-insensitive on the literal and the name.
+_DBLINK_PLACEHOLDER = re.compile(r"#DBLINK(?:\.([A-Za-z0-9_]+))?#", re.IGNORECASE)
+# a non-empty replacement must be a bare DB-link ref — `@name`, optionally domain-qualified
+# (`@ORCLPROD.WORLD`) — a config-injection guard so nothing but a link suffix can reach the SQL.
+_DBLINK_VALUE = re.compile(r"@[A-Za-z0-9_$#.]+")
+
+
+def _apply_dblink_placeholders(sql: str, dblinks: dict[str, str], *, connector: str, query: str, pool: str) -> str:
+    """Replace ``#DBLINK.<NAME>#`` (and bare ``#DBLINK#`` → the ``""`` key) in *sql* with the pool's
+    ``dblinks`` mapping. A name with **no mapping, or an empty value, resolves to ``""``** — the
+    placeholder is dropped (so the same query runs locally on a pool without DB links; this is the
+    feature's whole point). A non-empty value that isn't a bare ``@link`` reference raises
+    :class:`ConnectorError` (config-injection guard). When the query has no placeholders, *sql* is
+    returned unchanged (safe to call unconditionally)."""
+    if "#" not in sql:  # cheap fast path — no `#…#` token at all
+        return sql
+    lookup = {k.upper(): v for k, v in dblinks.items()}
+
+    def _sub(m: re.Match[str]) -> str:
+        key = (m.group(1) or "").upper()
+        value = (lookup.get(key) or "").strip()
+        if not value:  # unmapped or empty → drop the placeholder (dblink is optional by design)
+            return ""
+        if not _DBLINK_VALUE.fullmatch(value):
+            raise ConnectorError(
+                f"{connector}.{query}: dblink mapping {key or '(default)'!r} = {value!r} (pool {pool!r}) "
+                "is not a bare DB-link reference — must be like '@ORCLPROD' or '@ORCLPROD.WORLD'"
+            )
+        return value
+
+    return _DBLINK_PLACEHOLDER.sub(_sub, sql)
+
+
 # A best-effort PostgreSQL OID → type-name map. ``cursor.description`` exposes the
 # type *code*; for asyncpg that's the pg_type OID. We surface a friendly label
 # when we recognise it and ``None`` otherwise — the column *name* (always
@@ -1878,6 +1914,10 @@ class SQLConnector:
                 seq_qdef.sql_for(self._resolve_dialect()), self._pools.schemas(self.pool_name),
                 connector=self.name, query=seq_qdef.name, pool=self.pool_name,
             )
+            seq_sql = _apply_dblink_placeholders(
+                seq_sql, self._pools.dblinks(self.pool_name),
+                connector=self.name, query=seq_qdef.name, pool=self.pool_name,
+            )
             # The column's configured param binds (``lookup_param_binds`` — the SAME field a lookup
             # uses) → ``{PARAM: value}``. A SEQUENCE is just a lookup that returns the next id, so each
             # bind doubles as BOTH: (a) a value for a matching ``:param`` IN the SQL, and (b) a filter
@@ -1997,6 +2037,10 @@ class SQLConnector:
         cap = self._row_cap(qdef, max_rows, screen_max_rows)
         sql_text = _apply_schema_placeholders(
             qdef.sql_for(self._resolve_dialect()), self._pools.schemas(self.pool_name),
+            connector=self.name, query=query_name, pool=self.pool_name,
+        )
+        sql_text = _apply_dblink_placeholders(
+            sql_text, self._pools.dblinks(self.pool_name),
             connector=self.name, query=query_name, pool=self.pool_name,
         )
         stmt_type = detect_statement_type(sql_text)
@@ -2359,6 +2403,10 @@ class SQLConnector:
             qdef.sql_for(self._resolve_dialect()), self._pools.schemas(self.pool_name),
             connector=self.name, query=query_name, pool=self.pool_name,
         )
+        sql_text = _apply_dblink_placeholders(
+            sql_text, self._pools.dblinks(self.pool_name),
+            connector=self.name, query=query_name, pool=self.pool_name,
+        )
         stmt_type = detect_statement_type(sql_text)
         if stmt_type != "SELECT":
             # Streaming is SELECT-only — writes don't fit the protocol (need a single
@@ -2465,6 +2513,10 @@ class SQLConnector:
         """
         sql_text = _apply_schema_placeholders(
             sql_text, self._pools.schemas(self.pool_name),
+            connector=self.name, query="<test-run>", pool=self.pool_name,
+        )
+        sql_text = _apply_dblink_placeholders(
+            sql_text, self._pools.dblinks(self.pool_name),
             connector=self.name, query="<test-run>", pool=self.pool_name,
         )
         stmt_type = detect_statement_type(sql_text)

@@ -316,6 +316,10 @@ class JobsSettings(BaseModel):
     # Master toggle. False → the registry still loads (so /admin views work) but the
     # scheduler + runner won't start at app boot. Useful for one-off maintenance windows.
     enabled: bool = True
+    # Per-run log ring-buffer cap (lines beyond it drop, oldest first) shown in the UI
+    # run log. Default 5000; raise it for jobs that legitimately emit tens of thousands
+    # of lines (e.g. a per-table ETL over thousands of tables) so the run's head isn't lost.
+    run_log_max_lines: int = 5000
 
 
 class PostApplyStep(BaseModel):

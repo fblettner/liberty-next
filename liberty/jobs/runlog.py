@@ -37,6 +37,9 @@ _current_run_id: ContextVar[str | None] = ContextVar("nomaflow_run_id", default=
 # Per-run ring buffers. Bounded so a chatty / runaway job can't exhaust memory;
 # the oldest lines drop. A guard lock keeps the dict mutation safe against the
 # logging handler firing from an executor thread (run_in_executor steps).
+# Default 5000; overridable per deployment via ``[jobs] run_log_max_lines`` in
+# app.toml (threaded through :func:`install`) — raise it for jobs that legitimately
+# emit tens of thousands of lines (e.g. a per-table ETL over thousands of tables).
 _MAX_LINES = 5000
 _MAX_PERSIST_CHARS = 256 * 1024  # cap the text written to the DB
 
@@ -112,34 +115,53 @@ class RunLogHandler(logging.Handler):
             buf.append(line)
 
 
-def install() -> RunLogHandler:
-    """Attach a :class:`RunLogHandler` to the ``liberty`` logger (idempotent —
-    a second call returns the already-installed handler). Called from the
-    nomaflow lifespan wiring.
+def set_max_lines(n: int) -> None:
+    """Set the per-run ring-buffer cap (lines beyond it drop, oldest first).
+    Applies to buffers created *after* this call — i.e. subsequent runs; an
+    in-flight run keeps the cap its buffer was created with. Ignored for a
+    non-positive *n*."""
+    global _MAX_LINES
+    if n and n > 0:
+        _MAX_LINES = int(n)
+
+
+def install(max_lines: int | None = None) -> RunLogHandler:
+    """Attach a :class:`RunLogHandler` to the ``liberty`` logger **and every
+    registered plugin namespace** (idempotent — a second call rebinds against the
+    existing handler). Called from the nomaflow lifespan wiring.
 
     A handler only sees a record if the *logger* first passes it (logger level
-    gate). So this also pins the ``liberty`` logger to at most INFO — otherwise
-    a deployment started without :func:`liberty.main._setup_app_logging` (e.g.
-    a bare ``uvicorn liberty.main:asgi_app``, or the test client) would leave
-    the logger at its WARNING-ish default and the run-log buffer would capture
+    gate). So this also pins each attached logger to at most INFO — otherwise a
+    deployment started without :func:`liberty.main._setup_app_logging` (e.g. a
+    bare ``uvicorn liberty.main:asgi_app``, or the test client) would leave the
+    logger at its WARNING-ish default and the run-log buffer would capture
     nothing. It only ever *lowers* the level, never raises it — a DEBUG setting
     is left alone.
 
     Plugin loggers (e.g. ``nomasx1.security``) live OUTSIDE the ``liberty.*``
-    tree, so without registration their records never reach the run buffer.
-    Use :func:`register_namespace` from plugin import code to attach the
-    handler to additional namespaces."""
+    tree; they call :func:`register_namespace` from plugin import code. That may
+    run *before* this function (the handler doesn't exist yet, so the attach is
+    deferred) — so install binds **all** currently-registered namespaces here,
+    not just ``liberty``. Without this a namespace registered pre-install would
+    stay in the set but never actually receive the handler, and its records would
+    silently miss the run buffer (visible on stdout, absent from the UI log).
+
+    *max_lines*, when given, sets the per-run ring-buffer cap (see
+    :func:`set_max_lines`) — raise it for jobs that legitimately emit tens of
+    thousands of lines (e.g. a per-table ETL over thousands of tables)."""
     global _handler
-    if _handler is not None:
-        # Re-running install (e.g. lifespan re-init) — just rebind the
-        # registered namespaces against the existing handler.
-        _attach_to_namespace("liberty")
-        return _handler
-    _handler = RunLogHandler()
-    _handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname)-7s %(name)s — %(message)s", datefmt="%H:%M:%S",
-    ))
-    _attach_to_namespace("liberty")
+    if max_lines is not None:
+        set_max_lines(max_lines)
+    if _handler is None:
+        _handler = RunLogHandler()
+        _handler.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)-7s %(name)s — %(message)s", datefmt="%H:%M:%S",
+        ))
+    # Bind to ``liberty`` (always) plus every namespace a plugin registered —
+    # including any registered before the handler existed. Idempotent per namespace.
+    _registered_namespaces.add("liberty")
+    for ns in list(_registered_namespaces):
+        _attach_to_namespace(ns)
     return _handler
 
 
