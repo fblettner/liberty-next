@@ -32,6 +32,12 @@ liberty.db
 docs
 tests
 **/*.md
+# …but the framework's release notes ARE runtime data — served at /admin/release-notes via
+# importlib.resources.files("liberty"), so they must land in the pip-installed package. Re-include
+# them (declared as package-data in pyproject) or Settings → Release notes shows "No release notes
+# bundled with this build" in the container (works from source on a dev box either way).
+!liberty/RELEASE.md
+!liberty/RELEASE.fr.md
 docker-compose*.yml
 Dockerfile
 .dockerignore

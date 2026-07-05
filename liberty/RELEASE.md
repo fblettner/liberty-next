@@ -10,6 +10,10 @@
   now installs libaio in its own layer (no `--no-install-recommends`, which had skipped the real
   package) and adds a `libaio.so.1 → libaio.so.1t64` compat symlink — ABI-identical on the 64-bit
   arches we build, so thick-mode LOB-over-dblink fetches work out of the box with no manual step.
+- **Release notes now bundled in the image.** `.dockerignore` excluded `**/*.md`, which stripped
+  `RELEASE.md` / `RELEASE.fr.md` from the build context before they could be packaged — so
+  Settings → Release notes showed "No release notes bundled with this build" in the container
+  (it worked from source on a dev box). The two release-note files are now re-included.
 
 ## 7.0.51 — 2026-07-05
 

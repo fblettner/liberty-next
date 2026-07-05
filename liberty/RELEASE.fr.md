@@ -12,6 +12,11 @@
   symbolique de compatibilité `libaio.so.1 → libaio.so.1t64` — ABI identique sur les architectures
   64 bits produites — de sorte que la lecture des LOB via database link en mode thick fonctionne
   sans aucune manipulation.
+- **Notes de version désormais incluses dans l'image.** Le `.dockerignore` excluait `**/*.md`, ce
+  qui retirait `RELEASE.md` / `RELEASE.fr.md` du contexte de build avant leur empaquetage — d'où le
+  message « No release notes bundled with this build » dans Paramètres → Notes de version côté
+  conteneur (cela fonctionnait depuis les sources en développement). Les deux fichiers de notes sont
+  de nouveau ré-inclus.
 
 ## 7.0.51 — 2026-07-05
 
