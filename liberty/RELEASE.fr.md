@@ -1,5 +1,18 @@
 # Liberty Next — Notes de version
 
+## 7.0.52 — 2026-07-05
+
+**Docker**
+- **Le client Oracle en mode thick se charge de nouveau sur l'image de base actuelle.** L'Instant
+  Client embarqué a besoin de `libaio.so.1`, mais Debian trixie livre libaio sous le nom
+  `libaio1t64`, qui fournit `libaio.so.1t64` (renommage lié à la transition time_t) — si bien que
+  `init_oracle_client()` échouait avec `DPI-1047: libaio.so.1: cannot open shared object file`
+  alors même que le client et libaio étaient présents. L'image installe désormais libaio dans sa
+  propre couche (sans `--no-install-recommends`, qui écartait le vrai paquet) et ajoute un lien
+  symbolique de compatibilité `libaio.so.1 → libaio.so.1t64` — ABI identique sur les architectures
+  64 bits produites — de sorte que la lecture des LOB via database link en mode thick fonctionne
+  sans aucune manipulation.
+
 ## 7.0.51 — 2026-07-05
 
 **Connecteurs**

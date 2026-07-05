@@ -43,6 +43,22 @@ RUN apt-get update \
         libfontconfig1 \
     && rm -rf /var/lib/apt/lists/*
 
+# libaio — the Oracle Instant Client's runtime dependency (libaio.so.1). Two Debian-trixie traps:
+#   1. ``libaio1`` is now a transitional package; the real lib is ``libaio1t64``.
+#   2. libaio1t64 ships the library as ``libaio.so.1t64`` (the time_t rename), but the (proprietary,
+#      un-recompilable) Oracle client is linked against ``libaio.so.1`` → DPI-1047 "libaio.so.1:
+#      cannot open shared object file" even though libaio IS installed.
+# On 64-bit arches (amd64/arm64) time_t was already 64-bit, so libaio.so.1t64 is ABI-identical to
+# libaio.so.1 — a compat symlink is safe and lets the client load. (On bookworm ``libaio1`` ships
+# libaio.so.1 directly, so the find-loop is a no-op there.)
+RUN apt-get update \
+    && (apt-get install -y libaio1t64 || apt-get install -y libaio1) \
+    && rm -rf /var/lib/apt/lists/* \
+    && for f in $(find /usr/lib -name 'libaio.so.1t64' 2>/dev/null); do \
+         ln -sf "$f" "$(dirname "$f")/libaio.so.1"; \
+       done \
+    && ldconfig
+
 # ── Oracle Instant Client (thick OCI client) ─────────────────────────────────────
 # python-oracledb THIN mode can't fetch a LOB over a database link (ORA-22992); the THICK
 # client can. ``liberty.connectors.thick`` runs those few queries in a subprocess that turns
@@ -61,7 +77,7 @@ ARG TARGETARCH
 COPY docker/instantclient/${TARGETARCH}/ /tmp/ic/
 RUN set -eux; \
     apt-get update; \
-    (apt-get install -y --no-install-recommends unzip libaio1 || apt-get install -y --no-install-recommends unzip libaio1t64); \
+    apt-get install -y --no-install-recommends unzip; \
     mkdir -p /opt/oracle/instantclient; \
     if ls /tmp/ic/*.zip >/dev/null 2>&1; then \
       unzip -q /tmp/ic/*.zip -d /tmp/icx; \
@@ -73,7 +89,7 @@ RUN set -eux; \
       echo "no Instant Client zip for $TARGETARCH — thick mode unavailable on this arch"; \
     fi; \
     rm -rf /tmp/ic /tmp/icx; \
-    apt-get purge -y unzip; apt-get autoremove -y; \
+    apt-get purge -y unzip; \
     rm -rf /var/lib/apt/lists/*
 # thick.py reads LIBERTY_ORACLE_CLIENT_LIB for init_oracle_client(lib_dir=…); LD_LIBRARY_PATH is a belt-and-braces fallback.
 ENV LIBERTY_ORACLE_CLIENT_LIB=/opt/oracle/instantclient \

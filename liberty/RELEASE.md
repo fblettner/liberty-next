@@ -1,5 +1,16 @@
 # Liberty Next — Release notes
 
+## 7.0.52 — 2026-07-05
+
+**Docker**
+- **Oracle thick-mode client now loads on the current base image.** The bundled Instant Client
+  needs `libaio.so.1`, but Debian trixie ships libaio as `libaio1t64` providing `libaio.so.1t64`
+  (the time_t package rename) — so `init_oracle_client()` failed with `DPI-1047: libaio.so.1:
+  cannot open shared object file` even though the client and libaio were both present. The image
+  now installs libaio in its own layer (no `--no-install-recommends`, which had skipped the real
+  package) and adds a `libaio.so.1 → libaio.so.1t64` compat symlink — ABI-identical on the 64-bit
+  arches we build, so thick-mode LOB-over-dblink fetches work out of the box with no manual step.
+
 ## 7.0.51 — 2026-07-05
 
 **Connectors**
