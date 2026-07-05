@@ -20,6 +20,11 @@
 #
 # Re-running is idempotent: rematerializes the wheel (operator edits are preserved
 # unless you pass --force-config), refreshes .env keys, re-applies compose.
+#
+# --force-config refreshes the product config (new screens / columns / queries) but is now
+# SAFE for credentials: connectors.toml is secret-preservingly *merged*, not clobbered — your
+# [pools.*] (DB user/password/host/dblinks) and any API auth are kept, only the structure is
+# updated. So run it on every upgrade to pick up new config without re-entering credentials.
 set -euo pipefail
 
 if [ -t 1 ]; then
