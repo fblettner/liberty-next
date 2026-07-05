@@ -1,5 +1,17 @@
 # Liberty Next — Release notes
 
+## 7.0.51 — 2026-07-05
+
+**Connectors**
+- **Thick-mode fetch for LOBs over a database link.** python-oracledb's async (thin) mode can't
+  fetch a LOB across a DB link (fails with ORA-22992 / ORA-03149 — the LOB comes back as a remote
+  locator). `liberty.connectors.thick.fetch_thick(pools, pool, sql)` runs such a query in a
+  short-lived subprocess that turns on the thick (OCI) client *there and only there*, returning the
+  rows (LOBs materialised as bytes) to the async caller — the main app stays thin/async. The Oracle
+  **Instant Client is now bundled in the image** (amd64 + arm64), and `PoolRegistry.oracle_connect_params`
+  exposes a pool's decrypted DSN/creds for it. Use only where thin genuinely can't (a LOB SELECT over
+  a dblink); everything else stays on the async driver.
+
 ## 7.0.50 — 2026-07-04
 
 **Connectors**

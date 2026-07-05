@@ -14,7 +14,7 @@ import logging
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from liberty.connectors.base import UnknownPoolError
+from liberty.connectors.base import ConnectorError, UnknownPoolError
 from liberty.connectors.config import PoolConfig
 from liberty.crypto import decrypt_or_keep, is_encrypted
 
@@ -118,6 +118,34 @@ class PoolRegistry:
         if err:
             _log.warning("pool %r: %s — connecting with the configured value as-is", name, err)
         return url.set(password=pw)
+
+    def oracle_connect_params(self, name: str) -> dict[str, str]:
+        """Plain oracledb connect kwargs (``user`` / ``password`` / ``dsn``) for pool *name*,
+        derived from its resolved (decrypted) URL. For code that must open a **synchronous**
+        oracledb connection *outside* the async engine — specifically the thick-mode
+        LOB-over-dblink subprocess (see :mod:`liberty.connectors.thick`), since python-oracledb
+        only supports asyncio in thin mode. Builds an EZ-connect DSN ``host:port/service`` from
+        the URL's ``service_name`` query arg (else its database/SID). Oracle pools only."""
+        cfg = self._config(name)
+        url = self._resolved_url(name, cfg)
+        if url.get_backend_name() != "oracle":
+            raise ConnectorError(
+                f"pool {name!r}: thick connect params requested but backend is "
+                f"{url.get_backend_name()!r}, not oracle"
+            )
+        service = url.query.get("service_name") if url.query else None
+        if isinstance(service, (tuple, list)):
+            service = service[0] if service else None
+        service = service or url.database
+        if not (url.host and service):
+            raise ConnectorError(
+                f"pool {name!r}: cannot derive host/service from its URL for a thick connection"
+            )
+        return {
+            "user": url.username or "",
+            "password": url.password or "",
+            "dsn": f"{url.host}:{url.port or 1521}/{service}",
+        }
 
     def engine(self, name: str) -> AsyncEngine:
         """Return (creating on first call) the engine for pool *name*."""

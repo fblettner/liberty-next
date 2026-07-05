@@ -43,6 +43,42 @@ RUN apt-get update \
         libfontconfig1 \
     && rm -rf /var/lib/apt/lists/*
 
+# ── Oracle Instant Client (thick OCI client) ─────────────────────────────────────
+# python-oracledb THIN mode can't fetch a LOB over a database link (ORA-22992); the THICK
+# client can. ``liberty.connectors.thick`` runs those few queries in a subprocess that turns
+# on thick mode with this client — the main app stays thin/async.
+#
+# VENDORED, not downloaded at build time (Oracle's download is login-gated, so a build-time
+# fetch fails in CI). Drop the **Linux** Instant Client Basic ZIP per platform into:
+#   docker/instantclient/amd64/instantclient-basic-linux.x64-<ver>.zip     (Linux x86-64)
+#   docker/instantclient/arm64/instantclient-basic-linux.arm64-<ver>.zip   (Linux aarch64)
+# ⚠ These must be the LINUX zips — NOT the macOS client you may use for local `fastapi dev`.
+# An arch you don't deploy can hold just its .gitkeep — the build still succeeds and thick mode
+# is simply unavailable there (a clean ThickFetchError at runtime). Match the client version to
+# your Oracle DB: a 19c client connects to 11.2 … 23ai; a 23ai client connects to 19c+ only.
+# (The release builds linux/amd64 + linux/arm64; ``TARGETARCH`` selects the matching dir.)
+ARG TARGETARCH
+COPY docker/instantclient/${TARGETARCH}/ /tmp/ic/
+RUN set -eux; \
+    apt-get update; \
+    (apt-get install -y --no-install-recommends unzip libaio1 || apt-get install -y --no-install-recommends unzip libaio1t64); \
+    mkdir -p /opt/oracle/instantclient; \
+    if ls /tmp/ic/*.zip >/dev/null 2>&1; then \
+      unzip -q /tmp/ic/*.zip -d /tmp/icx; \
+      cp -a /tmp/icx/instantclient_*/. /opt/oracle/instantclient/; \
+      echo /opt/oracle/instantclient > /etc/ld.so.conf.d/oracle-instantclient.conf; \
+      ldconfig; \
+      echo "Instant Client installed for $TARGETARCH"; \
+    else \
+      echo "no Instant Client zip for $TARGETARCH — thick mode unavailable on this arch"; \
+    fi; \
+    rm -rf /tmp/ic /tmp/icx; \
+    apt-get purge -y unzip; apt-get autoremove -y; \
+    rm -rf /var/lib/apt/lists/*
+# thick.py reads LIBERTY_ORACLE_CLIENT_LIB for init_oracle_client(lib_dir=…); LD_LIBRARY_PATH is a belt-and-braces fallback.
+ENV LIBERTY_ORACLE_CLIENT_LIB=/opt/oracle/instantclient \
+    LD_LIBRARY_PATH=/opt/oracle/instantclient
+
 WORKDIR /app
 
 # Install the framework. Copy the package + build metadata first, install, then drop in the
