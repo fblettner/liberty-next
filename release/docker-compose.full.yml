@@ -211,6 +211,11 @@ services:
       PGADMIN_DEFAULT_PASSWORD: "${PGADMIN_PASSWORD:?PGADMIN_PASSWORD required}"
       PGADMIN_CONFIG_PROXY_X_FOR_COUNT: "1"
       PGADMIN_CONFIG_PROXY_X_PROTO_COUNT: "1"
+      # Bind gunicorn to IPv4. Recent pgadmin4 images default the listen address to ``[::]``
+      # (IPv6), which fails to bind on a host with IPv6 disabled — gunicorn loops on
+      # ``connection to ('::', 80) failed: [Errno 97] Address family not supported by protocol``
+      # then exits. Forcing 0.0.0.0 keeps it on IPv4 regardless of the host's IPv6 state.
+      PGADMIN_LISTEN_ADDRESS: "0.0.0.0"
       # Tells pgAdmin it's mounted under /pgadmin (so its internal links resolve right).
       SCRIPT_NAME: "/pgadmin"
     volumes:
