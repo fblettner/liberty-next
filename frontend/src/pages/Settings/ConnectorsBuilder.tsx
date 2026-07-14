@@ -1157,8 +1157,8 @@ export default function ConnectorsBuilder() {
               {isSql && mode === 'settings' && selConn && selSchema && (() => {
                 const locked = sel != null && alwaysLicensed.has(sel)
                 const fieldKeys = locked
-                  ? ['pool', 'show_in_switcher', 'home', 'max_rows']
-                  : ['pool', 'show_in_switcher', 'home', 'licensed', 'max_rows']
+                  ? ['pool', 'pools', 'show_in_switcher', 'home', 'max_rows']
+                  : ['pool', 'pools', 'show_in_switcher', 'home', 'licensed', 'max_rows']
                 const settingsSchema = pickSchemaProperties(selSchema, fieldKeys)
                 return (
                   <SqlConnectorContext.Provider value={sel ?? undefined}>
