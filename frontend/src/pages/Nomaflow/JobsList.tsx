@@ -68,7 +68,11 @@ const ParamSectionTitle = styled.div`
   display: flex; align-items: baseline; gap: 8px;
 `
 const ParamRow = styled.label`
-  display: grid; grid-template-columns: 200px 1fr; align-items: center; gap: 10px;
+  /* minmax(0, 1fr) — NOT 1fr — so the value column can shrink below its content's
+     intrinsic width. A native <select> with a long option (e.g. "(no saved presets…)")
+     otherwise forces the whole modal to overflow horizontally and pushes controls
+     (the Save-as-preset button) off the right edge. */
+  display: grid; grid-template-columns: 200px minmax(0, 1fr); align-items: center; gap: 10px;
   font-size: ${fontSize.sm};
 `
 const ParamKey = styled.span`font-family: ${fonts.mono}; color: ${colors.text.secondary};`
@@ -884,12 +888,12 @@ function RunWithParamsModal({
               </ParamSectionTitle>
               <ParamRow>
                 <ParamKey>{t('nomaflow.runParams.presetPick', 'Apply')}</ParamKey>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}>
                   <Select
                     value={selectedPreset}
                     onChange={(e) => applyPreset(e.target.value)}
                     disabled={presets.length === 0}
-                    style={{ flex: 1 }}
+                    style={{ flex: 1, minWidth: 0 }}
                   >
                     <option value="">
                       {presets.length === 0
@@ -904,6 +908,7 @@ function RunWithParamsModal({
                     $variant="ghost" $size="sm"
                     onClick={handleSavePreset}
                     disabled={savePresetBusy}
+                    style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
                     title={t('nomaflow.runParams.savePresetTitle', 'Save the current modal state as a named preset on this job (writes to jobs.toml).')}
                   >
                     {savePresetBusy ? <SpinnerRing size={12} thickness={2} /> : null}
