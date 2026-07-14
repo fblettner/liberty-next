@@ -1,5 +1,25 @@
 # Liberty Next — Notes de version
 
+## 7.0.54 — 2026-07-14
+
+**Connecteurs — multi-environnement (un connecteur, plusieurs pools)**
+- **Un connecteur SQL peut désormais s'exécuter sur plusieurs pools.** Déclarez `pools = ["…"]` en
+  plus du `pool` par défaut : les *mêmes* requêtes + écrans s'exécutent sur n'importe lequel — un
+  seul connecteur dessert plusieurs instances DB / JDE, sans cloner les connecteurs ni dupliquer les
+  écrans. Le pool est choisi à l'exécution :
+  - **Interface** — le sélecteur d'application affiche un sélecteur **Pool** lorsque l'application
+    courante couvre un connecteur multi-pools ; choisir un pool réexécute ses écrans sur cette
+    instance. Le choix voyage via l'en-tête `X-Liberty-Pool` et n'est appliqué qu'aux connecteurs qui
+    possèdent ce pool (les écrans d'une application interrogent plusieurs connecteurs — un connecteur
+    mono-pool garde son pool par défaut au lieu d'échouer). Le choix est mémorisé par application.
+  - **Tâches** — les étapes `sql_copy` / `sql_query` acceptent `source_pool` / `target_pool` pour
+    cibler une instance précise sans nouveau connecteur.
+- Le `pool` (par défaut) et les `pools` (supplémentaires) du connecteur se choisissent dans une
+  **liste déroulante des pools configurés** (Paramètres → Connecteurs → Paramètres…), sans saisie.
+- Entièrement rétrocompatible : un connecteur avec seulement `pool` se comporte comme avant.
+  L'ensemble autorisé est `[pool] + pools` ; une requête/tâche ne peut atteindre un pool hors de cet
+  ensemble. Seuls les *noms* de pool sont exposés à l'interface — jamais l'URL ni les identifiants.
+
 ## 7.0.53 — 2026-07-14
 
 **nomaflow**

@@ -1,5 +1,25 @@
 # Liberty Next — Release notes
 
+## 7.0.54 — 2026-07-14
+
+**Connectors — multi-environment (one connector, many pools)**
+- **A SQL connector can now run against several pools.** Declare `pools = ["…"]` alongside the
+  default `pool`, and the *same* queries + screens run against any of them — one connector serving
+  multiple DB / JDE instances, no cloning of connectors or duplicating screens. The pool is chosen
+  at runtime:
+  - **UI** — the app switcher shows a **Pool** picker when the current app spans a multi-pool
+    connector; picking a pool re-runs its screens against that instance. The choice rides on the
+    `X-Liberty-Pool` header and is applied only to connectors that actually have that pool (an app's
+    screens hit several connectors — a single-pool one keeps its default rather than erroring). The
+    pick is per app and persisted.
+  - **Jobs** — `sql_copy` / `sql_query` steps take `source_pool` / `target_pool` to target a
+    specific instance without new connectors.
+- The connector's `pool` (default) and `pools` (extra) are edited from a **dropdown of configured
+  pools** in Settings → Connectors → Settings…, instead of typing names.
+- Fully back-compatible: a connector with only `pool` behaves exactly as before. The allowed set is
+  `[pool] + pools`; a request/job can't reach a pool outside it. Pool *names* are exposed to the UI
+  picker — never the pool URL or credentials.
+
 ## 7.0.53 — 2026-07-14
 
 **nomaflow**
