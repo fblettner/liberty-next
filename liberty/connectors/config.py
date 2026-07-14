@@ -800,7 +800,10 @@ class SqlConnectorConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["sql"]
-    pool: str = Field(default="default", description="Default pool this connector's queries run on.")
+    pool: str = Field(
+        default="default", description="Default pool this connector's queries run on.",
+        json_schema_extra={"x_enum_ref": "POOL_NAMES"},  # pick from configured pools (combobox)
+    )
     pools: list[str] = Field(
         default_factory=list,
         description=(
@@ -810,6 +813,7 @@ class SqlConnectorConfig(BaseModel):
             "the queries + screens stay shared, only the target DB changes. Empty ⇒ this "
             "connector is single-pool (``pool`` only), behaving exactly as before."
         ),
+        json_schema_extra={"x_enum_ref": "POOL_NAMES"},  # each entry picks from configured pools
     )
     licensed: bool = Field(default=False, description="Require a valid [license] key. Without one this connector isn't loaded.")
     max_rows: int | None = Field(default=None, description="Default SELECT row cap. Falls back to the pool's, then 1000. A per-screen / per-request cap takes precedence.")

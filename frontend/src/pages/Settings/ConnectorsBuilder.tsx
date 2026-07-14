@@ -249,8 +249,11 @@ export default function ConnectorsBuilder() {
     }
     if (sel && menus && menus[sel]) walk(menus[sel].items)
     base.MENU_HOME_ITEMS = { label: 'Menu items', values: homeOptions }
+    // POOL_NAMES — every configured pool (Settings → Pools). Drives the connector's ``pool``
+    // (default) + ``pools`` (extra) fields so they're picked from a dropdown, not typed.
+    base.POOL_NAMES = { label: 'Pools', values: pools.map((p) => ({ value: p, label: p, mono: p })) }
     return base
-  }, [schemas, dictionary, sel, menus])
+  }, [schemas, dictionary, sel, menus, pools])
 
   const update = (name: string, v: Record<string, unknown>) => setConns((p) => ({ ...(p ?? {}), [name]: { ...v, type: (p ?? {})[name]?.type } }))
   // Replace one section array (`tables` / `queries` / `sequences` / `lookups`) on a connector.
