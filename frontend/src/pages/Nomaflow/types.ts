@@ -39,6 +39,7 @@ export interface PresetSchedule {
   name: string
   schedule: string
   timezone: string | null
+  enabled: boolean
   next_run: string | null
 }
 
@@ -121,6 +122,9 @@ export interface JobPreset {
   schedule?: string | null
   /** IANA timezone for `schedule`; null → inherit the job's timezone. */
   timezone?: string | null
+  /** Whether this preset's `schedule` fires. Independent of the job's `enabled` —
+   *  an enabled preset fires even when the job is disabled. Default true. */
+  enabled?: boolean
 }
 
 export interface JobsParsedResponse {

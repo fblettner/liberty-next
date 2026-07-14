@@ -146,12 +146,12 @@ class JobScheduler:
     def add_job(self, job: Job) -> None:
         """Add a job to the live scheduler (chunk 3 hot-reload).
 
-        No-op for a disabled job or one with no cron trigger at all (neither a
-        job-level ``schedule`` nor any schedulable preset) — same filter as
-        :meth:`JobRegistry.scheduled_jobs`."""
-        if not job.enabled:
-            return
-        if not job.schedule and not any(p.schedule for p in job.presets):
+        No-op for a job with no ACTIVE cron trigger — neither an enabled job-level
+        ``schedule`` nor any enabled schedulable preset — same filter as
+        :meth:`JobRegistry.scheduled_jobs`. (A disabled job can still register: its
+        enabled presets fire independently.)"""
+        if not ((job.enabled and job.schedule)
+                or any(p.enabled and p.schedule for p in job.presets)):
             return
         self._add_apscheduler_job(job)
 
@@ -304,16 +304,18 @@ class JobScheduler:
         return f"{job_id}{cls._PRESET_SEP}{preset_name}"
 
     def _add_apscheduler_job(self, job: Job) -> None:
-        """Register the cron trigger(s) that fire :meth:`_run_or_drop` for *job* — the
-        job's own ``schedule`` (base fire, no overrides) plus one trigger per schedulable
-        preset (fired with that preset's params / op_kwargs / step toggles / log level)."""
+        """Register the ACTIVE cron trigger(s) that fire :meth:`_run_or_drop` for *job* — the
+        job's own ``schedule`` (base fire, no overrides; only when the job is enabled) plus
+        one trigger per enabled schedulable preset (fired with that preset's params /
+        op_kwargs / step toggles / log level). Preset triggers are independent of the job's
+        ``enabled`` — a disabled job can still have firing presets."""
         common = dict(
             replace_existing=True,
             misfire_grace_time=None,  # PHASE13 §6: catchup=False default
             coalesce=True,  # if multiple fires queue up, take only the latest
             max_instances=1,  # one concurrent run per job — drop policy below
         )
-        if job.schedule:
+        if job.enabled and job.schedule:
             self._scheduler.add_job(
                 self._run_or_drop,
                 trigger=CronTrigger.from_crontab(job.schedule, timezone=job.timezone),
@@ -322,7 +324,7 @@ class JobScheduler:
                 **common,
             )
         for preset in job.presets:
-            if not preset.schedule:
+            if not (preset.enabled and preset.schedule):
                 continue
             tz = preset.timezone or job.timezone
             self._scheduler.add_job(
@@ -360,10 +362,13 @@ class JobScheduler:
         # its schedule) — a stale preset trigger fires into nothing rather than the wrong params.
         preset = None
         if preset_name is not None:
-            preset = next((p for p in job.presets if p.name == preset_name and p.schedule), None)
+            preset = next(
+                (p for p in job.presets if p.name == preset_name and p.schedule and p.enabled),
+                None,
+            )
             if preset is None:
                 _log.warning(
-                    "nomaflow.scheduler fire for unknown/unscheduled preset %r on job %r — dropped",
+                    "nomaflow.scheduler fire for unknown/disabled/unscheduled preset %r on job %r — dropped",
                     preset_name, job_id,
                 )
                 return

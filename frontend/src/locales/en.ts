@@ -398,6 +398,7 @@ const en = {
       presetsSection: 'Presets & schedules',
       presetsEmpty: 'No presets yet. Save one from a job’s Run → Save preset, then give it a schedule here to fire this job on a cron with those parameters — no cloning.',
       presetsHint: 'Give a preset its own cron to run this job on that schedule with the preset’s parameters. Leave the schedule empty to keep it manual-only (Run → pick preset).',
+      presetEnabled: 'Schedule enabled',
       fieldTags: 'Tags',
       tagsPlaceholder: 'Type to add a tag, or pick from existing…',
       tagsNoMatch: 'No matching tags.',
@@ -476,6 +477,7 @@ const en = {
       colSchedule: 'Schedule',
       colNextRun: 'Next run',
       colLastRun: 'Last run',
+      disabled: '(disabled)',
     },
     run: {
       title: 'Run detail',

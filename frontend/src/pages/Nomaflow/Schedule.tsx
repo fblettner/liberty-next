@@ -37,6 +37,7 @@ const PresetTag = styled.span`
   font-family: ${fonts.mono}; font-size: ${fontSize.sm};
   background: ${colors.bg.card}; border: 1px solid ${colors.border}; color: ${colors.text.secondary};
 `
+const Off = styled.span`margin-left: 8px; font-size: ${fontSize.sm}; color: ${colors.text.muted};`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 16px 10px;`
 
 /** One scheduled thing = a job's own cron OR one of its schedulable presets. */
@@ -46,6 +47,7 @@ type SchedEntry = {
   label: string
   preset: string | null      // null = the job's own schedule; else the preset name
   schedule: string | null    // cron; null = manual-only
+  enabled: boolean           // whether this specific trigger is enabled
   nextRun: string | null
   job: JobSummary
 }
@@ -74,14 +76,14 @@ export default function Schedule() {
     const entries: SchedEntry[] = []
     for (const j of all) {
       if (j.schedule) {
-        entries.push({ key: j.id, jobId: j.id, label: j.id, preset: null, schedule: j.schedule, nextRun: j.schedule_next_run ?? null, job: j })
+        entries.push({ key: j.id, jobId: j.id, label: j.id, preset: null, schedule: j.schedule, enabled: j.enabled, nextRun: j.schedule_next_run ?? null, job: j })
       }
       for (const ps of j.preset_schedules ?? []) {
-        entries.push({ key: `${j.id}::${ps.name}`, jobId: j.id, label: j.id, preset: ps.name, schedule: ps.schedule, nextRun: ps.next_run, job: j })
+        entries.push({ key: `${j.id}::${ps.name}`, jobId: j.id, label: j.id, preset: ps.name, schedule: ps.schedule, enabled: ps.enabled, nextRun: ps.next_run, job: j })
       }
       // A job with neither a job-level cron nor any scheduled preset is manual-only.
       if (!j.schedule && (j.preset_schedules?.length ?? 0) === 0) {
-        entries.push({ key: j.id, jobId: j.id, label: j.id, preset: null, schedule: null, nextRun: null, job: j })
+        entries.push({ key: j.id, jobId: j.id, label: j.id, preset: null, schedule: null, enabled: j.enabled, nextRun: null, job: j })
       }
     }
     const sch = entries.filter((e) => e.nextRun != null).sort((a, b) => (a.nextRun! < b.nextRun! ? -1 : 1))
@@ -95,7 +97,10 @@ export default function Schedule() {
         {e.label}
         {e.preset && <PresetTag>{e.preset}</PresetTag>}
       </JobId>
-      <Cell>{e.schedule ? <Mono>{e.schedule}</Mono> : t('nomaflow.jobs.manualOnly')}</Cell>
+      <Cell>
+        {e.schedule ? <Mono>{e.schedule}</Mono> : t('nomaflow.jobs.manualOnly')}
+        {e.schedule && !e.enabled && <Off>{t('nomaflow.scheduleView.disabled', '(disabled)')}</Off>}
+      </Cell>
       <Cell>
         {e.nextRun
           ? <span title={new Date(e.nextRun).toLocaleString()}>

@@ -107,6 +107,7 @@ def _job_summary(
             "name": p.name,
             "schedule": p.schedule,
             "timezone": p.timezone,
+            "enabled": p.enabled,
             "next_run": pn.isoformat() if pn is not None else None,
         })
     next_run = min(candidates) if candidates else None

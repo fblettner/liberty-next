@@ -496,3 +496,89 @@ schedule = "0 1 * * *"
 name = "same"
 schedule = "0 2 * * *"
 """)
+
+
+@pytest.mark.asyncio
+async def test_disabled_job_still_fires_enabled_preset(jobs_db, tmp_path) -> None:
+    """A DISABLED job registers its enabled scheduled presets — the preset trigger is
+    independent of the job's ``enabled`` flag; only the base schedule is suppressed."""
+    registry = _registry_from_toml(tmp_path, """
+[[jobs]]
+id = "off-job"
+schedule = "0 1 * * *"
+enabled = false
+[[jobs.steps]]
+type = "sql_query"
+name = "s"
+connector = "c"
+query = "q"
+[[jobs.presets]]
+name = "keep-running"
+schedule = "0 4 * * *"
+""")
+    assert [j.id for j in registry.scheduled_jobs()] == ["off-job"]
+    scheduler = JobScheduler(registry, _runner(jobs_db, FixedSuccessExecutor()))
+    await scheduler.start()
+    try:
+        ids = set(scheduler.scheduled_job_ids)
+        assert "off-job" not in ids  # base schedule suppressed (job disabled)
+        assert JobScheduler._preset_job_id("off-job", "keep-running") in ids  # preset still fires
+    finally:
+        await scheduler.stop()
+
+
+@pytest.mark.asyncio
+async def test_disabled_preset_is_not_registered(jobs_db, tmp_path) -> None:
+    """A preset with ``enabled = false`` does not register a trigger even with a schedule."""
+    registry = _registry_from_toml(tmp_path, """
+[[jobs]]
+id = "j"
+[[jobs.steps]]
+type = "sql_query"
+name = "s"
+connector = "c"
+query = "q"
+[[jobs.presets]]
+name = "paused"
+schedule = "0 4 * * *"
+enabled = false
+""")
+    assert registry.scheduled_jobs() == []  # no active trigger
+    scheduler = JobScheduler(registry, _runner(jobs_db, FixedSuccessExecutor()))
+    await scheduler.start()
+    try:
+        assert JobScheduler._preset_job_id("j", "paused") not in set(scheduler.scheduled_job_ids)
+    finally:
+        await scheduler.stop()
+
+
+@pytest.mark.asyncio
+async def test_disabled_preset_fire_is_dropped(jobs_db, tmp_path) -> None:
+    """A stale trigger firing for a since-disabled preset runs nothing."""
+    registry = _registry_from_toml(tmp_path, """
+[[jobs]]
+id = "j2"
+[[jobs.steps]]
+type = "sql_query"
+name = "s"
+connector = "c"
+query = "q"
+[[jobs.presets]]
+name = "paused"
+schedule = "0 4 * * *"
+enabled = false
+""")
+    runner = _runner(jobs_db, FixedSuccessExecutor())
+    ran = {"n": 0}
+    orig = runner.run
+    async def spy(job, trigger, **kw):
+        ran["n"] += 1
+        return await orig(job, trigger, **kw)
+    runner.run = spy
+    scheduler = JobScheduler(registry, runner)
+    await scheduler.start()
+    try:
+        await scheduler._run_or_drop("j2", "paused")  # simulate a stale fire
+    finally:
+        await scheduler.stop()
+    assert ran["n"] == 0  # dropped — the preset is disabled

@@ -400,6 +400,7 @@ const fr: Resources = {
       presetsSection: 'Préréglages & plannings',
       presetsEmpty: 'Aucun préréglage. Enregistrez-en un depuis Exécuter → Enregistrer le préréglage, puis donnez-lui un planning ici pour exécuter cette tâche sur un cron avec ces paramètres — sans cloner.',
       presetsHint: 'Donnez un cron à un préréglage pour exécuter cette tâche selon ce planning avec les paramètres du préréglage. Laissez le planning vide pour un usage manuel uniquement (Exécuter → choisir le préréglage).',
+      presetEnabled: 'Planning activé',
       fieldTags: 'Étiquettes',
       tagsPlaceholder: 'Saisir une étiquette ou choisir une existante…',
       tagsNoMatch: 'Aucune étiquette correspondante.',
@@ -478,6 +479,7 @@ const fr: Resources = {
       colSchedule: 'Planification',
       colNextRun: 'Prochaine exécution',
       colLastRun: 'Dernière exécution',
+      disabled: '(désactivé)',
     },
     run: {
       title: 'Détail de l\'exécution',

@@ -293,6 +293,15 @@ class JobPreset(BaseModel):
         default=None,
         description="IANA timezone for ``schedule``. None → inherit the job's timezone (then system tz).",
     )
+    enabled: bool = Field(
+        default=True,
+        description=(
+            "Whether this preset's ``schedule`` fires. Independent of the job's own "
+            "``enabled`` flag: an enabled preset fires on its cron even when the job is "
+            "disabled (the job's ``enabled`` gates only the job's OWN schedule). Ignored "
+            "for a preset with no ``schedule`` (manual-only presets are always pickable)."
+        ),
+    )
 
     @field_validator("timezone")
     @classmethod

@@ -479,6 +479,15 @@ export default function JobEditor() {
                     <PresetHead>
                       <strong>{p.name}</strong>
                       <FieldHint>{presetOverrideSummary(p)}</FieldHint>
+                      {p.schedule && (
+                        <span style={{ marginLeft: 'auto' }}>
+                          <Checkbox
+                            checked={p.enabled ?? true}
+                            onChange={(checked) => patchPreset(i, { enabled: checked })}
+                            label={t('nomaflow.editor.presetEnabled', 'Schedule enabled')}
+                          />
+                        </span>
+                      )}
                     </PresetHead>
                     <Grid>
                       <FieldWrap $full as="div">
