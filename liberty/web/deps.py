@@ -121,6 +121,9 @@ def public_connector(desc: dict, principal: Principal) -> dict | None:
             "sequences": sections["sequences"],
             "lookups": sections["lookups"],
             "show_in_switcher": desc.get("show_in_switcher", True),
+            # Pool NAMES this connector may run against (multi-environment picker). Never the
+            # pool URL/credentials — just identifiers. Absent/1-element ⇒ single-pool connector.
+            "pools": desc.get("pools", []),
         }
     if desc["type"] == "api":
         endpoints = [

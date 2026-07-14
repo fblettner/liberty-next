@@ -234,6 +234,7 @@ async def _run_sql(
     screen_hint: tuple[str, str] | None = None,
     summary_dims: list[tuple[str, str | None]] | None = None,
     detail_filters: list[tuple[str, str | None, Any]] | None = None,
+    pool: str | None = None,
 ) -> dict[str, Any]:
     """Run *query* on *connector* with *params*. When a matching :class:`Screen` is found,
     thread its per-screen behaviour (column hints, ``audit_table``, ``max_rows``, dictionary
@@ -274,7 +275,10 @@ async def _run_sql(
     # an AI tool / external caller / dashboard widget — those resolve against the connector scope).
     dict_scope = screen_app if screen is not None else ((action_context or {}).get("app") or None)
     try:
-        conn = connectors.sql(connector)
+        # ``pool`` (from the ``X-Liberty-Pool`` header) rebinds a multi-pool connector to a
+        # different DB instance for this call — same queries/screens, different environment.
+        # ``for_pool`` validates it against the connector's allowed set (ConnectorError otherwise).
+        conn = connectors.sql(connector).for_pool(pool)
         # `user` is recorded on the audit row when the screen carries `audit_table`; otherwise
         # it's ignored. Pulled from the JWT principal — never the request body.
         result = await conn.execute(
@@ -361,6 +365,7 @@ def _stream_sql_ndjson(
     language: str | None = None, max_rows: int | None = None, user: str | None = None,
     screens: ScreensFile | None = None, chunk_size: int | None = None,
     screen_hint: tuple[str, str] | None = None,
+    pool: str | None = None,
 ) -> StreamingResponse:
     """Stream *query*'s rows as NDJSON (``application/x-ndjson``). Same per-screen prep as
     :func:`_run_sql` — column hints, ``screen_max_rows``, dictionary scope — except writes are
@@ -395,7 +400,7 @@ def _stream_sql_ndjson(
     screen_max_rows = screen.max_rows if screen else None
     dict_scope = screen_app if screen is not None else None
     try:
-        conn = connectors.sql(connector)
+        conn = connectors.sql(connector).for_pool(pool)  # X-Liberty-Pool → multi-pool rebind
         # Reject non-SELECT up front so we don't 200-then-error. ``execute_stream`` also
         # raises, but doing it here gives a clean 405 / 422 instead of an NDJSON error line.
         qdef = conn.get_query(query)
@@ -554,6 +559,14 @@ async def sql_pool_schema(
         ) from exc
 
 
+def _request_pool(request: Request) -> str | None:
+    """The optional ``X-Liberty-Pool`` header — rebinds a multi-pool connector to a specific DB
+    instance (JDE/DB environment) for this request. None/empty ⇒ the connector's default pool.
+    Validation against the connector's allowed pools happens in ``SQLConnector.for_pool``."""
+    v = (request.headers.get("x-liberty-pool") or "").strip()
+    return v or None
+
+
 def _streaming_requested(qp: dict[str, Any]) -> bool:
     """``?_stream=1`` (or any truthy spelling) opts the response into NDJSON streaming
     mode. Lives on the query string so a browser can swap modes without changing the body
@@ -634,12 +647,14 @@ async def sql_query_get(
             connectors, connector, query, qp,
             language=request_language(request), max_rows=limit, user=principal.username,
             screens=screens, chunk_size=chunk_size, screen_hint=screen_hint,
+            pool=_request_pool(request),
         )
     return await _run_sql(
         connectors, connector, query, qp,
         language=request_language(request), max_rows=limit, user=principal.username,
         screens=screens, screen_hint=screen_hint,
         summary_dims=summary_dims, detail_filters=detail_filters,
+        pool=_request_pool(request),
     )
 
 
@@ -856,12 +871,14 @@ async def sql_query_post(
             connectors, connector, query, params,
             language=request_language(request), max_rows=limit, user=principal.username,
             screens=screens, chunk_size=chunk_size,
+            pool=_request_pool(request),
         )
     return await _run_sql(
         connectors, connector, query, params,
         language=request_language(request), max_rows=limit, user=principal.username,
         screens=screens, changesets=getattr(request.app.state, "changesets_db", None),
         action_context=action_context if isinstance(action_context, dict) else None,
+        pool=_request_pool(request),
     )
 
 

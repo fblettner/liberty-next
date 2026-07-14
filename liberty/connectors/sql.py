@@ -20,6 +20,7 @@ Safety model (also from nomaubl):
 
 from __future__ import annotations
 
+import copy
 import logging
 import re
 import time
@@ -1257,11 +1258,39 @@ class SQLConnector:
         # raise ValueError at config-build time (caller logs + skips that connector).
         self._queries: dict[str, QueryDef] = dict(config.iter_named_queries())
         self._dialect: str | None = None  # lazily resolved from the pool
+        # Pools this connector may run against at runtime (multi-environment). The default
+        # ``pool`` plus any extras in ``pools`` — a caller can pick any of them via
+        # :meth:`for_pool` (from the ``X-Liberty-Pool`` header / a job's ``source_pool``).
+        self.allowed_pools: frozenset[str] = frozenset([config.pool, *config.pools])
 
     def _resolve_dialect(self) -> str:
         if self._dialect is None:
             self._dialect = self._pools.dialect(self.pool_name)  # may raise UnknownPoolError
         return self._dialect
+
+    def for_pool(self, pool: str | None) -> "SQLConnector":
+        """Return a view of this connector bound to *pool* — for a multi-pool connector that
+        runs the same queries/screens against several DB instances (one JDE/DB environment
+        per pool). The returned connector **shares** this one's queries / dictionary / pool
+        registry; only the target pool (and therefore its dialect / schemas / dblinks /
+        trim / engine) differs, so ``execute`` & friends need no changes — they read
+        ``self.pool_name``.
+
+        ``None`` or the connector's own default pool returns ``self`` (no copy). Any other
+        pool must be in :attr:`allowed_pools` (``[pool] + pools``) or a
+        :class:`ConnectorError` is raised — a request can't reach an arbitrary pool.
+        """
+        if pool is None or pool == self.pool_name:
+            return self
+        if pool not in self.allowed_pools:
+            raise ConnectorError(
+                f"{self.name}: pool {pool!r} is not one of this connector's pools "
+                f"(allowed: {', '.join(sorted(self.allowed_pools))})."
+            )
+        clone = copy.copy(self)  # shallow: _queries / _pools / _dict are shared, read-only
+        clone.pool_name = pool
+        clone._dialect = None    # re-resolve for the new pool's DB
+        return clone
 
     # -- introspection ----------------------------------------------------- #
 
@@ -1334,6 +1363,7 @@ class SQLConnector:
             "name": self.name,
             "type": "sql",
             "pool": self.pool_name,
+            "pools": sorted(self.allowed_pools),  # pool NAMES (not URLs/creds) for the runtime picker
             "show_in_switcher": self.config.show_in_switcher,
             "tables": tables,
             "queries": [_qmeta(q) for q in self.config.queries],

@@ -2344,3 +2344,46 @@ def test_aggregate_wrap_sql_shapes() -> None:
     assert det.rstrip().endswith("ORDER BY id DESC")  # original ORDER BY preserved
     with pytest.raises(StatementNotAllowedError):
         _apply_aggregate_wrap(sql, [("seg; DROP TABLE t", None)], "postgres")
+
+
+@pytest.mark.asyncio
+async def test_for_pool_routes_to_selected_pool(tmp_path) -> None:
+    """A multi-pool connector runs the SAME query against different pools via ``for_pool`` —
+    the shallow clone re-binds ``pool_name``; the allowed set is ``[pool] + pools``; a pool
+    outside it is refused even if it exists in the registry."""
+    from liberty.connectors.base import ConnectorError
+    engines = {}
+    for name, marker in (("prod", "PROD"), ("test", "TEST")):
+        eng = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / (name + '.db')}")
+        async with eng.begin() as c:
+            await c.execute(text("CREATE TABLE t (v TEXT)"))
+            await c.execute(text(f"INSERT INTO t (v) VALUES ('{marker}')"))
+        engines[name] = eng
+    pools = PoolRegistry({
+        "prod": PoolConfig(url="sqlite://"),
+        "test": PoolConfig(url="sqlite://"),
+        "other": PoolConfig(url="sqlite://"),
+    })
+    for n, e in engines.items():
+        pools.register_engine(n, e)
+    q = QueryDef(name="get", sql="SELECT v FROM t")
+    conn = SQLConnector("db", SqlConnectorConfig(type="sql", pool="prod", pools=["test"], queries=[q]), pools)
+
+    assert (await conn.execute("get")).rows[0]["v"] == "PROD"               # default pool
+    assert (await conn.for_pool("test").execute("get")).rows[0]["v"] == "TEST"  # override → other DB
+    assert conn.pool_name == "prod"                                         # original unchanged
+    assert conn.for_pool(None) is conn and conn.for_pool("prod") is conn    # no-op cases
+    assert conn.allowed_pools == frozenset({"prod", "test"})
+    with pytest.raises(ConnectorError, match="not one of this connector's pools"):
+        conn.for_pool("other")   # exists in the registry but not this connector's set
+    for e in engines.values():
+        await e.dispose()
+
+
+def test_describe_exposes_allowed_pools() -> None:
+    pools = PoolRegistry({"a": PoolConfig(url="sqlite://"), "b": PoolConfig(url="sqlite://")})
+    conn = SQLConnector("db", SqlConnectorConfig(type="sql", pool="a", pools=["b"],
+                        queries=[QueryDef(name="q", sql="SELECT 1")]), pools)
+    d = conn.describe()
+    assert d["pool"] == "a"
+    assert d["pools"] == ["a", "b"]   # sorted allowed pool names (identifiers, not URLs)

@@ -800,7 +800,17 @@ class SqlConnectorConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["sql"]
-    pool: str = Field(default="default", description="Which pool this connector's queries run on.")
+    pool: str = Field(default="default", description="Default pool this connector's queries run on.")
+    pools: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Additional pools this connector may run against at runtime (multi-environment: "
+            "one connector, many JDE/DB instances). A request/job/UI can select any pool in "
+            "``[pool] + pools`` via the ``X-Liberty-Pool`` header / a step's ``source_pool`` — "
+            "the queries + screens stay shared, only the target DB changes. Empty ⇒ this "
+            "connector is single-pool (``pool`` only), behaving exactly as before."
+        ),
+    )
     licensed: bool = Field(default=False, description="Require a valid [license] key. Without one this connector isn't loaded.")
     max_rows: int | None = Field(default=None, description="Default SELECT row cap. Falls back to the pool's, then 1000. A per-screen / per-request cap takes precedence.")
     show_in_switcher: bool = Field(
