@@ -22,6 +22,16 @@ export function setTokenRefresher(fn: (() => Promise<string | null>) | null): vo
   tokenRefresher = fn;
 }
 
+// Current pool for the active app (multi-environment). Sent as ``X-Liberty-Pool`` on every
+// request; the server applies it only to connectors that actually have that pool (a broadcast
+// hint from the app switcher — see WorkspaceContext.setCurrentPool). null ⇒ each connector's
+// default pool. Module-level (not React state) so the plain ``request()`` path can read it,
+// same pattern as the i18n language header.
+let currentPool: string | null = null;
+export function setCurrentPool(pool: string | null): void {
+  currentPool = pool && pool.trim() ? pool : null;
+}
+
 // Single-flight: concurrent 401s share ONE refresh attempt instead of stampeding /auth/refresh.
 function refreshOnce(): Promise<string | null> {
   if (!tokenRefresher) return Promise.resolve(null);
@@ -50,6 +60,9 @@ export function authHeaders(extra?: Record<string, string>): Record<string, stri
   // The server resolves query-result column labels in this language (the shared dictionary).
   const lang = (i18n.language || "").split("-")[0];
   if (lang) h["X-Liberty-Lang"] = lang;
+  // Multi-environment: the picked pool for the current app. Applied server-side only to
+  // connectors that have it; ignored by single-pool connectors.
+  if (currentPool) h["X-Liberty-Pool"] = currentPool;
   return h;
 }
 

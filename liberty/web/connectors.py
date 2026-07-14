@@ -276,9 +276,13 @@ async def _run_sql(
     dict_scope = screen_app if screen is not None else ((action_context or {}).get("app") or None)
     try:
         # ``pool`` (from the ``X-Liberty-Pool`` header) rebinds a multi-pool connector to a
-        # different DB instance for this call — same queries/screens, different environment.
-        # ``for_pool`` validates it against the connector's allowed set (ConnectorError otherwise).
-        conn = connectors.sql(connector).for_pool(pool)
+        # different DB instance for this call. The header is a broadcast HINT from the app
+        # switcher — an app's screens hit several connectors, so apply it only when THIS
+        # connector actually has that pool; a single-pool connector keeps its default rather
+        # than erroring. (for_pool stays strict for the explicit job path — Step.pool.)
+        conn = connectors.sql(connector)
+        if pool and pool in conn.allowed_pools:
+            conn = conn.for_pool(pool)
         # `user` is recorded on the audit row when the screen carries `audit_table`; otherwise
         # it's ignored. Pulled from the JWT principal — never the request body.
         result = await conn.execute(
@@ -400,7 +404,9 @@ def _stream_sql_ndjson(
     screen_max_rows = screen.max_rows if screen else None
     dict_scope = screen_app if screen is not None else None
     try:
-        conn = connectors.sql(connector).for_pool(pool)  # X-Liberty-Pool → multi-pool rebind
+        conn = connectors.sql(connector)
+        if pool and pool in conn.allowed_pools:  # X-Liberty-Pool hint → apply only if this connector has it
+            conn = conn.for_pool(pool)
         # Reject non-SELECT up front so we don't 200-then-error. ``execute_stream`` also
         # raises, but doing it here gives a clean 405 / 422 instead of an NDJSON error line.
         qdef = conn.get_query(query)

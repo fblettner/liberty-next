@@ -19,7 +19,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api, ApiError } from '../api/client'
+import { api, ApiError, setCurrentPool as setClientPool } from '../api/client'
 import type { ConnectorMeta } from '../types/connectors'
 import type { AppMenuTree, MenusByApp } from '../types/menus'
 import type { ScreenListItem, ScreensByApp, SharedAction } from '../types/screens'
@@ -27,6 +27,24 @@ import { type LicenseInfo, RESTRICTED } from '../types/license'
 import { useAuth } from '../auth/AuthContext'
 
 const APP_KEY = 'liberty.app'
+const POOL_KEY = 'liberty.poolByApp'  // { [app]: pool } — the picked pool per app (multi-environment)
+
+function readPoolByApp(): Record<string, string> {
+  try {
+    const v = JSON.parse(localStorage.getItem(POOL_KEY) || '{}')
+    return v && typeof v === 'object' ? v : {}
+  } catch {
+    return {}
+  }
+}
+
+function writePoolByApp(m: Record<string, string>): void {
+  try {
+    localStorage.setItem(POOL_KEY, JSON.stringify(m))
+  } catch {
+    /* ignore — non-fatal */
+  }
+}
 
 interface WorkspaceState {
   connectors: ConnectorMeta[] | null // every accessible connector (null while loading / signed out)
@@ -44,6 +62,13 @@ interface WorkspaceState {
   currentApp: string | null // the explicitly picked app; null = "(all apps)"
   currentMenu: AppMenuTree | null // the menu the Sidebar shows (the picked app's, or — with one app — that one's)
   setCurrentApp: (name: string | null) => void
+  /** The pools the current app can run against (union of the >1-pool connectors its screens use).
+   *  Empty ⇒ no picker (single-pool). */
+  currentPoolOptions: string[]
+  /** The pool picked for the current app (persisted per app); null = each connector's default.
+   *  Sent as `X-Liberty-Pool` on every SQL call. */
+  currentPool: string | null
+  setCurrentPool: (pool: string | null) => void
   refresh: () => void
   /** Find the screen (across every app) whose effective connector + read_query match. Returns
    *  null when no screen / multiple matches found. The TableView uses this to decide whether to
@@ -96,6 +121,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [license, setLicense] = useState<LicenseInfo>(RESTRICTED)
   const [error, setError] = useState<string | null>(null)
   const [currentApp, setCurrentAppState] = useState<string | null>(readApp)
+  const [poolByApp, setPoolByApp] = useState<Record<string, string>>(readPoolByApp)
   const [nonce, setNonce] = useState(0)
 
   useEffect(() => {
@@ -183,6 +209,46 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(() => setNonce((n) => n + 1), [])
 
+  // ── multi-environment pool selection ──────────────────────────────────────────
+  // The pools the current app can pick from = the union of pools of the >1-pool connectors
+  // its screens run against (plus the app connector itself). E.g. nomajde's screens hit
+  // ``jdedwards`` (pools = [jdedwards, jde_test]) → the picker offers those; single-pool
+  // connectors (the app's own DB) contribute nothing.
+  const currentPoolOptions = useMemo<string[]>(() => {
+    if (!currentApp || !connectors) return []
+    const used = new Set<string>([currentApp])
+    for (const s of (screens?.[currentApp] ?? [])) used.add(s.connector)
+    const pools = new Set<string>()
+    for (const cname of used) {
+      const c = connectors.find((x) => x.name === cname)
+      if (c && c.type === 'sql' && (c.pools?.length ?? 0) > 1) c.pools!.forEach((p) => pools.add(p))
+    }
+    return [...pools].sort()
+  }, [currentApp, connectors, screens])
+
+  // The picked pool for the current app — only honoured when it's still a valid option (a stale
+  // localStorage pick for a since-removed pool falls back to the default).
+  const currentPool = useMemo<string | null>(() => {
+    if (!currentApp) return null
+    const picked = poolByApp[currentApp]
+    return picked && currentPoolOptions.includes(picked) ? picked : null
+  }, [currentApp, poolByApp, currentPoolOptions])
+
+  const setCurrentPool = useCallback((pool: string | null) => {
+    if (!currentApp) return
+    setPoolByApp((prev) => {
+      const next = { ...prev }
+      if (pool) next[currentApp] = pool
+      else delete next[currentApp]
+      writePoolByApp(next)
+      return next
+    })
+  }, [currentApp])
+
+  // Push the resolved pool to the plain (non-React) api client so ``X-Liberty-Pool`` rides on
+  // every request. Runs whenever the app or its pick changes.
+  useEffect(() => { setClientPool(currentPool) }, [currentPool])
+
   // With exactly one app there's no picker, so the Sidebar follows it implicitly.
   const currentMenu = useMemo<AppMenuTree | null>(() => {
     if (!menus) return null
@@ -225,8 +291,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   )
 
   const value = useMemo<WorkspaceState>(
-    () => ({ connectors, apps, menus, screens, dashboards, sharedActions, license, error, currentApp, currentMenu, setCurrentApp, refresh, findScreen, findScreenById }),
-    [connectors, apps, menus, screens, dashboards, sharedActions, license, error, currentApp, currentMenu, setCurrentApp, refresh, findScreen, findScreenById],
+    () => ({ connectors, apps, menus, screens, dashboards, sharedActions, license, error, currentApp, currentMenu, setCurrentApp, currentPoolOptions, currentPool, setCurrentPool, refresh, findScreen, findScreenById }),
+    [connectors, apps, menus, screens, dashboards, sharedActions, license, error, currentApp, currentMenu, setCurrentApp, currentPoolOptions, currentPool, setCurrentPool, refresh, findScreen, findScreenById],
   )
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
 }

@@ -14,35 +14,67 @@
 // even when the operator loads with the sidebar collapsed).
 import { useEffect } from 'react'
 import styled from '@emotion/styled'
+import { Database } from 'lucide-react'
 import { SearchSelect } from '../common'
 import { useWorkspace } from '../workspace/WorkspaceContext'
+import { colors, fontSize } from '../theme'
 
 const Wrap = styled.div`
   display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 0 8px;
   margin: 0 0 10px;
 `
+// The pool picker (multi-environment). A small "Pool" label + a searchable select of the
+// current app's pools; changing it re-runs every screen against the chosen DB instance.
+const PoolLabel = styled.span`
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: ${fontSize.sm}; color: ${colors.text.muted}; margin: 2px 0 -2px 2px;
+`
 
 export default function WorkspaceSelect({ collapsed = false }: { collapsed?: boolean }) {
-  const { apps, currentApp, setCurrentApp } = useWorkspace()
+  const { apps, currentApp, setCurrentApp, currentPoolOptions, currentPool, setCurrentPool } = useWorkspace()
   // Auto-init when apps loaded but no app picked yet — drops the "(all apps)" middle state
   // so the picker always reflects a real app (the operator picks across apps, never "none").
+  // Runs even when collapsed (component stays mounted) so the current app always resolves.
   useEffect(() => {
     if (apps && apps.length > 0 && !currentApp) {
       setCurrentApp(apps[0].name)
     }
   }, [apps, currentApp, setCurrentApp])
-  if (collapsed || !apps || apps.length < 2) return null
-  const options = apps.map((c) => ({ value: c.name, label: c.name }))
+
+  if (collapsed) return null
+  const showApps = !!apps && apps.length >= 2
+  const showPools = currentPoolOptions.length > 1  // the app spans >1 pool → offer a picker
+  if (!showApps && !showPools) return null
+
   return (
     <Wrap>
-      <SearchSelect
-        value={currentApp ?? ''}
-        // Always switch to a real app — there's no "no selection" option anymore,
-        // so v is always a valid app name (never empty string).
-        onChange={(v) => { if (v) setCurrentApp(v) }}
-        options={options}
-      />
+      {showApps && (
+        <SearchSelect
+          value={currentApp ?? ''}
+          // Always switch to a real app — there's no "no selection" option anymore,
+          // so v is always a valid app name (never empty string).
+          onChange={(v) => { if (v) setCurrentApp(v) }}
+          options={apps!.map((c) => ({ value: c.name, label: c.name }))}
+        />
+      )}
+      {showPools && (
+        <div>
+          <PoolLabel><Database size={12} /> Pool</PoolLabel>
+          <SearchSelect
+            value={currentPool ?? ''}
+            // '' = "Default (per connector)" → no X-Liberty-Pool header; each connector uses its
+            // own default. A named pool forces that environment on the connectors that have it.
+            onChange={(v) => setCurrentPool(v || null)}
+            options={[
+              { value: '', label: 'Default' },
+              ...currentPoolOptions.map((p) => ({ value: p, label: p })),
+            ]}
+          />
+        </div>
+      )}
     </Wrap>
   )
 }
