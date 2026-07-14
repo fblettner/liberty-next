@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 
 from liberty.connectors import (
+    ConnectorError,
     ConnectorRegistry,
     QueryNotFoundError,
     UnknownConnectorError,
@@ -69,10 +70,16 @@ class SqlQueryExecutor:
                 f"sql_query step {step.name!r} targets connector {step.connector!r} "
                 f"which is not a SQL connector (got {type(connector).__name__})"
             )
+        # Optional pool override — run against a different DB/JDE instance in the connector's
+        # allowed set (ConnectorError → StepFailed if the pool isn't allowed).
+        try:
+            connector = connector.for_pool(step.pool)
+        except ConnectorError as exc:
+            raise StepFailed(str(exc)) from exc
 
         _log.info(
-            "nomaflow.sql_query run=%s step=%r connector=%s query=%s",
-            ctx.run_id, step.name, step.connector, step.query,
+            "nomaflow.sql_query run=%s step=%r connector=%s pool=%s query=%s",
+            ctx.run_id, step.name, step.connector, step.pool or connector.pool_name, step.query,
         )
 
         try:

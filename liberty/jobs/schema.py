@@ -101,6 +101,11 @@ class SqlEndpoint(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     connector: str | None = None
+    # Optional pool override — run this endpoint's connector against a specific pool (a
+    # different DB/JDE instance) instead of the connector's default. The pool must be in the
+    # connector's allowed set (``[pool] + pools``). None ⇒ the connector's default pool. Lets
+    # one sql_copy job target several environments by only swapping source/target pools.
+    pool: str | None = None
     # ``schema`` is a reserved word on Pydantic BaseModels (model_schema, etc.);
     # alias lets TOML/JSON use the natural ``schema`` key while Python sees ``schema_``.
     schema_: str | None = Field(None, alias="schema")
@@ -141,6 +146,9 @@ class Step(BaseModel):
     target: SqlEndpoint | None = None
     connector: str | None = None
     query: str | None = None
+    # sql_query: optional pool override for ``connector`` (run against a different DB/JDE
+    # instance in the connector's allowed set). None ⇒ the connector's default pool.
+    pool: str | None = None
     # sql_query: bound parameters passed through to SQLConnector.execute(params=...)
     params: dict[str, Any] = Field(default_factory=dict)
 

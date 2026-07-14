@@ -33,7 +33,7 @@ from typing import AbstractSet, Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from liberty.connectors import ConnectorRegistry, UnknownConnectorError
+from liberty.connectors import ConnectorError, ConnectorRegistry, UnknownConnectorError
 from liberty.connectors.sql import SQLConnector
 from liberty.jobs.coercion import (
     ColumnInfo,
@@ -184,6 +184,14 @@ class SqlCopyExecutor:
                 f"sql_copy step {step.name!r}: target connector {step.target.connector!r} "
                 f"is not a SQL connector (got {type(tgt).__name__})"
             )
+        # Optional per-endpoint pool override — copy between specific DB/JDE instances
+        # (source.pool / target.pool) without new connectors. Falls back to each
+        # connector's default pool when unset.
+        try:
+            src = src.for_pool(step.source.pool)
+            tgt = tgt.for_pool(step.target.pool)
+        except ConnectorError as exc:
+            raise StepFailed(str(exc)) from exc
         mode = step.mode or CopyMode.OVERWRITE
         return src, tgt, mode
 
