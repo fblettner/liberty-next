@@ -92,7 +92,8 @@ def _job_summary(
     # Schedulable presets: each has its own trigger id `<job>::preset::<name>`.
     preset_schedules: list[dict[str, Any]] = []
     preset_registered = False
-    candidates: list[datetime] = [next_fires[job.id]] if job.id in next_fires else []
+    base_next = next_fires.get(job.id)  # the job-level schedule's own next fire
+    candidates: list[datetime] = [base_next] if base_next is not None else []
     for p in job.presets:
         if not p.schedule:
             continue
@@ -122,6 +123,8 @@ def _job_summary(
         "in_flight": in_flight,
         "last_run": last_run,
         "next_run": next_run.isoformat() if next_run is not None else None,
+        # The job-level schedule's OWN next fire (vs ``next_run`` = soonest across base + presets).
+        "schedule_next_run": base_next.isoformat() if base_next is not None else None,
         "preset_schedules": preset_schedules,
     }
 

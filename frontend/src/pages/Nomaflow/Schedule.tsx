@@ -30,9 +30,25 @@ const Row = styled.div`
   border-top: 1px solid ${colors.border};
   &:hover { background: var(--hover-subtle, ${colors.bg.card}); }
 `
-const JobId = styled.span`font-family: ${fonts.mono}; color: ${colors.text.primary};`
+const JobId = styled.span`font-family: ${fonts.mono}; color: ${colors.text.primary}; display: inline-flex; align-items: center;`
 const Cell = styled.span`font-size: ${fontSize.sm}; color: ${colors.text.secondary}; display: inline-flex; align-items: center; gap: 6px;`
+const PresetTag = styled.span`
+  margin-left: 8px; padding: 1px 7px; border-radius: 999px;
+  font-family: ${fonts.mono}; font-size: ${fontSize.sm};
+  background: ${colors.bg.card}; border: 1px solid ${colors.border}; color: ${colors.text.secondary};
+`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 16px 10px;`
+
+/** One scheduled thing = a job's own cron OR one of its schedulable presets. */
+type SchedEntry = {
+  key: string
+  jobId: string
+  label: string
+  preset: string | null      // null = the job's own schedule; else the preset name
+  schedule: string | null    // cron; null = manual-only
+  nextRun: string | null
+  job: JobSummary
+}
 
 export default function Schedule() {
   const { t } = useTranslation()
@@ -50,32 +66,47 @@ export default function Schedule() {
   }, [t])
   useEffect(load, [load])
 
-  // Scheduled = has a next fire; sort ascending by it. The rest (manual-only,
-  // disabled) land in a separate group below — they have no place on a timeline.
+  // One entry PER SCHEDULE, not per job: a job's own cron (if any) plus each
+  // schedulable preset's cron. Scheduled = has a next fire; the rest (manual-only,
+  // disabled — incl. a preset whose job is disabled so it never fires) land below.
   const { scheduled, unscheduled } = useMemo(() => {
     const all = jobs ?? []
-    const sch = all.filter((j) => j.next_run != null)
-      .sort((a, b) => (a.next_run! < b.next_run! ? -1 : 1))
-    const un = all.filter((j) => j.next_run == null)
-      .sort((a, b) => a.id.localeCompare(b.id))
+    const entries: SchedEntry[] = []
+    for (const j of all) {
+      if (j.schedule) {
+        entries.push({ key: j.id, jobId: j.id, label: j.id, preset: null, schedule: j.schedule, nextRun: j.schedule_next_run ?? null, job: j })
+      }
+      for (const ps of j.preset_schedules ?? []) {
+        entries.push({ key: `${j.id}::${ps.name}`, jobId: j.id, label: j.id, preset: ps.name, schedule: ps.schedule, nextRun: ps.next_run, job: j })
+      }
+      // A job with neither a job-level cron nor any scheduled preset is manual-only.
+      if (!j.schedule && (j.preset_schedules?.length ?? 0) === 0) {
+        entries.push({ key: j.id, jobId: j.id, label: j.id, preset: null, schedule: null, nextRun: null, job: j })
+      }
+    }
+    const sch = entries.filter((e) => e.nextRun != null).sort((a, b) => (a.nextRun! < b.nextRun! ? -1 : 1))
+    const un = entries.filter((e) => e.nextRun == null).sort((a, b) => a.key.localeCompare(b.key))
     return { scheduled: sch, unscheduled: un }
   }, [jobs])
 
-  const row = (job: JobSummary) => (
-    <Row key={job.id} onClick={() => navigate(`/nomaflow/jobs/${encodeURIComponent(job.id)}`)}>
-      <JobId>{job.id}</JobId>
-      <Cell>{job.schedule ? <Mono>{job.schedule}</Mono> : t('nomaflow.jobs.manualOnly')}</Cell>
+  const row = (e: SchedEntry) => (
+    <Row key={e.key} onClick={() => navigate(`/nomaflow/jobs/${encodeURIComponent(e.jobId)}`)}>
+      <JobId>
+        {e.label}
+        {e.preset && <PresetTag>{e.preset}</PresetTag>}
+      </JobId>
+      <Cell>{e.schedule ? <Mono>{e.schedule}</Mono> : t('nomaflow.jobs.manualOnly')}</Cell>
       <Cell>
-        {job.next_run
-          ? <span title={new Date(job.next_run).toLocaleString()}>
-              <CalendarClock size={13} /> {new Date(job.next_run).toLocaleString()} · {relative(job.next_run)}
+        {e.nextRun
+          ? <span title={new Date(e.nextRun).toLocaleString()}>
+              <CalendarClock size={13} /> {new Date(e.nextRun).toLocaleString()} · {relative(e.nextRun)}
             </span>
           : '—'}
       </Cell>
       <Cell>
-        {job.in_flight && <Tag $tone="blue">{t('nomaflow.jobs.running')}</Tag>}
-        {!job.in_flight && job.last_run && <Tag $tone={STATE_TONE[job.last_run.state]}>{job.last_run.state}</Tag>}
-        {!job.in_flight && !job.last_run && '—'}
+        {e.job.in_flight && <Tag $tone="blue">{t('nomaflow.jobs.running')}</Tag>}
+        {!e.job.in_flight && e.job.last_run && <Tag $tone={STATE_TONE[e.job.last_run.state]}>{e.job.last_run.state}</Tag>}
+        {!e.job.in_flight && !e.job.last_run && '—'}
       </Cell>
     </Row>
   )

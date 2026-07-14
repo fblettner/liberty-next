@@ -29,6 +29,8 @@ export interface JobSummary {
   last_run: JobLastRun | null
   /** Soonest fire across the job's own schedule AND any schedulable preset. */
   next_run: string | null
+  /** The job-level schedule's OWN next fire (null when it has no job-level cron). */
+  schedule_next_run?: string | null
   /** Schedulable presets: each fires the job on its own cron with its own params. */
   preset_schedules?: PresetSchedule[]
 }
