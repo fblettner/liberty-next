@@ -405,17 +405,22 @@ class JobRunner:
         *,
         op_kwargs_overrides: dict[str, dict[str, Any]] | None = None,
         params_override: dict[str, Any] | None = None,
+        step_enabled_overrides: dict[str, bool] | None = None,
         log_level: str | None = None,
     ) -> JobRun:
         """Allocate + execute *job* under *trigger* — the blocking shape, kept
         for callers (the scheduled-fire path, tests) that legitimately need to
         wait for the terminal state. Equivalent to
-        ``await execute_run(job, trigger, await create_run(job, trigger), …)``."""
+        ``await execute_run(job, trigger, await create_run(job, trigger), …)``.
+
+        The override kwargs let a scheduled *preset* fire apply its saved
+        params / op_kwargs / step toggles / log level (see the scheduler)."""
         run = await self.create_run(job, trigger)
         return await self.execute_run(
             job, trigger, run,
             op_kwargs_overrides=op_kwargs_overrides,
             params_override=params_override,
+            step_enabled_overrides=step_enabled_overrides,
             log_level=log_level,
         )
 

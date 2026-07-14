@@ -27,6 +27,16 @@ export interface JobSummary {
   registered_with_scheduler: boolean
   in_flight: boolean
   last_run: JobLastRun | null
+  /** Soonest fire across the job's own schedule AND any schedulable preset. */
+  next_run: string | null
+  /** Schedulable presets: each fires the job on its own cron with its own params. */
+  preset_schedules?: PresetSchedule[]
+}
+
+export interface PresetSchedule {
+  name: string
+  schedule: string
+  timezone: string | null
   next_run: string | null
 }
 
@@ -103,6 +113,12 @@ export interface JobPreset {
   params?: Record<string, unknown>
   op_kwargs?: Record<string, Record<string, unknown>>
   step_enabled?: Record<string, boolean>
+  /** Optional cron — when set, the scheduler fires THIS preset on its own schedule,
+   *  applying the preset's params/op_kwargs/log_level/step_enabled. One job → many
+   *  param'd schedules without cloning. */
+  schedule?: string | null
+  /** IANA timezone for `schedule`; null → inherit the job's timezone. */
+  timezone?: string | null
 }
 
 export interface JobsParsedResponse {

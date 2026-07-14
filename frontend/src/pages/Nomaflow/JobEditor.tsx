@@ -20,9 +20,15 @@ import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import StepEditor, { KeyValueEditor, JOB_PARAM_CATALOG } from './StepEditor'
 import ScheduleField from './ScheduleField'
-import type { JobConfig, JobsParsedResponse } from './types'
+import type { JobConfig, JobPreset, JobsParsedResponse } from './types'
 
 const Section = styled(Card)`display: flex; flex-direction: column; gap: 12px;`
+const PresetCard = styled.div`
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px; border: 1px solid ${colors.border}; border-radius: ${radius.sm};
+  background: ${colors.bg.input};
+`
+const PresetHead = styled.div`display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;`
 const SectionTitle = styled.div`
   display: flex; align-items: center; gap: 7px;
   font-weight: 600; color: ${colors.text.primary}; font-size: ${fontSize.md};
@@ -282,6 +288,19 @@ function TagsField(
 
 const blankJob = (): JobConfig => ({ id: '', description: '', schedule: '', enabled: true, tags: [], steps: [] })
 
+/** One-line summary of what a preset overrides — shown next to its name in the editor. */
+function presetOverrideSummary(p: JobPreset): string {
+  const bits: string[] = []
+  if (p.log_level) bits.push(p.log_level)
+  const np = Object.keys(p.params ?? {}).length
+  if (np) bits.push(`${np} ${np > 1 ? 'params' : 'param'}`)
+  const nk = Object.keys(p.op_kwargs ?? {}).length
+  if (nk) bits.push(`${nk} step-kwargs`)
+  const ne = Object.keys(p.step_enabled ?? {}).length
+  if (ne) bits.push(`${ne} step ${ne > 1 ? 'toggles' : 'toggle'}`)
+  return bits.length ? bits.join(' · ') : 'no overrides'
+}
+
 export default function JobEditor() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -314,6 +333,12 @@ export default function JobEditor() {
 
   const dirty = useMemo(() => job != null && JSON.stringify(job) !== original, [job, original])
   const patch = useCallback((p: Partial<JobConfig>) => setJob((j) => (j ? { ...j, ...p } : j)), [])
+  // Patch one preset in place (schedule / timezone editing). Presets themselves are
+  // created from the Run-with-parameters modal (Save preset); here we only attach a cron.
+  const patchPreset = useCallback((idx: number, p: Partial<JobPreset>) => setJob((j) => {
+    if (!j?.presets) return j
+    return { ...j, presets: j.presets.map((pr, i) => (i === idx ? { ...pr, ...p } : pr)) }
+  }), [])
 
   // Tag catalog — every distinct tag in use across jobs.toml, drives the
   // autocomplete in the TagsField below. Recomputed when allJobs changes
@@ -435,6 +460,47 @@ export default function JobEditor() {
                 />
               </FieldWrap>
             </Grid>
+          </Section>
+
+          {/* ── presets & schedules ─────────────────────────────────────────── */}
+          <Section>
+            <SectionTitle><Layers size={15} /> {t('nomaflow.editor.presetsSection', 'Presets & schedules')}</SectionTitle>
+            {(job.presets?.length ?? 0) === 0 ? (
+              <FieldHint>
+                {t('nomaflow.editor.presetsEmpty', 'No presets yet. Save one from a job’s Run → Save preset, then give it a schedule here to fire this job on a cron with those parameters — no cloning.')}
+              </FieldHint>
+            ) : (
+              <>
+                <FieldHint>
+                  {t('nomaflow.editor.presetsHint', 'Give a preset its own cron to run this job on that schedule with the preset’s parameters. Leave the schedule empty to keep it manual-only (Run → pick preset).')}
+                </FieldHint>
+                {(job.presets ?? []).map((p, i) => (
+                  <PresetCard key={p.name}>
+                    <PresetHead>
+                      <strong>{p.name}</strong>
+                      <FieldHint>{presetOverrideSummary(p)}</FieldHint>
+                    </PresetHead>
+                    <Grid>
+                      <FieldWrap $full as="div">
+                        <ScheduleField
+                          value={p.schedule ?? null}
+                          timezone={p.timezone ?? job.timezone ?? null}
+                          onChange={(schedule) => patchPreset(i, { schedule })}
+                        />
+                      </FieldWrap>
+                      <FieldWrap>
+                        <FieldLabel>{t('nomaflow.editor.fieldTimezone')}</FieldLabel>
+                        <Input
+                          value={p.timezone ?? ''}
+                          onChange={(e) => patchPreset(i, { timezone: e.target.value || null })}
+                          placeholder={job.timezone ?? 'Europe/Paris'}
+                        />
+                      </FieldWrap>
+                    </Grid>
+                  </PresetCard>
+                ))}
+              </>
+            )}
           </Section>
 
           {/* ── retry policy ───────────────────────────────────────────────── */}

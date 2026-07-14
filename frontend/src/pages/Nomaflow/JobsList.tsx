@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock, ChevronDown, ChevronRight, Copy, Download } from 'lucide-react'
+import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock, ChevronDown, ChevronRight, Copy, Download, Trash2 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { PageLayout, Button, Banner, Centered, Card, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, Input, Select, SearchSelect, type SearchSelectOption, useModals } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -278,38 +278,78 @@ export default function JobsList() {
     } finally { setBusyId(null) }
   }, [load])
 
+  const modals = useModals()
+
   const newJob = useCallback(async () => {
     navigate('/nomaflow/jobs/new')
   }, [navigate])
 
-  // Duplicate a job — read the full source config, generate a fresh id (suffix
-  // ``_copy`` and bump while the id collides), append to the array, save, reload,
-  // and open the editor pointed at the new entry so the operator can rename + tweak.
-  // Disabled-by-default on the clone matches new-job convention: an operator
-  // duplicating a complex job hasn't yet decided when/if it should run.
+  // Duplicate a job — ask for the new id UP FRONT (the editor's id is read-only in
+  // edit mode, so an auto ``<id>_copy`` used to be un-renameable), then clone the
+  // source config under that id, disabled + unscheduled (a duplicate on the source's
+  // cron would double-run its data), and open the editor.
   const duplicateJob = useCallback(async (job: JobSummary) => {
-    setBusyId(job.id); setError(null)
+    setError(null)
     try {
       const parsed = await api.get<JobsParsedResponse>('/admin/config/jobs/parsed')
       const src = parsed.jobs.find((j) => j.id === job.id)
       if (!src) throw new Error(`Source job ${job.id} not found in jobs.toml`)
-      // Find a non-colliding id: <id>_copy, _copy2, _copy3, ...
       const existing = new Set(parsed.jobs.map((j) => j.id))
-      let newId = `${job.id}_copy`
-      for (let i = 2; existing.has(newId); i += 1) newId = `${job.id}_copy${i}`
+      // Suggest <id>_copy (bumped past collisions) but let the operator rename it.
+      let suggested = `${job.id}_copy`
+      for (let i = 2; existing.has(suggested); i += 1) suggested = `${job.id}_copy${i}`
+      const answer = await modals.prompt({
+        title: t('nomaflow.jobs.duplicateTitle', 'Duplicate job'),
+        message: t('nomaflow.jobs.duplicatePrompt', 'New job id (letters, digits, - or _):'),
+        defaultValue: suggested,
+        placeholder: suggested,
+      })
+      const newId = answer?.trim()
+      if (!newId) return  // cancelled or empty
+      if (!/^[A-Za-z0-9_-]+$/.test(newId)) {
+        setError(t('nomaflow.jobs.badId', 'Job id may only contain letters, digits, - and _.'))
+        return
+      }
+      if (existing.has(newId)) {
+        setError(t('nomaflow.jobs.idExists', { defaultValue: 'A job named "{{id}}" already exists.', id: newId }))
+        return
+      }
+      setBusyId(job.id)
       // Deep-clone via JSON round-trip — JobConfig is a pure JSON shape (no Dates /
-      // functions / regex), so JSON.parse(JSON.stringify(...)) is safe + cheap. Drop
-      // the schedule (a duplicate fired on the same cron as the original would
-      // double-run the source data) and start disabled.
+      // functions / regex), so JSON.parse(JSON.stringify(...)) is safe + cheap.
       const cloned = { ...JSON.parse(JSON.stringify(src)), id: newId, enabled: false, schedule: undefined }
       await api.put('/admin/config/jobs/parsed', { jobs: [...parsed.jobs, cloned] })
       await api.post('/admin/reload')
-      // Open the editor on the new entry so the operator can rename / re-schedule.
       navigate(`/nomaflow/jobs/${encodeURIComponent(newId)}`)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
     } finally { setBusyId(null) }
-  }, [navigate])
+  }, [navigate, modals, t])
+
+  // Delete a job — confirm, then rewrite jobs.toml without it + reload. No dedicated
+  // endpoint needed: PUT /admin/config/jobs/parsed replaces the whole list, so removing
+  // the entry deletes it. Run history (nomaflow_job_runs) is retention-managed, not touched.
+  const deleteJob = useCallback(async (job: JobSummary) => {
+    const ok = await modals.confirm({
+      title: t('nomaflow.jobs.deleteTitle', 'Delete job'),
+      message: t('nomaflow.jobs.deletePrompt', {
+        defaultValue: 'Delete "{{id}}" from jobs.toml? Its schedule and config are removed (past run history is kept).',
+        id: job.id,
+      }),
+      variant: 'danger',
+    })
+    if (!ok) return
+    setBusyId(job.id); setError(null)
+    try {
+      const parsed = await api.get<JobsParsedResponse>('/admin/config/jobs/parsed')
+      const next = parsed.jobs.filter((j) => j.id !== job.id)
+      await api.put('/admin/config/jobs/parsed', { jobs: next })
+      await api.post('/admin/reload')
+      load()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally { setBusyId(null) }
+  }, [modals, load, t])
 
   // Tag filter — operators pin one or more tag chips from the toolbar; matching jobs
   // are those whose ``tags`` contain ANY of the selected tags (union, not intersection
@@ -426,6 +466,19 @@ export default function JobsList() {
                       ? <Mono>{job.schedule}</Mono>
                       : t('nomaflow.jobs.manualOnly')}
                   </Meta>
+                  {job.preset_schedules && job.preset_schedules.length > 0 && (
+                    <Meta
+                      title={job.preset_schedules
+                        .map((ps) => `${ps.name}: ${ps.schedule}${ps.next_run ? ` — next ${new Date(ps.next_run).toLocaleString()}` : ''}`)
+                        .join('\n')}
+                    >
+                      <Copy size={13} />
+                      {t('nomaflow.jobs.presetSchedules', {
+                        defaultValue: '{{count}} preset schedule(s)',
+                        count: job.preset_schedules.length,
+                      })}
+                    </Meta>
+                  )}
                   {job.next_run && (
                     <Meta title={new Date(job.next_run).toLocaleString()}>
                       <CalendarClock size={13} /> {t('nomaflow.jobs.nextRun')} {relative(job.next_run)}
@@ -467,6 +520,15 @@ export default function JobsList() {
                   >
                     {busy ? <SpinnerRing size={13} thickness={2} /> : <Copy size={13} />}
                     {t('nomaflow.jobs.duplicateBtn', 'Duplicate')}
+                  </Button>
+                  {/* Delete — confirm, then rewrite jobs.toml without this entry + reload.
+                      Run history is retention-managed and left intact. */}
+                  <Button
+                    $variant="ghost" $size="sm" disabled={busy}
+                    onClick={() => deleteJob(job)}
+                    title={t('nomaflow.jobs.delete', 'Delete this job from jobs.toml (config only; run history kept).')}
+                  >
+                    <Trash2 size={13} /> {t('common.delete', 'Delete')}
                   </Button>
                   {/* Export — minimal ZIP carrying just this job's [[jobs]] entry + a
                       MANIFEST.md. Referenced queries / connectors are NOT bundled (the
@@ -523,8 +585,15 @@ export default function JobsList() {
             const parsed = await api.get<JobsParsedResponse>('/admin/config/jobs/parsed')
             const updated = parsed.jobs.map((j) => {
               if (j.id !== paramModalJob.job.id) return j
+              // Preserve a schedule/timezone the operator attached in the editor — the modal
+              // only edits params/op_kwargs/log_level/step_enabled, so a same-name re-save
+              // must not drop the preset's cron.
+              const prior = (j.presets ?? []).find((p) => p.name === preset.name)
               const presets = (j.presets ?? []).filter((p) => p.name !== preset.name)
-              return { ...j, presets: [...presets, preset] }
+              const kept = prior?.schedule
+                ? { ...preset, schedule: prior.schedule, timezone: prior.timezone ?? null }
+                : preset
+              return { ...j, presets: [...presets, kept] }
             })
             await api.put('/admin/config/jobs/parsed', { jobs: updated })
             await api.post('/admin/reload')

@@ -48,13 +48,18 @@ class JobRegistry:
             raise UnknownJobError(job_id) from None
 
     def scheduled_jobs(self) -> list[Job]:
-        """The jobs the scheduler should register at startup: enabled AND have a schedule.
+        """The jobs the scheduler should register at startup: enabled AND carrying at
+        least one cron trigger — either the job's own ``schedule`` OR a schedulable
+        preset (a preset with its own ``schedule``, fired with that preset's params).
 
-        ``enabled = false`` (scheduler-level) and missing ``schedule`` (manual-only)
-        both disqualify a job from cron registration; the latter is still triggerable
-        via :samp:`POST /admin/jobs/{id}/run`.
+        ``enabled = false`` (scheduler-level) disqualifies a job entirely; a job with
+        neither a job-level schedule nor any scheduled preset is manual-only (still
+        triggerable via :samp:`POST /admin/jobs/{id}/run`).
         """
-        return [j for j in self._jobs.values() if j.enabled and j.schedule]
+        return [
+            j for j in self._jobs.values()
+            if j.enabled and (j.schedule or any(p.schedule for p in j.presets))
+        ]
 
 
 # --------------------------------------------------------------------------- #

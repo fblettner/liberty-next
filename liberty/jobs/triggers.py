@@ -28,6 +28,7 @@ class ScheduledTrigger:
 
     kind: str = "scheduled"
     triggered_by: str | None = None  # always None for scheduled fires
+    preset_name: str | None = None  # set when a schedulable preset fired this run (provenance)
 
 
 @dataclass(slots=True, frozen=True)

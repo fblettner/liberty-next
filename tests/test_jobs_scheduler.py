@@ -372,3 +372,127 @@ async def test_fire_for_unknown_job_is_dropped_silently(jobs_db, tmp_path) -> No
         assert runs == []
     finally:
         await scheduler.stop()
+
+
+# --------------------------------------------------------------------------- #
+# schedulable presets: a preset with its own cron fires the job with its params
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_scheduled_preset_registers_its_own_trigger(jobs_db, tmp_path) -> None:
+    """A preset carrying a ``schedule`` registers a distinct APScheduler trigger
+    alongside the job's own schedule — both have a next fire."""
+    registry = _registry_from_toml(tmp_path, """
+[[jobs]]
+id = "sync"
+schedule = "0 2 * * *"
+[[jobs.steps]]
+type = "sql_query"
+name = "s"
+connector = "c"
+query = "q"
+[[jobs.presets]]
+name = "nightly-eu"
+schedule = "0 3 * * *"
+timezone = "Europe/Paris"
+params = { apps_id = 2 }
+""")
+    scheduler = JobScheduler(registry, _runner(jobs_db, FixedSuccessExecutor()))
+    await scheduler.start()
+    try:
+        ids = set(scheduler.scheduled_job_ids)
+        pid = JobScheduler._preset_job_id("sync", "nightly-eu")
+        assert "sync" in ids and pid in ids
+        assert "sync" in scheduler.next_fire_times and pid in scheduler.next_fire_times
+    finally:
+        await scheduler.stop()
+
+
+@pytest.mark.asyncio
+async def test_preset_only_job_is_scheduled(jobs_db, tmp_path) -> None:
+    """A job with NO job-level schedule but a scheduled preset is still registered —
+    only the preset trigger, not a base trigger."""
+    registry = _registry_from_toml(tmp_path, """
+[[jobs]]
+id = "manual-base"
+[[jobs.steps]]
+type = "sql_query"
+name = "s"
+connector = "c"
+query = "q"
+[[jobs.presets]]
+name = "friday"
+schedule = "0 5 * * 5"
+""")
+    assert [j.id for j in registry.scheduled_jobs()] == ["manual-base"]
+    scheduler = JobScheduler(registry, _runner(jobs_db, FixedSuccessExecutor()))
+    await scheduler.start()
+    try:
+        ids = set(scheduler.scheduled_job_ids)
+        assert "manual-base" not in ids  # no base schedule → no base trigger
+        assert JobScheduler._preset_job_id("manual-base", "friday") in ids
+    finally:
+        await scheduler.stop()
+
+
+@pytest.mark.asyncio
+async def test_preset_fire_applies_its_overrides(jobs_db, tmp_path) -> None:
+    """Firing a preset trigger runs the job with the preset's params / op_kwargs /
+    log level, and stamps the trigger with the preset name."""
+    registry = _registry_from_toml(tmp_path, """
+[[jobs]]
+id = "sync2"
+[[jobs.steps]]
+type = "sql_query"
+name = "s"
+connector = "c"
+query = "q"
+[[jobs.presets]]
+name = "eu"
+schedule = "0 3 * * *"
+params = { apps_id = 9 }
+op_kwargs = { s = { region = "EU" } }
+log_level = "DEBUG"
+""")
+    runner = _runner(jobs_db, FixedSuccessExecutor())
+    recorded: dict = {}
+    orig_run = runner.run
+
+    async def spy(job, trigger, **kw):
+        recorded["trigger"] = trigger
+        recorded["kw"] = kw
+        return await orig_run(job, trigger, **kw)
+
+    runner.run = spy
+    scheduler = JobScheduler(registry, runner)
+    await scheduler.start()
+    try:
+        await scheduler._run_or_drop("sync2", "eu")
+    finally:
+        await scheduler.stop()
+
+    assert recorded["trigger"].preset_name == "eu"
+    assert recorded["kw"]["params_override"] == {"apps_id": 9}
+    assert recorded["kw"]["op_kwargs_overrides"] == {"s": {"region": "EU"}}
+    assert recorded["kw"]["log_level"] == "DEBUG"
+
+
+def test_duplicate_scheduled_preset_names_rejected(tmp_path) -> None:
+    """Two scheduled presets sharing a name collide on the trigger id — rejected at load."""
+    with pytest.raises(Exception):
+        _registry_from_toml(tmp_path, """
+[[jobs]]
+id = "dup"
+[[jobs.steps]]
+type = "sql_query"
+name = "s"
+connector = "c"
+query = "q"
+[[jobs.presets]]
+name = "same"
+schedule = "0 1 * * *"
+[[jobs.presets]]
+name = "same"
+schedule = "0 2 * * *"
+""")

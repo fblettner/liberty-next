@@ -72,13 +72,15 @@ def _job_summary(
     scheduled_ids: set[str],
     in_flight_ids: frozenset[str],
     last_run: dict[str, Any] | None,
-    next_run: datetime | None,
+    next_fires: dict[str, datetime],
 ) -> dict[str, Any]:
     """Compact JSON representation of one Job — for ``GET /admin/jobs``.
 
     Carries what the Jobs list (NOMAFLOW-UI.md §3.1) renders: the catalogue fields,
     the operational flags, the last-run badge (``last_run``: latest run's state +
-    timestamps, or None if never run), and the next scheduled fire (``next_run``)."""
+    timestamps, or None if never run), the next scheduled fire (``next_run`` — the
+    soonest across the job's own schedule AND any schedulable preset), and
+    ``preset_schedules`` (per scheduled preset: its cron + next fire)."""
     # "in flight" must cover BOTH a scheduler-fired run (tracked in the scheduler's
     # _in_flight set) AND a manual "Run now" — which goes through fire_now → runner.run
     # directly and never touches that set. The reliable signal for either is the latest
@@ -86,6 +88,28 @@ def _job_summary(
     # never appears for a manually-started job (it gates on `in_flight`).
     last_state = (last_run or {}).get("state")
     in_flight = job.id in in_flight_ids or last_state in ("RUNNING", "QUEUED")
+
+    # Schedulable presets: each has its own trigger id `<job>::preset::<name>`.
+    preset_schedules: list[dict[str, Any]] = []
+    preset_registered = False
+    candidates: list[datetime] = [next_fires[job.id]] if job.id in next_fires else []
+    for p in job.presets:
+        if not p.schedule:
+            continue
+        pid = JobScheduler._preset_job_id(job.id, p.name)  # noqa: SLF001 — same subsystem
+        if pid in scheduled_ids:
+            preset_registered = True
+        pn = next_fires.get(pid)
+        if pn is not None:
+            candidates.append(pn)
+        preset_schedules.append({
+            "name": p.name,
+            "schedule": p.schedule,
+            "timezone": p.timezone,
+            "next_run": pn.isoformat() if pn is not None else None,
+        })
+    next_run = min(candidates) if candidates else None
+
     return {
         "id": job.id,
         "description": job.description,
@@ -94,10 +118,11 @@ def _job_summary(
         "enabled": job.enabled,
         "tags": list(job.tags),
         "step_count": len(job.steps),
-        "registered_with_scheduler": job.id in scheduled_ids,
+        "registered_with_scheduler": (job.id in scheduled_ids) or preset_registered,
         "in_flight": in_flight,
         "last_run": last_run,
         "next_run": next_run.isoformat() if next_run is not None else None,
+        "preset_schedules": preset_schedules,
     }
 
 
@@ -161,7 +186,7 @@ async def list_jobs(request: Request, _: Superuser) -> dict[str, Any]:
                 scheduled_ids=scheduled_ids,
                 in_flight_ids=in_flight,
                 last_run=last_runs.get(j.id),
-                next_run=next_fires.get(j.id),
+                next_fires=next_fires,
             )
             for j in registry.jobs()
         ],

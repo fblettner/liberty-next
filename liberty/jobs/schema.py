@@ -280,6 +280,30 @@ class JobPreset(BaseModel):
             "captured. Empty means 'run every step at its saved default'."
         ),
     )
+    schedule: str | None = Field(
+        default=None,
+        description=(
+            "Optional cron expression. When set, the scheduler fires THIS preset "
+            "on its own schedule, applying the preset's params / op_kwargs / "
+            "log_level / step_enabled — so one job can run on several schedules "
+            "with different parameters without cloning. None → manual-only preset."
+        ),
+    )
+    timezone: str | None = Field(
+        default=None,
+        description="IANA timezone for ``schedule``. None → inherit the job's timezone (then system tz).",
+    )
+
+    @field_validator("timezone")
+    @classmethod
+    def _validate_tz(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        try:
+            ZoneInfo(v)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(f"unknown timezone {v!r}") from exc
+        return v
 
 
 class Job(BaseModel):
@@ -353,6 +377,19 @@ class Job(BaseModel):
                 "use letters, digits, '-', '_'"
             )
         return v
+
+    @model_validator(mode="after")
+    def _unique_scheduled_preset_names(self) -> "Job":
+        # The scheduler registers one APScheduler trigger per *scheduled* preset, keyed by
+        # preset name — two scheduled presets sharing a name would collide (one silently
+        # replaces the other). Names of manual-only presets are free to repeat (harmless).
+        scheduled = [p.name for p in self.presets if p.schedule]
+        dupes = sorted({n for n in scheduled if scheduled.count(n) > 1})
+        if dupes:
+            raise ValueError(
+                f"job {self.id!r}: scheduled presets must have unique names; duplicated: {dupes}"
+            )
+        return self
 
 
 class RetentionPolicy(BaseModel):
