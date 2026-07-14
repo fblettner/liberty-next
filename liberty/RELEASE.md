@@ -1,5 +1,28 @@
 # Liberty Next — Release notes
 
+## 7.0.53 — 2026-07-14
+
+**nomaflow**
+- **Schedulable presets.** A job preset (a saved set of run parameters) can now carry its own
+  cron + timezone. The scheduler fires the job on that schedule with the preset's params /
+  op_kwargs / step toggles / log level — so one job runs on several schedules with different
+  parameters, without cloning. Each preset has its own **enable** toggle, **independent of the
+  job's `enabled`**: an enabled preset fires even when the job's own schedule is off (the job's
+  `enabled` gates only the job's own cron). The Schedule view now lists one row per schedule (the
+  job's cron plus each preset's), and a scheduled-but-disabled trigger is marked so it's clear
+  why it isn't firing.
+- **Name a clone; delete a job.** Duplicating a job now prompts for the new id (the editor's id is
+  immutable, so the old auto `<id>_copy` couldn't be renamed). A **Delete** action removes a job
+  from `jobs.toml` (config only — past run history is kept).
+- **Fixed** the Run-with-parameters modal overflowing horizontally and pushing the "Save as
+  preset" button off-screen.
+
+**Docker**
+- **pgAdmin binds to IPv4.** Recent `dpage/pgadmin4` images default the gunicorn listen address to
+  `[::]` (IPv6); on a host with IPv6 disabled that fails to bind (`Address family not supported by
+  protocol`) and pgAdmin never starts. The full-stack compose now sets
+  `PGADMIN_LISTEN_ADDRESS=0.0.0.0`.
+
 ## 7.0.52 — 2026-07-05
 
 **Docker**

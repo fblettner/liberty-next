@@ -1,5 +1,30 @@
 # Liberty Next — Notes de version
 
+## 7.0.53 — 2026-07-14
+
+**nomaflow**
+- **Préréglages planifiables.** Un préréglage de tâche (un jeu de paramètres d'exécution
+  enregistré) peut désormais porter son propre cron + fuseau horaire. Le planificateur exécute la
+  tâche selon ce planning avec les paramètres / op_kwargs / bascules d'étapes / niveau de log du
+  préréglage — une même tâche s'exécute donc sur plusieurs plannings avec des paramètres
+  différents, sans clonage. Chaque préréglage a sa propre bascule **activé**, **indépendante du
+  `enabled` de la tâche** : un préréglage activé se déclenche même si le planning propre de la
+  tâche est désactivé (le `enabled` de la tâche ne gouverne que son propre cron). La vue Planning
+  affiche désormais une ligne par planning (le cron de la tâche et celui de chaque préréglage), et
+  un déclencheur planifié mais désactivé est signalé.
+- **Nommer un clone ; supprimer une tâche.** Le clonage d'une tâche demande désormais le nouvel
+  identifiant (celui de l'éditeur est immuable, l'ancien `<id>_copy` automatique était donc
+  irrenommable). Une action **Supprimer** retire une tâche de `jobs.toml` (configuration
+  uniquement — l'historique des exécutions est conservé).
+- **Correction** de la fenêtre « Exécuter avec paramètres » qui débordait horizontalement et
+  masquait le bouton « Enregistrer le préréglage ».
+
+**Docker**
+- **pgAdmin écoute en IPv4.** Les images récentes `dpage/pgadmin4` utilisent par défaut l'adresse
+  d'écoute `[::]` (IPv6) ; sur un hôte où l'IPv6 est désactivée, l'attachement échoue (`Address
+  family not supported by protocol`) et pgAdmin ne démarre jamais. La composition full définit
+  désormais `PGADMIN_LISTEN_ADDRESS=0.0.0.0`.
+
 ## 7.0.52 — 2026-07-05
 
 **Docker**
