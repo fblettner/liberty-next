@@ -10,24 +10,56 @@ name; the registry owns their lifecycle.
 from __future__ import annotations
 
 import logging
+import os
 
+from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from liberty.connectors.base import ConnectorError, UnknownPoolError
 from liberty.connectors.config import PoolConfig
+from liberty.connectors.thick_engine import ThickAsyncEngine
 from liberty.crypto import decrypt_or_keep, is_encrypted
 
 _log = logging.getLogger(__name__)
+
+# ``init_oracle_client()`` is process-global and may only be called once. Guarded so the first
+# thick Oracle pool built anywhere in the process initialises the client and the rest reuse it.
+_thick_client_ready = False
+
+
+def _ensure_thick_client() -> None:
+    """Enable python-oracledb thick mode (OCI) for the whole process, once. Requires the Instant
+    Client — its path comes from ``LIBERTY_ORACLE_CLIENT_LIB`` (set in the Docker image), else the
+    driver searches the default locations. Raises if the client can't be found."""
+    global _thick_client_ready
+    if _thick_client_ready:
+        return
+    import oracledb  # local import: only needed when a thick pool is actually used
+
+    lib_dir = os.environ.get("LIBERTY_ORACLE_CLIENT_LIB") or None
+    oracledb.init_oracle_client(lib_dir=lib_dir)
+    _thick_client_ready = True
+    _log.info("oracledb thick mode enabled (lib_dir=%s)", lib_dir or "<default search>")
 
 
 class PoolRegistry:
     """Holds pool configs and lazily materialises one engine per pool."""
 
-    def __init__(self, configs: dict[str, PoolConfig] | None = None, *, master_key: str = "") -> None:
+    def __init__(
+        self,
+        configs: dict[str, PoolConfig] | None = None,
+        *,
+        master_key: str = "",
+        oracle_thick: bool = False,
+    ) -> None:
         self._configs: dict[str, PoolConfig] = dict(configs or {})
         self._engines: dict[str, AsyncEngine] = {}
         self._master_key = master_key
+        # Thick mode is process-global (``init_oracle_client``) — an all-or-nothing choice for the
+        # whole process, set once app-wide via ``[app] oracle_thick`` (a thin Oracle engine can't
+        # coexist once the client is loaded). When on, EVERY Oracle pool runs thick.
+        self._oracle_thick = oracle_thick
 
     @property
     def master_key(self) -> str:
@@ -169,6 +201,16 @@ class PoolRegistry:
         # included), so raising it here speeds up big tables. Oracle only; other backends ignore it.
         if cfg.arraysize and url.get_backend_name() == "oracle":
             kwargs["arraysize"] = int(cfg.arraysize)
+        # THICK Oracle pool (Native Network Encryption): python-oracledb thick mode is sync-only,
+        # so build a SYNC engine and wrap it in an async-over-sync adapter (see thick_engine).
+        # ``init_oracle_client`` is process-global → every Oracle pool takes this path once any
+        # pool sets ``oracle_thick`` (self._oracle_thick), so no thin Oracle engine is ever built.
+        if url.get_backend_name() == "oracle" and self._oracle_thick:
+            _ensure_thick_client()
+            sync_engine = create_engine(url, **kwargs)
+            engine = ThickAsyncEngine(sync_engine)
+            self._engines[name] = engine
+            return engine
         engine = create_async_engine(url, **kwargs)
         # SQLite ships with FK enforcement OFF by default — without ``PRAGMA
         # foreign_keys=ON`` per-connection, ON DELETE CASCADE silently no-ops on

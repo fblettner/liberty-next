@@ -149,6 +149,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             master_key=settings.crypto.master_key,
             license=app.state.license,
             default_language=settings.app.default_language,
+            oracle_thick=settings.app.oracle_thick,
         )
         app.state.menus = load_menus(settings.menus.config_path)
         app.state.screens = load_screens(settings.screens.config_path)
