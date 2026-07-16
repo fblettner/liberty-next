@@ -2387,3 +2387,63 @@ def test_describe_exposes_allowed_pools() -> None:
     d = conn.describe()
     assert d["pool"] == "a"
     assert d["pools"] == ["a", "b"]   # sorted allowed pool names (identifiers, not URLs)
+
+
+def test_oracle_thick_detection() -> None:
+    """Thick is an app-wide (process-global) flag passed into the registry — not per pool."""
+    thick = PoolRegistry(
+        {
+            "jde": PoolConfig(url="oracle+oracledb://u@h:1521/?service_name=X"),
+            "app": PoolConfig(url="postgresql+asyncpg://u@h:5432/db"),
+        },
+        oracle_thick=True,
+    )
+    assert thick._oracle_thick is True
+    thin = PoolRegistry({"jde": PoolConfig(url="oracle+oracledb://u@h:1521/?service_name=X")})
+    assert thin._oracle_thick is False
+
+
+@pytest.mark.asyncio
+async def test_connector_runs_through_thick_adapter(tmp_path) -> None:
+    """SQLConnector executes transparently through the ThickAsyncEngine adapter (sync engine +
+    threadpool) — the exact path a thick Oracle pool takes for NNE, validated on sqlite."""
+    from sqlalchemy import create_engine
+    from liberty.connectors.thick_engine import ThickAsyncEngine
+    db = tmp_path / "thick.db"
+    sync = create_engine(f"sqlite:///{db}")
+    with sync.begin() as c:
+        c.execute(text("CREATE TABLE item (id INTEGER, name TEXT)"))
+        c.execute(text("INSERT INTO item VALUES (1, 'a'), (2, 'b')"))
+    pools = PoolRegistry({"p": PoolConfig(url=f"sqlite:///{db}")})
+    pools.register_engine("p", ThickAsyncEngine(sync))       # inject a thick-style engine
+    conn = SQLConnector("db", SqlConnectorConfig(type="sql", pool="p",
+                        queries=[QueryDef(name="get", sql="SELECT id, name FROM item ORDER BY id")]), pools)
+    r = await conn.execute("get")
+    assert [row["name"] for row in r.rows] == ["a", "b"]     # rows flowed through the adapter
+    assert r.columns[0].name == "id"
+    await pools.dispose()
+
+
+@pytest.mark.asyncio
+async def test_connector_streams_through_thick_adapter(tmp_path) -> None:
+    """execute_stream (NDJSON path) works through the ThickAsyncEngine adapter — mappings() +
+    partitions() on the thick stream result mirror the SQLAlchemy streaming surface. Regression
+    for the TableView grid load on a thick Oracle pool (was AttributeError: no 'mappings')."""
+    from sqlalchemy import create_engine
+    from liberty.connectors.sql import StreamDone, StreamMeta, StreamRows
+    from liberty.connectors.thick_engine import ThickAsyncEngine
+    db = tmp_path / "thick_stream.db"
+    sync = create_engine(f"sqlite:///{db}")
+    with sync.begin() as c:
+        c.execute(text("CREATE TABLE item (id INTEGER, name TEXT)"))
+        c.execute(text("INSERT INTO item VALUES (1, 'a'), (2, 'b'), (3, 'c')"))
+    pools = PoolRegistry({"p": PoolConfig(url=f"sqlite:///{db}")})
+    pools.register_engine("p", ThickAsyncEngine(sync))
+    conn = SQLConnector("db", SqlConnectorConfig(type="sql", pool="p",
+                        queries=[QueryDef(name="get", sql="SELECT id, name FROM item ORDER BY id")]), pools)
+    events = [ev async for ev in conn.execute_stream("get", chunk_size=2)]
+    assert isinstance(events[0], StreamMeta) and events[0].columns[0].name == "id"
+    rows = [row for ev in events if isinstance(ev, StreamRows) for row in ev.rows]
+    assert [r["name"] for r in rows] == ["a", "b", "c"]       # rows streamed through the adapter
+    assert isinstance(events[-1], StreamDone) and events[-1].total == 3
+    await pools.dispose()

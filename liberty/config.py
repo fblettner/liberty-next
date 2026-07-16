@@ -113,6 +113,14 @@ class AppSettings(BaseModel):
     # Each dictionary entry's ``l`` map carries per-language overrides; when none match, the base
     # ``label`` is used. App-wide setting (one value covers every connector).
     default_language: str = "en"
+    # Use python-oracledb THICK mode (the bundled Instant Client / OCI) for every Oracle pool,
+    # instead of the default thin driver. Required for Oracle Native Network Encryption (NNE) +
+    # data-integrity checksumming, which thin mode can't do (fails with DPY-3001). This is an
+    # APP-WIDE flag, not per-pool: ``init_oracle_client()`` is process-global, so thick vs thin is
+    # an all-or-nothing choice for the whole process — every Oracle pool runs thick when this is on
+    # (a sync engine driven from a thread pool). Postgres / other pools are unaffected either way.
+    # Needs the Instant Client on the box — ``LIBERTY_ORACLE_CLIENT_LIB`` (set in the Docker image).
+    oracle_thick: bool = False
 
 
 class ConnectorSettings(BaseModel):

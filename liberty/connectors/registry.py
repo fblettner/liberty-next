@@ -44,8 +44,9 @@ class ConnectorRegistry:
         http_client: httpx.AsyncClient | None = None,
         master_key: str = "",
         default_language: str = "en",
+        oracle_thick: bool = False,
     ) -> None:
-        self.pools = PoolRegistry(config.pools, master_key=master_key)
+        self.pools = PoolRegistry(config.pools, master_key=master_key, oracle_thick=oracle_thick)
         self.dictionary = dictionary or DictionaryFile()
         self._http_client = http_client
         self._connectors: dict[str, Connector] = {}
@@ -122,6 +123,7 @@ def load_connectors(
     master_key: str = "",
     license: LicenseResult | None = None,
     default_language: str = "en",
+    oracle_thick: bool = False,
 ) -> ConnectorRegistry:
     """Load ``connectors.toml`` at *path* (and the shared ``dictionary.toml`` — *dictionary_path*,
     or ``dictionary.toml`` next to *path* — a missing file is fine) and build a :class:`ConnectorRegistry`.
@@ -153,4 +155,5 @@ def load_connectors(
         http_client=http_client,
         master_key=master_key,
         default_language=default_language,
+        oracle_thick=oracle_thick,
     )

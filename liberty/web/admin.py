@@ -180,6 +180,7 @@ async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]
         master_key=settings.crypto.master_key,
         license=license_result,
         default_language=settings.app.default_language,
+        oracle_thick=settings.app.oracle_thick,
     )
     request.app.state.license = license_result
     request.app.state.connectors = new
@@ -1539,7 +1540,7 @@ from liberty.config import AISettings, AppSettings, LicenseSettings, OIDCSetting
 
 # Keys safe to expose: secrets, path fields, and backend toggles that require a coordinated
 # DB/auth migration stay out. Everything else round-trips through the editor.
-_APP_SAFE_KEYS = {"name", "host", "port", "log_level", "hot_reload", "default_language"}
+_APP_SAFE_KEYS = {"name", "host", "port", "log_level", "hot_reload", "default_language", "oracle_thick"}
 _AI_SAFE_KEYS = {
     "enabled", "model", "max_tokens", "max_iterations", "system_prompt", "thinking",
     "effort", "request_timeout", "connector_tools", "api_tool", "scaffold_tools",
@@ -1763,6 +1764,7 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
                 master_key=new_settings.crypto.master_key,
                 license=new_license,
                 default_language=new_settings.app.default_language,
+                oracle_thick=new_settings.app.oracle_thick,
             )
         except Exception as exc:  # noqa: BLE001 — surface as 500 so the UI shows the cause
             raise HTTPException(

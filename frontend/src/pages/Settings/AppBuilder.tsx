@@ -25,6 +25,7 @@ interface AppSection {
   log_level: string
   hot_reload: boolean
   default_language: string
+  oracle_thick: boolean
 }
 interface AiSection {
   enabled: boolean
@@ -135,7 +136,7 @@ const InlineActions = styled.div`display: flex; align-items: center; gap: 6px;`
 const DEFAULTS: {
   app: AppSection; ai: AiSection; license: LicenseSection; oidc: OidcSection; branding: BrandingFields;
 } = {
-  app: { name: 'Liberty Next', host: '0.0.0.0', port: 8000, log_level: 'info', hot_reload: false, default_language: 'en' },
+  app: { name: 'Liberty Next', host: '0.0.0.0', port: 8000, log_level: 'info', hot_reload: false, default_language: 'en', oracle_thick: false },
   ai: {
     enabled: true, model: 'claude-opus-4-8', max_tokens: 8192, max_iterations: 8, system_prompt: '',
     thinking: false, effort: '', request_timeout: 120,
@@ -361,6 +362,8 @@ export default function AppBuilder() {
             </RowFlex>
             <Checkbox label={t('settings.app.hotReload', 'Hot-reload config TOML files on change')}
               checked={app.hot_reload} onChange={(c) => setApp({ ...app, hot_reload: c })} />
+            <Checkbox label={t('settings.app.oracleThick', 'Oracle thick mode (python-oracledb OCI — required for Native Network Encryption / NNE)')}
+              checked={app.oracle_thick} onChange={(c) => setApp({ ...app, oracle_thick: c })} />
           </>,
         )}
 
