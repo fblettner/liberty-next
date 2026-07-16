@@ -1,5 +1,9 @@
 # Liberty Next — Release notes
 
+## 7.0.55 — 2026-07-16
+
+- _Release notes pending — edit liberty/RELEASE.md._
+
 ## 7.0.54 — 2026-07-14
 
 **Connectors — multi-environment (one connector, many pools)**
