@@ -32,6 +32,13 @@ class JobDatabase:
     def pool_name(self) -> str:
         return self._pool_name
 
+    def rebind(self, pools: PoolRegistry) -> None:
+        """Point at a rebuilt :class:`PoolRegistry` (config reload). Drops the cached
+        sessionmaker so the next session opens on the new registry's engine instead of
+        the disposed one — see :mod:`liberty.runtime`."""
+        self._pools = pools
+        self._sessionmaker = None
+
     def _maker(self) -> async_sessionmaker[AsyncSession]:
         if self._sessionmaker is None:
             engine = self._pools.engine(self._pool_name)

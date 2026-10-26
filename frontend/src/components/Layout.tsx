@@ -13,7 +13,7 @@ import { LANGUAGE_KEY, type Language } from '../i18n'
 import { useAuth } from '../auth/AuthContext'
 import { installAuthBuiltins } from '../pages/TableView/actionRunner'
 import { useWorkspace } from '../workspace/WorkspaceContext'
-import { Banner, Centered } from '../common'
+import { Banner, Centered, ErrorBoundary } from '../common'
 import Sidebar from './Sidebar'
 import ProfileModal from './ProfileModal'
 import TabStrip from './TabStrip'
@@ -105,16 +105,16 @@ const AiBtn = styled.button<{ $active?: boolean }>`
   height: 30px;
   padding: 0 12px;
   border-radius: ${radius.md};
-  border: 1px solid rgba(139, 92, 246, 0.5);
-  background: ${({ $active }) => ($active ? 'rgba(139, 92, 246, 0.26)' : 'rgba(139, 92, 246, 0.13)')};
-  color: #a78bfa;
+  border: 1px solid ${colors.ai.border};
+  background: ${({ $active }) => ($active ? colors.ai.bgActive : colors.ai.bg)};
+  color: ${colors.ai.main};
   font-size: ${fontSize.sm};
   font-family: ${fonts.sans};
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
-  &:hover { background: rgba(139, 92, 246, 0.26); border-color: rgba(139, 92, 246, 0.7); }
+  &:hover { background: ${colors.ai.bgActive}; border-color: ${colors.ai.borderHover}; }
 `
 
 function readDark(): boolean {
@@ -239,7 +239,9 @@ export default function Layout() {
           <Suspense fallback={<Centered />}>
             {/* Outlet renders the index home/blank landing or a framework page (Settings / nomaflow);
                 on a tab route it renders the TabRoute marker (null) and TabHost below does the work. */}
-            <Outlet />
+            <ErrorBoundary label="page">
+              <Outlet />
+            </ErrorBoundary>
             <TabHost hidden={!onTabRoute} />
           </Suspense>
         </ContentArea>

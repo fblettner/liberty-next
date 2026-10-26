@@ -7,7 +7,7 @@ import { colors, radius, fontSize, fonts } from '../theme'
 /** Reduce a raw backend/DB error to a short, human summary — strips the Python/driver wrapper
  *  noise ("query failed: IntegrityError: (oracledb…)") and cuts the giant ``[SQL: …] [parameters: …]``
  *  dump. Returns the summary plus whether the original carried extra detail worth expanding. */
-export function summarizeError(message: string): { summary: string; hasDetails: boolean } {
+function summarizeError(message: string): { summary: string; hasDetails: boolean } {
   const full = (message || '').trim()
   let s = full
   s = s.replace(/^query failed:\s*/i, '')   // Liberty's connector wrapper

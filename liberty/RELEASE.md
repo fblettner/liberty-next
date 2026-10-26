@@ -1,5 +1,57 @@
 # Liberty Next — Release notes
 
+## 7.0.57 — 2026-10-26
+
+**Reload**
+- **Fixed: a config reload left some subsystems on the previous pool registry.** Change packages,
+  saved grid views, the nomaflow job database and (on the file-watcher path) the auth backend kept
+  the registry from before the reload and, because a disposed registry silently rebuilt engines
+  from its old configuration, kept running with the previous pool credentials until a restart.
+  Every reload path (Settings → Reload, the file watcher, a license rotation) now goes through one
+  `rebuild_runtime` that re-points every component and closes the old registry for good.
+- The framework now boots when the default database is down at startup (nomaflow is disabled for
+  that run with a warning instead of blocking the whole app). New `GET /ready` readiness probe:
+  `SELECT 1` on the default pool, 503 when it fails; `/health` stays a pure liveness check.
+
+**Security**
+- **DB errors no longer echo the SQL statement and the bound values** to regular users: they get the
+  driver message plus an `error_id`; superusers keep the full text. The statement and binds are
+  written to the server log only when the pool's `debug_sql` is on.
+- **Refresh tokens rotate.** Each `/auth/refresh` returns a new refresh token and the one presented
+  is consumed; presenting it again more than `[auth] refresh_reuse_grace` seconds later (default
+  60 s — two browser tabs racing the same stored token) is refused. API clients must store the
+  refresh token from every reply (the web app already does).
+- **Login throttle**: after `[auth] login_max_failures` failed logins for a username inside
+  `login_window_seconds` (default 10 in 5 min; 5× that per client address), `/auth/login` answers
+  429 with `Retry-After`. `login_max_failures = 0` disables it.
+- JWTs are signed with PyJWT (python-jose, unmaintained, is gone — same claims and secret, existing
+  sessions keep working). A `LIBERTY_JWT_SECRET` shorter than 32 bytes is flagged once at startup.
+- Anonymous `/info` reports counts and flags only; connector / pool names, the auth store location
+  and the AI model show to authenticated callers.
+- `POST /admin/import-package`: 50 MB upload cap and a 200 MB unpacked-size guard.
+
+**Install**
+- **Optional extras.** WeasyPrint (PDF reports), ldap3 (the `ldap_sync` job step) and Alembic +
+  psycopg2 (the apps' schema migrations) are no longer core dependencies: install
+  `liberty-next[all]` (or `[reports]` / `[ldap]` / `[alembic]`). The Docker image ships every extra
+  unchanged. A core-only install boots without Pango; a PDF request then answers 503 with the
+  install hint and markdown reports keep working.
+- **Fixed: Package & Deploy upload never worked outside a venv that happened to carry
+  `python-multipart`** — the dependency is now declared, and the upload check that rejected every
+  real file as "missing 'package' file part" is corrected.
+
+**Web app**
+- **Faster first load**: the Monaco editor left the startup bundle (816 → 226 kB gzipped before the
+  login page paints); it loads the first time a SQL editor opens.
+- A rendering error in one tab no longer blanks the whole app: the tab shows the error with a
+  Reload button and the other tabs keep working.
+- The AI assistant reply can be **stopped** mid-stream; what was received is kept.
+- The AI Assistant button follows the theme (a proper light-mode variant).
+
+**Docs**
+- `CLAUDE.md` is now a short map of the codebase; the full build narrative moved to
+  `docs/history/`.
+
 ## 7.0.56 — 2026-10-26
 
 **Connectors**

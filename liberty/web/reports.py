@@ -45,7 +45,7 @@ from liberty.reports.schema import (
     ReportParam,
     UnknownReportError,
 )
-from liberty.reports.render import render_content
+from liberty.reports.render import ReportsUnavailableError, render_content
 
 _log = logging.getLogger(__name__)
 
@@ -397,13 +397,17 @@ async def run_report(
         branding = getattr(reports_settings, "branding", None)
         if branding is not None:
             branding_dict = branding.model_dump()
-    body_bytes, content_type, filename = render_content(
-        raw,
-        body.format,
-        app_name=getattr(settings.app, "name", ""),
-        report_title=d.title,
-        branding=branding_dict,
-    )
+    try:
+        body_bytes, content_type, filename = render_content(
+            raw,
+            body.format,
+            app_name=getattr(settings.app, "name", ""),
+            report_title=d.title,
+            branding=branding_dict,
+        )
+    except ReportsUnavailableError as exc:
+        # The framework runs without the 'reports' extra; only PDF output needs it.
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
     safe_filename = "".join(
         c if c.isalnum() or c in "-_." else "_" for c in filename

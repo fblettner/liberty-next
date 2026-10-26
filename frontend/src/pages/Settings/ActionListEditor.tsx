@@ -133,7 +133,7 @@ export const PROMPT_FIELD_CONDITION_KEYS = ['visible_when', 'required_when', 'di
  *  each becomes ``INPUT.<name>`` since the runtime merges prompt values under ``ctx.INPUT``
  *  before the action fires. Not exhaustive (no step results, no parent-chain prompts), but
  *  covers the common ``{param: 'USER', source: 'INPUT.USER'}`` case operators write by hand. */
-export function promptFieldsToOptions(action: Row): SearchSelectOption[] {
+function promptFieldsToOptions(action: Row): SearchSelectOption[] {
   const fields = Array.isArray(action.prompt_fields) ? (action.prompt_fields as Row[]) : []
   return fields
     .map((f) => String(f.name ?? '').trim())

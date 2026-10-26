@@ -138,46 +138,38 @@ async def _watch_loop(
 # ── per-file handlers ──────────────────────────────────────────────────────────────
 
 
+# Every handler goes through :func:`liberty.runtime.rebuild_runtime` — the same code
+# path (and lock) as ``POST /admin/reload``, restricted to the sections the changed file
+# feeds. That's what guarantees a connector swap from the watcher re-points *every*
+# component holding the registry's pools (the pre-7.0.56 handlers forgot several).
+
+
 async def _reload_menus(app: FastAPI, _path: Path) -> None:
-    from liberty.menus import load_menus
-    app.state.menus = load_menus(app.state.settings.menus.config_path)
+    from liberty.runtime import rebuild_runtime
+    await rebuild_runtime(app, sections={"menus"})
 
 
 async def _reload_screens(app: FastAPI, _path: Path) -> None:
-    from liberty.screens import load_screens
-    app.state.screens = load_screens(app.state.settings.screens.config_path)
+    from liberty.runtime import rebuild_runtime
+    await rebuild_runtime(app, sections={"screens"})
 
 
 async def _reload_charts(app: FastAPI, _path: Path) -> None:
-    from liberty.charts import load_charts
-    app.state.charts = load_charts(app.state.settings.charts.config_path)
+    from liberty.runtime import rebuild_runtime
+    await rebuild_runtime(app, sections={"charts"})
 
 
 async def _reload_dashboards(app: FastAPI, _path: Path) -> None:
-    from liberty.dashboards import load_dashboards
-    app.state.dashboards = load_dashboards(app.state.settings.dashboards.config_path)
+    from liberty.runtime import rebuild_runtime
+    await rebuild_runtime(app, sections={"dashboards"})
 
 
 async def _reload_dictionary(app: FastAPI, _path: Path) -> None:
     """Dictionary reload cascades to connectors + screens: dictionary entries flow into
     both as column hints. Cheaper than the full /admin/reload because we skip menus +
-    charts + dashboards + jobs."""
-    from liberty.connectors import load_connectors
-    from liberty.screens import load_screens
-    settings = app.state.settings
-    license_result = app.state.license  # carry the existing license result through
-    new = load_connectors(
-        settings.connectors.config_path,
-        dictionary_path=settings.connectors.dictionary_path,
-        master_key=settings.crypto.master_key,
-        license=license_result,
-        default_language=settings.app.default_language,
-        oracle_thick=settings.app.oracle_thick,
-    )
-    old = app.state.connectors
-    app.state.connectors = new
-    app.state.screens = load_screens(settings.screens.config_path)
-    await old.aclose()
+    charts + dashboards + jobs. The live license result is carried through."""
+    from liberty.runtime import rebuild_runtime
+    await rebuild_runtime(app, sections={"connectors", "screens"})
 
 
 async def _reload_connectors(app: FastAPI, path: Path) -> None:
@@ -186,8 +178,7 @@ async def _reload_connectors(app: FastAPI, path: Path) -> None:
     pools. Hot-swapping a live SQL engine kills any borrowed connection from the pool
     mid-query; the operator uses the Pools page's manual Reload button when they want
     a pool change applied. We still log clearly so they know."""
-    from liberty.connectors import load_connectors
-    settings = app.state.settings
+    from liberty.runtime import rebuild_runtime
     old = app.state.connectors
 
     # Detect pool changes by comparing the [pools.*] section on disk to the live pools.
@@ -220,36 +211,12 @@ async def _reload_connectors(app: FastAPI, path: Path) -> None:
             added, removed, changed,
         )
 
-    # Re-parse + swap connector / dictionary side. The new ConnectorRegistry rebuilds its
-    # PoolRegistry from the on-disk [pools.*], so the new engines DO see the new pool
-    # config — but the OLD registry's engines (still in use by in-flight queries) stay
-    # alive on app.state. We don't aclose the old registry in the pool-change branch;
-    # we DO close it in the no-pool-change branch (safe — engines are equivalent).
-    new = load_connectors(
-        settings.connectors.config_path,
-        dictionary_path=settings.connectors.dictionary_path,
-        master_key=settings.crypto.master_key,
-        license=app.state.license,
-        default_language=settings.app.default_language,
-        oracle_thick=settings.app.oracle_thick,
-    )
-    app.state.connectors = new
-
-    # Rebuild the nomaflow executors against the new registry — they cache a
-    # ``connectors`` reference at construction time, so a swap here is invisible
-    # to jobs without this step. Symptom: UI queries pick up the new credentials
-    # (they read app.state.connectors) but jobs touching the same pool still use
-    # the OLD registry and fail. Only matters when [app] hot_reload=true; the
-    # /admin/reload manual path does the equivalent.
-    jobs_components = getattr(app.state, "jobs", None)
-    if jobs_components is not None:
-        from liberty.jobs.wiring import refresh_executors
-        refresh_executors(jobs_components, connectors=new, settings=settings)
-
-    if live_pools == on_disk_sig:
-        await old.aclose()
-    # Else: deliberately leak the old registry's engines; they'll be GC'd when in-flight
-    # requests finish. This is rare (only triggered by an actual pool edit on disk).
+    # Re-parse + swap the connector / dictionary side and rebind every pool holder. The
+    # new ConnectorRegistry rebuilds its PoolRegistry from the on-disk [pools.*], so the
+    # new engines DO see the new pool config. In the pool-change branch the OLD registry
+    # is deliberately NOT disposed: its engines may still be serving in-flight queries;
+    # they're released when those requests finish (rare — only an actual pool edit).
+    await rebuild_runtime(app, sections={"connectors"}, dispose_old=(live_pools == on_disk_sig))
 
 
 async def _reload_jobs(app: FastAPI, _path: Path) -> None:

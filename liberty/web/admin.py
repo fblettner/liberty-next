@@ -32,10 +32,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import Response
 from pydantic import BaseModel, ValidationError
 
-from liberty.auth.authstore import build_auth_backend
 from liberty.auth.dependencies import require_superuser
 from liberty.auth.principal import Principal
-from liberty.connectors import load_connectors
 from liberty.crypto import CryptoError, encrypt, is_encrypted
 from liberty.connectors.config import (
     ApiConnectorConfig,
@@ -171,64 +169,28 @@ def _capture_screen_bundles(request: Request, new_screens: dict[str, dict[str, d
 
 @router.post("/reload", summary="Reload config")
 async def reload_connectors(request: Request, _: Superuser) -> dict[str, object]:
-    settings = request.app.state.settings
-    old = request.app.state.connectors
-    license_result = verify_license(settings.license.key, master_key=settings.crypto.master_key)
-    new = load_connectors(
-        settings.connectors.config_path,
-        dictionary_path=settings.connectors.dictionary_path,
-        master_key=settings.crypto.master_key,
-        license=license_result,
-        default_language=settings.app.default_language,
-        oracle_thick=settings.app.oracle_thick,
-    )
-    request.app.state.license = license_result
-    request.app.state.connectors = new
-    request.app.state.menus = load_menus(settings.menus.config_path)
-    request.app.state.screens = load_screens(settings.screens.config_path)
-    request.app.state.charts = load_charts(settings.charts.config_path)
-    request.app.state.actions = load_actions(settings.actions.config_path)
-    request.app.state.dashboards = load_dashboards(settings.dashboards.config_path)
-    request.app.state.auth_backend = build_auth_backend(settings, new.pools)
+    """Full reload: re-verify the license, rebuild the connector registry and **every**
+    component that holds its pools (auth backend, change packages, saved views, the
+    nomaflow job DB + executors, the AI tools, reports), re-read every config TOML and
+    reconcile the job scheduler — all through :func:`liberty.runtime.rebuild_runtime`,
+    under its lock, so a concurrent file-watcher reload can't interleave."""
+    from liberty.runtime import rebuild_runtime
 
-    # nomaflow (Phase 13a chunk 3): also reload jobs.toml and reconcile the
-    # live scheduler (add/remove/reschedule cron triggers per the diff). The
-    # JobDatabase looks up pools by name through the new registry on every fire,
-    # so it doesn't need rebuilding — but the per-step-type executors capture
-    # ``connectors`` at construction time, so they DO need rebuilding to see the
-    # new registry. Without that, UI queries pick up the new pool credentials
-    # while jobs that touch the same pool fail with stale ones.
-    jobs_components = getattr(request.app.state, "jobs", None)
-    nomaflow_reloaded: dict[str, Any] = {"enabled": False}
-    if jobs_components is not None:
-        from liberty.jobs.wiring import hot_reload_registry, refresh_executors
-        new_registry = await hot_reload_registry(jobs_components, settings)
-        refresh_executors(jobs_components, connectors=new, settings=settings)
-        nomaflow_reloaded = {
-            "enabled": True,
-            "jobs": [j.id for j in new_registry.jobs()],
-            "scheduled_jobs": jobs_components.scheduler.scheduled_job_ids,
-        }
-
-    # Reports — license rotation that newly covers a plugin (or stops covering
-    # one) immediately changes the registry; rebuild here so /api/reports
-    # reflects the new state without a process restart.
-    from liberty.reports.wiring import refresh_reports
-    new_reports = refresh_reports(request.app, settings, license_result)
-
-    await old.aclose()
+    result = await rebuild_runtime(request.app)
+    state = request.app.state
+    new = state.connectors
     return {
         "reloaded": True,
         "connectors": new.names(),
         "pools": new.pools.names(),
         "dictionary_entries": len(new.dictionary.entries),
-        "menu_apps": list(request.app.state.menus.menus),
-        "screen_apps": list(request.app.state.screens.screens),
-        "charts": [f"{s}.{c}" for s, c, _ in request.app.state.charts.iter_charts()],
-        "dashboards": [d.qualified_id for _, _, d in request.app.state.dashboards.iter_dashboards()],
-        "license_mode": license_result.mode,
-        "nomaflow": nomaflow_reloaded,
-        "reports": new_reports.names(),
+        "menu_apps": list(state.menus.menus),
+        "screen_apps": list(state.screens.screens),
+        "charts": [f"{s}.{c}" for s, c, _ in state.charts.iter_charts()],
+        "dashboards": [d.qualified_id for _, _, d in state.dashboards.iter_dashboards()],
+        "license_mode": state.license.mode,
+        "nomaflow": result.nomaflow,
+        "reports": result.reports,
     }
 
 
@@ -1756,34 +1718,26 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
     # connectors.pools). Menus/screens/charts/dashboards/jobs don't depend on the
     # license — leave them be (POST /admin/reload is still the path for a full reload).
     if license_changed:
-        old_conns = request.app.state.connectors
+        from liberty.runtime import rebuild_runtime
         try:
-            new_conns = load_connectors(
-                new_settings.connectors.config_path,
-                dictionary_path=new_settings.connectors.dictionary_path,
-                master_key=new_settings.crypto.master_key,
-                license=new_license,
-                default_language=new_settings.app.default_language,
-                oracle_thick=new_settings.app.oracle_thick,
-            )
+            # Rebuilds the registry AND rebinds everything holding its pools (auth backend,
+            # change packages, saved views, nomaflow, the AI tools, reports) in one place.
+            await rebuild_runtime(request.app, sections={"connectors"}, license_result=new_license)
         except Exception as exc:  # noqa: BLE001 — surface as 500 so the UI shows the cause
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Saved {path}, but rebuilding connectors with the new license failed: {exc}",
             ) from exc
-        request.app.state.connectors = new_conns
-        request.app.state.auth_backend = build_auth_backend(new_settings, new_conns.pools)
-        await old_conns.aclose()
-
-    # Rebuild the AI assistant AFTER any connector swap — its tools bind to the registry.
-    old_ai = getattr(request.app.state, "ai", None)
-    new_ai = build_assistant(
-        new_settings.ai, request.app.state.connectors,
-        master_key=new_settings.crypto.master_key,
-    )
-    request.app.state.ai = new_ai
-    if old_ai is not None and old_ai is not new_ai:
-        await old_ai.aclose()
+    else:
+        # No connector swap — still rebuild the AI assistant, its [ai] settings may have changed.
+        old_ai = getattr(request.app.state, "ai", None)
+        new_ai = build_assistant(
+            new_settings.ai, request.app.state.connectors,
+            master_key=new_settings.crypto.master_key,
+        )
+        request.app.state.ai = new_ai
+        if old_ai is not None and old_ai is not new_ai:
+            await old_ai.aclose()
     request.app.state.oidc = build_oidc(
         new_settings.oidc, master_key=new_settings.crypto.master_key,
     )
@@ -2298,6 +2252,13 @@ async def build_package_endpoint(body: BuildPackageBody, request: Request, _: Su
     )
 
 
+# Hard cap on a deployment package upload. A real package is a few hundred KB of TOML
+# (the biggest install's screens.toml is ~560 KB zipped to ~60 KB); 50 MB leaves room
+# for presets / reports while keeping ``await upload.read()`` from buffering arbitrary
+# bodies into memory. The unpacked size is capped separately in package_import.
+MAX_PACKAGE_BYTES = 50 * 1024 * 1024
+
+
 @router.post("/import-package", summary="Import deployment package")
 async def import_package_endpoint(
     request: Request, _: Superuser,
@@ -2313,16 +2274,27 @@ async def import_package_endpoint(
     counts of added / replaced / skipped entities. Reloads the framework after a
     successful apply so the new config is live for the next request."""
     _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
-    from fastapi import UploadFile, File
+    # ``request.form()`` yields Starlette's UploadFile; ``fastapi.UploadFile`` is a *subclass*
+    # of it, so an isinstance check against the FastAPI class is always False for a real
+    # upload — that made every import read as "missing 'package' file part" until 7.0.57.
+    from starlette.datastructures import UploadFile
+
     from liberty.web.package_import import apply_package_zip
     if strategy not in ("merge", "overwrite", "replace_all"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             detail=f"invalid strategy: {strategy!r} — pick merge / overwrite / replace_all")
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_PACKAGE_BYTES:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE,
+                            detail=f"package upload exceeds {MAX_PACKAGE_BYTES // (1024 * 1024)} MB")
     form = await request.form()
     upload = form.get("package")
     if not isinstance(upload, UploadFile) or not upload:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="missing 'package' file part")
-    blob = await upload.read()
+    blob = await upload.read(MAX_PACKAGE_BYTES + 1)
+    if len(blob) > MAX_PACKAGE_BYTES:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE,
+                            detail=f"package upload exceeds {MAX_PACKAGE_BYTES // (1024 * 1024)} MB")
     try:
         report = apply_package_zip(zip_bytes=blob, strategy=strategy, settings=request.app.state.settings)  # type: ignore[arg-type]
     except ValueError as exc:

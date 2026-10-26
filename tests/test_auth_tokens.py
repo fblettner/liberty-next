@@ -78,3 +78,39 @@ def test_ephemeral_config_has_random_secret() -> None:
     a = TokenConfig.ephemeral()
     b = TokenConfig.ephemeral()
     assert a.secret != b.secret and len(a.secret) > 20
+
+
+# ── A3.5: PyJWT + refresh rotation ───────────────────────────────────────────────────
+
+
+def test_decode_rejects_wrong_issuer_and_tampering() -> None:
+    svc = _svc()
+    other = TokenService(TokenConfig(secret="unit-test-secret", issuer="someone-else"))
+    with pytest.raises(TokenError):
+        svc.decode(other.access_token(subject="1", username="a").token)
+    tok = svc.access_token(subject="1", username="a").token
+    with pytest.raises(TokenError):
+        svc.decode(tok[:-3] + "xyz")  # broken signature
+
+
+def test_refresh_rotation_consumes_the_token_after_the_grace() -> None:
+    svc = _svc(refresh_reuse_grace=0)  # strict single use
+    claims = svc.decode(svc.refresh_token(subject="1").token, expected_type=REFRESH)
+    svc.consume_refresh(claims)  # first exchange
+    with pytest.raises(TokenError, match="already used"):
+        svc.consume_refresh(claims)  # replay
+
+
+def test_refresh_rotation_allows_a_racing_second_tab_inside_the_grace() -> None:
+    svc = _svc(refresh_reuse_grace=60)
+    claims = svc.decode(svc.refresh_token(subject="1").token, expected_type=REFRESH)
+    svc.consume_refresh(claims)
+    svc.consume_refresh(claims)  # a second tab presenting the same stored token right away
+
+
+def test_refresh_rotation_is_per_token_not_per_user() -> None:
+    svc = _svc(refresh_reuse_grace=0)
+    a = svc.decode(svc.refresh_token(subject="1").token, expected_type=REFRESH)
+    b = svc.decode(svc.refresh_token(subject="1").token, expected_type=REFRESH)  # second device
+    svc.consume_refresh(a)
+    svc.consume_refresh(b)  # the other device's token is untouched

@@ -194,6 +194,15 @@ class AuthSettings(BaseModel):
     jwt_issuer: str = "liberty-next"
     access_token_ttl: int = 3600  # seconds
     refresh_token_ttl: int = 1_209_600  # seconds (14 days)
+    # Refresh-token rotation: a refresh token already exchanged may be presented again for
+    # this many seconds (two browser tabs racing the same stored token); after that it's
+    # refused. 0 = strict single use.
+    refresh_reuse_grace: int = 60
+    # Login throttle: after `login_max_failures` failed logins for a username inside
+    # `login_window_seconds` (or 5× that for one client address — password spraying),
+    # POST /auth/login answers 429 + Retry-After. 0 failures = throttle off.
+    login_max_failures: int = 10
+    login_window_seconds: int = 300
 
 
 class OIDCSettings(BaseModel):

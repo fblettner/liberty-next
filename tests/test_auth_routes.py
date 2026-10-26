@@ -276,6 +276,79 @@ def test_oidc_routes_404_when_disabled(app) -> None:
 
 def test_info_reports_auth(app) -> None:
     with TestClient(app) as client:
-        body = client.get("/info").json()
+        anon = client.get("/info").json()
+        assert anon["auth"]["backend"] == "db" and anon["auth"]["oidc_enabled"] is False
+        assert "pool" not in anon["auth"]  # the store location is only shown to authenticated callers
+        token = _login(client, "alice", "alicepw").json()["access_token"]
+        body = client.get("/info", headers={"Authorization": f"Bearer {token}"}).json()
         assert body["auth"]["pool"] == "default"
         assert body["auth"]["oidc_enabled"] is False
+
+
+# ── A3.5: refresh rotation + login throttle at the route level ───────────────────────
+
+
+def test_refresh_rotation_rejects_a_replayed_token(app) -> None:
+    """With the grace at 0 the presented refresh token is single-use: the second exchange of
+    the same token is refused (a leaked refresh token dies once its owner refreshes)."""
+    from liberty.auth.tokens import TokenConfig, TokenService
+
+    with TestClient(app) as client:
+        app.state.token_service = TokenService(
+            TokenConfig(secret=JWT_SECRET, issuer=ISSUER, refresh_reuse_grace=0)
+        )
+        old = _login(client, "alice", "alicepw").json()["refresh_token"]
+        first = client.post("/auth/refresh", json={"refresh_token": old})
+        assert first.status_code == 200
+        assert first.json()["refresh_token"] != old  # a NEW refresh token every time
+        replay = client.post("/auth/refresh", json={"refresh_token": old})
+        assert replay.status_code == 401 and "already used" in replay.json()["detail"]
+        # the rotated token still works
+        assert client.post("/auth/refresh", json={"refresh_token": first.json()["refresh_token"]}).status_code == 200
+
+
+def test_refresh_rotation_grace_allows_two_tabs(app) -> None:
+    with TestClient(app) as client:  # default grace: 60 s
+        old = _login(client, "alice", "alicepw").json()["refresh_token"]
+        assert client.post("/auth/refresh", json={"refresh_token": old}).status_code == 200
+        assert client.post("/auth/refresh", json={"refresh_token": old}).status_code == 200
+
+
+def test_login_throttle_locks_after_repeated_failures(app) -> None:
+    from liberty.auth.throttle import LoginThrottle
+
+    with TestClient(app) as client:
+        app.state.login_throttle = LoginThrottle(max_failures=3, window_seconds=60)
+        for _ in range(3):
+            assert _login(client, "alice", "wrong").status_code == 401
+        r = _login(client, "alice", "alicepw")  # even the right password is refused now
+        assert r.status_code == 429 and int(r.headers["Retry-After"]) >= 1
+        # another user from the same client is NOT locked yet — the address limit is 5× looser …
+        assert _login(client, "admin", "adminpw").status_code == 200
+        # … until spraying across accounts reaches it (3 × 5 = 15 failures from one address)
+        for i in range(12):
+            assert _login(client, f"ghost{i}", "x").status_code == 401
+        assert _login(client, "admin", "adminpw").status_code == 429
+
+
+def test_login_throttle_success_resets_the_user_key(app) -> None:
+    from liberty.auth.throttle import LoginThrottle
+
+    with TestClient(app) as client:
+        app.state.login_throttle = LoginThrottle(max_failures=3, window_seconds=60)
+        assert _login(client, "alice", "wrong").status_code == 401
+        assert _login(client, "alice", "wrong").status_code == 401
+        assert _login(client, "alice", "alicepw").status_code == 200  # 2 < 3 → allowed, resets
+        for _ in range(2):
+            assert _login(client, "alice", "wrong").status_code == 401
+        assert _login(client, "alice", "alicepw").status_code == 200  # counter restarted at 0
+
+
+def test_login_throttle_disabled_with_zero_failures(app) -> None:
+    from liberty.auth.throttle import LoginThrottle
+
+    with TestClient(app) as client:
+        app.state.login_throttle = LoginThrottle(max_failures=0)
+        for _ in range(12):
+            assert _login(client, "alice", "wrong").status_code == 401
+        assert _login(client, "alice", "alicepw").status_code == 200

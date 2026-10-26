@@ -440,7 +440,7 @@ If you don't want containers at all (small install on a single host, or you're l
 into a Python-only environment), install from PyPI via **pipx**:
 
 ```bash
-pipx install liberty-next
+pipx install 'liberty-next[all]'  # [all] = reports (PDF) + ldap + alembic extras
 liberty-next                     # → API + SPA on http://localhost:8000
 ```
 

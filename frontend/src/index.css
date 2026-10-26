@@ -43,6 +43,12 @@
   --purple-bg:      rgba(191,90,242,0.10);
   --purple-border:  rgba(191,90,242,0.28);
 
+  --ai-main:          #a78bfa;
+  --ai-bg:            rgba(139,92,246,0.13);
+  --ai-bg-active:     rgba(139,92,246,0.26);
+  --ai-border:        rgba(139,92,246,0.5);
+  --ai-border-hover:  rgba(139,92,246,0.7);
+
   --yellow-main:    #FFD60A;
   --yellow-bg:      rgba(255,214,10,0.10);
   --yellow-border:  rgba(255,214,10,0.28);
@@ -94,6 +100,12 @@
   --purple-main:    #7c3aed;
   --purple-bg:      rgba(124,58,237,0.08);
   --purple-border:  rgba(124,58,237,0.20);
+
+  --ai-main:          #6d28d9;
+  --ai-bg:            rgba(124,58,237,0.10);
+  --ai-bg-active:     rgba(124,58,237,0.20);
+  --ai-border:        rgba(124,58,237,0.40);
+  --ai-border-hover:  rgba(124,58,237,0.60);
   --yellow-main:    #b07d02;
   --yellow-bg:      rgba(176,125,2,0.08);
   --yellow-border:  rgba(176,125,2,0.20);

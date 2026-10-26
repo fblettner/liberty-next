@@ -21,7 +21,11 @@ const en = {
     scrollLeft: 'Scroll left',
     scrollRight: 'Scroll right',
   },
+  errors: {
+    renderFailed: 'This view failed to render',
+  },
   common: {
+    stop: 'Stop',
     loading: 'Loading…',
     run: 'Run',
     running: 'Running…',
@@ -324,6 +328,8 @@ const en = {
     responseField: 'response_field →',
   },
   chat: {
+    stopped: '(stopped)',
+    stopHint: 'Stop the reply — the conversation keeps what was received so far',
     title: 'Assistant',
     model: 'Model',
     tools: 'tools',

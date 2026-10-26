@@ -19,9 +19,11 @@ from liberty.ai.routes import router as ai_router
 from liberty.auth.authstore import build_auth_backend
 from liberty.auth.oidc import build_oidc
 from liberty.auth.routes import router as auth_router
-from liberty.auth.tokens import TokenConfig, TokenService
+from liberty.auth.dependencies import OptionalPrincipal
+from liberty.auth.tokens import MIN_SECRET_BYTES, TokenConfig, TokenService
+from liberty.runtime import build_changesets_db, build_user_views, load_registry
 from liberty.config import AuthSettings, Settings, load_settings
-from liberty.connectors import ConnectorRegistry, load_connectors
+from liberty.connectors import ConnectorRegistry
 from liberty.connectors.base import ConnectorError
 from liberty.licensing import verify_license
 from liberty.actions import load_actions
@@ -75,6 +77,13 @@ def _build_token_service(cfg: AuthSettings) -> TokenService:
             "auth.jwt_secret is empty — using an ephemeral signing key; issued tokens "
             "won't survive a restart. Set LIBERTY_JWT_SECRET in the environment."
         )
+    elif len(secret.encode("utf-8")) < MIN_SECRET_BYTES:
+        _log.warning(
+            "auth.jwt_secret is %d bytes — below the %d bytes RFC 7518 recommends for HS256. "
+            "Tokens still work, but set LIBERTY_JWT_SECRET to a long random value "
+            "(e.g. `openssl rand -base64 48`); release/install.sh generates one.",
+            len(secret.encode("utf-8")), MIN_SECRET_BYTES,
+        )
     return TokenService(
         TokenConfig(
             secret=secret,
@@ -82,6 +91,7 @@ def _build_token_service(cfg: AuthSettings) -> TokenService:
             issuer=cfg.jwt_issuer,
             access_ttl=cfg.access_token_ttl,
             refresh_ttl=cfg.refresh_token_ttl,
+            refresh_reuse_grace=cfg.refresh_reuse_grace,
         )
     )
 
@@ -143,14 +153,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.license = verify_license(settings.license.key, master_key=settings.crypto.master_key)
         if app.state.license.error and settings.license.key.strip():
             logging.getLogger("liberty.licensing").warning("license: %s", app.state.license.error)
-        app.state.connectors = load_connectors(
-            settings.connectors.config_path,
-            dictionary_path=settings.connectors.dictionary_path,
-            master_key=settings.crypto.master_key,
-            license=app.state.license,
-            default_language=settings.app.default_language,
-            oracle_thick=settings.app.oracle_thick,
-        )
+        # Every later rebuild (Settings → Reload, the file watcher, a license rotation)
+        # goes through liberty.runtime.rebuild_runtime — one lock, one code path.
+        import asyncio
+        app.state.runtime_lock = asyncio.Lock()
+        app.state.connectors = load_registry(settings, app.state.license)
         app.state.menus = load_menus(settings.menus.config_path)
         app.state.screens = load_screens(settings.screens.config_path)
         app.state.charts = load_charts(settings.charts.config_path)
@@ -179,37 +186,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.auth_backend = build_auth_backend(settings, app.state.connectors.pools)
         # Change packages — control tables on the configured pool. None when disabled so the route
         # capture hook short-circuits. Schema is created lazily here (idempotent), like nomaflow.
-        app.state.changesets_db = None
-        if settings.changesets.enabled:
-            from liberty.changesets.db import ChangeSetDatabase
-            cs_db = ChangeSetDatabase(app.state.connectors.pools, settings.changesets.pool)
-            try:
-                # Self-bootstrap the control tables (idempotent). Guarded like nomaflow: an
-                # unreachable pool skips change-package capture rather than failing app boot.
-                await cs_db.create_schema()
-                app.state.changesets_db = cs_db
-            except Exception as exc:  # noqa: BLE001 — never let a bad control pool take down boot
-                _log.warning(
-                    "changesets pool %r unusable (%s) — change-package capture disabled this run",
-                    settings.changesets.pool, exc,
-                )
+        app.state.changesets_db = await build_changesets_db(settings, app.state.connectors)
         # Per-user saved views (grid formats / chart specs) — durable replacement
         # for browser localStorage, on the auth pool. Self-bootstrapping + guarded
         # like the changesets table above so a bad/unreachable pool degrades the
         # feature rather than failing boot (the grid then just won't persist).
-        app.state.user_views = None
-        try:
-            from liberty.userviews import UserViewStore
-            uv = UserViewStore(app.state.connectors.pools, settings.auth.pool)
-            await uv.create_schema()
-            app.state.user_views = uv
-        except Exception as exc:  # noqa: BLE001 — never let the view store take down boot
-            _log.warning(
-                "user-view store on pool %r unusable (%s) — saved grid/chart views disabled this run",
-                settings.auth.pool, exc,
-            )
+        app.state.user_views = await build_user_views(settings, app.state.connectors)
 
         app.state.token_service = token_service
+        from liberty.auth.throttle import LoginThrottle
+        app.state.login_throttle = LoginThrottle(
+            max_failures=settings.auth.login_max_failures, window_seconds=settings.auth.login_window_seconds,
+        )
         app.state.oidc = build_oidc(settings.oidc, master_key=settings.crypto.master_key)
         app.state.ai = build_assistant(settings.ai, app.state.connectors, master_key=settings.crypto.master_key)
         from liberty.reports.wiring import build_reports
@@ -217,7 +205,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Log-handler attach against the running loop. The SIO server itself is
         # already initialised + registered with ASGIApp (below) — handlers fire
         # the moment a client connects.
-        import asyncio
         sio_layer.attach_log_handler(loop=asyncio.get_running_loop())
         app.state.sio = sio_layer
         # nomaflow (Phase 13a chunk 3): build the registry + runner + scheduler,
@@ -592,19 +579,54 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/health", tags=["meta"], summary="Liveness probe")
     async def health() -> dict[str, str]:
+        """Process is up. Deliberately touches nothing else — an orchestrator must not
+        restart the container because a database is down; that's what ``/ready`` is for."""
         return {"status": "ok", "version": __version__}
 
+    @app.get(
+        "/ready", tags=["meta"], summary="Readiness probe",
+        responses={503: {"description": "The framework pool is configured but unreachable."}},
+    )
+    async def ready() -> JSONResponse:
+        """Process is up **and** the framework pool answers ``SELECT 1`` (5 s budget). 503
+        otherwise, so a load balancer / Kubernetes readiness gate stops routing to an
+        instance whose database is gone. An install with no ``default`` pool (API-only,
+        TOML auth) reports ready without a probe."""
+        import asyncio
+
+        from sqlalchemy import text
+
+        connectors: ConnectorRegistry = app.state.connectors
+        pool = "default" if "default" in connectors.pools.names() else None
+        if pool is None:
+            return JSONResponse({"status": "ok", "version": __version__, "pool": None})
+        try:
+            async with asyncio.timeout(5):
+                async with connectors.pools.engine(pool).connect() as conn:
+                    await conn.execute(text("SELECT 1"))
+        except Exception as exc:  # noqa: BLE001 — any failure means "not ready"
+            return JSONResponse(
+                {"status": "unavailable", "version": __version__, "pool": pool, "error": type(exc).__name__},
+                status_code=503,
+            )
+        return JSONResponse({"status": "ok", "version": __version__, "pool": pool})
+
     @app.get("/info", tags=["meta"], summary="Runtime info")
-    async def info() -> dict[str, object]:
+    async def info(principal: OptionalPrincipal = None) -> dict[str, object]:
+        """Runtime summary. Unauthenticated callers (the Docker healthcheck, a browser before
+        login) get counts and feature flags only; an authenticated caller also gets the
+        connector / pool **names**, the auth store location and the AI model — the bits that
+        are reconnaissance material on an internet-facing install."""
         s: Settings = app.state.settings
         connectors: ConnectorRegistry = app.state.connectors
         ai = app.state.ai
+        detailed = principal is not None
         return {
             "name": s.app.name,
             "version": __version__,
             "connectors_loaded": len(connectors),
-            "connectors": connectors.names(),
-            "pools": connectors.pools.names(),
+            "pools_loaded": len(connectors.pools.names()),
+            **({"connectors": connectors.names(), "pools": connectors.pools.names()} if detailed else {}),
             "dictionary": {
                 "entries": len(connectors.dictionary.entries),
                 "default_language": s.app.default_language,
@@ -618,13 +640,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "dashboards": {"total": sum(len(by_id) for by_id in app.state.dashboards.dashboards.values())},
             "auth": {
                 "backend": s.auth.backend,
-                **({"pool": s.auth.pool} if s.auth.backend == "db" else {"toml": str(s.auth.toml_path)}),
+                **(({"pool": s.auth.pool} if s.auth.backend == "db" else {"toml": str(s.auth.toml_path)})
+                   if detailed else {}),
                 "oidc_enabled": app.state.oidc is not None,
             },
             "ai": {
                 "enabled": ai is not None,
                 "available": ai.available if ai is not None else False,
-                "model": ai.settings.model if ai is not None else None,
+                **({"model": ai.settings.model if ai is not None else None} if detailed else {}),
             },
             "crypto": {"configured": bool(s.crypto.master_key)},
             "license": {"mode": app.state.license.mode},

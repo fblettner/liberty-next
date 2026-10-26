@@ -23,7 +23,11 @@ const fr: Resources = {
     scrollLeft: 'Défiler à gauche',
     scrollRight: 'Défiler à droite',
   },
+  errors: {
+    renderFailed: 'Cette vue n’a pas pu s’afficher',
+  },
   common: {
+    stop: 'Arrêter',
     loading: 'Chargement…',
     run: 'Exécuter',
     running: 'Exécution…',
@@ -326,6 +330,8 @@ const fr: Resources = {
     responseField: 'response_field →',
   },
   chat: {
+    stopped: '(interrompu)',
+    stopHint: 'Arrêter la réponse — la conversation garde ce qui a été reçu',
     title: 'Assistant',
     model: 'Modèle',
     tools: 'outils',

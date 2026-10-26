@@ -1122,7 +1122,7 @@ export function ResultTable({
       const norm = (v: unknown) => String(v ?? '').trim()
       const matchKeys = keys.filter((k) => seeds.some((s) => k in s))
       if (matchKeys.length > 0) {
-        const keyOf = (o: Record<string, unknown>) => matchKeys.map((k) => norm(o[k])).join(' ')
+        const keyOf = (o: Record<string, unknown>) => matchKeys.map((k) => norm(o[k])).join('\u0000')
         const byKey = new Map<string, DataRow>()
         for (const row of result.rows) byKey.set(keyOf(row), row)
         for (const seed of seeds) {
@@ -1443,7 +1443,7 @@ export function ResultTable({
             const key = [
               ...keyDeps.map((d) => norm(lr[data.byColLower.get(d.column.toLowerCase()) ?? d.column])),
               norm(lr[data.vKey]),
-            ].join(' ')
+            ].join('\u0000')
             m.set(key, lr[data.lKey] == null ? '' : String(lr[data.lKey]))
           }
           return m
@@ -1493,7 +1493,7 @@ export function ResultTable({
           }
           const raw = value == null ? '' : String(value)
           if (compositeMap) {
-            const key = [...keyDeps.map((d) => norm(cur(row, d.source))), norm(value)].join(' ')
+            const key = [...keyDeps.map((d) => norm(cur(row, d.source))), norm(value)].join('\u0000')
             const hit = compositeMap.get(key)
             if (hit != null && hit !== '') return hit
           }

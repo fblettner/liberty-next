@@ -39,6 +39,10 @@ def get_auth_backend(request: Request) -> AuthBackend:
     return request.app.state.auth_backend
 
 
+def get_login_throttle(request: Request):  # -> liberty.auth.throttle.LoginThrottle
+    return request.app.state.login_throttle
+
+
 def get_oidc(request: Request) -> OIDCClient:
     client: OIDCClient | None = getattr(request.app.state, "oidc", None)
     if client is None:
