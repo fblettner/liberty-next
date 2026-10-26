@@ -24,6 +24,7 @@ from liberty.web.hot_reload import (
     DEBOUNCE_MS,
     _pool_signature,
     _reload_charts,
+    _reload_connectors,
     _reload_dashboards,
     _reload_dictionary,
     _reload_menus,
@@ -80,7 +81,7 @@ def test_pool_signature_works_for_raw_dict_too() -> None:
 def _settings(tmp_path: Path) -> SimpleNamespace:
     """A minimal Settings-shaped object — only the path attributes the handlers read."""
     return SimpleNamespace(
-        app=SimpleNamespace(hot_reload=False, log_level="info", default_language="en"),
+        app=SimpleNamespace(hot_reload=False, log_level="info", default_language="en", oracle_thick=False),
         menus=SimpleNamespace(config_path=tmp_path / "menus.toml"),
         screens=SimpleNamespace(config_path=tmp_path / "screens.toml"),
         charts=SimpleNamespace(config_path=tmp_path / "charts.toml"),
@@ -179,6 +180,58 @@ async def test_reload_dictionary_swaps_connectors_and_screens(tmp_path: Path) ->
     await _reload_dictionary(app, tmp_path / "dictionary.toml")
     # The reload completed; the new entry is in the connectors' dictionary.
     assert "X" in app.state.connectors.dictionary.entries
+
+
+@pytest.mark.asyncio
+async def test_reload_connectors_preserves_oracle_thick(tmp_path: Path) -> None:
+    """Regression: the connectors.toml watcher must carry ``[app] oracle_thick`` into the
+    rebuilt registry. It used to omit the kwarg, so a hot reload silently rebuilt every
+    Oracle pool as a THIN async engine (``PoolRegistry._oracle_thick`` defaulted to False)
+    — NNE-dependent queries broke until a process restart. A sqlite pool keeps this free of
+    any real Oracle client: we assert the flag reaches the new PoolRegistry, which is the
+    exact gate ``PoolRegistry.engine()`` checks before building a ThickAsyncEngine."""
+    (tmp_path / "connectors.toml").write_text('[pools.default]\nurl = "sqlite+aiosqlite:///:memory:"\n')
+    (tmp_path / "dictionary.toml").write_text('default_language = "en"\n')
+    from liberty.connectors import load_connectors
+    from liberty.licensing import LicenseResult
+    app = _app(tmp_path)
+    app.state.settings.app.oracle_thick = True          # operator turned thick mode on
+    app.state.license = LicenseResult(mode="open", error=None)
+    app.state.connectors = load_connectors(
+        tmp_path / "connectors.toml",
+        dictionary_path=tmp_path / "dictionary.toml",
+        master_key="",
+        license=app.state.license,
+        oracle_thick=True,
+    )
+    assert app.state.connectors.pools._oracle_thick is True  # noqa: SLF001 — precondition
+    await _reload_connectors(app, tmp_path / "connectors.toml")
+    # The rebuilt registry must still be thick — this is what regressed.
+    assert app.state.connectors.pools._oracle_thick is True  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_reload_dictionary_preserves_oracle_thick(tmp_path: Path) -> None:
+    """Same regression for the dictionary.toml cascade (it rebuilds connectors too)."""
+    (tmp_path / "connectors.toml").write_text('[pools.default]\nurl = "sqlite+aiosqlite:///:memory:"\n')
+    (tmp_path / "dictionary.toml").write_text('default_language = "en"\n')
+    (tmp_path / "screens.toml").write_text('')
+    from liberty.connectors import load_connectors
+    from liberty.licensing import LicenseResult
+    from liberty.screens import load_screens
+    app = _app(tmp_path)
+    app.state.settings.app.oracle_thick = True
+    app.state.license = LicenseResult(mode="open", error=None)
+    app.state.connectors = load_connectors(
+        tmp_path / "connectors.toml",
+        dictionary_path=tmp_path / "dictionary.toml",
+        master_key="",
+        license=app.state.license,
+        oracle_thick=True,
+    )
+    app.state.screens = load_screens(tmp_path / "screens.toml")
+    await _reload_dictionary(app, tmp_path / "dictionary.toml")
+    assert app.state.connectors.pools._oracle_thick is True  # noqa: SLF001
 
 
 # ── start_watcher: the no-op + opt-in paths ────────────────────────────────────────

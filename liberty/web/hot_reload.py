@@ -172,6 +172,7 @@ async def _reload_dictionary(app: FastAPI, _path: Path) -> None:
         master_key=settings.crypto.master_key,
         license=license_result,
         default_language=settings.app.default_language,
+        oracle_thick=settings.app.oracle_thick,
     )
     old = app.state.connectors
     app.state.connectors = new
@@ -230,6 +231,7 @@ async def _reload_connectors(app: FastAPI, path: Path) -> None:
         master_key=settings.crypto.master_key,
         license=app.state.license,
         default_language=settings.app.default_language,
+        oracle_thick=settings.app.oracle_thick,
     )
     app.state.connectors = new
 
