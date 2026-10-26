@@ -20,7 +20,7 @@ The logs endpoint serves the **in-memory buffer** while a run is active (so a
 poll sees lines the instant they're logged, even mid-step) and the **DB row**
 once the run has finished. Single-process assumption — the buffer lives in the
 worker that ran the job (consistent with nomaflow's current single-scheduler
-model; see PHASE13 §11 #2).
+model; see spec §11 #2).
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for nomaflow's run history — see ``docs/PHASE13.md`` §7.
+"""SQLAlchemy ORM models for nomaflow's run history — see the nomaflow operating guide (apps repo ``docs/NOMAFLOW.md``)
 
 Two tables: ``nomaflow_job_runs`` (one row per fire — scheduled or manual) and
 ``nomaflow_step_runs`` (one row per step attempt, FK to the parent run). The
@@ -35,7 +35,7 @@ class Base(DeclarativeBase):
 
 
 class RunState(str, Enum):
-    """Lifecycle states for both ``JobRun`` and ``StepRun`` — see PHASE13.md §4."""
+    """Lifecycle states for both ``JobRun`` and ``StepRun`` — see spec §4."""
 
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"

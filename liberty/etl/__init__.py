@@ -7,7 +7,7 @@ v1 had hardcoded as Spark/Airflow operators. The split is deliberate:
   snapshot a slice of rows into a history table, delete a slice, run an
   arbitrary query, append rows from a SELECT into a target table, write an
   audit record. No JDE / nomasx1 / customer specifics — those live in the
-  apps repo's ``plugins/`` packages (PHASE13 §5.3) and import from here.
+  apps repo's ``plugins/`` packages (spec §5.3) and import from here.
 
 * **liberty-apps/plugins/<name>/** — proprietary. SQL templates, connection
   setup specific to a customer schema, module orchestration. Stays out of the

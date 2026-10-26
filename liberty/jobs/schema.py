@@ -1,4 +1,4 @@
-"""Pydantic schema for ``jobs.toml`` — see ``docs/PHASE13.md`` §3.
+"""Pydantic schema for ``jobs.toml`` — see the nomaflow operating guide (apps repo ``docs/NOMAFLOW.md``)
 
 The file's top level is a list of ``[[jobs]]`` blocks plus an optional
 ``[meta]`` section. Each job carries an optional retry/alerts policy, an
@@ -167,7 +167,7 @@ class Step(BaseModel):
     strip_both_columns: list[str] = Field(default_factory=list)
 
     # python
-    callable: str | None = None  # ``module:function`` — see PHASE13.md §5.3
+    callable: str | None = None  # ``module:function`` — see spec §5.3
     op_kwargs: dict[str, Any] = Field(default_factory=dict)
 
     # ldap_sync — paged search on the bind/base/filter, every entry pushed through

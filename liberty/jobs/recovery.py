@@ -1,4 +1,4 @@
-"""Crash-recovery sweep — see ``docs/PHASE13.md`` §6.
+"""Crash-recovery sweep — see the nomaflow operating guide (apps repo ``docs/NOMAFLOW.md``)
 
 When the process dies mid-run, ``nomaflow_job_runs`` ends up with rows in
 ``RUNNING`` (or ``QUEUED``) whose owning process is gone. Without intervention
@@ -45,7 +45,7 @@ async def mark_orphan_runs_failed(db: JobDatabase) -> tuple[int, int]:
     starting up at this moment. If your deployment runs multiple workers
     concurrently and they all sweep at once, the second sweep will find
     nothing to do — that's fine, the UPDATE is idempotent. The advisory-lock
-    election that picks the single scheduler-owning worker (PHASE13 §11 #2,
+    election that picks the single scheduler-owning worker (spec §11 #2,
     chunk 3+) makes this sweep happen exactly once per cold start in
     practice; the safety holds either way.
     """

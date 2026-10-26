@@ -49,9 +49,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Nothing is published red: the same backend + frontend checks that run on develop
+  # (ci.yml) gate every release.
+  checks:
+    name: Checks
+    if: github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[skip ci]')
+    uses: ./.github/workflows/ci.yml
+
   release:
     name: Release
     runs-on: ubuntu-latest
+    needs: checks
     # Skip when the trigger is the workflow's OWN version-bump commit (defense in
     # depth — [skip ci] in the message is the primary guard, this catches edge cases).
     if: github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[skip ci]')
@@ -113,13 +121,14 @@ jobs:
           echo "tag=v$VERSION"    >> "$GITHUB_OUTPUT"
           echo "✔ Releasing version=$VERSION (tag=v$VERSION)"
 
-      # ── sync pyproject.toml + ensure RELEASE.md has the version section + commit ──
-      # Also guarantees the changelog stays complete: every released version gets a
-      # ``## <version> — <date>`` heading in liberty/RELEASE.md (the Settings → History →
-      # Upgrades detail renders it). A stub is inserted when missing — common on an auto-bumped
-      # patch where the version isn't known until release time — with a ::warning:: nudging the
-      # author to fill it in. A real section the author already wrote is left untouched.
-      - name: Bump pyproject.toml + ensure RELEASE.md section
+      # ── require real release notes, then sync pyproject.toml + commit ──────────
+      # Every released version MUST have a ``## <version> — <date>`` section in
+      # liberty/RELEASE.md (Settings → History → Upgrades renders it). The workflow used to
+      # insert a "pending" stub and warn — 7.0.55 shipped with empty notes that way — so now
+      # a missing section, or a still-pending stub, FAILS the release before anything is
+      # built or published. Since the patch number auto-bumps, write the notes under the
+      # *next* version before merging to main (``liberty-release`` skill / docs/work/PLAN.md).
+      - name: Require RELEASE.md section + bump pyproject.toml
         id: bump
         env:
           RESOLVED: ${{ steps.ver.outputs.version }}
@@ -127,7 +136,7 @@ jobs:
         run: |
           set -e
           python3 - <<'PY'
-          import os, re, pathlib, datetime
+          import os, re, pathlib
           resolved = os.environ["RESOLVED"]
 
           # 1) pyproject version — bump only when the workflow resolved a different value.
@@ -140,24 +149,26 @@ jobs:
                   raise SystemExit("pyproject.toml version line not found")
               pp.write_text(new)
 
-          # 2) RELEASE.md must carry a "## <resolved>" section — insert a stub (newest, on top) if absent.
+          # 2) RELEASE.md MUST carry a real "## <resolved>" section (no stub, no placeholder).
           rn = pathlib.Path("liberty/RELEASE.md")
-          md = rn.read_text() if rn.exists() else "# Liberty Next — Release notes\n"
-          if not re.search(r'(?m)^##\s+' + re.escape(resolved) + r'\b', md):
-              stub = f"## {resolved} — {datetime.date.today().isoformat()}\n\n- _Release notes pending — edit liberty/RELEASE.md._\n\n"
-              m = re.search(r'(?m)^## ', md)            # before the first existing version section
-              md = (md[:m.start()] + stub + md[m.start():]) if m else (md.rstrip() + "\n\n" + stub)
-              rn.write_text(md)
-              print(f"::warning::liberty/RELEASE.md had no section for {resolved} — inserted a stub. Edit it to describe the release.")
+          md = rn.read_text() if rn.exists() else ""
+          m = re.search(r'(?m)^##\s+' + re.escape(resolved) + r'\b.*\n(?P<body>(?:(?!^## ).*\n?)*)', md)
+          body = m.group("body").strip() if m else ""
+          if not m:
+              raise SystemExit(f"::error::liberty/RELEASE.md has no '## {resolved}' section. "
+                               f"Write the release notes (EN, and RELEASE.fr.md) under that version before merging to main.")
+          if not body or "_release notes pending" in body.lower():   # the old auto-inserted stub
+              raise SystemExit(f"::error::liberty/RELEASE.md section '## {resolved}' is empty or still a placeholder — fill it in.")
+          print(f"release notes for {resolved}: {len(body.splitlines())} line(s)")
           PY
 
-          # Commit whatever changed (pyproject and/or RELEASE.md). Nothing changed → no commit.
+          # Commit the version bump when the workflow resolved a new one. Nothing changed → no commit.
           if git diff --quiet; then
             echo "nothing to commit"; echo "committed=false" >> "$GITHUB_OUTPUT"
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add pyproject.toml liberty/RELEASE.md
+            git add pyproject.toml
             git commit -m "release: ${TAG} [skip ci]"
             git push origin HEAD:main
             echo "committed=true" >> "$GITHUB_OUTPUT"
@@ -206,13 +217,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # ── publish to PyPI (LAST irreversible step) ─────────────────────────────
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-
-      # ── tag + GitHub release ─────────────────────────────────────────────────
+      # ── tag first: the image is pushed and the tag exists before the irreversible
+      #    PyPI publish, so a failure there leaves a tag to re-run from (workflow_dispatch
+      #    with the version input) rather than an untagged version on PyPI.
       - name: Create + push annotated git tag
         run: |
           git config user.name "github-actions[bot]"
@@ -220,6 +227,13 @@ jobs:
           git tag -a "${{ steps.ver.outputs.tag }}" -m "Release ${{ steps.ver.outputs.tag }}"
           git push origin "${{ steps.ver.outputs.tag }}"
 
+      # ── publish to PyPI (LAST irreversible step) ─────────────────────────────
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+      # ── GitHub release ───────────────────────────────────────────────────────
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:

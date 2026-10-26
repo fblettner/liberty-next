@@ -1,7 +1,7 @@
 """Step executors — one module per :class:`~liberty.jobs.schema.StepType`.
 
 The closed set is six: ``sql_query``, ``sql_copy``, ``python``, ``ldap_sync``,
-``http``, ``call_job`` (see PHASE13.md §3.2 + Phase C call_job notes). Each
+``http``, ``call_job`` (see spec §3.2 + Phase C call_job notes). Each
 executor implements the :class:`StepExecutor` protocol; the
 :class:`~liberty.jobs.runner.JobRunner` dispatches on ``Step.type`` via a
 mapping built at registry construction.

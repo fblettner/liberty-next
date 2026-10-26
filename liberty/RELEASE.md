@@ -1,8 +1,43 @@
 # Liberty Next — Release notes
 
+## 7.0.56 — 2026-10-26
+
+**Connectors**
+- **Fixed:** a hot reload of `connectors.toml` / `dictionary.toml` rebuilt the Oracle pools as *thin*
+  engines (the file watcher didn't carry `[app] oracle_thick` into the rebuilt registry), so Native
+  Network Encryption connections failed after any config edit until the next restart.
+
+**Build, release and tests**
+- **CI gates every release.** A new CI workflow runs the backend test suite and the frontend
+  TypeScript check + production build on every push to `develop` and every pull request; the
+  release workflow now waits for it, so nothing reaches PyPI or the Docker registry red.
+- **Release notes are mandatory.** A release stops with a clear error when `RELEASE.md` has no
+  section for the version being published (the previous behaviour inserted an empty placeholder —
+  7.0.55 shipped that way). The git tag is now created *before* the PyPI publish.
+- **Frontend lockfile repaired.** `package-lock.json` carried an inconsistent `yaml` entry that
+  npm 10 rejected in the image build; it is regenerated and the image (and CI) now install with
+  `npm ci`, which fails loudly if the lockfile ever drifts again.
+- The health-endpoint tests no longer depend on the developer machine's local configuration.
+- Dependabot keeps Python, npm, GitHub Actions and Docker base-image dependencies current
+  (weekly, grouped, against `develop`).
+
+**Docs**
+- Removed references to planning documents that no longer exist (`docs/PLAN.md`,
+  `docs/PHASE13.md`) and to a `liberty-apps/Dockerfile` that never did; the nomaflow operating
+  guide lives in the apps repo (`docs/NOMAFLOW.md`).
+
 ## 7.0.55 — 2026-07-16
 
-- _Release notes pending — edit liberty/RELEASE.md._
+**Connectors — Oracle thick mode (Native Network Encryption)**
+- **App-wide `[app] oracle_thick`.** A customer enabled Oracle Native Network Encryption, which
+  python-oracledb's thin (pure-Python) mode can't negotiate (`DPY-3001`). When the flag is on, every
+  Oracle pool is built on the **thick** OCI client (the Instant Client bundled in the image) instead
+  of the thin async driver — `ThickAsyncEngine` presents the same `AsyncEngine` surface the framework
+  uses (execute / stream / begin / dispose) over a sync SQLAlchemy engine, running each connection's
+  DB calls on its own single-thread executor (oracledb connections aren't thread-safe). Postgres
+  pools are untouched.
+- The flag is **process-wide, not per pool**: `init_oracle_client()` is global to the process, so
+  thick vs thin is all-or-nothing. It's exposed in Settings → App; a restart applies it.
 
 ## 7.0.54 — 2026-07-14
 

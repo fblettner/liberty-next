@@ -7,7 +7,7 @@ exact cron-fire instant.
 
 What's here (chunk 2c):
 
-* :meth:`start` — runs the orphan-run sweep (PHASE13 §6 / :mod:`liberty.jobs.recovery`),
+* :meth:`start` — runs the orphan-run sweep (spec §6 / :mod:`liberty.jobs.recovery`),
   registers cron triggers for the enabled+scheduled jobs, kicks the scheduler.
 * :meth:`stop` — graceful shutdown; cancels in-flight runs cleanly.
 * :meth:`add_job` / :meth:`remove_job` — hot-reload entry points for chunk 3's
@@ -17,11 +17,11 @@ What's here (chunk 2c):
 
 What's *not* here:
 
-* Multi-worker advisory lock (PHASE13 §11 #2) — single-process assumption
+* Multi-worker advisory lock (spec §11 #2) — single-process assumption
   for now. Chunk 3+.
 * Hooking into FastAPI's lifespan (``app.state.scheduler`` + start/stop) —
   chunk 3 wires this in main.py.
-* The catchup_window_minutes grace period (PHASE13 §6) — catchup=False today,
+* The catchup_window_minutes grace period (spec §6) — catchup=False today,
   add when a tenant asks.
 """
 
@@ -311,7 +311,7 @@ class JobScheduler:
         ``enabled`` — a disabled job can still have firing presets."""
         common = dict(
             replace_existing=True,
-            misfire_grace_time=None,  # PHASE13 §6: catchup=False default
+            misfire_grace_time=None,  # spec §6: catchup=False default
             coalesce=True,  # if multiple fires queue up, take only the latest
             max_instances=1,  # one concurrent run per job — drop policy below
         )
@@ -342,7 +342,7 @@ class JobScheduler:
         applies that preset's params / op_kwargs / step toggles / log level (same shape
         as a manual "Run with parameters" fire). ``None`` is the plain job-level fire.
 
-        Implements the "drop + alert" rule (PHASE13 §4): if a previous run of
+        Implements the "drop + alert" rule (spec §4): if a previous run of
         the same job is still in flight, drop this fire and notify via the
         ``on_dropped_fire`` hook (Phase 9 ``/technical`` Socket.IO room — wired
         in chunk 3). The in-flight key is the JOB id, so a preset fire is dropped

@@ -1,0 +1,31 @@
+# Dependabot — weekly, grouped (one PR per ecosystem), against develop.
+# Security advisories still open their own PRs regardless of the schedule.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    target-branch: develop
+    groups:
+      python-deps: { patterns: ["*"] }
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule: { interval: weekly, day: monday }
+    target-branch: develop
+    groups:
+      frontend-deps: { patterns: ["*"] }
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    target-branch: develop
+    groups:
+      actions: { patterns: ["*"] }
+
+  - package-ecosystem: docker
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    target-branch: develop
+    groups:
+      base-images: { patterns: ["*"] }

@@ -1,7 +1,7 @@
 """JobRunner — orchestrates a single run of a :class:`~liberty.jobs.schema.Job`.
 
 The state machine and persistence contract are spelled out in
-``docs/PHASE13.md`` §4. Summary:
+the nomaflow operating guide (apps repo ``docs/NOMAFLOW.md``) Summary:
 
 * One :class:`JobRun` row per fire (scheduled or manual). The
   ``UNIQUE (job_id, scheduled_at)`` constraint dedups scheduled triggers;
