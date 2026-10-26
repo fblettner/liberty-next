@@ -34,7 +34,7 @@ from liberty.connectors.introspect import introspect_pool, list_pool_schemas, re
 from liberty.connectors.sql import StreamDone, StreamMeta, StreamRows
 from liberty.screens import Screen, ScreensFile
 from liberty.web.deps import get_connectors, get_screens, public_connector, request_language, require_permission
-from liberty.web.errors import http_for_connector_error
+from liberty.web.errors import db_error_detail, http_for_connector_error, summarize_db_error
 
 _log = logging.getLogger(__name__)
 
@@ -235,6 +235,7 @@ async def _run_sql(
     summary_dims: list[tuple[str, str | None]] | None = None,
     detail_filters: list[tuple[str, str | None, Any]] | None = None,
     pool: str | None = None,
+    verbose_errors: bool = False,
 ) -> dict[str, Any]:
     """Run *query* on *connector* with *params*. When a matching :class:`Screen` is found,
     thread its per-screen behaviour (column hints, ``audit_table``, ``max_rows``, dictionary
@@ -293,7 +294,13 @@ async def _run_sql(
     except ConnectorError as exc:
         raise http_for_connector_error(exc) from exc
     except SQLAlchemyError as exc:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=f"query failed: {type(exc).__name__}: {exc}") from exc
+        # Full text (SQL + binds) → server log; the caller sees it only when superuser.
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail=db_error_detail(exc, context=f"query {connector}.{query} failed",
+                                   verbose=verbose_errors, log=_log,
+                                   log_full=connectors.pools.debug_sql(conn.pool_name)),
+        ) from exc
     # Change-package capture — AFTER the write has committed (cross-DB: control pool ≠ this
     # connector, so it can't share the write's transaction). Best-effort: a capture failure is
     # logged but never undoes the already-committed write — the audit table stays the immutable
@@ -370,6 +377,7 @@ def _stream_sql_ndjson(
     screens: ScreensFile | None = None, chunk_size: int | None = None,
     screen_hint: tuple[str, str] | None = None,
     pool: str | None = None,
+    verbose_errors: bool = False,
 ) -> StreamingResponse:
     """Stream *query*'s rows as NDJSON (``application/x-ndjson``). Same per-screen prep as
     :func:`_run_sql` — column hints, ``screen_max_rows``, dictionary scope — except writes are
@@ -460,13 +468,11 @@ def _stream_sql_ndjson(
             # consumer's NDJSON parser sees ``{"kind":"error",…}`` and treats it as end-of-
             # stream + reports the detail. Logged at warning level so an operator sees it
             # in the server log without scraping the response body.
-            _log.warning(
-                "execute_stream %s.%s failed mid-stream: %s",
-                connector, query, exc,
-            )
             yield (json.dumps({
                 "kind": "error",
-                "detail": f"{type(exc).__name__}: {exc}",
+                "detail": db_error_detail(exc, context=f"query {connector}.{query} failed mid-stream",
+                                          verbose=verbose_errors, log=_log,
+                                          log_full=connectors.pools.debug_sql(conn.pool_name)),
             }) + "\n").encode("utf-8")
 
     return StreamingResponse(
@@ -506,7 +512,10 @@ async def sql_pool_schemas(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="schema list cancelled") from None
     except SQLAlchemyError as exc:
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, detail=f"schema list failed: {type(exc).__name__}: {exc}",
+            status.HTTP_502_BAD_GATEWAY,
+            detail=db_error_detail(exc, context=f"schema list on {connector} failed",
+                                   verbose=principal.is_superuser, log=_log,
+                                   log_full=connectors.pools.debug_sql(conn.pool_name)),
         ) from exc
 
 
@@ -561,7 +570,10 @@ async def sql_pool_schema(
     except SQLAlchemyError as exc:
         # Don't 500 — the editor calls this on focus and gracefully degrades without suggestions.
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, detail=f"schema introspection failed: {type(exc).__name__}: {exc}",
+            status.HTTP_502_BAD_GATEWAY,
+            detail=db_error_detail(exc, context=f"schema introspection on {connector} failed",
+                                   verbose=principal.is_superuser, log=_log,
+                                   log_full=connectors.pools.debug_sql(conn.pool_name)),
         ) from exc
 
 
@@ -652,12 +664,14 @@ async def sql_query_get(
         return _stream_sql_ndjson(
             connectors, connector, query, qp,
             language=request_language(request), max_rows=limit, user=principal.username,
+            verbose_errors=principal.is_superuser,
             screens=screens, chunk_size=chunk_size, screen_hint=screen_hint,
             pool=_request_pool(request),
         )
     return await _run_sql(
         connectors, connector, query, qp,
         language=request_language(request), max_rows=limit, user=principal.username,
+            verbose_errors=principal.is_superuser,
         screens=screens, screen_hint=screen_hint,
         summary_dims=summary_dims, detail_filters=detail_filters,
         pool=_request_pool(request),
@@ -679,11 +693,9 @@ class ImportBody(BaseModel):
 
 
 def _import_error(exc: Exception) -> str:
-    """A compact, operator-readable message from a DB error: keep the driver/ORA line, drop the huge
-    ``[SQL: …] [parameters: …]`` tail SQLAlchemy appends (it's noise in the per-row report)."""
-    msg = f"{type(exc).__name__}: {exc}"
-    cut = msg.find("[SQL:")  # SQLAlchemy separates the tail with a newline, not a space
-    return (msg[:cut] if cut > 0 else msg).strip()
+    """A compact, operator-readable message from a DB error for the per-row import report —
+    the driver line without the ``[SQL: …] [parameters: …]`` tail (see :func:`summarize_db_error`)."""
+    return summarize_db_error(exc)
 
 
 def _import_row_params(row: dict[str, Any]) -> dict[str, Any]:
@@ -876,12 +888,14 @@ async def sql_query_post(
         return _stream_sql_ndjson(
             connectors, connector, query, params,
             language=request_language(request), max_rows=limit, user=principal.username,
+            verbose_errors=principal.is_superuser,
             screens=screens, chunk_size=chunk_size,
             pool=_request_pool(request),
         )
     return await _run_sql(
         connectors, connector, query, params,
         language=request_language(request), max_rows=limit, user=principal.username,
+            verbose_errors=principal.is_superuser,
         screens=screens, changesets=getattr(request.app.state, "changesets_db", None),
         action_context=action_context if isinstance(action_context, dict) else None,
         pool=_request_pool(request),

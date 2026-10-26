@@ -585,3 +585,73 @@ def test_import_rejects_bad_mode(app) -> None:
             "mode": "sideways", "insert_query": "add_item", "rows": [], "commit": False,
         })
         assert r.status_code == 400
+
+
+# --- DB-error detail: no SQL / binds for non-superusers (A3.2) -------------- #
+
+
+def test_sql_db_error_detail_hides_sql_from_non_superusers(app) -> None:
+    """A failing query used to echo SQLAlchemy's full message — the statement text AND the
+    bound values — to any caller with permission on the query. Now only superusers get the
+    full text; everyone else gets the driver line plus an ``error_id`` that points at the
+    server-log entry carrying the rest."""
+    with TestClient(app) as client:
+        r = client.get("/api/sql/db/bad", headers=_h(client, "dbuser"))  # sql:db:* — not superuser
+        assert r.status_code == 502
+        detail = r.json()["detail"]
+        assert detail.startswith("query db.bad failed: ")
+        assert "[SQL:" not in detail and "[parameters:" not in detail
+        assert "error_id=" in detail
+
+
+def test_sql_db_error_detail_is_verbose_for_superusers(app) -> None:
+    with TestClient(app) as client:
+        r = client.get("/api/sql/db/bad", headers=_h(client, "admin"))
+        assert r.status_code == 502
+        detail = r.json()["detail"]
+        assert "[SQL:" in detail  # operators keep the statement they're debugging
+        assert "error_id=" in detail
+
+
+def test_sql_db_error_is_logged_with_the_error_id(app, caplog) -> None:
+    """The log entry carries the same ``error_id`` as the response. With the pool's
+    ``debug_sql`` off (the default) it holds the driver line only — the statement and the
+    bound values (data) stay out of the log unless the operator turned SQL debugging on."""
+    import logging
+    import re
+
+    with TestClient(app) as client, caplog.at_level(logging.ERROR, logger="liberty.web.connectors"):
+        detail = client.get("/api/sql/db/bad", headers=_h(client, "dbuser")).json()["detail"]
+        eid = re.search(r"error_id=([0-9a-f]{8})", detail).group(1)
+        logged = [rec.getMessage() for rec in caplog.records if eid in rec.getMessage()]
+        assert logged and "no such table" in logged[0]
+        assert "[SQL:" not in logged[0] and "[parameters:" not in logged[0]
+
+
+def test_db_error_detail_logs_statement_only_when_debug_sql(caplog) -> None:
+    import logging
+
+    from sqlalchemy.exc import OperationalError
+
+    from liberty.web.errors import db_error_detail
+
+    exc = OperationalError("SELECT secret FROM t WHERE k = ?", ("hunter2",), Exception("boom"))
+    log = logging.getLogger("liberty.test.dberr")
+    with caplog.at_level(logging.ERROR, logger="liberty.test.dberr"):
+        d1 = db_error_detail(exc, context="q", verbose=False, log=log, log_full=False)
+        d2 = db_error_detail(exc, context="q", verbose=False, log=log, log_full=True)
+    assert "hunter2" not in d1 and "hunter2" not in d2  # never in a non-superuser response
+    off, on = (rec.getMessage() for rec in caplog.records)
+    assert "hunter2" not in off and "[SQL:" not in off      # debug_sql off → driver line only
+    assert "hunter2" in on and "[SQL:" in on                # debug_sql on → statement + binds
+
+
+def test_stream_db_error_line_hides_sql_from_non_superusers(app) -> None:
+    import json
+
+    with TestClient(app) as client:
+        r = client.get("/api/sql/db/bad?_stream=1", headers=_h(client, "dbuser"))
+        assert r.status_code == 200
+        events = [json.loads(line) for line in r.text.splitlines() if line.strip()]
+        err = [e for e in events if e["kind"] == "error"]
+        assert err and "[SQL:" not in err[0]["detail"] and "error_id=" in err[0]["detail"]

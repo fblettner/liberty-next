@@ -215,7 +215,10 @@ def test_disabled_ai_is_404(tmp_path) -> None:
 
 def test_info_reports_ai(app) -> None:
     with TestClient(app) as client:
-        body = client.get("/info").json()
-        assert body["ai"]["enabled"] is True
-        assert body["ai"]["available"] is False  # no api key
+        anon = client.get("/info").json()
+        assert anon["ai"]["enabled"] is True
+        assert anon["ai"]["available"] is False  # no api key
+        assert "model" not in anon["ai"]  # the model name is only shown to authenticated callers
+        token = _login(client, "admin", "adminpw")
+        body = client.get("/info", headers={"Authorization": f"Bearer {token}"}).json()
         assert body["ai"]["model"] == "claude-opus-4-8"

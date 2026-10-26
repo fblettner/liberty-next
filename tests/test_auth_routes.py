@@ -276,6 +276,10 @@ def test_oidc_routes_404_when_disabled(app) -> None:
 
 def test_info_reports_auth(app) -> None:
     with TestClient(app) as client:
-        body = client.get("/info").json()
+        anon = client.get("/info").json()
+        assert anon["auth"]["backend"] == "db" and anon["auth"]["oidc_enabled"] is False
+        assert "pool" not in anon["auth"]  # the store location is only shown to authenticated callers
+        token = _login(client, "alice", "alicepw").json()["access_token"]
+        body = client.get("/info", headers={"Authorization": f"Bearer {token}"}).json()
         assert body["auth"]["pool"] == "default"
         assert body["auth"]["oidc_enabled"] is False

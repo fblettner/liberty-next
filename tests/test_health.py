@@ -72,8 +72,9 @@ def test_info(settings: Settings) -> None:
         assert r.status_code == 200
         body = r.json()
         assert body["name"] == "Liberty Next"
-        assert body["connectors_loaded"] == len(body["connectors"])
-        assert body["pools"] == ["default"]
+        assert body["connectors_loaded"] == 0 and body["pools_loaded"] == 1
+        # Anonymous: counts and flags only — no connector / pool names, no auth store path.
+        assert "connectors" not in body and "pools" not in body and "toml" not in body["auth"]
         assert body["auth"]["backend"] == "toml"
 
 

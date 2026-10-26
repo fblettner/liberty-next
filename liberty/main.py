@@ -19,6 +19,7 @@ from liberty.ai.routes import router as ai_router
 from liberty.auth.authstore import build_auth_backend
 from liberty.auth.oidc import build_oidc
 from liberty.auth.routes import router as auth_router
+from liberty.auth.dependencies import OptionalPrincipal
 from liberty.auth.tokens import TokenConfig, TokenService
 from liberty.runtime import build_changesets_db, build_user_views, load_registry
 from liberty.config import AuthSettings, Settings, load_settings
@@ -569,16 +570,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok", "version": __version__}
 
     @app.get("/info", tags=["meta"], summary="Runtime info")
-    async def info() -> dict[str, object]:
+    async def info(principal: OptionalPrincipal = None) -> dict[str, object]:
+        """Runtime summary. Unauthenticated callers (the Docker healthcheck, a browser before
+        login) get counts and feature flags only; an authenticated caller also gets the
+        connector / pool **names**, the auth store location and the AI model — the bits that
+        are reconnaissance material on an internet-facing install."""
         s: Settings = app.state.settings
         connectors: ConnectorRegistry = app.state.connectors
         ai = app.state.ai
+        detailed = principal is not None
         return {
             "name": s.app.name,
             "version": __version__,
             "connectors_loaded": len(connectors),
-            "connectors": connectors.names(),
-            "pools": connectors.pools.names(),
+            "pools_loaded": len(connectors.pools.names()),
+            **({"connectors": connectors.names(), "pools": connectors.pools.names()} if detailed else {}),
             "dictionary": {
                 "entries": len(connectors.dictionary.entries),
                 "default_language": s.app.default_language,
@@ -592,13 +598,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "dashboards": {"total": sum(len(by_id) for by_id in app.state.dashboards.dashboards.values())},
             "auth": {
                 "backend": s.auth.backend,
-                **({"pool": s.auth.pool} if s.auth.backend == "db" else {"toml": str(s.auth.toml_path)}),
+                **(({"pool": s.auth.pool} if s.auth.backend == "db" else {"toml": str(s.auth.toml_path)})
+                   if detailed else {}),
                 "oidc_enabled": app.state.oidc is not None,
             },
             "ai": {
                 "enabled": ai is not None,
                 "available": ai.available if ai is not None else False,
-                "model": ai.settings.model if ai is not None else None,
+                **({"model": ai.settings.model if ai is not None else None} if detailed else {}),
             },
             "crypto": {"configured": bool(s.crypto.master_key)},
             "license": {"mode": app.state.license.mode},
