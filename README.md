@@ -73,11 +73,12 @@ your PATH; no risk of polluting system Python):
 #   Windows:  py -m pip install --user pipx && py -m pipx ensurepath
 
 # Report rendering (markdown → PDF) uses WeasyPrint — install the system libs
-# it links against. Skip if you don't plan to use the /api/reports endpoints.
+# it links against. Skip them — and install without the `reports` extra — if you don't
+# need PDF output from /api/reports (markdown output works without them).
 #   macOS:    brew install pango
 #   Debian/Ubuntu:  sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libfontconfig1
 
-pipx install liberty-next
+pipx install 'liberty-next[all]'   # [all] = reports (PDF) + ldap + alembic extras; plain liberty-next = core only
 liberty-next                      # → API + SPA on http://localhost:8000
 ```
 
@@ -92,7 +93,7 @@ system packages):
 
 ```bash
 python3 -m venv ~/.local/liberty-venv
-~/.local/liberty-venv/bin/pip install liberty-next
+~/.local/liberty-venv/bin/pip install 'liberty-next[all]'
 ~/.local/liberty-venv/bin/liberty-next
 ```
 

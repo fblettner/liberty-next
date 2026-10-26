@@ -103,7 +103,7 @@ WORKDIR /app
 # built SPA — keeps the (slow) pip layer cached when only frontend assets change.
 COPY pyproject.toml ./
 COPY liberty/ ./liberty/
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[all]"   # reports (WeasyPrint) + ldap + alembic extras — the image ships every feature
 
 COPY --from=frontend /build/frontend/dist ./frontend/dist
 COPY docker/entrypoint.sh /usr/local/bin/liberty-entrypoint

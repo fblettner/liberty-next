@@ -5,9 +5,9 @@
 # backend suite, the TypeScript check and the production build having passed.
 #
 # Two independent jobs:
-#   backend  — Python 3.12, `pip install -e .[dev]`, pytest. WeasyPrint is imported at
-#              app start, so the Pango/HarfBuzz/Fontconfig libs the Dockerfile installs
-#              are needed here too.
+#   backend  — Python 3.12, `pip install -e .[dev]` (= every optional extra), pytest. The
+#              suite renders PDFs through WeasyPrint, so the Pango/HarfBuzz/Fontconfig libs the
+#              Dockerfile installs are needed here too.
 #   frontend — Node 20 (the Dockerfile's build stage), `npm ci`, then `npm run build`
 #              (= `tsc --noEmit && vite build`). `npm ci` fails loudly if package.json
 #              and package-lock.json ever drift again — that's the point.

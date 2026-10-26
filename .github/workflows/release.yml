@@ -250,7 +250,7 @@ jobs:
             ### Install
 
             ```bash
-            pipx install liberty-next==${{ steps.ver.outputs.version }}
+            pipx install 'liberty-next[all]==${{ steps.ver.outputs.version }}'   # [all] = reports + ldap + alembic extras
             # OR
             docker pull ghcr.io/${{ github.repository_owner }}/liberty-next:${{ steps.ver.outputs.version }}
             ```

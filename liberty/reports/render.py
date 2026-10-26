@@ -25,10 +25,22 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import markdown
-from weasyprint import CSS, HTML
-from weasyprint.text.fonts import FontConfiguration
 
 from liberty.reports.schema import OutputFormat, ReportContent
+
+
+class ReportsUnavailableError(RuntimeError):
+    """PDF rendering was requested but WeasyPrint (the ``reports`` extra) isn't installed.
+
+    WeasyPrint is imported lazily, inside :func:`build_pdf`, so the framework boots — and
+    markdown reports still render — on a machine without Pango / HarfBuzz. Only a PDF
+    request hits this."""
+
+
+_REPORTS_EXTRA_HINT = (
+    "PDF rendering needs WeasyPrint — install the 'reports' extra "
+    "(pip install 'liberty-next[reports]', plus the Pango / HarfBuzz / Fontconfig system libraries)"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -667,6 +679,13 @@ def build_pdf(
     Returns:
         The generated PDF as bytes — ready to stream or persist.
     """
+    # Lazy — WeasyPrint pulls in Pango at import time; see ReportsUnavailableError.
+    try:
+        from weasyprint import CSS, HTML
+        from weasyprint.text.fonts import FontConfiguration
+    except ImportError as exc:
+        raise ReportsUnavailableError(f"{_REPORTS_EXTRA_HINT}: {exc}") from exc
+
     if options is None:
         options = BuildOptions()
 

@@ -56,16 +56,24 @@ dependencies = [
     "fastapi-socketio>=0.0.10",   # mounts python-socketio on a FastAPI app
     "apscheduler>=3.11,<4",   # nomaflow (Phase 13a) — in-process cron + interval scheduler (4.0 still pre-release on PyPI)
     "watchfiles>=0.21",       # filesystem watcher behind ``[app] hot_reload = true`` — picks up TOML edits without an explicit /admin/reload
-    "alembic>=1.13",          # nomaflow plugins ship versioned schema migrations (plugins/<name>/db/alembic/) — the upgrade path
-    "psycopg2-binary>=2.9",   # sync Postgres driver — Alembic's online runner is sync (the async asyncpg pool is unused there)
-    "ldap3>=2.9",             # LDAP / Active Directory client — used by the nomasx1.ldap plugin (sync client, called via asyncio.to_thread). Pure Python, no native deps.
-    "weasyprint>=63.0",       # report renderer (markdown → PDF) — needs system libs: libpango, libpangoft2, libharfbuzz, libfontconfig (apt/brew)
     "markdown>=3.7",          # markdown → HTML for the report pipeline (extensions: tables, fenced_code, toc, attr_list, md_in_html, sane_lists, nl2br)
     "jinja2>=3.1",            # markdown templating used by plugin reports (e.g. nomasx1.reports.audit_licences); hosted in the framework so plugin packages stay zero-dep
 ]
 
+# Optional extras — the core install boots and serves everything except the three features
+# below. The Docker image, the dev venv (start.sh) and CI install ``[all]``.
+#   reports  → PDF output of /api/reports (markdown output needs nothing). WeasyPrint needs
+#              system libs: libpango, libpangoft2, libharfbuzz, libfontconfig (apt / brew).
+#   ldap     → the nomaflow ``ldap_sync`` step (ldap3, pure Python).
+#   alembic  → the licensed apps' schema migrations (plugins/<name>/db/alembic/) — Alembic's
+#              online runner is sync, hence psycopg2 next to the async asyncpg pool.
 [project.optional-dependencies]
+reports = ["weasyprint>=63.0"]
+ldap = ["ldap3>=2.9"]
+alembic = ["alembic>=1.13", "psycopg2-binary>=2.9"]
+all = ["liberty-next[reports,ldap,alembic]"]
 dev = [
+    "liberty-next[all]",       # the test suite renders PDFs and exercises the ldap step
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "pytest-html>=4.1",        # `pytest --html=test-report.html --self-contained-html` → browsable HTML report

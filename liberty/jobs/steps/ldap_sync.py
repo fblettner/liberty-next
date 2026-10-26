@@ -166,8 +166,14 @@ def _search_ldap(step: Step) -> list[dict[str, Any]]:
     """
     # Local import — ldap3 only when an ldap_sync step actually runs; keeps the
     # base import graph free of the ldap3 module for tests + deployments that
-    # never use this executor.
-    from ldap3 import ALL, SUBTREE, Connection, Server
+    # never use this executor. It's the optional 'ldap' extra.
+    try:
+        from ldap3 import ALL, SUBTREE, Connection, Server
+    except ImportError as exc:
+        raise StepFailed(
+            "ldap_sync needs the ldap3 client — install the 'ldap' extra: "
+            f"pip install 'liberty-next[ldap]' ({exc})"
+        ) from exc
 
     server = Server(step.server, get_info=ALL)
     conn = Connection(
