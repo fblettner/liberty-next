@@ -47,6 +47,15 @@ export const colors = {
     bg: 'var(--purple-bg, rgba(191,90,242,0.10))',
     border: 'var(--purple-border, rgba(191,90,242,0.28))',
   },
+  // The AI Assistant accent (toolbar pill, drawer chrome) — its own family so it can be
+  // re-tinted independently of the generic purple badge colour.
+  ai: {
+    main: 'var(--ai-main, #a78bfa)',
+    bg: 'var(--ai-bg, rgba(139,92,246,0.13))',
+    bgActive: 'var(--ai-bg-active, rgba(139,92,246,0.26))',
+    border: 'var(--ai-border, rgba(139,92,246,0.5))',
+    borderHover: 'var(--ai-border-hover, rgba(139,92,246,0.7))',
+  },
   yellow: {
     main: 'var(--yellow-main, #FFD60A)',
     bg: 'var(--yellow-bg, rgba(255,214,10,0.10))',

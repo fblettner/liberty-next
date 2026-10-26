@@ -618,9 +618,10 @@ async def sql_query_get(
     | ``_limit`` | Row cap. Falls back to the screen / connector / pool default (1000). |
     | ``_stream`` | Truthy → response is ``application/x-ndjson``: one ``{kind: meta\\|rows\\|done\\|error}`` line per chunk. Suited to large datasets / SSE-style UIs. |
     | ``_chunk_size`` | NDJSON rows-per-chunk (default 100). |
-    | ``_sort`` / ``_dir`` | Server-side sort by a result column. ``_dir`` ∈ {``asc``, ``desc``}. |
-    | ``_count`` | Returns ``{total: N}`` only, not the data. |
-    | ``_filter`` | JSON-encoded filter tree applied server-side. |
+
+    (The other reserved ``_*`` names — ``_screen`` / ``_app`` / ``_group`` / ``_summary`` /
+    ``_change_context`` — are read further down; server-side sort / count / filter params
+    were documented here for a while but never implemented.)
 
     When the query is the ``read_query`` of a Screen, that screen's column hints +
     ``max_rows`` + audit table + dictionary scope (the screen's app) are applied

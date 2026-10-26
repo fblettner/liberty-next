@@ -1,5 +1,5 @@
 import styled from '@emotion/styled'
-import { colors, radius, fontSize, glass } from '../theme'
+import {colors, radius, glass} from '../theme'
 
 export const Card = styled.div`
   background: var(--ghost-bg, ${colors.bg.card});
@@ -9,11 +9,3 @@ export const Card = styled.div`
   ${glass.surface}
 `
 
-export const CardTitle = styled.div`
-  font-size: ${fontSize.base};
-  font-weight: 600;
-  color: ${colors.text.muted};
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  margin-bottom: 12px;
-`

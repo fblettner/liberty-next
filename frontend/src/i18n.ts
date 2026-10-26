@@ -6,7 +6,7 @@ import { initReactI18next } from 'react-i18next'
 import en from './locales/en'
 import fr from './locales/fr'
 
-export const LANGUAGES = ['en', 'fr'] as const
+const LANGUAGES = ['en', 'fr'] as const
 export type Language = (typeof LANGUAGES)[number]
 export const LANGUAGE_KEY = 'liberty.language'
 
