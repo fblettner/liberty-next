@@ -1,0 +1,75 @@
+# Liberty Next — CI.
+#
+# Runs on every push to develop and every pull request to main, and is reused by
+# release.yml (workflow_call) so nothing is published to PyPI / ghcr.io without the
+# backend suite, the TypeScript check and the production build having passed.
+#
+# Two independent jobs:
+#   backend  — Python 3.12, `pip install -e .[dev]`, pytest. WeasyPrint is imported at
+#              app start, so the Pango/HarfBuzz/Fontconfig libs the Dockerfile installs
+#              are needed here too.
+#   frontend — Node 20 (the Dockerfile's build stage), `npm ci`, then `npm run build`
+#              (= `tsc --noEmit && vite build`). `npm ci` fails loudly if package.json
+#              and package-lock.json ever drift again — that's the point.
+
+name: CI
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: System libs (WeasyPrint)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libfontconfig1
+
+      - name: Install
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+
+      - name: Test
+        run: pytest -q
+
+  frontend:
+    name: Frontend (tsc + vite build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        run: npm run build

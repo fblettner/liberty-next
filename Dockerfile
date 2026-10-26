@@ -17,11 +17,13 @@
 FROM node:20-slim AS frontend
 WORKDIR /build/frontend
 # Copy only the manifest + lockfile first so the install layer is cached across source-only
-# edits. We use `npm install` (not `npm ci`) to match the project's own start.sh — the
-# committed lockfile drifts from package.json, which `npm ci` rejects but `npm install`
-# reconciles. --no-audit/--no-fund keep the build log clean.
+# edits. `npm ci` installs exactly the committed lockfile and FAILS if package.json and
+# package-lock.json drift — which is what we want in an image build. (Until 2026-10-26 this
+# was `npm install`: the lockfile carried an internally inconsistent yaml@1 entry that
+# npm 10 rejected, and `npm install` silently repaired it on every build. The lock was
+# regenerated; CI now runs the same `npm ci`.) --no-audit/--no-fund keep the log clean.
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm install --no-audit --no-fund
+RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build   # emits /build/frontend/dist (vite.config.ts: outDir "dist")
 
