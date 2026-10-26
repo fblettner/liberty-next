@@ -18,7 +18,7 @@ rules (Decimal(p,0)→int/bigint, Decimal(p,s>0)→bigint *or* numeric(p,s)
 depending on decimal_mode, strings trimmed + null-stripped, column names
 lowercased).
 
-The "why" for the Decimal default is in PHASE13 §5.1 + the project memory at
+The "why" for the Decimal default is in spec §5.1 + the project memory at
 ``project_jde_decimal_coercion.md`` — TL;DR JDE never stores decimals, the
 truncating cast is the workaround for Spark→Postgres mapping NUMBER → float.
 """

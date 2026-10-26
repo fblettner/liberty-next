@@ -1,4 +1,5 @@
-"""nomaflow — config-driven ETL + scheduler. See the nomaflow operating guide (apps repo ``docs/NOMAFLOW.md``).
+"""nomaflow — config-driven ETL + scheduler. See the nomaflow operating guide (apps repo ``docs/NOMAFLOW.md``). ``spec §n`` references throughout this package point at the original
+design spec, ``docs/PHASE13.md``, kept in git history (removed in 17768a2 once delivered).
 
 This module is the framework side: parsing ``jobs.toml``, persisting run state,
 executing job steps, scheduling cron fires. The actual job catalogue + the

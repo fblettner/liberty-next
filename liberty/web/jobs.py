@@ -1,6 +1,6 @@
 """``/admin/jobs`` routes — nomaflow control plane (superuser only).
 
-Three endpoints (PHASE13 §6 + §4):
+Three endpoints (spec §6 + §4):
 
 * ``GET  /admin/jobs`` — list the loaded job catalogue + their schedule status.
   Powers the Settings → Jobs UI's job picker.

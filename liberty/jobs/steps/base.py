@@ -72,7 +72,7 @@ class StepResult:
     """What a step returns when it succeeds.
 
     ``rows_affected`` is summed across all steps into the parent
-    ``JobRun.rows_affected`` for the at-a-glance Screen view (PHASE13.md §7);
+    ``JobRun.rows_affected`` for the at-a-glance Screen view (spec §7);
     ``log_excerpt`` is the last ~4 KB of step-emitted log lines (the runner
     truncates if the executor returns more).
     """

@@ -356,7 +356,6 @@ docker/      entrypoint.sh — runtime config-init (init-db when POSTGRES_PASSWO
 start.sh     run/dev helper (serve | dev | api | build | frontend | init-db | init-config | help)
 release/     deployment configs (Docker Compose light/full/swarm, install.sh, install-apps.sh, upgrade.sh)
 tests/       1100+ tests
-docs/        PLAN.md · DEPLOYMENT.md · NOMAFLOW-UI.md · PHASE13.md
 ```
 
 ---

@@ -6,7 +6,7 @@ Two flavours, both small dataclasses (no behaviour):
   ``fired_at`` timestamp (matches the cron's notion of "now" for that fire,
   not wall-clock at the moment ``JobRunner.run`` is entered) so duplicate
   fires for the same logical instant dedup via the ``UNIQUE (job_id,
-  scheduled_at)`` constraint on ``nomaflow_job_runs`` (see PHASE13.md §4 +
+  scheduled_at)`` constraint on ``nomaflow_job_runs`` (see spec §4 +
   models.py).
 
 * :class:`ManualTrigger` — an operator hit "Run now" (or another job fired

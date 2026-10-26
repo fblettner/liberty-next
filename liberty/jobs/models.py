@@ -35,7 +35,7 @@ class Base(DeclarativeBase):
 
 
 class RunState(str, Enum):
-    """Lifecycle states for both ``JobRun`` and ``StepRun`` — see PHASE13.md §4."""
+    """Lifecycle states for both ``JobRun`` and ``StepRun`` — see spec §4."""
 
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"

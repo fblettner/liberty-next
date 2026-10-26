@@ -20,7 +20,7 @@ This is the Spark replacement (see the nomaflow operating guide (apps repo ``doc
       mid-stream failure never leaves the target empty.
 
 6. For ``append`` mode: skip the DDL + swap, INSERT into the target directly.
-7. ``upsert`` is reserved (PHASE13 §11 #5) — raise :class:`StepFailed` with a
+7. ``upsert`` is reserved (spec §11 #5) — raise :class:`StepFailed` with a
    message pointing at the alternative (a ``sql_query`` step on a hand-rolled
    MERGE/ON CONFLICT statement).
 """
@@ -71,7 +71,7 @@ class SqlCopyExecutor:
         tgt_engine = self._connectors.pools.engine(tgt_conn.pool_name)
 
         # Per-pool string handling — the copy honours the *source* pool's read
-        # setting and the *target* pool's write setting (NOMAFLOW-UI / PHASE13
+        # setting and the *target* pool's write setting (NOMAFLOW-UI / spec
         # §5.1). trim_strings: strip Oracle CHAR/NCHAR padding read from the
         # source. coalesce_nulls: pad/zero empties written to an Oracle-style
         # target (Oracle treats '' as NULL). The raw stream→insert path bypasses
@@ -135,7 +135,7 @@ class SqlCopyExecutor:
                 strip_both_columns=src_strip_both,
             )
         elif mode is CopyMode.UPSERT:
-            # Per PHASE13 §11 #5: no clean cross-dialect implementation in
+            # Per spec §11 #5: no clean cross-dialect implementation in
             # v1 of nomaflow. Operators who need this write a sql_query step
             # against a hand-rolled MERGE/ON CONFLICT statement.
             raise StepFailed(

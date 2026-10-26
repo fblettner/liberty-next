@@ -90,7 +90,7 @@ def ensure_plugins_on_sys_path() -> None:
     """Make ``${LIBERTY_APPS_DIR}/../plugins/`` importable as a Python source root —
     so a ``python`` step's ``callable = "nomasx1.security:j_x"`` resolves to
     ``<apps-repo>/plugins/nomasx1/security.py`` without the operator wiring sys.path
-    by hand (PHASE13 §5.3).
+    by hand (spec §5.3).
 
     Customer-specific code (proprietary SQL templates, business orchestration) lives
     in the apps repo, never in the open framework. The framework only provides the

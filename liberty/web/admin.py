@@ -2366,7 +2366,7 @@ async def export_job_endpoint(body: ExportJobBody, request: Request, _: Superuse
         f"**Source install:** `{request.app.state.settings.app.name}`\n\n"
         f"## Apply on the target\n\n"
         "1. Unzip into the target install's nomaflow jobs.toml location\n"
-        "   (typically `${LIBERTY_APPS_DIR}/../plugins/nomaflow/jobs.toml` — see PHASE13).\n"
+        "   (typically `${LIBERTY_APPS_DIR}/../plugins/nomaflow/jobs.toml` — see spec).\n"
         "2. Either replace the file (single-job target) or merge the `[[jobs]]` entry into\n"
         "   your target's existing jobs.toml.\n"
         "3. Reload nomaflow:\n"
