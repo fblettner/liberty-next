@@ -20,7 +20,7 @@ from liberty.auth.authstore import build_auth_backend
 from liberty.auth.oidc import build_oidc
 from liberty.auth.routes import router as auth_router
 from liberty.auth.dependencies import OptionalPrincipal
-from liberty.auth.tokens import TokenConfig, TokenService
+from liberty.auth.tokens import MIN_SECRET_BYTES, TokenConfig, TokenService
 from liberty.runtime import build_changesets_db, build_user_views, load_registry
 from liberty.config import AuthSettings, Settings, load_settings
 from liberty.connectors import ConnectorRegistry
@@ -77,6 +77,13 @@ def _build_token_service(cfg: AuthSettings) -> TokenService:
             "auth.jwt_secret is empty — using an ephemeral signing key; issued tokens "
             "won't survive a restart. Set LIBERTY_JWT_SECRET in the environment."
         )
+    elif len(secret.encode("utf-8")) < MIN_SECRET_BYTES:
+        _log.warning(
+            "auth.jwt_secret is %d bytes — below the %d bytes RFC 7518 recommends for HS256. "
+            "Tokens still work, but set LIBERTY_JWT_SECRET to a long random value "
+            "(e.g. `openssl rand -base64 48`); release/install.sh generates one.",
+            len(secret.encode("utf-8")), MIN_SECRET_BYTES,
+        )
     return TokenService(
         TokenConfig(
             secret=secret,
@@ -84,6 +91,7 @@ def _build_token_service(cfg: AuthSettings) -> TokenService:
             issuer=cfg.jwt_issuer,
             access_ttl=cfg.access_token_ttl,
             refresh_ttl=cfg.refresh_token_ttl,
+            refresh_reuse_grace=cfg.refresh_reuse_grace,
         )
     )
 
@@ -186,6 +194,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.user_views = await build_user_views(settings, app.state.connectors)
 
         app.state.token_service = token_service
+        from liberty.auth.throttle import LoginThrottle
+        app.state.login_throttle = LoginThrottle(
+            max_failures=settings.auth.login_max_failures, window_seconds=settings.auth.login_window_seconds,
+        )
         app.state.oidc = build_oidc(settings.oidc, master_key=settings.crypto.master_key)
         app.state.ai = build_assistant(settings.ai, app.state.connectors, master_key=settings.crypto.master_key)
         from liberty.reports.wiring import build_reports

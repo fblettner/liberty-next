@@ -18,12 +18,14 @@ from pydantic import BaseModel, Field
 
 from liberty.auth.authstore import AuthBackend, UserRecord
 from liberty.auth.dependencies import (
+    get_login_throttle,
     CurrentPrincipal,
     get_auth_backend,
     get_oidc,
     get_token_service,
 )
 from liberty.auth.oidc import OIDCClient
+from liberty.auth.throttle import LoginThrottle, client_ip
 from liberty.auth.tokens import REFRESH, TokenError, TokenService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -104,8 +106,10 @@ _BAD_CREDENTIALS = HTTPException(
 )
 async def login(
     body: LoginRequest,
+    request: Request,
     backend: Annotated[AuthBackend, Depends(get_auth_backend)],
     tokens: Annotated[TokenService, Depends(get_token_service)],
+    throttle: Annotated[LoginThrottle, Depends(get_login_throttle)],
 ) -> TokenPair:
     """Exchange username + password for a JWT pair. The access token (default 1 h TTL) goes
     on every subsequent ``Authorization: Bearer <token>`` header; the refresh token (default
@@ -114,10 +118,25 @@ async def login(
     Routes through whichever auth backend the install configured (``[auth] backend =
     "toml"`` or ``"db"`` in app.toml). For OIDC-authenticated users, use
     ``GET /auth/oidc/login`` instead — this endpoint only accepts local (password-backed)
-    accounts."""
+    accounts.
+
+    Repeated failures are throttled per username **and** per client address (``[auth]
+    login_max_failures`` inside ``login_window_seconds``, default 10 in 5 min) — a 429 with
+    ``Retry-After`` instead of another password check."""
+    user_key = f"user:{body.username.strip().lower()}"
+    ip_key = f"ip:{client_ip(dict(request.headers), request.client.host if request.client else None)}"
+    wait = throttle.retry_after(user_key, ip_key)
+    if wait:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many failed logins — try again in {wait} s",
+            headers={"Retry-After": str(wait)},
+        )
     user = await backend.authenticate(body.username, body.password)
     if user is None:
+        throttle.record_failure(user_key, ip_key)
         raise _BAD_CREDENTIALS
+    throttle.reset(user_key)
     return _issue_pair(tokens, user)
 
 
@@ -134,9 +153,11 @@ async def refresh(
     backend: Annotated[AuthBackend, Depends(get_auth_backend)],
     tokens: Annotated[TokenService, Depends(get_token_service)],
 ) -> TokenPair:
-    """Exchange a still-valid refresh token for a fresh access + refresh pair. The old
-    refresh token is NOT invalidated (Liberty doesn't track per-token state for stateless
-    JWTs); the caller should drop it client-side once the new pair lands.
+    """Exchange a still-valid refresh token for a fresh access + refresh pair. The
+    presented refresh token is **consumed**: presenting it again more than ``[auth]
+    refresh_reuse_grace`` seconds later (default 60 s — enough for two browser tabs racing
+    the same stored token) is refused with 401, so a leaked refresh token dies the moment
+    its owner refreshes. Callers must store the *new* refresh token from each reply.
 
     Call this when the access token's exp claim is close — the SPA does so silently from
     a setInterval; backend integrations should refresh ~30 s before the access token
@@ -152,6 +173,13 @@ async def refresh(
     subject = claims.get("sub")
     if not subject:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+    try:
+        tokens.consume_refresh(claims)
+    except TokenError as exc:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, detail=f"Invalid refresh token: {exc}",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
     user = await backend.get_by_id(str(subject))
     if user is None or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="User is inactive or unknown")
