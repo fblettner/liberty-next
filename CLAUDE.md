@@ -238,7 +238,8 @@ python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # dev = every ex
 ./start.sh dev                # --reload   ·   ./start.sh frontend → Vite :5173 with API proxy
 .venv/bin/pytest -q           # ~100 s, no live DB needed   ·   .venv/bin/ruff check liberty tests
 (cd frontend && npm ci && npm run lint && npm test && npm run build)   # eslint · vitest · tsc + vite
-# CLIs: liberty-next · liberty-connectors list|describe|run · liberty-admin init-db|create-user|…|migrate [--dry-run]
+# CLIs: liberty-next · liberty-connectors list|describe|run · liberty-admin init-db|create-user|…|migrate [--dry-run]|record-upgrade
+#       liberty-ops status|doctor|start|stop|restart|logs|backup|restore|migrate|upgrade|rollback (Python installs; Docker twin = release/liberty)
 #       (migrate = each plugins/<app>/db upgrade_schema / pending_revisions; journaled as <app>-schema)
 #       liberty-migrate (v1 → v2, incl. `diff`) · liberty-crypto encrypt|decrypt · liberty-license verify|status
 # Dev env (typical): LIBERTY_JWT_SECRET (≥ 32 bytes), LIBERTY_MASTER_KEY, LIBERTY_APPS_DIR,

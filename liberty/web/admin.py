@@ -409,6 +409,21 @@ async def list_upgrades(request: Request, _: Superuser) -> dict[str, object]:
     return {"upgrades": store.list_upgrades() if store is not None else []}
 
 
+@router.get("/upgrades/{upgrade_id}/report", summary="One upgrade's report")
+async def get_upgrade_report(request: Request, upgrade_id: int, _: Superuser) -> dict[str, Any]:
+    """The report ``liberty upgrade`` / ``liberty rollback`` recorded for one history row:
+    ``{upgrade, markdown, data}``. 404 when the row has no report (the version-bump rows the
+    server records at startup don't)."""
+    store = getattr(request.app.state, "config_versions", None)
+    row = store.get_upgrade(upgrade_id) if store is not None else None
+    if row is None or not row.get("report"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no report for this upgrade")
+    data, md = store.read_upgrade_report(row["report"])
+    if data is None and md is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="report file is missing")
+    return {"upgrade": row, "markdown": md or "", "data": data or {}}
+
+
 @router.get("/release-notes", summary="Release notes")
 async def get_release_notes(request: Request, _: Superuser) -> dict[str, Any]:
     """Bundled changelogs per component — the framework (liberty-next) and the licensed apps

@@ -12,6 +12,8 @@
 #   LIBERTY_DB_URL            — framework pool (auth + nomaflow). Default: SQLite in /app.
 #   LIBERTY_ADMIN_PASSWORD    — when set, the bootstrap admin gets this password
 #                               (else init-db generates a random one and prints it once).
+#   LIBERTY_AUTO_MIGRATE=1    — apply the apps' pending schema migrations at boot (default: only
+#                               warn; `liberty upgrade` applies them).
 #   LIBERTY_SKIP_INITDB=1     — skip the bootstrap (e.g. a read-replica / scaled-out worker
 #                               where another instance already ran it).
 #   LIBERTY_DB_WAIT_TRIES     — how many 1s probes to wait for the framework DB before
@@ -84,6 +86,24 @@ PY
   return 0
 }
 
+check_migrations() {
+  # The licensed apps ship Alembic migrations (plugins/<app>/db). They are applied by
+  # `liberty upgrade` / `liberty-admin migrate`; at boot we only SAY when some are pending —
+  # unless LIBERTY_AUTO_MIGRATE=1 asks for them to be applied right here.
+  if [ "${LIBERTY_AUTO_MIGRATE:-}" = "1" ]; then
+    log "applying pending app schema migrations (LIBERTY_AUTO_MIGRATE=1)…"
+    liberty-admin migrate || log "warning: liberty-admin migrate reported a problem."
+    return 0
+  fi
+  local rc=0
+  liberty-admin migrate --dry-run >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0) ;;
+    2) log "WARNING: app schema migrations are PENDING — run './liberty migrate' (or 'liberty-admin migrate' in the container; LIBERTY_AUTO_MIGRATE=1 applies them at boot)." ;;
+    *) log "warning: could not check the app schema migrations (liberty-admin migrate --dry-run exited $rc)." ;;
+  esac
+}
+
 serve() {
   seed_config
   if [ "${LIBERTY_SKIP_INITDB:-}" != "1" ]; then
@@ -94,6 +114,7 @@ serve() {
     # existing admin and ensures the nomaflow_* tables exist on the framework pool).
     log "bootstrapping auth + nomaflow schema (liberty-admin init-db)…"
     liberty-admin init-db "${args[@]}" || log "init-db reported a problem (continuing to serve)."
+    check_migrations
   else
     log "LIBERTY_SKIP_INITDB=1 — skipping bootstrap."
   fi

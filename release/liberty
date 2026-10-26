@@ -10,7 +10,8 @@
 #   liberty ssl provided --domain D --cert-dir DIR --cert-file F --key-file K
 #   liberty ssl off                           # back to plain HTTP
 #   liberty apps <wheel> [--force-config]     # link or refresh the licensed apps
-#   liberty upgrade [--tag X] [--apps <wheel>]   # doctor → backup → pull → restart → migrations → status
+#   liberty upgrade [--tag X] [--apps <wheel>] [--keep DAYS]   # doctor → backup → pull → recreate → migrations → report → status
+#   liberty rollback [--yes]                  # back to the image + volumes from before the last upgrade
 #   liberty backup [--keep DAYS] | liberty restore <backup-dir>
 #   liberty logs [-f]                         # the liberty-next service's logs
 #   liberty migrate [--dry-run]               # pending app schema migrations (liberty-admin migrate)
@@ -39,7 +40,7 @@ ok()    { printf "${GREEN}✔${NC} %s\n" "$*"; }
 warn()  { printf "${YELLOW}!${NC} %s\n" "$*"; }
 die()   { printf "${RED}✗${NC} %s\n" "$*" >&2; exit 1; }
 
-usage() { sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '3,21p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # ── .env helpers ───────────────────────────────────────────────────────────────
 need_env() { [ -f "$ENV_FILE" ] || die ".env not found in $here — run './liberty install' first."; }
@@ -84,6 +85,9 @@ wait_healthy() {
 }
 
 in_container() { docker exec -i "$SERVICE" "$@"; }   # -i: the python heredocs below need stdin forwarded
+ver_fw()   { in_container python -c 'import liberty;print(liberty.__version__)' 2>/dev/null </dev/null || true; }
+ver_apps() { in_container python -c "from importlib.metadata import version;print(version('liberty-apps'))" 2>/dev/null </dev/null || true; }
+health()   { docker inspect --format='{{.State.Health.Status}}' "$SERVICE" 2>/dev/null || echo absent; }
 
 # "up to date" | "N pending (app: n, …)" | "error: …" | "? …" — from `liberty-admin migrate
 # --dry-run`'s JSON (exit 0 = up to date, 2 = pending, 1 = an app errored).
@@ -284,23 +288,141 @@ cmd_restore() {
 }
 
 cmd_upgrade() {
-  # B1: doctor → backup → upgrade.sh (pull + recreate + health, with the recorded chain) →
-  # migrations → status. The config merge + the upgrade report land in B2 / B4.
+  # doctor (advisory) → keep the running image for rollback → backup (the gate) → pin + pull +
+  # recreate → health → apps wheel / schema migrations → report (journaled in Settings → History
+  # → Upgrades) → status. Everything the rollback needs lands in .env: LIBERTY_ROLLBACK_TAG (a local
+  # tag of the image that was running), LIBERTY_ROLLBACK_FROM_TAG, LIBERTY_LAST_BACKUP.
   need_env; require_docker
-  local wheel="" tagargs=()
+  local wheel="" newtag="" keep=30
   while [ $# -gt 0 ]; do
     case "$1" in
       --apps) [ -n "${2:-}" ] || die "--apps requires a wheel"; wheel="$2"; shift 2 ;;
-      --tag)  [ -n "${2:-}" ] || die "--tag requires a value"; tagargs+=(--tag "$2"); shift 2 ;;
+      --tag)  [ -n "${2:-}" ] || die "--tag requires a value"; newtag="$2"; shift 2 ;;
+      --keep) [ -n "${2:-}" ] || die "--keep requires a number of days"; keep="$2"; shift 2 ;;
       *) die "unknown argument: $1" ;;
     esac
   done
-  info "Pre-flight (advisory — an upgrade is often the fix for what doctor reports; the backup is the gate)"
-  cmd_doctor || warn "doctor found problems — continuing; re-check with ./liberty doctor once the upgrade is done"
-  info "Backup (gate: an upgrade never starts without one)"
-  ./backup.sh --keep 30 || die "backup failed — upgrade aborted"   # --keep = days of backups retained
-  ./upgrade.sh ${tagargs[@]+"${tagargs[@]}"}
-  if [ -n "$wheel" ]; then cmd_apps "$wheel"; else cmd_migrate || warn "migrations reported a problem — see above"; fi
+  local stamp started layout ch oldtag oldfw oldapps steps=() doctor_out problems=0
+  stamp="$(date -u +%Y%m%d-%H%M%S)"; started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  layout="$(layout_of_chain)"; ch="$(chain)"
+  oldtag="$(env_get LIBERTY_IMAGE_TAG)"; oldtag="${oldtag:-latest}"
+  oldfw="$(ver_fw)"; oldapps="$(ver_apps)"
+
+  info "1/6 Pre-flight (advisory — an upgrade is often the fix for what doctor reports; the backup is the gate)"
+  doctor_out="$(mktemp)"
+  if cmd_doctor >"$doctor_out" 2>&1; then steps+=("doctor=ok"); else
+    problems="$(grep -c '^   → ' "$doctor_out" || true)"
+    steps+=("doctor=warn:${problems} problem(s) before the upgrade")
+  fi
+  cat "$doctor_out"
+
+  info "2/6 Keeping the running image for a rollback"
+  local oldimg oldref repo
+  oldimg="$(docker inspect --format '{{.Image}}' "$SERVICE" 2>/dev/null || true)"
+  oldref="$(docker inspect --format '{{.Config.Image}}' "$SERVICE" 2>/dev/null || true)"
+  if [ -n "$oldimg" ] && [ -n "$oldref" ]; then
+    repo="${oldref%:*}"
+    docker tag "$oldimg" "${repo}:rollback-${stamp}"
+    env_set LIBERTY_ROLLBACK_TAG "rollback-${stamp}"
+    env_set LIBERTY_ROLLBACK_FROM_TAG "$oldtag"
+    ok "image kept as ${repo}:rollback-${stamp}"
+    steps+=("keep-image=ok:${repo}:rollback-${stamp}")
+  else
+    warn "no running container — nothing to keep for a rollback"
+    steps+=("keep-image=skipped:no running container")
+  fi
+
+  info "3/6 Backup (gate: an upgrade never starts without one; --keep ${keep} days)"
+  local backup_out bdir
+  backup_out="$(mktemp)"
+  if ! ./backup.sh --keep "$keep" >"$backup_out" 2>&1; then cat "$backup_out"; die "backup failed — upgrade aborted, nothing was changed"; fi
+  cat "$backup_out"
+  bdir="$(grep -E 'Backup complete:' "$backup_out" | sed -E 's/.*Backup complete: *//' | tail -1)"
+  [ -n "$bdir" ] || die "backup.sh did not report its destination — upgrade aborted"
+  env_set LIBERTY_LAST_BACKUP "$bdir"
+  steps+=("backup=ok:${bdir}")
+
+  info "4/6 Pull + recreate (chain: ${ch})"
+  [ -n "$newtag" ] && env_set LIBERTY_IMAGE_TAG "$newtag"
+  if compose pull; then steps+=("pull=ok"); else warn "pull reported a problem — recreating with what is available"; steps+=("pull=warn:pull reported a problem"); fi
+  compose up -d
+  if wait_healthy; then steps+=("health=ok"); else steps+=("health=fail:$(health)"); fi
+
+  info "5/6 Apps + schema migrations"
+  if [ -n "$wheel" ]; then
+    if ./install-apps.sh "$wheel" --layout "$layout"; then steps+=("apps=ok:${wheel##*/}"); else steps+=("apps=fail:install-apps.sh failed"); fi
+  fi
+  local migjson="" migrc=0
+  migjson="$(in_container liberty-admin migrate 2>/dev/null </dev/null)" || migrc=$?
+  case "$migrc" in
+    0) steps+=("migrate=ok") ;;
+    *) steps+=("migrate=fail:liberty-admin migrate exited ${migrc}") ;;
+  esac
+  [ -n "$migjson" ] && printf '%s\n' "$migjson"
+
+  info "6/6 Report"
+  local newfw newapps rec
+  newfw="$(ver_fw)"; newapps="$(ver_apps)"
+  local args=(--kind upgrade --started-at "$started" --host "$(hostname)" --layout "$layout" --chain "$ch"
+              --tag-from "$oldtag" --tag-to "$(env_get LIBERTY_IMAGE_TAG)" --fw-from "$oldfw" --fw-to "$newfw"
+              --apps-from "$oldapps" --apps-to "$newapps" --backup "$bdir" --health "$(health)"
+              --doctor-problems "$problems" --doctor-text -)
+  [ -n "$migjson" ] && args+=(--migrations "$migjson")
+  local st; for st in "${steps[@]}"; do args+=(--step "$st"); done
+  if rec="$(in_container liberty-admin record-upgrade "${args[@]}" <"$doctor_out" 2>/dev/null)"; then
+    local rname rjson
+    rname="$(printf '%s' "$rec" | grep -o '"report": "[^"]*"' | cut -d'"' -f4)"
+    rjson="$(printf '%s' "$rec" | grep -o '"json_path": "[^"]*"' | cut -d'"' -f4)"
+    env_set LIBERTY_LAST_REPORT "$rjson"
+    # a host-side copy next to the backup: survives a rollback's volume restore, handy for support
+    in_container cat "$rjson" </dev/null >"$bdir/upgrade-report.json" 2>/dev/null || true
+    ok "report recorded (Settings → History → Upgrades): $rname"
+  else
+    warn "could not record the report in the container (older image without record-upgrade?) — the run still completed"
+  fi
+  rm -f "$doctor_out" "$backup_out"
+  echo
+  cmd_status
+  case " ${steps[*]} " in *"=fail:"*) echo; warn "some steps FAILED — see above; './liberty rollback' goes back to the image + volumes from before this upgrade" ;; esac
+}
+
+cmd_rollback() {
+  # Back to the image that was running before the last `liberty upgrade` (kept as a local tag) and
+  # the volumes it snapshotted just before. Restores volumes → confirm first (or --yes).
+  need_env; require_docker
+  local yes=no; [ "${1:-}" = "--yes" ] && yes=yes
+  local tag from backup
+  tag="$(env_get LIBERTY_ROLLBACK_TAG)"; from="$(env_get LIBERTY_ROLLBACK_FROM_TAG)"; backup="$(env_get LIBERTY_LAST_BACKUP)"
+  [ -n "$tag" ] || die "nothing to roll back to — './liberty upgrade' records the previous image and a backup first"
+  [ -d "$backup" ] || die "the backup taken before the last upgrade ($backup) is gone — restore one by hand: ./liberty restore <dir>"
+  local curtag curfw; curtag="$(env_get LIBERTY_IMAGE_TAG)"; curfw="$(ver_fw)"
+  printf "${BOLD}Rollback${NC}\n  image tag  %s → %s (the image that ran before the upgrade, tagged %s)\n  volumes    restored from %s\n" "${curtag:-latest}" "${from:-latest}" "$tag" "$backup"
+  if [ "$yes" != yes ]; then
+    local ans; read -r -p "Everything written since that backup will be lost. Continue? [y/N] " ans
+    case "$ans" in y|Y|yes) ;; *) die "rollback cancelled" ;; esac
+  fi
+  local steps=() saved_report=""
+  # The upgrade's report lives in .versions/ inside the config volume — the restore below puts the
+  # pre-upgrade .versions/ back. Keep the report (the host copy next to the backup, else the live file)
+  # and re-journal it afterwards: the history must show the upgrade AND its rollback.
+  if [ -f "$backup/upgrade-report.json" ]; then saved_report="$backup/upgrade-report.json"
+  elif [ -n "$(env_get LIBERTY_LAST_REPORT)" ]; then
+    saved_report="$(mktemp)"; in_container cat "$(env_get LIBERTY_LAST_REPORT)" </dev/null >"$saved_report" 2>/dev/null || saved_report=""
+  fi
+  env_set LIBERTY_IMAGE_TAG "$tag"; steps+=("pin-image=ok:${tag}")
+  if cmd_restore "$backup"; then steps+=("restore=ok:${backup}"); else steps+=("restore=fail:see above"); fi
+  if [ -n "$saved_report" ] && [ -s "$saved_report" ]; then
+    if in_container liberty-admin record-upgrade --from-json - <"$saved_report" >/dev/null 2>&1; then steps+=("keep-upgrade-report=ok")
+    else steps+=("keep-upgrade-report=warn:could not re-journal the upgrade's report"); fi
+  fi
+  # the recorded tag is what install / upgrade should go back to pinning
+  if [ -n "$from" ] && [ "$from" != latest ]; then env_set LIBERTY_IMAGE_TAG "$from"; else env_set LIBERTY_IMAGE_TAG "$tag"; fi
+  local args=(--kind rollback --host "$(hostname)" --layout "$(layout_of_chain)" --chain "$(chain)"
+              --tag-from "${curtag:-latest}" --tag-to "$(env_get LIBERTY_IMAGE_TAG)" --fw-from "$curfw" --fw-to "$(ver_fw)"
+              --apps-to "$(ver_apps)" --backup "$backup" --health "$(health)")
+  local st; for st in "${steps[@]}"; do args+=(--step "$st"); done
+  in_container liberty-admin record-upgrade "${args[@]}" </dev/null >/dev/null 2>&1 || warn "could not record the rollback report in the container"
+  ok "rolled back — LIBERTY_IMAGE_TAG=$(env_get LIBERTY_IMAGE_TAG) (the ${tag} image stays available locally)"
   cmd_status
 }
 
@@ -315,6 +437,7 @@ case "$cmd" in
   ssl)      cmd_ssl "$@" ;;
   apps)     cmd_apps "$@" ;;
   upgrade)  cmd_upgrade "$@" ;;
+  rollback) cmd_rollback "$@" ;;
   backup)   cmd_backup "$@" ;;
   restore)  cmd_restore "$@" ;;
   logs)     cmd_logs "$@" ;;

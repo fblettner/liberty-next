@@ -22,6 +22,23 @@
   the manual run of the `nomasx1-upgrade-schema-1` job after an apps upgrade.
 - `liberty-admin` now verifies the license key like the server does; before, every admin command
   silently dropped the licensed connectors.
+- **`liberty upgrade` writes a report and `liberty rollback` undoes an upgrade.** Each run records
+  what happened (versions before / after, image tag, compose chain, backup directory, doctor
+  findings, every step's outcome, the schema migrations applied) as JSON + Markdown under the
+  config volume (`.versions/upgrades/`) and journals it in Settings → History → Upgrades next to the
+  version bumps (`liberty-admin record-upgrade`). Before pulling, the running image is kept under a
+  local `rollback-<stamp>` tag; `liberty rollback` restores the pre-upgrade snapshot and re-runs
+  that image.
+- The container's healthcheck now probes `/ready` (the framework database answers) instead of
+  `/info` (the process is up): a stack whose database is unreachable is reported `unhealthy`.
+- The container warns in its log at boot when app schema migrations are pending;
+  `LIBERTY_AUTO_MIGRATE=1` applies them at boot.
+- **New `liberty-ops` command for Python installs** (pipx or venv, with or without systemd) — the
+  twin of `release/liberty`: `status`, `doctor`, `start` / `stop` / `restart` / `logs`, `backup` /
+  `restore` (config dir, apps dir, SQLite file, `pg_dump`), `migrate`, `upgrade [--version X]
+  [--apps WHEEL]` (doctor → backup gate → `pipx upgrade` or pinned install → apps wheel →
+  migrations → restart → report → status) and `rollback` (previous version + the pre-upgrade
+  backup). Same report in Settings → History → Upgrades as the Docker path.
 
 ## 7.0.57 — 2026-10-26
 

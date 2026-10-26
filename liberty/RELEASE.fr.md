@@ -30,6 +30,27 @@
   `nomasx1-upgrade-schema-1` après une mise à jour des applications.
 - `liberty-admin` vérifie maintenant la clé de licence comme le serveur ; auparavant, les commandes
   d'administration ignoraient sans message les connecteurs sous licence.
+- **`liberty upgrade` produit un rapport et `liberty rollback` annule une mise à jour.** Chaque
+  exécution enregistre ce qui s'est passé (versions avant et après, étiquette d'image, fichiers
+  compose, dossier de sauvegarde, constats du diagnostic, résultat de chaque étape, migrations de
+  schéma appliquées) en JSON et en Markdown dans le volume de configuration (`.versions/upgrades/`)
+  et l'ajoute à Paramètres → Historique → Mises à jour, à côté des changements de version
+  (`liberty-admin record-upgrade`). Avant le téléchargement de la nouvelle image, l'image en cours
+  d'exécution est conservée sous une étiquette locale `rollback-<horodatage>` ; `liberty rollback`
+  restaure la sauvegarde prise avant la mise à jour et relance cette image.
+- Le contrôle de santé du conteneur interroge maintenant `/ready` (la base du framework répond) au
+  lieu de `/info` (le processus est démarré) : une pile dont la base est injoignable apparaît
+  `unhealthy`.
+- Au démarrage, le conteneur signale dans son journal les migrations de schéma en attente ;
+  `LIBERTY_AUTO_MIGRATE=1` les applique au démarrage.
+- **Nouvelle commande `liberty-ops` pour les installations Python** (pipx ou venv, avec ou sans
+  systemd), pendant de `release/liberty` : `status`, `doctor`, `start` / `stop` / `restart` / `logs`,
+  `backup` / `restore` (dossier de configuration, dossier des applications, fichier SQLite,
+  `pg_dump`), `migrate`, `upgrade [--version X] [--apps WHEEL]` (diagnostic → sauvegarde
+  obligatoire → `pipx upgrade` ou version épinglée → wheel des applications → migrations →
+  redémarrage → rapport → état) et `rollback` (version précédente et sauvegarde prise avant la mise
+  à jour). Le rapport est le même que celui du chemin Docker, dans Paramètres → Historique → Mises à
+  jour.
 
 ## 7.0.57 — 2026-10-26
 

@@ -8,6 +8,7 @@
     liberty-admin list-users
     liberty-admin create-role <name> [--permission P ...] [--description …]
     liberty-admin migrate [--app X ...] [--dry-run] [--target-connector C] [--revision R]
+    liberty-admin record-upgrade --kind upgrade|rollback [--fw-from V --fw-to V …] [--step name=status[:detail] …]
 
 Operates on whatever ``[auth] backend`` is configured in ``config/app.toml``: ``"toml"`` (the
 default) edits ``[auth] toml_path`` (``config/auth.toml``) — no database; ``"db"`` uses the
@@ -474,6 +475,152 @@ async def _cmd_migrate(ctx: _Context, args: argparse.Namespace) -> int:
     return 0
 
 
+
+# --------------------------------------------------------------------------- #
+# record-upgrade — the report `liberty upgrade` / `liberty rollback` hand in
+# --------------------------------------------------------------------------- #
+
+_STEP_MARK = {"ok": "✔", "warn": "!", "fail": "✗", "skipped": "–"}
+
+
+def _parse_step(raw: str) -> dict:
+    """``name=status[:detail]`` → ``{name, status, detail}``; status ∈ ok | warn | fail | skipped."""
+    name, _, rest = raw.partition("=")
+    status, _, detail = rest.partition(":")
+    status = (status or "ok").strip().lower()
+    if status not in _STEP_MARK:
+        raise argparse.ArgumentTypeError(f"step {name!r}: status must be one of {', '.join(_STEP_MARK)}")
+    return {"name": name.strip(), "status": status, "detail": detail.strip() or None}
+
+
+def render_upgrade_report(data: dict) -> str:
+    """The Markdown Settings → History → Upgrades shows for a report."""
+    kind = data.get("kind", "upgrade")
+    fw, apps, tag = data.get("framework", {}), data.get("apps", {}), data.get("image_tag", {})
+
+    def arrow(d: dict) -> str:
+        a, b = d.get("from") or "-", d.get("to") or "-"
+        return f"{a} → {b}" if a != b else b
+
+    lines = [f"# {kind.capitalize()} — {data.get('finished_at', '')[:19].replace('T', ' ')} UTC", ""]
+    lines += ["| | |", "|---|---|",
+              f"| Framework | {arrow(fw)} |",
+              f"| Apps | {arrow(apps) if (apps.get('from') or apps.get('to')) else 'not installed'} |",
+              f"| Image tag | {arrow(tag)} |",
+              f"| Layout / chain | {data.get('layout') or '?'} — `{data.get('chain') or '?'}` |",
+              f"| Backup | {('`' + data['backup'] + '`') if data.get('backup') else 'none'} |",
+              f"| Health after | {data.get('health') or '?'} |",
+              f"| Host | {data.get('host') or '?'} |", ""]
+    steps = data.get("steps") or []
+    if steps:
+        lines += ["## Steps", ""]
+        for st in steps:
+            mark = _STEP_MARK.get(st.get("status", "ok"), "?")
+            detail = f" — {st['detail']}" if st.get("detail") else ""
+            lines.append(f"- {mark} **{st['name']}**{detail}")
+        lines.append("")
+    mig = data.get("migrations")
+    if isinstance(mig, dict):
+        lines += ["## Schema migrations", ""]
+        apps_rows = mig.get("apps") or []
+        if not apps_rows:
+            lines.append("No migratable app plugin.")
+        for a in apps_rows:
+            pend = a.get("pending")
+            what = (f"{len(pend)} revision(s): " + ", ".join(pend)) if pend else ("up to date" if pend == [] else "")
+            reason = f" — {a['reason']}" if a.get("reason") else ""
+            lines.append(f"- **{a.get('app')}** on `{a.get('target_connector', '?')}`: {a.get('status')}{(' — ' + what) if what else ''}{reason}")
+        lines.append("")
+    doc = data.get("doctor") or {}
+    if doc.get("text"):
+        n = doc.get("problems")
+        lines += [f"## Doctor ({n} problem(s))" if n is not None else "## Doctor", "", "```", doc["text"].rstrip(), "```", ""]
+    return "\n".join(lines)
+
+
+async def _cmd_record_upgrade(ctx: _Context, args: argparse.Namespace) -> int:
+    """Store the report of an upgrade / rollback run by ``release/liberty`` and journal it as a
+    ``stack`` row of the upgrade history (next to the framework / apps version bumps the server
+    records at startup). The doctor output is read from stdin when ``--doctor-text -`` is given."""
+    import json
+    import socket
+    from datetime import datetime, timezone
+
+
+    if args.from_json:
+        # Re-journal a report saved earlier (the rollback keeps the upgrade's report across the
+        # volume restore this way). The JSON is taken as-is; nothing else on the command line is read.
+        raw = sys.stdin.read() if args.from_json == "-" else Path(args.from_json).read_text(encoding="utf-8")
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            print(f"error: --from-json is not JSON: {exc}", file=sys.stderr)
+            return 2
+        if not isinstance(data, dict) or data.get("kind") not in ("upgrade", "rollback", "install"):
+            print("error: --from-json: expected a report object with a kind", file=sys.stderr)
+            return 2
+        return _journal_report(ctx, data, who=args.who)
+    if not args.kind:
+        print("error: --kind is required (unless --from-json)", file=sys.stderr)
+        return 2
+    doctor_text = None
+    if args.doctor_text == "-":
+        doctor_text = sys.stdin.read()
+    elif args.doctor_text:
+        doctor_text = Path(args.doctor_text).read_text(encoding="utf-8")
+    migrations = None
+    if args.migrations:
+        try:
+            migrations = json.loads(args.migrations)
+        except json.JSONDecodeError as exc:
+            print(f"error: --migrations is not JSON: {exc}", file=sys.stderr)
+            return 2
+    now = datetime.now(timezone.utc)
+    data = {
+        "kind": args.kind,
+        "started_at": args.started_at or now.isoformat(timespec="seconds"),
+        "finished_at": now.isoformat(timespec="seconds"),
+        "host": args.host or socket.gethostname(),
+        "layout": args.layout, "chain": args.chain,
+        "image_tag": {"from": args.tag_from, "to": args.tag_to},
+        "framework": {"from": args.fw_from, "to": args.fw_to},
+        "apps": {"from": args.apps_from, "to": args.apps_to},
+        "backup": args.backup, "health": args.health,
+        "doctor": {"problems": args.doctor_problems, "text": doctor_text},
+        "migrations": migrations,
+        "steps": list(args.step or []),
+    }
+    return _journal_report(ctx, data, who=args.who)
+
+
+def _journal_report(ctx: _Context, data: dict, *, who: str) -> int:
+    """Write the report files and the ``stack`` history row for *data*; prints where they went."""
+    from datetime import datetime
+
+    from liberty.versioning import ConfigVersionStore
+
+    kind = data["kind"]
+    fw, apps, tag = data.get("framework") or {}, data.get("apps") or {}, data.get("image_tag") or {}
+    steps = data.get("steps") or []
+    failed = [st["name"] for st in steps if st.get("status") == "fail"]
+    finished = data.get("finished_at") or datetime.now().astimezone().isoformat(timespec="seconds")
+    stamp = finished[:19].replace("-", "").replace(":", "").replace("T", "-")
+    store = ConfigVersionStore(ctx.connectors_path.parent)
+    name = f"{stamp}-{kind}"
+    jp, mp = store.write_upgrade_report(name, data, render_upgrade_report(data))
+    summary = f"{kind}: framework {fw.get('from') or '-'} → {fw.get('to') or '-'}"
+    if apps.get("to"):
+        summary += f", apps {apps.get('from') or '-'} → {apps['to']}"
+    if failed:
+        summary += f"; FAILED: {', '.join(failed)}"
+    row = store.record_upgrade(
+        component="stack", kind=kind, from_version=fw.get("from"), to_version=fw.get("to") or tag.get("to") or "?",
+        summary=summary, who=who, report=name, created_at=finished,
+    )
+    _print({"id": row["id"], "report": name, "json_path": str(jp), "markdown_path": str(mp), "failed_steps": failed})
+    return 0
+
+
 def _add_password_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--password", help="set this password (otherwise a random one is generated)")
     p.add_argument("--password-env", metavar="VAR", help="read the password from this env var")
@@ -540,6 +687,28 @@ def build_parser() -> argparse.ArgumentParser:
     p_mig.add_argument("--revision", default="head", help="alembic target revision (default: head)")
     p_mig.add_argument("--plugins-dir", help="where the app plugins live (default: ${LIBERTY_APPS_DIR}/../plugins)")
     p_mig.set_defaults(func=_cmd_migrate)
+
+    p_rec = sub.add_parser(
+        "record-upgrade",
+        help="store an upgrade / rollback report (written by `liberty upgrade`) in the upgrade history",
+    )
+    p_rec.add_argument("--kind", choices=["upgrade", "rollback", "install"], help="required unless --from-json")
+    p_rec.add_argument("--from-json", help="re-journal a saved report (its .json file, or '-' for stdin) as-is")
+    p_rec.add_argument("--who", default="liberty")
+    p_rec.add_argument("--host")
+    p_rec.add_argument("--started-at", help="ISO timestamp of the run's start (default: now)")
+    p_rec.add_argument("--layout")
+    p_rec.add_argument("--chain", help="the COMPOSE_FILE chain in force")
+    p_rec.add_argument("--tag-from"); p_rec.add_argument("--tag-to")
+    p_rec.add_argument("--fw-from"); p_rec.add_argument("--fw-to")
+    p_rec.add_argument("--apps-from"); p_rec.add_argument("--apps-to")
+    p_rec.add_argument("--backup", help="the backup directory taken before the run")
+    p_rec.add_argument("--health", help="the container's health status at the end")
+    p_rec.add_argument("--doctor-problems", type=int)
+    p_rec.add_argument("--doctor-text", help="file with doctor's output, or '-' for stdin")
+    p_rec.add_argument("--migrations", help="the JSON printed by `liberty-admin migrate`")
+    p_rec.add_argument("--step", action="append", type=_parse_step, help="name=status[:detail] (status: ok|warn|fail|skipped); repeatable, in order")
+    p_rec.set_defaults(func=_cmd_record_upgrade)
 
     return parser
 

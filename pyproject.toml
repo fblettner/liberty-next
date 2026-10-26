@@ -90,6 +90,7 @@ liberty-admin = "liberty.admin_cli:main"
 liberty-migrate = "liberty.migrate_cli:main"
 liberty-crypto = "liberty.crypto_cli:main"
 liberty-license = "liberty.license_cli:main"
+liberty-ops = "liberty.ops_cli:main"            # Python-install operations (the Docker twin is release/liberty)
 
 # [project.urls] populates the sidebar links on the PyPI project page. Order matters —
 # PyPI renders them top-to-bottom; put the things people will click most at the top.

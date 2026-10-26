@@ -50,7 +50,8 @@ recomputes the compose chain**: the layout + TLS overlay + apps overlay live in 
 | `./liberty ssl provided --domain D --cert-dir DIR --cert-file F --key-file K` | Same with your own certificate. |
 | `./liberty ssl off` | Back to plain HTTP. |
 | `./liberty apps <wheel> [--force-config]` | Link (or refresh) the licensed apps (= `install-apps.sh`), then run the pending schema migrations. |
-| `./liberty upgrade [--tag X] [--apps <wheel>]` | `doctor` → backup (the upgrade aborts if the snapshot fails) → pull + recreate with the recorded chain → pending schema migrations → `status`. |
+| `./liberty upgrade [--tag X] [--apps <wheel>] [--keep DAYS]` | `doctor` (advisory) → the running image is kept under a local `rollback-<stamp>` tag → backup (the upgrade aborts if the snapshot fails) → pull + recreate with the recorded chain → pending schema migrations → a **report** (JSON + Markdown under the config volume, shown in Settings → History → Upgrades) → `status`. |
+| `./liberty rollback [--yes]` | Back to the image that ran before the last upgrade and the volumes it snapshotted just before. Asks for confirmation (the restore drops everything written since), records a `rollback` report. |
 | `./liberty migrate [--dry-run]` | `liberty-admin migrate` inside the container — every app plugin's pending Alembic revisions (nomasx1 today). `--dry-run` lists them, exit 2 when some are pending. |
 | `./liberty backup [--keep DAYS]` / `./liberty restore <dir>` | Volume snapshots (= `backup.sh`) and the matching restore (stops the stack, restores every `<volume>.tar.gz` + the apps bind mount, starts again). |
 | `./liberty logs [-f]` | The `liberty-next` service's logs. |
@@ -226,7 +227,14 @@ looks wiped. `liberty upgrade` (and `upgrade.sh`) reuse the recorded `COMPOSE_FI
 The entrypoint runs `liberty-admin init-db` on every boot — idempotent, adds any new
 framework tables a newer release brings, leaves existing rows alone. The licensed apps'
 schema migrations (Alembic, shipped in the apps wheel) are applied by the `migrate` step
-of `liberty upgrade`; `liberty status` / `liberty doctor` show when some are pending.
+of `liberty upgrade`; at boot the container only **warns** in its log when some are pending
+(`LIBERTY_AUTO_MIGRATE=1` in `.env` applies them at boot instead); `liberty status` /
+`liberty doctor` show the same. The container's healthcheck is `/ready` (the framework
+database answers), not just "the process is up": a stack whose database is unreachable shows
+`unhealthy` in `docker ps` and in `liberty status`.
+
+Something went wrong? `./liberty rollback` restores the pre-upgrade snapshot and re-runs the
+image that was running before (kept locally as `rollback-<stamp>`), then `./liberty status`.
 
 ---
 
@@ -473,10 +481,26 @@ liberty-next                     # → API + SPA on http://localhost:8000
 ```
 
 pipx puts Liberty Next in its own isolated venv so its dependencies can't conflict
-with system Python or other tools. The four CLI commands (`liberty-next`,
-`liberty-admin`, `liberty-license`, `liberty-crypto`) end up on the PATH; upgrades are
-`pipx upgrade liberty-next`. See the root [`README.md`](../README.md#pypi) for full
-PyPI install instructions.
+with system Python or other tools. The CLI commands (`liberty-next`, `liberty-admin`,
+`liberty-ops`, `liberty-license`, `liberty-crypto`) end up on the PATH. See the root
+[`README.md`](../README.md#pypi) for full PyPI install instructions.
+
+**`liberty-ops` is the Python twin of `./liberty`** — same verbs, for a pipx or venv install
+with or without systemd (unit name from `LIBERTY_SERVICE`, default `liberty-next`):
+
+| Command | What it does |
+|---|---|
+| `liberty-ops status` | Installer (pipx / pip), framework + apps versions, app.toml, config dir, `LIBERTY_APPS_DIR`, service state, `/ready`, pending migrations, last recorded upgrade. |
+| `liberty-ops doctor` | Python version, install, secrets present and long enough, config files parse, apps dir + plugins, master key decrypts every pool password, service, `/ready`, pending migrations, disk. Each problem with its fix; exit 1 when something is wrong. |
+| `liberty-ops start` / `stop` / `restart` / `logs [-f]` | `systemctl` / `journalctl` on the unit (prints what to run by hand when there is no systemd). |
+| `liberty-ops backup [--dest DIR] [--keep DAYS]` | `<dest>/<stamp>/` with the config dir (+ `.versions/`), the apps dir (config + plugins + data), the SQLite file when the default pool is SQLite, a `pg_dump` when it is Postgres and `pg_dump` is on the PATH, and a manifest. Default dest: `<config dir>/../backups`. |
+| `liberty-ops restore <dir> [--yes]` | The reverse (stops / starts the service around it). A Postgres dump is not restored automatically — the command to run is printed. |
+| `liberty-ops upgrade [--version X] [--apps WHEEL] [--keep DAYS] [--no-restart]` | `doctor` (advisory) → backup gate → `pipx upgrade` / `pipx install --force liberty-next[all]==X` (or `pip` in a plain venv) → `pipx inject` + `liberty-apps install` when a wheel is given → `liberty-admin migrate` → `systemctl restart` + wait for `/ready` → report (Settings → History → Upgrades) → `status`. |
+| `liberty-ops rollback [--yes] [--apps WHEEL]` | Previous framework version (recorded by `upgrade`) + the pre-upgrade backup; the apps bundle is downgraded only when you pass the previous wheel. The upgrade's report is kept across the restore. |
+| `liberty-ops migrate [--dry-run]` | = `liberty-admin migrate`. |
+
+Run it with the same environment the service has (`set -a; . /etc/liberty/secrets.env; set +a`
+under systemd) so it sees `LIBERTY_MASTER_KEY`, `LIBERTY_APPS_DIR` and the rest.
 
 For state persistence you'll point `LIBERTY_DB_URL` at an existing Postgres (or stick
 with the default SQLite — ``./liberty.db`` in the working directory). Config TOMLs
