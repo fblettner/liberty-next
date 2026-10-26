@@ -293,6 +293,41 @@ if [ -f "$ENV_FILE" ]; then
     printf '\n# Added by install.sh: pins compose to the right layout (no -f juggling).\nCOMPOSE_FILE=%s\n' "$COMPOSE_FILE_LINE" >> "$ENV_FILE"
   fi
 
+  # The compose chain is STATE, recorded in .env by the install and by every later
+  # `install-apps.sh` / `--ssl` run. Until 7.0.58 a re-run recomputed it from THIS run's
+  # flags, so the documented upgrade path (`./install.sh full` with no flags) brought the
+  # stack up without the TLS overlay and without the apps overlay: HTTPS vanished and the
+  # container, missing its /apps mount, seeded the .example templates — "all my config is
+  # gone" (it was still on the host, under ./apps). Now: start from the recorded chain;
+  # only an explicit --ssl swaps the TLS overlay; the apps overlay is never dropped.
+  recorded="$(grep -E '^COMPOSE_FILE=' "$ENV_FILE" | head -1 | cut -d= -f2-)"
+  if [ -n "$recorded" ]; then
+    chain="$recorded"
+    if [ -n "$SSL_MODE" ]; then
+      chain="$(printf '%s' "$chain" | tr ':' '\n' | grep -vE '^docker-compose\.tls-(letsencrypt|provided)\.yml$' | paste -sd: -)"
+      case "$SSL_MODE" in
+        letsencrypt) tls="docker-compose.tls-letsencrypt.yml" ;;
+        provided)    tls="docker-compose.tls-provided.yml" ;;
+        *)           tls="" ;;
+      esac
+      if [ -n "$tls" ]; then
+        # Overlays order: layout, TLS, apps — keep the apps overlay last.
+        case "$chain" in
+          *:docker-compose.apps.yml) chain="${chain%:docker-compose.apps.yml}:${tls}:docker-compose.apps.yml" ;;
+          *)                         chain="${chain}:${tls}" ;;
+        esac
+      fi
+    fi
+    if [ "$chain" != "$COMPOSE_FILE_LINE" ]; then
+      info "Using the compose chain recorded in .env: ${chain}"
+    fi
+    COMPOSE_FILE_LINE="$chain"
+    if [ "$chain" != "$recorded" ]; then
+      sed -i.bak "s|^COMPOSE_FILE=.*|COMPOSE_FILE=${chain}|" "$ENV_FILE" && rm -f "${ENV_FILE}.bak"
+      info "Updated COMPOSE_FILE in .env → ${chain}"
+    fi
+  fi
+
 else
   info "Generating .env with random secrets…"
 

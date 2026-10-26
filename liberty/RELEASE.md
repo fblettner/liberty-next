@@ -1,5 +1,28 @@
 # Liberty Next — Release notes
 
+## 7.0.58 — unreleased
+
+**Install / upgrade**
+- **Fixed: the image could not open its own default database.** `aiosqlite`, the driver behind the
+  shipped `sqlite+aiosqlite://` default pool (and the Light layout), was a development-only
+  dependency since the first release. The process still booted (the TOML auth backend needs no
+  database), but change packages, saved views and nomaflow were silently disabled and `/ready`
+  answered 503 on every Light install. The driver is now a runtime dependency.
+- **Fixed: re-running `install.sh` (the documented way to switch TLS) or `docker compose -f
+  docker-compose.full.yml pull` dropped the TLS and apps overlays** from the compose chain, so the
+  container came back without `/apps` and seeded the empty templates — the install looked wiped.
+  `install.sh` now reuses the `COMPOSE_FILE` recorded in `.env`; only `--ssl` swaps the TLS overlay.
+- **New `release/liberty` command** — the one entry point for a Docker install: `install`, `start`,
+  `stop`, `restart`, `status`, `doctor`, `ssl letsencrypt|provided|off`, `apps <wheel>`, `upgrade
+  [--tag] [--apps]`, `backup`, `restore <dir>`, `logs`, `migrate`. The compose chain is state in
+  `.env`, changed only by `ssl` and `apps`. `doctor` lists what is wrong and how to fix it;
+  `upgrade` = doctor → backup gate → pull and recreate → schema migrations → status.
+- **New `liberty-admin migrate [--dry-run]`** — applies (or lists) every app plugin's pending
+  Alembic revisions (`plugins/<app>/db`), journaled under Settings → History → Upgrades. Replaces
+  the manual run of the `nomasx1-upgrade-schema-1` job after an apps upgrade.
+- `liberty-admin` now verifies the license key like the server does; before, every admin command
+  silently dropped the licensed connectors.
+
 ## 7.0.57 — 2026-10-26
 
 **Reload**

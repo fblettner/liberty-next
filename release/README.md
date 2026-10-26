@@ -25,12 +25,35 @@ Helper scripts:
 ```bash
 git clone https://github.com/fblettner/liberty-next.git
 cd liberty-next/release
-./install.sh                       # interactive — asks light vs full
+./liberty install                  # interactive — asks light vs full
 # OR
-./install.sh light                 # single container, SQLite
-./install.sh full                  # full production stack (uses :latest)
-./install.sh full --tag 7.0.2      # full stack, pinned to a specific release
+./liberty install light            # single container, SQLite
+./liberty install full             # full production stack (uses :latest)
+./liberty install full --tag 7.0.2 # full stack, pinned to a specific release
 ```
+
+### The `liberty` command
+
+`release/liberty` is the one entry point for the whole lifecycle — the same shape as
+`nomaubl install | upgrade | start`. Every historic script (`install.sh`, `install-apps.sh`,
+`upgrade.sh`, `backup.sh`) still works on its own; `liberty` wraps them and, above all, **never
+recomputes the compose chain**: the layout + TLS overlay + apps overlay live in `.env` as
+`COMPOSE_FILE`, written at install time and changed only by `liberty ssl` / `liberty apps`.
+
+| Command | What it does |
+|---|---|
+| `./liberty install [light\|full] [--tag X] [--ssl …] [--apps <wheel>]` | First install (= `install.sh`). Re-running on an existing `.env` keeps the secrets, the volumes and the recorded chain. |
+| `./liberty start` / `stop` / `restart` | The stack, with the recorded chain. `stop` keeps volumes + `.env`. |
+| `./liberty status` | Layout, TLS mode, apps overlay, image tag, chain, container health, framework + apps versions, `/ready`, pending schema migrations, last recorded upgrade. What `upgrade` prints at the end. |
+| `./liberty doctor` | Where a support ticket starts: `.env` + chain + overlay files present, apps overlay in the chain when `APPS_HOST_PATH` is set, secrets length, TLS files, volumes, `/ready`, pending migrations, master key decrypts every pool password, disk. Each problem comes with its fix. Exit 1 when something is wrong. |
+| `./liberty ssl letsencrypt --domain D --email E` | Enable / switch TLS **after** the install (full layout). Only the TLS overlay changes in the chain; the apps overlay and the secrets are kept. |
+| `./liberty ssl provided --domain D --cert-dir DIR --cert-file F --key-file K` | Same with your own certificate. |
+| `./liberty ssl off` | Back to plain HTTP. |
+| `./liberty apps <wheel> [--force-config]` | Link (or refresh) the licensed apps (= `install-apps.sh`), then run the pending schema migrations. |
+| `./liberty upgrade [--tag X] [--apps <wheel>]` | `doctor` → backup (the upgrade aborts if the snapshot fails) → pull + recreate with the recorded chain → pending schema migrations → `status`. |
+| `./liberty migrate [--dry-run]` | `liberty-admin migrate` inside the container — every app plugin's pending Alembic revisions (nomasx1 today). `--dry-run` lists them, exit 2 when some are pending. |
+| `./liberty backup [--keep DAYS]` / `./liberty restore <dir>` | Volume snapshots (= `backup.sh`) and the matching restore (stops the stack, restores every `<volume>.tar.gz` + the apps bind mount, starts again). |
+| `./liberty logs [-f]` | The `liberty-next` service's logs. |
 
 ### Which image tag does install.sh pull?
 
@@ -139,9 +162,10 @@ What it does:
 
 #### Switching modes later
 
-Re-run `./install.sh full --ssl <new-mode> …` with the same secrets in place. The
-script swaps the overlay in `COMPOSE_FILE`, rewrites `tls.yml` (or removes it for
-LE mode), and `docker compose up -d` picks up the new config.
+`./liberty ssl letsencrypt …` / `./liberty ssl provided …` / `./liberty ssl off` — with the
+same secrets in place. Only the TLS overlay is swapped in `COMPOSE_FILE` (the apps overlay
+stays), `tls.yml` is rewritten or removed, and `docker compose up -d` picks up the new config.
+(`./install.sh full --ssl <mode> …` on an existing `.env` does the same.)
 
 #### No SSL (default)
 
@@ -189,18 +213,20 @@ docker compose -f docker-compose.full.yml up -d
 ### Upgrading (v2 → v2)
 
 ```bash
-./backup.sh                                # snapshot first (always)
-docker compose -f docker-compose.full.yml pull
-docker compose -f docker-compose.full.yml up -d
+./liberty upgrade                          # doctor → backup → pull → recreate → migrations → status
+./liberty upgrade --tag 7.0.57             # pin a release (written to .env as LIBERTY_IMAGE_TAG)
+./liberty upgrade --apps liberty_apps-….whl  # framework + a new apps wheel in one go
 ```
 
-The entrypoint runs `liberty-admin init-db` on every boot — idempotent, adds any new
-framework tables a newer release brings, leaves existing rows alone. Schema migrations
-are bundled inside the image; no manual step.
+**Never `docker compose -f docker-compose.full.yml pull / up -d` by hand.** A `-f` names only
+the base layout, so compose drops the TLS and apps overlays recorded in `.env`: the container
+comes back without the `/apps` mount, seeds the empty `.example` templates, and the install
+looks wiped. `liberty upgrade` (and `upgrade.sh`) reuse the recorded `COMPOSE_FILE` chain.
 
-To pin a specific version (recommended for production), set `LIBERTY_IMAGE_TAG` in
-`.env` (e.g. `LIBERTY_IMAGE_TAG=0.2.0`) — the `pull` then fetches that exact tag.
-Roll forward by bumping the value + running `pull && up -d` again.
+The entrypoint runs `liberty-admin init-db` on every boot — idempotent, adds any new
+framework tables a newer release brings, leaves existing rows alone. The licensed apps'
+schema migrations (Alembic, shipped in the apps wheel) are applied by the `migrate` step
+of `liberty upgrade`; `liberty status` / `liberty doctor` show when some are pending.
 
 ---
 
@@ -299,7 +325,9 @@ above; just stop the stack first with `./deploy-swarm.sh --rm` (volumes survive)
 | Reset the admin password | `docker compose exec liberty-next liberty-admin set-password admin <new>` | `docker exec $(docker ps -qf name=liberty_liberty-next) liberty-admin set-password admin <new>` |
 | Add another superuser | `docker compose exec liberty-next liberty-admin create-user <name> --superuser` | `docker exec $(docker ps -qf name=liberty_liberty-next) liberty-admin create-user <name> --superuser` |
 | Inspect the license key | `docker compose exec liberty-next liberty-license verify` | `docker exec $(docker ps -qf name=liberty_liberty-next) liberty-license verify` |
-| Tail logs | `docker compose -f docker-compose.full.yml logs -f liberty-next` | `docker service logs -f liberty_liberty-next` |
+| Health, versions, pending migrations | `./liberty status` (`./liberty doctor` for the fix-it list) | — |
+| Apply the apps' schema migrations | `./liberty migrate` (`--dry-run` to list) | `docker exec $(docker ps -qf name=liberty_liberty-next) liberty-admin migrate` |
+| Tail logs | `./liberty logs -f` | `docker service logs -f liberty_liberty-next` |
 | Open a shell | `docker compose exec liberty-next bash` | `docker exec -it $(docker ps -qf name=liberty_liberty-next) bash` |
 | List services | `docker compose ps` | `docker stack services liberty` |
 | Reload config (TOML change) | hit `POST /admin/reload` (Settings UI button does this) | same |

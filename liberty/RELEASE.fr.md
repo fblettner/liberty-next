@@ -1,5 +1,36 @@
 # Liberty Next — Notes de version
 
+## 7.0.58 — non publiée
+
+**Installation / mise à jour**
+- **Corrigé : l'image Docker ne pouvait pas ouvrir sa base par défaut.** Le pilote `aiosqlite`, celui
+  du pool `sqlite+aiosqlite://` fourni dans la configuration par défaut et utilisé par la disposition
+  Light, n'était installé qu'en développement depuis la première version. Le serveur démarrait quand
+  même (le backend d'authentification TOML n'a pas besoin de base), mais les paquets de changements,
+  les vues enregistrées et nomaflow restaient désactivés sans message, et `/ready` répondait 503 sur
+  toute installation Light. Le pilote fait maintenant partie des dépendances de l'image.
+- **Corrigé : une installation qui perdait toute sa configuration après un changement de TLS ou une
+  mise à jour.** Relancer `install.sh` (la méthode documentée pour activer le TLS) ou exécuter
+  `docker compose -f docker-compose.full.yml pull` recalculait la liste des fichiers compose à partir
+  des options de la commande en cours : les fichiers TLS et apps disparaissaient, le conteneur
+  redémarrait sans le montage `/apps` et recréait les fichiers de configuration vides. Les données
+  n'étaient pas perdues, mais l'installation paraissait réinitialisée. `install.sh` réutilise
+  maintenant la valeur `COMPOSE_FILE` enregistrée dans `.env` ; seule l'option `--ssl` remplace le
+  fichier TLS.
+- **Nouvelle commande `release/liberty`**, point d'entrée unique d'une installation Docker :
+  `install`, `start`, `stop`, `restart`, `status`, `doctor`, `ssl letsencrypt|provided|off`,
+  `apps <wheel>`, `upgrade [--tag] [--apps]`, `backup`, `restore <dossier>`, `logs`, `migrate`. La
+  liste des fichiers compose est enregistrée dans `.env` ; seules les commandes `ssl` et `apps` la
+  modifient. `doctor` affiche ce qui ne va pas et la correction à appliquer ; `upgrade` enchaîne le
+  diagnostic, une sauvegarde obligatoire, le téléchargement de l'image, le redémarrage, les migrations
+  de schéma et l'état final.
+- **Nouvelle commande `liberty-admin migrate [--dry-run]`** : applique, ou liste avec `--dry-run`, les
+  révisions Alembic en attente de chaque application (`plugins/<app>/db`), et les enregistre dans
+  Paramètres → Historique → Mises à jour. Elle remplace le lancement manuel de la tâche
+  `nomasx1-upgrade-schema-1` après une mise à jour des applications.
+- `liberty-admin` vérifie maintenant la clé de licence comme le serveur ; auparavant, les commandes
+  d'administration ignoraient sans message les connecteurs sous licence.
+
 ## 7.0.57 — 2026-10-26
 
 **Rechargement**
