@@ -22,6 +22,18 @@ configuration drives discovery, not code drives configuration.
 - **Anthropic, not OpenAI.** v1 hardcodes ChatGPT; v2 uses the `anthropic` SDK.
 - Match the surrounding code's style. Type hints everywhere (`from __future__
   import annotations`). Tests for new modules.
+- **TOML round-trips: never `tomlkit.parse` a big nested config file.** tomlkit is O(n²) on
+  deeply nested tables — measured 2026-10-26 on a real install: `screens.toml` (558 KB) **67 s**,
+  `dictionary.toml` (119 KB) **83 s**, vs 100 ms / 21 ms through `tomllib` + `tomli_w`. The cliff
+  is about nesting, not size (`connectors.toml`, 146 KB, parses in 0.66 s). Rule, already applied
+  everywhere: **screens / dictionary / menus / charts / dashboards / actions / theme** round-trip
+  through `tomllib` + `tomli_w` (comments dropped — the builders own those files); **connectors.toml,
+  app.toml, jobs.toml, reports** stay on `tomlkit` (small, hand-edited, comments kept). The single
+  source of truth is `_BIG_LABELS` + `_load_doc` / `_dump_doc` in `liberty/web/rename.py` (used by
+  `move.py`); every `put_*_parsed` / clone / delete helper in `liberty/web/admin.py` follows the same
+  split. A new write path for one of the big files must use tomllib + tomli_w. Don't "fix" the
+  speed of config saves with threads or caches: a save is ~100 ms; the only thing that was ever slow
+  was tomlkit, and it's already routed around.
 
 ## Stack
 
