@@ -43,6 +43,15 @@ def _ensure_thick_client() -> None:
     _log.info("oracledb thick mode enabled (lib_dir=%s)", lib_dir or "<default search>")
 
 
+class PoolRegistryClosedError(ConnectorError):
+    """The registry was disposed (replaced by a reload) and can't hand out engines any more.
+
+    Raised instead of silently recreating an engine from the *old* config — the bug that
+    let change packages / saved views / nomaflow keep running on stale pool credentials
+    after a reload. Whoever hits this holds a stale reference: re-resolve the registry
+    from ``app.state.connectors``."""
+
+
 class PoolRegistry:
     """Holds pool configs and lazily materialises one engine per pool."""
 
@@ -55,6 +64,7 @@ class PoolRegistry:
     ) -> None:
         self._configs: dict[str, PoolConfig] = dict(configs or {})
         self._engines: dict[str, AsyncEngine] = {}
+        self._closed = False
         self._master_key = master_key
         # Thick mode is process-global (``init_oracle_client``) — an all-or-nothing choice for the
         # whole process, set once app-wide via ``[app] oracle_thick`` (a thin Oracle engine can't
@@ -179,8 +189,18 @@ class PoolRegistry:
             "dsn": f"{url.host}:{url.port or 1521}/{service}",
         }
 
+    @property
+    def closed(self) -> bool:
+        """True once :meth:`dispose` ran — the registry is terminal from then on."""
+        return self._closed
+
     def engine(self, name: str) -> AsyncEngine:
         """Return (creating on first call) the engine for pool *name*."""
+        if self._closed:
+            raise PoolRegistryClosedError(
+                f"pool registry is closed (replaced by a reload) — can't open pool {name!r}; "
+                "re-resolve the registry from app.state.connectors"
+            )
         engine = self._engines.get(name)
         if engine is not None:
             return engine
@@ -238,7 +258,11 @@ class PoolRegistry:
         self._engines[name] = engine
 
     async def dispose(self) -> None:
-        """Dispose every materialised engine and forget it."""
+        """Dispose every materialised engine and mark the registry **closed**.
+
+        Terminal: after this, :meth:`engine` raises :class:`PoolRegistryClosedError`
+        instead of lazily rebuilding an engine from the (now superseded) config."""
+        self._closed = True
         for engine in self._engines.values():
             await engine.dispose()
         self._engines.clear()
