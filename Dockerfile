@@ -14,7 +14,7 @@
 # Point LIBERTY_DB_URL at Postgres for a real deployment (see docker-compose.yml).
 
 # ── Stage 1 — build the frontend (Vite → frontend/dist) ──────────────────────────────
-FROM node:20-slim AS frontend
+FROM node:26-slim AS frontend
 WORKDIR /build/frontend
 # Copy only the manifest + lockfile first so the install layer is cached across source-only
 # edits. `npm ci` installs exactly the committed lockfile and FAILS if package.json and
