@@ -6,7 +6,7 @@
 // render through <Outlet/> instead — but the tabs underneath stay mounted.
 import { lazy, Suspense, useEffect, useState, type LazyExoticComponent, type ComponentType } from 'react'
 import i18n from 'i18next'
-import { Centered } from '../common'
+import { Centered, ErrorBoundary } from '../common'
 import { useTabs } from '../tabs/TabsContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
 
@@ -62,25 +62,27 @@ export default function TabHost({ hidden }: { hidden: boolean }) {
           key={`${tab.id}@${langNonce}`}
           style={{ display: tab.id === activeId ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}
         >
-          <Suspense fallback={<Centered />}>
-            {tab.kind === 'http' ? (
-              <HttpRunner connector={tab.connector} endpoint={tab.target} />
-            ) : tab.kind === 'dashboard' ? (
-              <DashboardView dashboardId={tab.target} />
-            ) : tab.kind === 'nomaflow_run' ? (
-              <NomaflowRunDetail runId={tab.target} />
-            ) : tab.kind === 'settings' ? (
-              <Settings />
-            ) : tab.kind === 'monitoring' ? (
-              <Monitoring />
-            ) : tab.kind === 'page' ? (
-              (() => { const P = PAGE_COMPONENTS[tab.target]; return P ? <P /> : <Centered /> })()
-            ) : tab.kind === 'screen' ? (
-              <ScreenTab app={tab.connector} screenId={tab.target} />
-            ) : (
-              <TableView connector={tab.connector} query={tab.target} />
-            )}
-          </Suspense>
+          <ErrorBoundary label={`tab ${tab.id}`}>
+            <Suspense fallback={<Centered />}>
+              {tab.kind === 'http' ? (
+                <HttpRunner connector={tab.connector} endpoint={tab.target} />
+              ) : tab.kind === 'dashboard' ? (
+                <DashboardView dashboardId={tab.target} />
+              ) : tab.kind === 'nomaflow_run' ? (
+                <NomaflowRunDetail runId={tab.target} />
+              ) : tab.kind === 'settings' ? (
+                <Settings />
+              ) : tab.kind === 'monitoring' ? (
+                <Monitoring />
+              ) : tab.kind === 'page' ? (
+                (() => { const P = PAGE_COMPONENTS[tab.target]; return P ? <P /> : <Centered /> })()
+              ) : tab.kind === 'screen' ? (
+                <ScreenTab app={tab.connector} screenId={tab.target} />
+              ) : (
+                <TableView connector={tab.connector} query={tab.target} />
+              )}
+            </Suspense>
+          </ErrorBoundary>
         </div>
       ))}
     </div>

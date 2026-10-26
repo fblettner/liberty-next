@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Sparkles, Send, ArrowRight, Check, X, FileEdit, AlertTriangle } from 'lucide-react'
+import { Sparkles, Send, ArrowRight, Check, X, FileEdit, AlertTriangle, Square } from 'lucide-react'
 import { ApiError, api, streamSSE } from '../../api/client'
 import type { AiTool, ChatEvent, ChatMessage, Proposal } from '../../types/ai'
 import { PageLayout, Button, Banner, LinkButton, SpinnerRing, Mono, Tag } from '../../common'
@@ -157,6 +157,11 @@ export default function Chat() {
   const [entries, setEntries] = useState<Entry[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
+  // The in-flight /ai/chat stream. Stop (or leaving the page) aborts the fetch — the server
+  // sees the connection close and the assistant loop stops at its next event.
+  const abortRef = useRef<AbortController | null>(null)
+  const stop = () => { abortRef.current?.abort(); abortRef.current = null }
+  useEffect(() => () => abortRef.current?.abort(), [])
   const [error, setError] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const historyRef = useRef<ChatMessage[]>([])
@@ -222,6 +227,8 @@ export default function Chat() {
       { kind: 'proposal', toolName, proposal, state: 'pending' },
     ])
 
+    const controller = new AbortController()
+    abortRef.current = controller
     try {
       await streamSSE('/ai/chat', { messages: historyRef.current }, (raw) => {
         const ev = raw as ChatEvent
@@ -234,11 +241,13 @@ export default function Chat() {
           appendAssistant(assistantText ? '' : t('chat.noResponse'))
         }
         // "thinking" / "done" — ignored for display
-      })
+      }, controller.signal)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : String(err))
+      if (err instanceof DOMException && err.name === 'AbortError') appendAssistant(assistantText ? '' : t('chat.stopped'))
+      else setError(err instanceof ApiError ? err.message : String(err))
     } finally {
       historyRef.current = [...historyRef.current, { role: 'assistant', content: assistantText }]
+      if (abortRef.current === controller) abortRef.current = null
       setBusy(false)
     }
   }
@@ -284,6 +293,8 @@ export default function Chat() {
       ...es,
       { kind: 'proposal', toolName, proposal, state: 'pending' },
     ])
+    const controller = new AbortController()
+    abortRef.current = controller
     try {
       await streamSSE('/ai/chat', { messages: historyRef.current }, (raw) => {
         const ev = raw as ChatEvent
@@ -295,11 +306,13 @@ export default function Chat() {
           setError(ev.message ?? 'error')
           appendAssistant(assistantText ? '' : t('chat.noResponse'))
         }
-      })
+      }, controller.signal)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : String(err))
+      if (err instanceof DOMException && err.name === 'AbortError') appendAssistant(assistantText ? '' : t('chat.stopped'))
+      else setError(err instanceof ApiError ? err.message : String(err))
     } finally {
       historyRef.current = [...historyRef.current, { role: 'assistant', content: assistantText }]
+      if (abortRef.current === controller) abortRef.current = null
       setBusy(false)
     }
   }
@@ -413,10 +426,15 @@ export default function Chat() {
             placeholder={available ? t('chat.placeholder') : t('chat.placeholderDisabled')}
             disabled={!available || busy}
           />
-          <Button $variant="primary" type="submit" disabled={!available || busy || !input.trim()}>
-            {busy ? <SpinnerRing size={14} thickness={2} /> : <Send size={14} />}
-            {t('common.send')}
-          </Button>
+          {busy ? (
+            <Button type="button" onClick={stop} title={t('chat.stopHint')}>
+              <Square size={12} /> {t('common.stop')}
+            </Button>
+          ) : (
+            <Button $variant="primary" type="submit" disabled={!available || !input.trim()}>
+              <Send size={14} /> {t('common.send')}
+            </Button>
+          )}
         </Composer>
       </ChatArea>
     </PageLayout>

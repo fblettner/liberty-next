@@ -13,7 +13,7 @@ import { LANGUAGE_KEY, type Language } from '../i18n'
 import { useAuth } from '../auth/AuthContext'
 import { installAuthBuiltins } from '../pages/TableView/actionRunner'
 import { useWorkspace } from '../workspace/WorkspaceContext'
-import { Banner, Centered } from '../common'
+import { Banner, Centered, ErrorBoundary } from '../common'
 import Sidebar from './Sidebar'
 import ProfileModal from './ProfileModal'
 import TabStrip from './TabStrip'
@@ -239,7 +239,9 @@ export default function Layout() {
           <Suspense fallback={<Centered />}>
             {/* Outlet renders the index home/blank landing or a framework page (Settings / nomaflow);
                 on a tab route it renders the TabRoute marker (null) and TabHost below does the work. */}
-            <Outlet />
+            <ErrorBoundary label="page">
+              <Outlet />
+            </ErrorBoundary>
             <TabHost hidden={!onTabRoute} />
           </Suspense>
         </ContentArea>
