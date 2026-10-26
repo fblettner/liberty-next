@@ -1,5 +1,35 @@
 # Liberty Next — Notes de version
 
+## 7.0.56 — 2026-10-26
+
+**Connecteurs**
+- **Corrigé :** un rechargement à chaud de `connectors.toml` / `dictionary.toml` reconstruisait les
+  pools Oracle en mode *thin* (le watcher ne transmettait pas `[app] oracle_thick` au registre
+  reconstruit) : les connexions en chiffrement réseau natif (NNE) échouaient après toute modification
+  de configuration, jusqu'au redémarrage suivant.
+
+**Build, publication et tests**
+- **L'intégration continue conditionne chaque publication.** Un nouveau workflow CI exécute la suite
+  de tests backend ainsi que la vérification TypeScript + le build de production du frontend à chaque
+  push sur `develop` et à chaque pull request ; le workflow de publication l'attend désormais, rien
+  n'atteint PyPI ni le registre Docker en échec.
+- **Les notes de version sont obligatoires.** Une publication s'arrête avec une erreur explicite
+  lorsque `RELEASE.md` n'a pas de section pour la version publiée (le comportement précédent insérait
+  un espace réservé vide — la 7.0.55 est sortie ainsi). Le tag git est maintenant créé *avant* la
+  publication sur PyPI.
+- **Fichier de verrouillage frontend réparé.** `package-lock.json` contenait une entrée `yaml`
+  incohérente que npm 10 refusait lors du build de l'image ; il est régénéré et l'image (comme la CI)
+  installe désormais avec `npm ci`, qui échoue bruyamment si le fichier dérive à nouveau.
+- Les tests de l'endpoint de santé ne dépendent plus de la configuration locale du poste de
+  développement.
+- Dependabot maintient à jour les dépendances Python, npm, GitHub Actions et les images de base
+  Docker (hebdomadaire, groupé, vers `develop`).
+
+**Documentation**
+- Suppression des références à des documents de conception qui n'existent plus (`docs/PLAN.md`,
+  `docs/PHASE13.md`) et à un `liberty-apps/Dockerfile` qui n'a jamais existé ; le guide d'exploitation
+  de nomaflow se trouve dans le dépôt des applications (`docs/NOMAFLOW.md`).
+
 ## 7.0.55 — 2026-07-16
 
 **Connecteurs — mode « thick » Oracle (Native Network Encryption)**
@@ -14,9 +44,6 @@
 - L'option vaut **pour tout le processus, pas par pool** : `init_oracle_client()` est global, le choix
   thick / thin est donc tout ou rien. Elle se règle dans Paramètres → Application ; un redémarrage
   l'applique.
-- **Corrigé :** un rechargement à chaud de `connectors.toml` / `dictionary.toml` reconstruisait les
-  pools Oracle en mode thin (le watcher ne transmettait pas l'option), et les connexions NNE échouaient
-  jusqu'au redémarrage suivant.
 
 ## 7.0.54 — 2026-07-14
 
