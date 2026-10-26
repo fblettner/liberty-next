@@ -1,4 +1,4 @@
-"""Crash-recovery sweep — see ``docs/PHASE13.md`` §6.
+"""Crash-recovery sweep — see the nomaflow operating guide (apps repo ``docs/NOMAFLOW.md``)
 
 When the process dies mid-run, ``nomaflow_job_runs`` ends up with rows in
 ``RUNNING`` (or ``QUEUED``) whose owning process is gone. Without intervention

@@ -1,4 +1,4 @@
-"""Pydantic schema for ``jobs.toml`` — see ``docs/PHASE13.md`` §3.
+"""Pydantic schema for ``jobs.toml`` — see the nomaflow operating guide (apps repo ``docs/NOMAFLOW.md``)
 
 The file's top level is a list of ``[[jobs]]`` blocks plus an optional
 ``[meta]`` section. Each job carries an optional retry/alerts policy, an

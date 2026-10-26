@@ -1,4 +1,4 @@
-"""JDE-coercion rules for ``sql_copy`` — see ``docs/PHASE13.md`` §5.1.
+"""JDE-coercion rules for ``sql_copy`` — see the nomaflow operating guide (apps repo ``docs/NOMAFLOW.md``)
 
 Pure functions on purpose: the type-mapping logic and the per-row coercion are
 the highest-stakes part of the JDE sync (a wrong mapping silently corrupts the

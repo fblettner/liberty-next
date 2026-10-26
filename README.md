@@ -371,7 +371,7 @@ docs/        PLAN.md · DEPLOYMENT.md · NOMAFLOW-UI.md · PHASE13.md
 - **API reference:** `https://<your-install>/redoc`
 - **CLI reference:** `liberty-next --help` (also `liberty-admin`, `liberty-license`, `liberty-crypto`)
 - **Working with Claude Code?** See [`CLAUDE.md`](CLAUDE.md)
-- **Full plan + design decisions:** [`docs/PLAN.md`](docs/PLAN.md)
+- **Documentation site:** <https://docs.nomana-it.fr/liberty/getting-started/>
 
 ---
 

@@ -57,13 +57,13 @@ def _default_jobs_path() -> Path:
     because nomaflow lives under ``plugins/`` in the apps repo, not at the top of ``config/``.
 
     ``LIBERTY_APPS_DIR`` is set by convention to the ``config/`` subdir of the apps
-    repo (see :file:`liberty-apps/README.md` + :file:`docs/DEPLOYMENT.md`), so
+    repo (see the apps repo's ``README.md`` + ``docs/DEPLOYMENT.md``), so
     ``plugins/`` is a *sibling* of that directory — we resolve to ``<apps_dir>/../
     plugins/nomaflow/jobs.toml``. If the operator points ``LIBERTY_APPS_DIR``
     elsewhere (e.g. at the repo root itself), set ``[jobs] config_path`` explicitly.
 
     Falls back to ``./config/jobs.toml`` when the env var is unset (dev / API-only).
-    See ``docs/PHASE13.md`` §3."""
+    See the apps repo's ``docs/NOMAFLOW.md``."""
     apps = os.environ.get("LIBERTY_APPS_DIR", "").strip()
     if apps:
         return Path(apps).parent / "plugins" / "nomaflow" / "jobs.toml"
@@ -309,7 +309,7 @@ class ReportsSettings(BaseModel):
 
 
 class JobsSettings(BaseModel):
-    """nomaflow — config-driven ETL + scheduler (see ``docs/PHASE13.md``).
+    """nomaflow — config-driven ETL + scheduler (see the apps repo's ``docs/NOMAFLOW.md``).
 
     ``config_path`` resolves through :func:`_default_jobs_path` so
     ``LIBERTY_APPS_DIR`` (when set) redirects the default to

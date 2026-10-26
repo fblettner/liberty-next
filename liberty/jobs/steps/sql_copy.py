@@ -1,6 +1,6 @@
 """``sql_copy`` executor — stream rows from one SQL connector to another.
 
-This is the Spark replacement (see ``docs/PHASE13.md`` §5.1). What it does:
+This is the Spark replacement (see the nomaflow operating guide (apps repo ``docs/NOMAFLOW.md``)). What it does:
 
 1. Look up source + target as :class:`~liberty.connectors.SQLConnector` via
    the :class:`ConnectorRegistry`.

@@ -4,8 +4,8 @@
 # one port (FastAPI + Socket.IO, exactly what ./start.sh runs). This image carries NO
 # licensed content — it runs as the open framework (restricted mode) with whatever config
 # the operator mounts at /app/config (or via LIBERTY_APPS_DIR). The licensed product is a
-# separate image that builds FROM this one (see liberty-apps/Dockerfile) and lives in a
-# private registry; pull access to that image is the license gate.
+# separate wheel (liberty-apps: config + plugins) materialised next to this image and
+# bind-mounted in by release/install-apps.sh; distribution of that wheel is the license gate.
 #
 #   docker build -t liberty-next:local .
 #   docker run --rm -p 8000:8000 liberty-next:local        # → open framework on :8000

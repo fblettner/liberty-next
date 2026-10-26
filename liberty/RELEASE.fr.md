@@ -1,5 +1,23 @@
 # Liberty Next — Notes de version
 
+## 7.0.55 — 2026-07-16
+
+**Connecteurs — mode « thick » Oracle (Native Network Encryption)**
+- **`[app] oracle_thick`, à l'échelle de l'application.** Un client a activé le chiffrement réseau
+  natif d'Oracle (NNE), que le mode « thin » (pur Python) de python-oracledb ne sait pas négocier
+  (`DPY-3001`). Lorsque l'option est active, chaque pool Oracle s'appuie sur le client OCI **thick**
+  (l'Instant Client embarqué dans l'image) au lieu du pilote asynchrone thin — `ThickAsyncEngine`
+  expose la même surface `AsyncEngine` que le framework utilise (execute / stream / begin / dispose)
+  au-dessus d'un moteur SQLAlchemy synchrone, en exécutant les appels de chaque connexion sur son
+  propre exécuteur mono-thread (les connexions oracledb ne sont pas thread-safe). Les pools Postgres
+  ne sont pas concernés.
+- L'option vaut **pour tout le processus, pas par pool** : `init_oracle_client()` est global, le choix
+  thick / thin est donc tout ou rien. Elle se règle dans Paramètres → Application ; un redémarrage
+  l'applique.
+- **Corrigé :** un rechargement à chaud de `connectors.toml` / `dictionary.toml` reconstruisait les
+  pools Oracle en mode thin (le watcher ne transmettait pas l'option), et les connexions NNE échouaient
+  jusqu'au redémarrage suivant.
+
 ## 7.0.54 — 2026-07-14
 
 **Connecteurs — multi-environnement (un connecteur, plusieurs pools)**

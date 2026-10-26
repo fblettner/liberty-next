@@ -2,7 +2,18 @@
 
 ## 7.0.55 — 2026-07-16
 
-- _Release notes pending — edit liberty/RELEASE.md._
+**Connectors — Oracle thick mode (Native Network Encryption)**
+- **App-wide `[app] oracle_thick`.** A customer enabled Oracle Native Network Encryption, which
+  python-oracledb's thin (pure-Python) mode can't negotiate (`DPY-3001`). When the flag is on, every
+  Oracle pool is built on the **thick** OCI client (the Instant Client bundled in the image) instead
+  of the thin async driver — `ThickAsyncEngine` presents the same `AsyncEngine` surface the framework
+  uses (execute / stream / begin / dispose) over a sync SQLAlchemy engine, running each connection's
+  DB calls on its own single-thread executor (oracledb connections aren't thread-safe). Postgres
+  pools are untouched.
+- The flag is **process-wide, not per pool**: `init_oracle_client()` is global to the process, so
+  thick vs thin is all-or-nothing. It's exposed in Settings → App; a restart applies it.
+- **Fixed:** a hot reload of `connectors.toml` / `dictionary.toml` rebuilt the Oracle pools as thin
+  engines (the watcher didn't carry the flag), so NNE connections failed until the next restart.
 
 ## 7.0.54 — 2026-07-14
 

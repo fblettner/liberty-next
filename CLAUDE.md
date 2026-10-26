@@ -31,6 +31,23 @@ authlib (OIDC — any provider) · argon2-cffi (passwords) · React 19 + Vite + 
 
 ## Current status
 
+> **⚠ Read first (2026-10-26).** The phase narratives below stop at **7.0.26 (2026-05-29)**; the
+> code is at **7.0.55** (379 commits later). Modules **not described below**: `liberty/changesets/`
+> (change packages), `versioning/` (config snapshot + upgrade history), `userviews/` (DB-backed
+> saved grid views), `reports/` (Jinja markdown → PDF), `actions/` (shared `actions.toml`),
+> `plugins/` (`module:function` invoke), `jobs/` + `etl/` (nomaflow scheduler/ETL), `sio.py`
+> (Socket.IO locks + technical dashboard), `connectors/{thick,thick_engine,introspect}.py`
+> (Oracle thick mode, schema walk), `web/{rename,usages,dependencies,integrity,clone,
+> clone_with_deps,delete_with_deps,move,package,package_import,dictgen,hot_reload,access,theme}.py`;
+> frontend `Settings/` tabs actions/reports/theme/access/app/versions/releasenotes,
+> `ScreenAssistant/`, `Reports/`, `Nomaflow/`, `TechnicalDashboard`, `sio/` + `branding/` contexts.
+> The per-feature detail is in `liberty/RELEASE.md` (7.0.26 → 7.0.55) and
+> **`docs/work/REVIEW-2026-10.md` §2** (module map). v1 is retired — nomasx1 / nomajde / nomaflow are live on v2. The live roadmap is
+> **`docs/work/PLAN.md`** (A fix defects → B boring install/upgrade → C framework features from nomaubl +
+> the customer case → D the three apps → E sales-analytics reference app → F skills); the nomaubl ↔ Liberty shared
+> component ledger is `docs/work/shared-components.md`. These `docs/work/` files are **local working documents (git-ignored, not in the public repo)**; skills under `.claude/skills/` may be committed. Rewriting this file into a short map is PLAN A6.
+
+
 **Phase 0 (Foundation) — DONE.** Project skeleton, TOML config loader
 (`liberty/config.py`), FastAPI app (`liberty/main.py` with `/health`, `/info`).
 Full dep set pinned in `pyproject.toml`.
