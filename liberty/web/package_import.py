@@ -82,6 +82,12 @@ class ImportReport:
         }
 
 
+# A package unpacks to TOML text — a few MB at the very most. Anything declaring more
+# is malformed or hostile (a zip bomb expands to GBs from a few KB); refuse before reading
+# a single member.
+MAX_UNPACKED_BYTES = 200 * 1024 * 1024
+
+
 def apply_package_zip(
     *,
     zip_bytes: bytes,
@@ -95,6 +101,12 @@ def apply_package_zip(
         zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
     except zipfile.BadZipFile as exc:
         raise ValueError(f"not a valid ZIP archive: {exc}") from exc
+    unpacked = sum(info.file_size for info in zf.infolist())
+    if unpacked > MAX_UNPACKED_BYTES:
+        raise ValueError(
+            f"package declares {unpacked // (1024 * 1024)} MB unpacked — above the "
+            f"{MAX_UNPACKED_BYTES // (1024 * 1024)} MB limit; not a deployment package"
+        )
 
     # Route file → target path on disk. Skip files the package shouldn't carry (app.toml
     # would land secrets; auth / OIDC tokens stay env-only).

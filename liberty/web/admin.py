@@ -2252,6 +2252,13 @@ async def build_package_endpoint(body: BuildPackageBody, request: Request, _: Su
     )
 
 
+# Hard cap on a deployment package upload. A real package is a few hundred KB of TOML
+# (the biggest install's screens.toml is ~560 KB zipped to ~60 KB); 50 MB leaves room
+# for presets / reports while keeping ``await upload.read()`` from buffering arbitrary
+# bodies into memory. The unpacked size is capped separately in package_import.
+MAX_PACKAGE_BYTES = 50 * 1024 * 1024
+
+
 @router.post("/import-package", summary="Import deployment package")
 async def import_package_endpoint(
     request: Request, _: Superuser,
@@ -2267,16 +2274,27 @@ async def import_package_endpoint(
     counts of added / replaced / skipped entities. Reloads the framework after a
     successful apply so the new config is live for the next request."""
     _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
-    from fastapi import UploadFile, File
+    # ``request.form()`` yields Starlette's UploadFile; ``fastapi.UploadFile`` is a *subclass*
+    # of it, so an isinstance check against the FastAPI class is always False for a real
+    # upload — that made every import read as "missing 'package' file part" until 7.0.57.
+    from starlette.datastructures import UploadFile
+
     from liberty.web.package_import import apply_package_zip
     if strategy not in ("merge", "overwrite", "replace_all"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             detail=f"invalid strategy: {strategy!r} — pick merge / overwrite / replace_all")
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_PACKAGE_BYTES:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE,
+                            detail=f"package upload exceeds {MAX_PACKAGE_BYTES // (1024 * 1024)} MB")
     form = await request.form()
     upload = form.get("package")
     if not isinstance(upload, UploadFile) or not upload:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="missing 'package' file part")
-    blob = await upload.read()
+    blob = await upload.read(MAX_PACKAGE_BYTES + 1)
+    if len(blob) > MAX_PACKAGE_BYTES:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE,
+                            detail=f"package upload exceeds {MAX_PACKAGE_BYTES // (1024 * 1024)} MB")
     try:
         report = apply_package_zip(zip_bytes=blob, strategy=strategy, settings=request.app.state.settings)  # type: ignore[arg-type]
     except ValueError as exc:

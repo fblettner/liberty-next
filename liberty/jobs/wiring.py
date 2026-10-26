@@ -233,6 +233,16 @@ async def build_nomaflow(
             pool_name, exc,
         )
         return None
+    except Exception as exc:  # noqa: BLE001 — a refused / timed-out DB must not block boot
+        # The pool exists but the database doesn't answer (down, wrong host, firewall).
+        # Same policy as the changesets / user-view bootstraps: log, skip nomaflow for
+        # this run, let the rest of the app come up so /ready can report the outage and
+        # an operator can fix the pool through Settings → Pools + Reload.
+        _log.warning(
+            "nomaflow.wiring pool %r unreachable at startup (%s: %s) — nomaflow disabled this run",
+            pool_name, type(exc).__name__, exc,
+        )
+        return None
 
     broadcaster: Broadcaster | None = None
     if sio_layer is not None:

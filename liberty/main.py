@@ -579,7 +579,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/health", tags=["meta"], summary="Liveness probe")
     async def health() -> dict[str, str]:
+        """Process is up. Deliberately touches nothing else — an orchestrator must not
+        restart the container because a database is down; that's what ``/ready`` is for."""
         return {"status": "ok", "version": __version__}
+
+    @app.get(
+        "/ready", tags=["meta"], summary="Readiness probe",
+        responses={503: {"description": "The framework pool is configured but unreachable."}},
+    )
+    async def ready() -> JSONResponse:
+        """Process is up **and** the framework pool answers ``SELECT 1`` (5 s budget). 503
+        otherwise, so a load balancer / Kubernetes readiness gate stops routing to an
+        instance whose database is gone. An install with no ``default`` pool (API-only,
+        TOML auth) reports ready without a probe."""
+        import asyncio
+
+        from sqlalchemy import text
+
+        connectors: ConnectorRegistry = app.state.connectors
+        pool = "default" if "default" in connectors.pools.names() else None
+        if pool is None:
+            return JSONResponse({"status": "ok", "version": __version__, "pool": None})
+        try:
+            async with asyncio.timeout(5):
+                async with connectors.pools.engine(pool).connect() as conn:
+                    await conn.execute(text("SELECT 1"))
+        except Exception as exc:  # noqa: BLE001 — any failure means "not ready"
+            return JSONResponse(
+                {"status": "unavailable", "version": __version__, "pool": pool, "error": type(exc).__name__},
+                status_code=503,
+            )
+        return JSONResponse({"status": "ok", "version": __version__, "pool": pool})
 
     @app.get("/info", tags=["meta"], summary="Runtime info")
     async def info(principal: OptionalPrincipal = None) -> dict[str, object]:
