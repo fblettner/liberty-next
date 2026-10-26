@@ -14,13 +14,19 @@
 // from `GET /admin/config/schema → framework_enums`, threaded through `FrameworkEnumsContext`. A
 // Literal-typed `x_enum_ref` field renders as a strict SearchSelect (the value MUST be in the set);
 // a free-text `x_enum_ref` field renders as a combobox (typing a custom value commits).
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, lazy, Suspense, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { Plus, X, ChevronRight, ChevronDown, Search, Edit3, Copy, GripVertical, Wand2 } from 'lucide-react'
 import { Checkbox } from './Checkbox'
 import { Input, PasswordInput, Field } from './Input'
 import { SearchSelect, type SearchSelectOption } from './SearchSelect'
-import { SqlEditor } from './SqlEditor'
+// Lazy on purpose: SqlEditor pulls in Monaco (~2.3 MB) through services/monaco. SchemaForm
+// is re-exported by the `common` barrel that App / Layout / Login import, so a static import
+// here put the whole editor core in the ENTRY chunk (3 MB, 816 kB gz, before the login page
+// painted). The `sql` widget is the only reason SchemaForm needs it — load it when that widget
+// first renders; Settings / the designers already live in lazy chunks of their own.
+const SqlEditor = lazy(() => import('./SqlEditor').then((m) => ({ default: m.SqlEditor })))
+import { SpinnerRing } from './Spinner'
 import type { WizardStatementType } from './SqlWizardModal'
 import { colors, fontSize, fonts, radius } from '../theme'
 
@@ -386,7 +392,9 @@ function SqlField({ value, onChange }: { value: unknown; onChange: (v: unknown) 
     const text = value == null ? '' : String(value)
     return (
       <div>
-        <SqlEditor value={text} rows={14} onChange={(v) => onChange(v === '' ? undefined : v)} connector={connector} statementType={statementType} />
+        <Suspense fallback={<SpinnerRing size={18} />}>
+          <SqlEditor value={text} rows={14} onChange={(v) => onChange(v === '' ? undefined : v)} connector={connector} statementType={statementType} />
+        </Suspense>
         <MiniBtn type="button" style={{ marginTop: 4 }} onClick={() => onChange({ default: text })}><Plus size={12} /> per-dialect variants</MiniBtn>
       </div>
     )
@@ -401,7 +409,9 @@ function SqlField({ value, onChange }: { value: unknown; onChange: (v: unknown) 
           <Row style={{ alignItems: 'flex-start' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <DialectLabel>{d}{d === 'default' ? ' (required)' : ''}</DialectLabel>
-              <SqlEditor value={map[d] ?? ''} rows={10} onChange={(v) => set(d, v)} connector={connector} statementType={statementType} />
+              <Suspense fallback={<SpinnerRing size={18} />}>
+                <SqlEditor value={map[d] ?? ''} rows={10} onChange={(v) => set(d, v)} connector={connector} statementType={statementType} />
+              </Suspense>
             </div>
             {d !== 'default' && <SmallX type="button" title="remove variant" style={{ marginTop: 22 }} onClick={() => onChange(Object.fromEntries(Object.entries(map).filter(([k]) => k !== d)))}><X size={12} /></SmallX>}
           </Row>
