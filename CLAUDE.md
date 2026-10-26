@@ -30,7 +30,9 @@ docs at https://docs.nomana-it.fr/liberty/ (a separate Docusaurus repo).
   `claude-opus-4-7` unless the user names another; consult the `claude-api` skill before
   changing `liberty/ai/`.
 - **Match the surrounding code's style.** Type hints everywhere (`from __future__ import
-  annotations`). Tests for new modules (backend); frontend has no test runner yet.
+  annotations`). Tests for new modules: pytest on the backend, Vitest for the frontend's pure
+  modules (`*.test.ts` next to the module). `ruff check` and `npm run lint` must stay at zero
+  errors (CI enforces both; `.pre-commit-config.yaml` mirrors them).
 - **Work step by step and never commit before the operator has reviewed the diff.** Finish
   one step, run the tests, leave the tree uncommitted, report, wait. "Commit" means commit
   *and* push. Verify a claim against the current code and `git log` (and measure, for
@@ -66,7 +68,7 @@ lazy) + socket.io-client; built `frontend/dist/` is served by the backend.
 ## Repository map
 
 ```
-liberty/                  the framework (≈44k lines, 84 test files, 1250+ tests)
+liberty/                  the framework (≈44k lines, 85 test files, 1280+ tests)
   main.py                 create_app(): lifespan builds everything onto app.state, mounts the
                           routers, /health (liveness) /ready (pool ping) /info, serves the SPA
   runtime.py              load_registry() + rebuild_runtime(app, sections=…): THE reload path
@@ -231,8 +233,8 @@ python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # dev = every ex
 ./start.sh init-db            # first run: auth store + an `admin` user (prints the password)
 ./start.sh                    # build frontend/dist if stale, serve SPA + API on :8000
 ./start.sh dev                # --reload   ·   ./start.sh frontend → Vite :5173 with API proxy
-.venv/bin/pytest -q           # ~100 s, no live DB needed
-(cd frontend && npm ci && npm run build)   # tsc --noEmit && vite build
+.venv/bin/pytest -q           # ~100 s, no live DB needed   ·   .venv/bin/ruff check liberty tests
+(cd frontend && npm ci && npm run lint && npm test && npm run build)   # eslint · vitest · tsc + vite
 # CLIs: liberty-next · liberty-connectors list|describe|run · liberty-admin init-db|create-user|…
 #       liberty-migrate (v1 → v2, incl. `diff`) · liberty-crypto encrypt|decrypt · liberty-license verify|status
 # Dev env (typical): LIBERTY_JWT_SECRET (≥ 32 bytes), LIBERTY_MASTER_KEY, LIBERTY_APPS_DIR,
@@ -242,7 +244,8 @@ python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # dev = every ex
 ## Branches, CI, releases
 
 - `develop` is the working branch; `main` is release-only. CI (`.github/workflows/ci.yml`)
-  runs pytest + `npm ci && npm run build` on every push to develop and PR to main.
+  runs ruff + pytest and `npm ci` + eslint + vitest + the build on every push to develop and PR
+  to main.
 - A push to `main` runs `release.yml`: the CI checks → version resolution (auto-bumps the
   patch when `pyproject.toml`'s version is already tagged) → **a real `## <version>` section
   in `liberty/RELEASE.md` is mandatory** (the run fails on a missing or placeholder one — so
