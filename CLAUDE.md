@@ -108,6 +108,10 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
   versioning/             config snapshot history (.versions/) + upgrade journal
   userviews/              DB-backed saved grid / chart views (shared + per user)
   plugins/invoke.py       module:function resolution for the apps' Python (allow-listed)
+  config_merge.py         per-entity additive merge of a shipped config into the live one (the apps
+                          installer + Package & Deploy): override / untouched-vs-.bundled snapshot /
+                          custom / withdrawn rules, secrets always from the live connectors.toml
+  schema_sync.py          create_all + forward-add model columns on the framework's own tables
   migrations/             v1 → v2 migration + `liberty-migrate diff` (kept for reference)
   sio.py                  Socket.IO: record locks (rooms), technical dashboard, log tail
   web/                    the HTTP layer — see the router table

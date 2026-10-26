@@ -247,8 +247,13 @@ cmd_ssl() {
 }
 
 cmd_apps() {
+  # Plan first (a dry run prints the per-entity merge: added / refreshed / kept / removed), then
+  # the real install unless --dry-run was asked for; then the apps' schema migrations.
   need_env; require_docker
-  [ -n "${1:-}" ] || die "usage: ./liberty apps <wheel-path-or-url> [--force-config]"
+  [ -n "${1:-}" ] || die "usage: ./liberty apps <wheel-path-or-url> [--force-config] [--dry-run]"
+  case " $* " in *" --dry-run "*) ./install-apps.sh "$@" --layout "$(layout_of_chain)"; return 0 ;; esac
+  info "Merge plan"
+  ./install-apps.sh "$@" --dry-run --layout "$(layout_of_chain)" | sed -n '/^Merge plan/,$p'
   ./install-apps.sh "$@" --layout "$(layout_of_chain)"
   cmd_migrate
 }

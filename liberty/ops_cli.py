@@ -634,6 +634,8 @@ def install_apps_wheel(env: Env, wheel: Path) -> subprocess.CompletedProcess:
     info("$ " + " ".join(cmd))
     r = env.runner(cmd, capture=False)
     if r.returncode == 0 and env.apps_dir is not None:
+        info("Merge plan")  # the per-entity config merge: added / refreshed / kept / removed
+        env.runner([env.tool("liberty-apps"), "install", "--target", str(env.apps_dir), "--dry-run"], capture=False)
         r2 = env.runner([env.tool("liberty-apps"), "install", "--target", str(env.apps_dir)], capture=False)
         if r2.returncode != 0:
             return r2

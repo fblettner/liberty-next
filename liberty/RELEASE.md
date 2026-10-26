@@ -40,6 +40,20 @@
   their models with the live tables at boot and add the missing columns, with the model's default
   so existing rows get a value; what was added is journaled as a `framework-schema` row in
   Settings → History → Upgrades, next to the apps' migrations.
+- **Fixed: upgrading the licensed apps no longer loses operator edits — or misses product
+  additions.** `liberty-apps install` copied whole files: without `--force-config` an existing file
+  was kept as is (a new product screen, menu item or dictionary entry never reached the install);
+  with it every file was replaced (your edits in screens, menus, dictionary, dashboards, charts and
+  actions were lost — the `override` flag was ignored, only `connectors.toml` kept its secrets). The
+  installer now merges **per entity**, with the rules Settings → Package & Deploy already applied:
+  product additions are added; `override = true` entities, your own entities and entities you
+  changed are kept; vendor entities you never touched are refreshed; what the vendor withdrew is
+  removed only when untouched. `[pools.*]` and every `ENC:` secret always come from your file,
+  `theme.toml` is yours. The shipment is recorded under `<config>/.bundled/` so the next upgrade
+  can tell "untouched" from "edited". `--force-config` now means "also refresh vendor entities I
+  changed without flagging them"; `--dry-run` prints the plan, and `liberty apps` / `liberty upgrade
+  --apps` show it before writing. Entities kept because they changed locally are listed for review.
+  (`liberty.config_merge`, shared with Package & Deploy.)
 - **New `liberty-ops` command for Python installs** (pipx or venv, with or without systemd) — the
   twin of `release/liberty`: `status`, `doctor`, `start` / `stop` / `restart` / `logs`, `backup` /
   `restore` (config dir, apps dir, SQLite file, `pg_dump`), `migrate`, `upgrade [--version X]

@@ -49,7 +49,7 @@ recomputes the compose chain**: the layout + TLS overlay + apps overlay live in 
 | `./liberty ssl letsencrypt --domain D --email E` | Enable / switch TLS **after** the install (full layout). Only the TLS overlay changes in the chain; the apps overlay and the secrets are kept. |
 | `./liberty ssl provided --domain D --cert-dir DIR --cert-file F --key-file K` | Same with your own certificate. |
 | `./liberty ssl off` | Back to plain HTTP. |
-| `./liberty apps <wheel> [--force-config]` | Link (or refresh) the licensed apps (= `install-apps.sh`), then run the pending schema migrations. |
+| `./liberty apps <wheel> [--force-config] [--dry-run]` | Link (or refresh) the licensed apps (= `install-apps.sh`): prints the per-entity **merge plan**, applies it, then runs the pending schema migrations. `--dry-run` prints the plan only. |
 | `./liberty upgrade [--tag X] [--apps <wheel>] [--keep DAYS]` | `doctor` (advisory) → the running image is kept under a local `rollback-<stamp>` tag → backup (the upgrade aborts if the snapshot fails) → pull + recreate with the recorded chain → pending schema migrations → a **report** (JSON + Markdown under the config volume, shown in Settings → History → Upgrades) → `status`. |
 | `./liberty rollback [--yes]` | Back to the image that ran before the last upgrade and the volumes it snapshotted just before. Asks for confirmation (the restore drops everything written since), records a `rollback` report. |
 | `./liberty migrate [--dry-run]` | `liberty-admin migrate` inside the container — every app plugin's pending Alembic revisions (nomasx1 today). `--dry-run` lists them, exit 2 when some are pending. |
@@ -369,6 +369,18 @@ That's everything — base stack + licensed apps + license key in one go.
 ```
 
 ### What `install-apps.sh` does
+
+**Config is merged per entity, never copied over.** Product additions (a screen, a dictionary entry,
+a menu item, a query, a dashboard) are added; what you own is kept — entities flagged
+`override = true`, entities you created, entities you changed; vendor entities you never touched
+are refreshed; what the vendor withdrew is removed only when untouched. `[pools.*]` and every
+`ENC:` secret always come from your live `connectors.toml`; `theme.toml` is yours. The shipment is
+recorded under `<apps>/config/.bundled/` so the next upgrade can tell "untouched" from "edited".
+`--force-config` additionally refreshes vendor entities you changed without the `override` flag
+(it never touches overrides, your own entities or secrets). Entities kept because they changed
+locally are listed at the end: set `override = true` on them in Settings to keep them for good.
+The merge runs inside a throwaway container from the liberty-next image you already pulled.
+
 
 1. **Materializes the wheel** into `./apps/` (via a throwaway `python:3.12-slim`
    container — your host needs no local pip / python install). The wheel ships with

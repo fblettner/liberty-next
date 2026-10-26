@@ -51,6 +51,23 @@
   réelles et ajoute les colonnes manquantes, avec la valeur par défaut du modèle pour les lignes
   existantes ; les ajouts sont consignés sous `framework-schema` dans Paramètres → Historique → Mises
   à jour, à côté des migrations des applications.
+- **Corrigé : la mise à jour des applications sous licence ne perd plus les modifications de
+  l'exploitant et n'oublie plus les ajouts du produit.** `liberty-apps install` copiait des fichiers
+  entiers : sans `--force-config`, un fichier existant était conservé tel quel (un nouvel écran, une
+  nouvelle entrée de menu ou de dictionnaire n'arrivait jamais) ; avec l'option, chaque fichier était
+  remplacé (vos modifications dans les écrans, menus, dictionnaire, tableaux de bord, graphiques et
+  actions étaient perdues ; l'indicateur `override` était ignoré, seul `connectors.toml` gardait ses
+  secrets). L'installateur fusionne maintenant **entité par entité**, avec les règles que Paramètres →
+  Package & Deploy appliquait déjà : les ajouts du produit sont ajoutés ; les entités marquées
+  `override = true`, celles que vous avez créées et celles que vous avez modifiées sont conservées ;
+  les entités du produit jamais touchées sont rafraîchies ; ce que le produit a retiré n'est supprimé
+  que si vous n'y aviez pas touché. `[pools.*]` et chaque secret `ENC:` viennent toujours de votre
+  fichier, `theme.toml` est le vôtre. La livraison est enregistrée dans `<config>/.bundled/` pour que
+  la mise à jour suivante distingue « intact » de « modifié ». `--force-config` signifie désormais
+  « rafraîchir aussi les entités du produit que j'ai modifiées sans les marquer » ; `--dry-run` affiche
+  le plan, et `liberty apps` / `liberty upgrade --apps` le montrent avant d'écrire. Les entités
+  conservées parce que modifiées localement sont listées pour vérification. (`liberty.config_merge`,
+  partagé avec Package & Deploy.)
 - **Nouvelle commande `liberty-ops` pour les installations Python** (pipx ou venv, avec ou sans
   systemd), pendant de `release/liberty` : `status`, `doctor`, `start` / `stop` / `restart` / `logs`,
   `backup` / `restore` (dossier de configuration, dossier des applications, fichier SQLite,
