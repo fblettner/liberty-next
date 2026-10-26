@@ -36,6 +36,7 @@ reload, since fixing the pool and hitting Reload is exactly the operator's inten
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -68,6 +69,23 @@ def load_registry(settings: Settings, license_result: LicenseResult | None) -> C
     )
 
 
+def journal_schema(settings: Settings, changes: list) -> None:
+    """Record the columns :func:`liberty.schema_sync.sync_tables` just added as a
+    ``framework-schema`` row of the upgrade history (next to connectors.toml, like the server's
+    version bumps). No-op when nothing changed."""
+    if not changes:
+        return
+    from liberty.schema_sync import journal_schema_changes
+    from liberty.versioning import ConfigVersionStore
+
+    try:
+        store = ConfigVersionStore(Path(settings.connectors.config_path).parent)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("schema changes not journaled (%s): %s", exc, ", ".join(map(str, changes)))
+        return
+    journal_schema_changes(store, changes)
+
+
 async def build_changesets_db(settings: Settings, connectors: ConnectorRegistry) -> Any | None:
     """The change-package control DB on ``[changesets] pool`` — ``None`` when disabled or
     when the pool is unusable (logged; capture is simply off for this run)."""
@@ -77,7 +95,7 @@ async def build_changesets_db(settings: Settings, connectors: ConnectorRegistry)
 
     cs_db = ChangeSetDatabase(connectors.pools, settings.changesets.pool)
     try:
-        await cs_db.create_schema()  # idempotent self-bootstrap
+        journal_schema(settings, await cs_db.create_schema())  # idempotent self-bootstrap
     except Exception as exc:  # noqa: BLE001 — never let a bad control pool take the app down
         _log.warning(
             "changesets pool %r unusable (%s) — change-package capture disabled", settings.changesets.pool, exc,
@@ -96,7 +114,7 @@ async def build_user_views(settings: Settings, connectors: ConnectorRegistry) ->
         from liberty.userviews import UserViewStore
 
         uv = UserViewStore(connectors.pools, auth.pool)
-        await uv.create_schema()
+        journal_schema(settings, await uv.create_schema())
         return uv
     except Exception as exc:  # noqa: BLE001 — never let the view store take the app down
         _log.warning("user-view store on pool %r unusable (%s) — saved views disabled", auth.pool, exc)

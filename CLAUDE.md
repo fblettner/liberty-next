@@ -270,6 +270,11 @@ python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # dev = every ex
 - **Single-process assumptions**: APScheduler's in-memory jobstore and the Socket.IO lock
   rooms are per process — run one replica (PLAN D3 before scaling out).
 - **Audit**: `Screen.audit_table` mirrors writes into `AUD_<table>` in the same transaction.
+- **Framework tables** (nomaflow run history, change packages, saved views, optional `ly2_*` auth):
+  every store's `create_schema()` goes through `liberty.schema_sync.sync_tables` — `create_all` plus
+  forward-adding the model columns a live table lacks — and returns the changes, journaled as
+  `framework-schema` via `runtime.journal_schema`. Adding a column to a model is therefore enough;
+  a rename or type change needs a one-off script. The apps' schemas use Alembic (`liberty-admin migrate`).
 - **Optional features fail clearly**: PDF without the `reports` extra → 503 with the install
   hint; `ldap_sync` without `ldap3` → a StepFailed naming the extra.
 - **i18n**: every `t('key')` needs the key in both locale files; ~700 keys still exist only

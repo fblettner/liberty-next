@@ -25,6 +25,8 @@ from typing import Any, AsyncIterator
 from sqlalchemy import DateTime, String, delete as sa_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from liberty.schema_sync import SchemaChange, sync_tables
 from sqlalchemy.types import JSON
 
 from liberty.connectors.db import PoolRegistry
@@ -87,11 +89,12 @@ class UserViewStore:
                 await s.rollback()
                 raise
 
-    async def create_schema(self) -> None:
-        """Create ``ly2_user_view`` on the pool if absent (idempotent)."""
+    async def create_schema(self) -> list[SchemaChange]:
+        """Create ``ly2_user_view`` on the pool if absent and forward-add missing columns
+        (idempotent). Returns what was added."""
         engine = self._pools.engine(self._pool_name)
         async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+            return await conn.run_sync(sync_tables, Base.metadata)
 
     async def list_views(self, username: str, kind: str, view_key: str) -> list[dict[str, Any]]:
         """The user's named views for one (kind, view_key) — e.g. all the grid

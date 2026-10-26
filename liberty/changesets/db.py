@@ -14,6 +14,7 @@ from typing import Any, AsyncIterator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from liberty.changesets.models import Base
+from liberty.schema_sync import SchemaChange, sync_tables
 from liberty.connectors.db import PoolRegistry
 
 
@@ -53,45 +54,27 @@ class ChangeSetDatabase:
                 await session.rollback()
                 raise
 
-    async def create_schema(self) -> None:
-        """Create the ``ly_change_*`` tables on the configured pool if absent (idempotent)."""
+    async def create_schema(self) -> list[SchemaChange]:
+        """Create the ``ly_change_*`` tables on the configured pool if absent and forward-add the
+        columns an older install lacks (idempotent). Returns what was added."""
         engine = self._pools.engine(self._pool_name)
         async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            await conn.run_sync(self._add_missing_columns)
+            changes = await conn.run_sync(sync_tables, Base.metadata)
+            if any(c.table == "ly_change_packages" and c.column == "kind" for c in changes):
+                await conn.run_sync(self._rebuild_active_draft_index)
+        return changes
 
     @staticmethod
-    def _add_missing_columns(sync_conn: Any) -> None:
-        """Forward-add columns introduced after a table was first created — ``create_all`` never
-        ALTERs an existing table, so without this an operator would have to DROP the table to pick
-        up a new field. Idempotent: ADDs only what's absent. Both SQLite and Postgres accept the
-        plain ``ALTER TABLE … ADD COLUMN`` forms used here."""
-        from sqlalchemy import inspect as sa_inspect
-        insp = sa_inspect(sync_conn)
-        wanted = (
-            ("ly_change_entries", "replay", "BOOLEAN"),
-            ("ly_change_entries", "source_action", "VARCHAR(256)"),
-            # ``kind`` backfills existing packages to 'auto' (DEFAULT) — they were all framework
-            # capture targets before custom packages existed.
-            ("ly_change_packages", "kind", "VARCHAR(16) NOT NULL DEFAULT 'auto'"),
+    def _rebuild_active_draft_index(sync_conn: Any) -> None:
+        """When ``kind`` was just added, the active-draft unique index still carries the old
+        ``WHERE status='draft'`` predicate (create_all won't ALTER it). Recreate it scoped to
+        ``kind='auto'`` so custom drafts can coexist. ``CREATE UNIQUE INDEX … WHERE`` + ``DROP
+        INDEX IF EXISTS`` are accepted by both Postgres and SQLite."""
+        sync_conn.exec_driver_sql("DROP INDEX IF EXISTS ux_ly_change_pkg_active")
+        sync_conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX ux_ly_change_pkg_active ON ly_change_packages (application) "
+            "WHERE status = 'draft' AND kind = 'auto'"
         )
-        added: set[tuple[str, str]] = set()
-        for table, col, ddl in wanted:
-            if not insp.has_table(table):
-                continue
-            if col not in {c["name"] for c in insp.get_columns(table)}:
-                sync_conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
-                added.add((table, col))
-        # When ``kind`` was just added, the active-draft unique index still carries the old
-        # ``WHERE status='draft'`` predicate (create_all won't ALTER it). Recreate it scoped to
-        # ``kind='auto'`` so custom drafts can coexist. ``CREATE UNIQUE INDEX … WHERE`` + ``DROP
-        # INDEX IF EXISTS`` are accepted by both Postgres and SQLite.
-        if ("ly_change_packages", "kind") in added:
-            sync_conn.exec_driver_sql("DROP INDEX IF EXISTS ux_ly_change_pkg_active")
-            sync_conn.exec_driver_sql(
-                "CREATE UNIQUE INDEX ux_ly_change_pkg_active ON ly_change_packages (application) "
-                "WHERE status = 'draft' AND kind = 'auto'"
-            )
 
     async def drop_schema(self) -> None:  # pragma: no cover - destructive helper
         engine = self._pools.engine(self._pool_name)

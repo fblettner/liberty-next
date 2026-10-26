@@ -33,6 +33,13 @@
   `/info` (the process is up): a stack whose database is unreachable is reported `unhealthy`.
 - The container warns in its log at boot when app schema migrations are pending;
   `LIBERTY_AUTO_MIGRATE=1` applies them at boot.
+- **Fixed: a release that adds a column to one of the framework's own tables no longer breaks
+  upgraded installs.** The nomaflow run history, change packages, saved views and the optional
+  `ly2_*` auth tables were created with `create_all`, which never alters an existing table (change
+  packages carried a hand-written `ALTER TABLE` list for exactly that). The stores now compare
+  their models with the live tables at boot and add the missing columns, with the model's default
+  so existing rows get a value; what was added is journaled as a `framework-schema` row in
+  Settings → History → Upgrades, next to the apps' migrations.
 - **New `liberty-ops` command for Python installs** (pipx or venv, with or without systemd) — the
   twin of `release/liberty`: `status`, `doctor`, `start` / `stop` / `restart` / `logs`, `backup` /
   `restore` (config dir, apps dir, SQLite file, `pg_dump`), `migrate`, `upgrade [--version X]

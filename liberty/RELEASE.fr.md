@@ -43,6 +43,14 @@
   `unhealthy`.
 - Au démarrage, le conteneur signale dans son journal les migrations de schéma en attente ;
   `LIBERTY_AUTO_MIGRATE=1` les applique au démarrage.
+- **Corrigé : une version qui ajoute une colonne à l'une des tables du framework ne casse plus les
+  installations mises à jour.** L'historique des exécutions nomaflow, les paquets de changements, les
+  vues enregistrées et les tables `ly2_*` optionnelles étaient créés avec `create_all`, qui ne modifie
+  jamais une table existante (les paquets de changements portaient une liste d'`ALTER TABLE` écrite
+  à la main pour cette raison). Au démarrage, chaque module compare maintenant ses modèles aux tables
+  réelles et ajoute les colonnes manquantes, avec la valeur par défaut du modèle pour les lignes
+  existantes ; les ajouts sont consignés sous `framework-schema` dans Paramètres → Historique → Mises
+  à jour, à côté des migrations des applications.
 - **Nouvelle commande `liberty-ops` pour les installations Python** (pipx ou venv, avec ou sans
   systemd), pendant de `release/liberty` : `status`, `doctor`, `start` / `stop` / `restart` / `logs`,
   `backup` / `restore` (dossier de configuration, dossier des applications, fichier SQLite,
