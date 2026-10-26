@@ -73,7 +73,10 @@ async function parseError(res: Response): Promise<ApiError> {
     const body = await res.json();
     detail = body?.detail ?? body;
     if (typeof detail === "string") message = detail;
-    else if (Array.isArray(detail)) message = detail.map((d: any) => d?.msg ?? JSON.stringify(d)).join("; ");
+    else if (Array.isArray(detail))
+      message = detail
+        .map((d: unknown) => (d && typeof d === "object" && "msg" in d ? String((d as { msg: unknown }).msg) : JSON.stringify(d)))
+        .join("; ");
   } catch {
     /* non-JSON body */
   }

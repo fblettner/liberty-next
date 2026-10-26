@@ -35,6 +35,8 @@ as an ``ENC:`` value — v2 decrypts it at runtime via ``[crypto] master_key``.
 
 from __future__ import annotations
 
+from typing import Any
+
 import argparse
 import asyncio
 import sys

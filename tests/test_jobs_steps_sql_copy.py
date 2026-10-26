@@ -34,8 +34,6 @@ from liberty.connectors.config import (
 )
 from liberty.connectors.registry import ConnectorRegistry
 from liberty.jobs import (
-    CopyMode,
-    DecimalMode,
     ManualTrigger,
     RunContext,
     SqlCopyExecutor,

@@ -14,7 +14,7 @@ from liberty.reports.registry import (
     ReportRegistry,
     discover_reports,
 )
-from liberty.reports.schema import ReportDef, ReportParam, UnknownReportError
+from liberty.reports.schema import ReportDef, UnknownReportError
 
 
 # --------------------------------------------------------------------------- #

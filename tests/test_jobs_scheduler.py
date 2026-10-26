@@ -25,8 +25,6 @@ from liberty.jobs import (
     JobRun,
     JobRunner,
     JobScheduler,
-    JobsFile,
-    ManualTrigger,
     RunState,
     Step,
     StepResult,
@@ -192,7 +190,7 @@ async def test_add_job_registers_at_runtime(jobs_db, tmp_path) -> None:
     await scheduler.start()
     try:
         # Build a Job out-of-band (in production, registry would be swapped first)
-        new_job = Step.model_validate  # silence unused-import linter
+        _new_job = Step.model_validate  # silence unused-import linter
         from liberty.jobs.schema import Job
         job = Job(
             id="late-add",

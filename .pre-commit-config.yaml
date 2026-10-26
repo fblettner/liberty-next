@@ -1,0 +1,33 @@
+# Local pre-commit hooks (A5). Install once: `.venv/bin/pip install pre-commit && pre-commit install`.
+# They mirror what CI runs (ci.yml): ruff on the backend, eslint on the frontend, plus the usual
+# hygiene checks. Nothing here reformats code — the project keeps its own style.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.2
+    hooks:
+      - id: ruff
+        args: [--fix]
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: check-added-large-files
+        args: [--maxkb=5000]   # the Oracle Instant Client zips are already tracked; nothing new that size
+      - id: check-toml
+      - id: check-yaml
+      - id: check-merge-conflict
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint (frontend)
+        entry: bash -c 'cd frontend && npx eslint "src/**/*.{ts,tsx}" --max-warnings=-1'
+        language: system
+        files: ^frontend/src/.*\.(ts|tsx)$
+        pass_filenames: false
+      - id: ds-store
+        name: no .DS_Store
+        entry: bash -c 'echo ".DS_Store files must not be committed" && exit 1'
+        language: system
+        files: \.DS_Store$

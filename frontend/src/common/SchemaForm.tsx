@@ -705,7 +705,6 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
   // snapping to the first. Fixes "edit a column → open a rules_when → Back lands on the General tab".
   const tabByModel = useRef<Map<string, string>>(new Map())
   const selectTab = (g: string) => { setTab(g); tabByModel.current.set(resolvedSchema.title ?? '', g) }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only re-key on model change
   useEffect(() => {
     const remembered = tabByModel.current.get(resolvedSchema.title ?? '')
     setTab(remembered && groupNames.includes(remembered) ? remembered : groupNames[0])

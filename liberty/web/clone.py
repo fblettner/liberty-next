@@ -293,7 +293,7 @@ def clone_app(
     # Build a tiny dict per file containing only ``{top_key: {new_name: cloned}}``,
     # serialise with tomli_w (linear in the cloned subtree's size — irrelevant of the
     # existing file's size), append. Existing bytes stay untouched.
-    for label, path, top_key, name, cloned in new_subtrees:
+    for _label, path, top_key, name, cloned in new_subtrees:
         chunk = tomli_w.dumps({top_key: {name: cloned}})
         path.parent.mkdir(parents=True, exist_ok=True)
         existing = path.read_bytes() if path.exists() else b""

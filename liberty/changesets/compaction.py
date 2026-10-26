@@ -88,7 +88,7 @@ def compact(entries: list[ChangeEntry]) -> list[dict[str, Any]]:
             continue  # created and removed within the package — nothing to promote
 
         def _pick(op: str) -> ChangeEntry | None:
-            return next((e for e in ops if e.operation == op), None)
+            return next((e for e in ops if e.operation == op), None)  # noqa: B023 — closure runs within this iteration
 
         # read_query is the same across a row's entries (same screen); take the first non-null.
         read_query = next((e.read_query for e in ops if e.read_query), None)

@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from liberty.web.dependencies import Dependency, Seed, collect_dependencies
+from liberty.web.dependencies import Seed, collect_dependencies
 
 
 CLONE_KINDS: set[str] = {"query"}

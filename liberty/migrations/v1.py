@@ -528,17 +528,17 @@ def migrate_sql_queries(
             # We still emit the *lookup-param* wrap (separate concern: a query is a lookup
             # target whose params narrow it at fetch time; the wrap is fixed per query,
             # not per caller) and the upsert simplifications.
-            if is_update:
+            if is_update:  # noqa: B023 — closure runs within this iteration
                 s = _rewrite_put_where(_upsert_to_update(raw))
-            elif is_read:
+            elif is_read:  # noqa: B023 — closure runs within this iteration
                 s = raw
             else:
                 s = _simplify_upsert(raw)
-            if is_sequence:
+            if is_sequence:  # noqa: B023 — closure runs within this iteration
                 s = _rewrite_sequence_max_to_next(s)
-            if lkp_params:
-                s = _wrap_with_lookup_params(s, lkp_params, dialect=dia)
-            return f"{s}\nORDER BY {ob}" if ob else s
+            if lkp_params:  # noqa: B023 — closure runs within this iteration
+                s = _wrap_with_lookup_params(s, lkp_params, dialect=dia)  # noqa: B023 — closure runs within this iteration
+            return f"{s}\nORDER BY {ob}" if ob else s  # noqa: B023 — closure runs within this iteration
         variants = {dia: _variant(raw, dia) for dia, raw in groups[key].items()}
         # Declare the lookup params on `QueryDef.params` so the SQL connector accepts the binds and
         # the runtime knows they're optional (blank → SQL NULL → the WHERE branch lets every row through).
@@ -2803,7 +2803,7 @@ def attach_actions_to_screens(
     # Each v1 task becomes a v2 ``run_query`` (when its target query resolves) or is dropped
     # (API-only / IF / LOOP — those aren't representable in v2's flat Action union yet).
     actions_by_v1_id: dict[int, dict[str, Any]] = {}
-    for slug, a in actions.items():
+    for _slug, a in actions.items():
         v1_act_id = a.get("v1_act_id")
         if v1_act_id is None:
             continue
@@ -3114,7 +3114,7 @@ def migrate_screens(
             sqid_raw = s.get("seq_query_id")
             if sqid_raw is None:
                 continue
-            sqid = int(sqid_raw)
+            _sqid = int(sqid_raw)
         except (KeyError, TypeError, ValueError):
             continue
         label = str(s.get("seq_label") or "").strip()

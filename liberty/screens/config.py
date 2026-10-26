@@ -1453,7 +1453,7 @@ def parse_screens(data: dict[str, Any]) -> ScreensFile:
     dialog tab missing the ``type`` discriminator defaults to ``"form"`` so screens.toml
     files written before the nested-tab variants were added keep validating."""
     apps = data.get("screens") or {}
-    for app_name, screens in apps.items():
+    for _app_name, screens in apps.items():
         if not isinstance(screens, dict):
             continue
         for sid, screen in screens.items():

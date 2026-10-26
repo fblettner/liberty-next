@@ -440,7 +440,7 @@ class LibertySio:
                 pool = engine.sync_engine.pool if hasattr(engine, "sync_engine") else engine.pool
                 def safe(fn: str) -> Any:
                     try:
-                        return getattr(pool, fn)()
+                        return getattr(pool, fn)()  # noqa: B023 — closure runs within this iteration
                     except Exception:  # noqa: BLE001
                         return None
                 pools.append({

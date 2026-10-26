@@ -13,7 +13,6 @@ Three things matter here that the runner-level mock tests can't cover:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio

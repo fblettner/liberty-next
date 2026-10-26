@@ -354,7 +354,6 @@ export function ScreenDialog({
     }
     // ``mode`` is used only for the diagnostic log; the actual reactive trigger is
     // ``lockPayload`` (which itself depends on mode). Listed in deps for the lint rule.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, lockPayload, acquireLock, releaseLock])
 
   // Human-friendly "X minutes ago" for the banner. Recomputed every render — the WS broadcasts
@@ -817,7 +816,6 @@ export function ScreenDialog({
       // success — surface any non-fatal warnings (notify messages, skipped stubs with
       // stop_on_error=false) but proceed to close + refresh.
       if (result.warnings.length > 0) {
-        // eslint-disable-next-line no-console
         console.info('on_save warnings:', result.warnings)
       }
       onSaved()

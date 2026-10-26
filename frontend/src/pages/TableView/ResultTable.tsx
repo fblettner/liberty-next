@@ -634,7 +634,6 @@ export function ResultTable({
     // Notify-action messages collect on ``result.warnings``; surface them in the menu's
     // error/status slot (no global toast yet — same convention as before).
     if (result.warnings.length > 0) {
-      // eslint-disable-next-line no-console
       console.info('row-menu warnings:', result.warnings)
     }
   }, [connector, onSaved, closeMenu, navigate, requestPrompt, sharedActions])
@@ -1224,7 +1223,6 @@ export function ResultTable({
         changeContext,
       })
       if (result.warnings.length > 0) {
-        // eslint-disable-next-line no-console
         console.info('row-hook warnings:', result.warnings)
       }
       return result.ok ? null : (result.error ?? null)

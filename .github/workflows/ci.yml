@@ -5,10 +5,10 @@
 # backend suite, the TypeScript check and the production build having passed.
 #
 # Two independent jobs:
-#   backend  — Python 3.12, `pip install -e .[dev]` (= every optional extra), pytest. The
+#   backend  — Python 3.12, `pip install -e .[dev]` (= every optional extra), ruff, pytest. The
 #              suite renders PDFs through WeasyPrint, so the Pango/HarfBuzz/Fontconfig libs the
 #              Dockerfile installs are needed here too.
-#   frontend — Node 20 (the Dockerfile's build stage), `npm ci`, then `npm run build`
+#   frontend — Node 20 (the Dockerfile's build stage), `npm ci`, `npm run lint`, then `npm run build`
 #              (= `tsc --noEmit && vite build`). `npm ci` fails loudly if package.json
 #              and package-lock.json ever drift again — that's the point.
 
@@ -50,6 +50,9 @@ jobs:
       - name: Install
         run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
 
+      - name: Lint (ruff)
+        run: ruff check liberty tests
+
       - name: Test
         run: pytest -q
 
@@ -70,6 +73,9 @@ jobs:
 
       - name: Install
         run: npm ci --no-audit --no-fund
+
+      - name: Lint (eslint — zero errors; warnings are the a11y / hooks backlog)
+        run: npm run lint
 
       - name: Build
         run: npm run build

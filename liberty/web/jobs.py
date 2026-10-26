@@ -38,7 +38,6 @@ from liberty.jobs import (
     JobScheduler,
     UnknownJobError,
 )
-from liberty.jobs.triggers import ManualTrigger
 
 _log = logging.getLogger(__name__)
 

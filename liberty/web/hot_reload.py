@@ -115,7 +115,7 @@ async def _watch_loop(
     from watchfiles import awatch
 
     watch_paths = list(handlers.keys())
-    pending: dict[Path, float] = {}
+    _pending: dict[Path, float] = {}
     try:
         async for changes in awatch(*watch_paths, debounce=DEBOUNCE_MS, recursive=False):
             for _change_kind, path_str in changes:

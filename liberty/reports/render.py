@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import io
 import re
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
+from typing import Any, Optional
 
 import markdown
 

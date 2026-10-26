@@ -123,7 +123,7 @@ async def test_invoke_callable_full_path() -> None:
         return {"apps_id": apps_id, "got_reg": connectors == "REG"}
     import sys
     sys.modules[__name__]  # this module is importable; attach the fn for resolve
-    setattr(sys.modules[__name__], "_fake_target", fake)
+    sys.modules[__name__]._fake_target = fake
     res = await invoke_callable(
         f"{__name__}:_fake_target", {"apps_id": "9"}, injections=[("connectors", "REG")],
     )

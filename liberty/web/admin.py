@@ -877,7 +877,7 @@ def _reinject_action_type(a_dict: dict[str, Any], a_model: Any) -> None:
         nested_models = getattr(a_model, nested_key, None)
         if not nested_list or not nested_models:
             continue
-        for sub_dict, sub_model in zip(nested_list, nested_models):
+        for sub_dict, sub_model in zip(nested_list, nested_models, strict=False):
             _reinject_action_type(sub_dict, sub_model)
 
 
@@ -886,19 +886,19 @@ def _dump_screen(s: Screen) -> dict[str, Any]:
     d = s.model_dump(exclude_defaults=True)
     # Tabs — discriminator on each ScreenTab variant.
     if s.dialog is not None:
-        for tab_dict, tab_model in zip(d.get("dialog", {}).get("tabs", []), s.dialog.tabs):
+        for tab_dict, tab_model in zip(d.get("dialog", {}).get("tabs", []), s.dialog.tabs, strict=False):
             tab_dict["type"] = tab_model.type
             # Per-tab actions — recursive so nested ChainAction.steps / IfAction.then_steps /
             # else_steps / LoopAction.steps all keep their discriminators.
-            for a_dict, a_model in zip(tab_dict.get("actions", []), tab_model.actions):
+            for a_dict, a_model in zip(tab_dict.get("actions", []), tab_model.actions, strict=False):
                 _reinject_action_type(a_dict, a_model)
         # Dialog-level hook chains.
         for hook in ("on_load", "on_save", "on_cancel"):
-            for a_dict, a_model in zip(d.get("dialog", {}).get(hook, []), getattr(s.dialog, hook, [])):
+            for a_dict, a_model in zip(d.get("dialog", {}).get(hook, []), getattr(s.dialog, hook, []), strict=False):
                 _reinject_action_type(a_dict, a_model)
     # Screen-level action lists.
     for hook in ("actions", "row_menu", "on_insert", "on_update", "on_delete", "on_duplicate"):
-        for a_dict, a_model in zip(d.get(hook, []), getattr(s, hook, [])):
+        for a_dict, a_model in zip(d.get(hook, []), getattr(s, hook, []), strict=False):
             _reinject_action_type(a_dict, a_model)
     # Fold ``screen.key_columns`` (the old flat list — what pre-Phase-3 migration emitted
     # and what hand-edited screens may still use) into each matching column hint as
@@ -1236,7 +1236,7 @@ async def get_actions_parsed(request: Request, _: Superuser) -> dict[str, Any]:
         # Re-inject the Action ``type`` discriminator on every step (+ nested then/else/steps) —
         # exclude_defaults strips it, and the editor's union parser needs it to render each step
         # as its real variant (else an `if` reaches the builder typeless and renders as run_query).
-        for s_dict, s_model in zip(d.get("steps", []), a.steps):
+        for s_dict, s_model in zip(d.get("steps", []), a.steps, strict=False):
             _reinject_action_type(s_dict, s_model)
         out[aid] = d
     return {"path": str(path), "actions": out}

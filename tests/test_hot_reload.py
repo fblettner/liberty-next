@@ -12,11 +12,9 @@ Two layers:
 from __future__ import annotations
 
 import asyncio
-import tempfile
 import textwrap
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
 
