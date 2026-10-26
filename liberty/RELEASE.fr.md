@@ -1,5 +1,66 @@
 # Liberty Next — Notes de version
 
+## 7.0.57 — 2026-10-26
+
+**Rechargement**
+- **Corrigé : un rechargement de la configuration laissait certains sous-systèmes sur l'ancien
+  registre de pools.** Les paquets de changements, les vues de grille enregistrées, la base de
+  nomaflow et (sur le chemin du watcher de fichiers) le backend d'authentification conservaient le
+  registre d'avant le rechargement ; comme un registre libéré reconstruisait silencieusement ses
+  moteurs à partir de son ancienne configuration, ils continuaient avec les anciens identifiants de
+  pool jusqu'au redémarrage. Tous les chemins de rechargement (Paramètres → Recharger, le watcher,
+  une rotation de licence) passent désormais par un `rebuild_runtime` unique qui repointe chaque
+  composant et ferme définitivement l'ancien registre.
+- Le framework démarre même si la base par défaut est injoignable au démarrage (nomaflow est
+  désactivé pour cette exécution avec un avertissement au lieu de bloquer toute l'application).
+  Nouvelle sonde de disponibilité `GET /ready` : `SELECT 1` sur le pool par défaut, 503 en cas
+  d'échec ; `/health` reste une simple sonde de vie.
+
+**Sécurité**
+- **Les erreurs base de données ne renvoient plus l'instruction SQL ni les valeurs liées** aux
+  utilisateurs ordinaires : ils reçoivent le message du pilote et un `error_id` ; les
+  superutilisateurs gardent le texte complet. L'instruction et les valeurs ne sont écrites dans le
+  journal serveur que si `debug_sql` est activé sur le pool.
+- **Rotation des jetons de rafraîchissement.** Chaque `/auth/refresh` renvoie un nouveau jeton et
+  consomme celui présenté ; le représenter plus de `[auth] refresh_reuse_grace` secondes après
+  (60 s par défaut — deux onglets utilisant le même jeton stocké) est refusé. Les clients API
+  doivent conserver le jeton de chaque réponse (l'application web le fait déjà).
+- **Limitation des connexions** : après `[auth] login_max_failures` échecs pour un identifiant dans
+  `login_window_seconds` (10 en 5 min par défaut ; 5× par adresse cliente), `/auth/login` répond
+  429 avec `Retry-After`. `login_max_failures = 0` désactive la limitation.
+- Les JWT sont signés via PyJWT (python-jose, plus maintenu, est retiré — mêmes claims et même
+  secret, les sessions existantes restent valides). Un `LIBERTY_JWT_SECRET` de moins de 32 octets
+  est signalé une fois au démarrage.
+- `/info` anonyme ne renvoie que des compteurs et des indicateurs ; les noms de connecteurs / pools,
+  l'emplacement du magasin d'authentification et le modèle IA sont réservés aux appels
+  authentifiés.
+- `POST /admin/import-package` : limite de 50 Mo à l'envoi et garde de 200 Mo décompressés.
+
+**Installation**
+- **Extras optionnels.** WeasyPrint (rapports PDF), ldap3 (l'étape `ldap_sync`) et Alembic +
+  psycopg2 (les migrations de schéma des applications) ne sont plus des dépendances de base :
+  installez `liberty-next[all]` (ou `[reports]` / `[ldap]` / `[alembic]`). L'image Docker embarque
+  tous les extras, sans changement. Une installation de base démarre sans Pango ; une demande de
+  PDF répond alors 503 avec l'indication d'installation, les rapports markdown continuent de
+  fonctionner.
+- **Corrigé : l'envoi d'un paquet (Package & Deploy) ne fonctionnait pas hors d'un venv disposant
+  par hasard de `python-multipart`** — la dépendance est déclarée, et le contrôle qui rejetait
+  chaque fichier réel (« missing 'package' file part ») est corrigé.
+
+**Application web**
+- **Premier chargement plus rapide** : l'éditeur Monaco a quitté le bundle de démarrage (816 →
+  226 ko gzippés avant l'affichage de la page de connexion) ; il se charge à la première ouverture
+  d'un éditeur SQL.
+- Une erreur d'affichage dans un onglet ne vide plus toute l'application : l'onglet affiche
+  l'erreur avec un bouton Recharger et les autres onglets continuent de fonctionner.
+- La réponse de l'assistant IA peut être **interrompue** en cours de flux ; ce qui a été reçu est
+  conservé.
+- Le bouton Assistant IA suit le thème (variante claire correcte).
+
+**Documentation**
+- `CLAUDE.md` est désormais une carte concise du code ; le récit complet de la construction est
+  déplacé dans `docs/history/`.
+
 ## 7.0.56 — 2026-10-26
 
 **Connecteurs**
