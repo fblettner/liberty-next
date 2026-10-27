@@ -4,6 +4,7 @@
 // QueryResult (for the column choices) + the current ChartSpec + an onChange; persistence, the
 // Save-to-charts.toml flow, and the Load picker live in the host (passed via `trailing`).
 import type { ReactNode } from 'react'
+import { resolveColumnName } from '../../services/chartData'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Plus, X } from 'lucide-react'
@@ -78,13 +79,13 @@ export function ChartSpecEditor({ result, spec, onChange, trailing }: ChartSpecE
       </SpecCell>
       <SpecCell>
         <Field label={t('chart.spec.x')}>
-          <SearchSelect value={spec.x} onChange={(v) => onChange({ ...spec, x: v })} options={colOpts} placeholder={t('chart.spec.pick')} />
+          <SearchSelect value={resolveColumnName(result, spec.x)} onChange={(v) => onChange({ ...spec, x: v })} options={colOpts} placeholder={t('chart.spec.pick')} />
         </Field>
       </SpecCell>
       {spec.type !== 'pie' && (
         <SpecCell>
           <Field label={t('chart.spec.pivot', 'Pivot by')}>
-            <SearchSelect value={spec.series ?? ''} onChange={(v) => onChange({ ...spec, series: v || undefined })} options={colOpts}
+            <SearchSelect value={spec.series ? resolveColumnName(result, spec.series) : ''} onChange={(v) => onChange({ ...spec, series: v || undefined })} options={colOpts}
               anyLabel={t('common.none', 'None')} placeholder={t('chart.spec.pivotHint', 'One series per value')} />
           </Field>
         </SpecCell>
@@ -94,7 +95,7 @@ export function ChartSpecEditor({ result, spec, onChange, trailing }: ChartSpecE
           {spec.y.map((yName, i) => (
             <SeriesRow key={`${yName}-${i}`}>
               <SearchSelect
-                value={yName}
+                value={resolveColumnName(result, yName)}
                 onChange={(v) => onChange(updateSeriesColumn(spec, i, v))}
                 options={colOpts} placeholder={t('chart.spec.pick')}
               />

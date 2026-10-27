@@ -67,6 +67,10 @@ class WidgetBase(BaseModel):
 
     label: str | None = Field(default=None, description="Optional title shown above the widget.")
     description: str | None = Field(default=None, description="A subtitle under the title: what the figure covers (\"Last 12 months, by status\").")
+    l: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Per-language overrides of the widget's text fields, by language code: ``l.fr = { label = \"…\", sub = \"…\", title_column = \"TITLE_FR\" }`` — any string field, including the column a list or bars widget reads a text from.",
+    )
     col_span: int = Field(default=6, ge=1, le=12, description="Width in 12-column grid units (1–12).")
     row_span: int = Field(default=1, ge=1, le=8, description="Height in grid rows (1–8).")
 
@@ -233,6 +237,7 @@ class DashboardFilter(BaseModel):
 
     id: str = Field(description="Stable id (used as the state key on the frontend).")
     label: str = Field(description="Display label shown above the dropdown.")
+    l: dict[str, dict[str, Any]] = Field(default_factory=dict, description="Per-language overrides (``l.fr = { label = \"Application\" }``).")
     dictionary_key: str = Field(
         description=(
             "Cross-table glue — every widget's query column whose ``dd`` hint matches this is the "
@@ -292,6 +297,7 @@ class Dashboard(BaseModel):
     id: str = Field(default="", description="Stable id (matches the inner TOML key).", json_schema_extra={"x_group": "Advanced"})
     label: str = Field(description="Display label — the dashboard's title in lists and menus.")
     description: str | None = Field(default=None, description="Optional longer description.")
+    l: dict[str, dict[str, Any]] = Field(default_factory=dict, description="Per-language overrides of ``label`` / ``description`` (``l.fr = { label = \"Synthèse d'audit\" }``).")
     connector: str = Field(
         default="",
         description="Owning app/connector — the ``<scope>`` path key; injected from it. Widgets may read any connector.",

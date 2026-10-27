@@ -384,3 +384,66 @@ def test_export_dashboard_as_xlsx_and_pdf(app) -> None:
         assert r.status_code in (200, 503)
         if r.status_code == 200:
             assert r.content[:4] == b"%PDF"
+
+
+def test_dashboard_texts_follow_the_request_language(tmp_path) -> None:
+    """``l.fr`` blocks on the dashboard, a filter and a widget apply under X-Liberty-Lang: fr —
+    including the column a list reads its titles from; the block itself never travels."""
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
+    (tmp_path / "connectors.toml").write_text(_connectors_toml(db_url))
+    (tmp_path / "charts.toml").write_text(_charts_toml())
+    (tmp_path / "dashboards.toml").write_text(textwrap.dedent(
+        """
+        [dashboards.app1.synth]
+        label = "Synthesis"
+        description = "What matters"
+        l = { fr = { label = "Synthèse", description = "Ce qui compte" } }
+
+          [[dashboards.app1.synth.filters]]
+          id = "app"
+          label = "Application"
+          dictionary_key = "APPS_ID"
+          l = { fr = { label = "Application (fr)" } }
+            [dashboards.app1.synth.filters.options]
+            connector = "app1"
+            query = "users_get"
+            value_column = "id"
+            label_column = "id"
+
+          [[dashboards.app1.synth.widgets]]
+          type = "list"
+          label = "Decisions"
+          connector = "app1"
+          query = "users_get"
+          title_column = "TITLE"
+          count_label = "{n} users"
+          l = { fr = { label = "Décisions", title_column = "TITLE_FR", count_label = "{n} utilisateurs" } }
+
+          [[dashboards.app1.synth.widgets]]
+          type = "kpi"
+          label = "Users"
+          connector = "app1"
+          query = "users_get"
+          column = "id"
+          l = { fr = { label = "Utilisateurs" } }
+        """
+    ))
+    _seed(db_url)
+    settings = Settings(
+        app=AppSettings(static_dir=""),
+        connectors=ConnectorSettings(config_path=Path(tmp_path / "connectors.toml")),
+        charts=ChartSettings(config_path=Path(tmp_path / "charts.toml")),
+        dashboards=DashboardSettings(config_path=Path(tmp_path / "dashboards.toml")),
+        auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
+        ai=AISettings(enabled=False),
+    )
+    with TestClient(create_app(settings)) as client:
+        h = _h(client, "admin")
+        en = client.get("/api/dashboards/app1.synth", headers=h).json()
+        assert en["label"] == "Synthesis" and en["filters"][0]["label"] == "Application" and en["widgets"][0]["title_column"] == "TITLE" and "l" not in en["widgets"][0]
+        fr = client.get("/api/dashboards/app1.synth", headers={**h, "X-Liberty-Lang": "fr"}).json()
+        assert fr["label"] == "Synthèse" and fr["description"] == "Ce qui compte" and fr["filters"][0]["label"] == "Application (fr)"
+        assert fr["widgets"][0]["label"] == "Décisions" and fr["widgets"][0]["title_column"] == "TITLE_FR" and fr["widgets"][0]["count_label"] == "{n} utilisateurs"
+        assert fr["widgets"][1]["label"] == "Utilisateurs" and "l" not in fr["widgets"][1]
+        listed = client.get("/api/dashboards", headers={**h, "X-Liberty-Lang": "fr-FR"}).json()["dashboards"]
+        assert next(d for d in listed if d["id"] == "app1.synth")["label"] == "Synthèse"

@@ -288,9 +288,10 @@ def _chart_rows(result: dict[str, Any], measure_key: str | None, series_key: str
 
 async def build_sections(
     connectors: ConnectorRegistry, screens: ScreensFile | None, view: ModelView, items: list[tuple[str, dict[str, Any]]], *,
-    window: tuple[date, date] | None = None, scope: DataScope | None = None, today: date | None = None,
+    window: tuple[date, date] | None = None, scope: DataScope | None = None, today: date | None = None, lang: str | None = None,
 ) -> list[Section]:
-    """One section per (title, definition), in the definition's own view."""
+    """One section per (title, definition), in the definition's own view; the note under a
+    section in *lang*."""
     out: list[Section] = []
     for title, d in items:
         kind = d.get("view") or "table"
@@ -305,7 +306,7 @@ async def build_sections(
             out.append(Section(title, "error", ["error"], [[str(exc)]]))
             continue
         cols = res["columns"]
-        note = _note(d, res, window)
+        note = _note(d, res, window, lang)
         if kind == "pivot":
             dims = [c for c in cols if c["kind"] == "dimension"]
             measures = [c for c in cols if c["kind"] == "measure"]
@@ -336,18 +337,19 @@ async def build_sections(
     return out
 
 
-def _note(d: dict[str, Any], res: dict[str, Any], window: tuple[date, date] | None) -> str | None:
+def _note(d: dict[str, Any], res: dict[str, Any], window: tuple[date, date] | None, lang: str | None = None) -> str | None:
+    fr = (lang or "").lower().startswith("fr")
     parts: list[str] = []
     p = _period_of(d, window, None)
     if p and (p.get("from") or p.get("to")):
-        parts.append(f"period {p.get('from', '…')} → {p.get('to', '…')} on {p['field']}")
+        parts.append(f"{'période' if fr else 'period'} {p.get('from', '…')} → {p.get('to', '…')} {'sur' if fr else 'on'} {p['field']}")
     bag = compile_filters(d.get("filterRows") or [])
     flt = [f"{k} {bag.get(k + '__op', '=')} {v}" for k, v in bag.items() if not k.endswith("__op") and not k.endswith("__from") and not k.endswith("__to")]
     flt += [f"{k[:-6]} ≥ {v}" for k, v in bag.items() if k.endswith("__from")] + [f"{k[:-4]} ≤ {v}" for k, v in bag.items() if k.endswith("__to")]
     if flt:
-        parts.append("filters: " + ", ".join(flt))
+        parts.append(("filtres : " if fr else "filters: ") + ", ".join(flt))
     if res.get("groups") is not None:
-        parts.append(f"{res['groups']} group(s) from {res.get('scanned', 0)} row(s)")
+        parts.append(f"{res['groups']} groupe(s) sur {res.get('scanned', 0)} ligne(s)" if fr else f"{res['groups']} group(s) from {res.get('scanned', 0)} row(s)")
     return " · ".join(parts) or None
 
 

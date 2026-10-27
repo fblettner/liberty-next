@@ -86,6 +86,16 @@
   digest. Les KPI deviennent des cartes ; les nombres suivent la langue du lecteur (`1 234,5` /
   `1,234.5`), les mots du gabarit (libellés de couverture, mentions de confidentialité) aussi.
   Excel garde les données seules.
+- **Les tableaux de bord dans la langue du lecteur.** Un tableau de bord, un filtre et un
+  widget acceptent un bloc `l` de surcharges par langue pour leurs textes — `l.fr = { label =
+  "…", description = "…", sub = "…", count_label = "…" }` — y compris la colonne où une liste
+  lit un texte (`title_column = "TITLE_FR"`), de sorte qu'une requête porte une colonne
+  française à côté de l'anglaise. Les routes et l'export appliquent le bloc de la langue de la
+  requête (`X-Liberty-Lang`, région retirée) ; le bloc lui-même ne circule pas. La note sous
+  une section du PDF de l'Explorateur (période, filtres, groupes) suit aussi la langue. Les
+  éditeurs de widget et de graphique montrent une colonne configurée dans l'orthographe de
+  l'échantillon : un nom en majuscules dans le TOML retrouve la colonne en minuscules que
+  Postgres renvoie.
 - **Explorateur : les sélecteurs suivent le modèle.** Changer de modèle rapidement (le premier,
   puis celui de l'application courante) pouvait laisser les analyses enregistrées d'un autre
   modèle dans les sélecteurs : une réponse pour un modèle que la page a quitté est désormais

@@ -131,7 +131,17 @@ def _resolve_table_widget(w: TableWidget) -> dict[str, Any]:
 def _resolve_plain_widget(w: StatWidget | ListWidget | BarsWidget) -> dict[str, Any]:
     """The synthesis widgets (stat / list / bars) travel as they are configured: every field is
     presentation, the frontend formats the first row / the rows itself."""
-    return w.model_dump(mode="json", exclude_none=True)
+    return w.model_dump(mode="json", exclude_none=True, exclude={"l"})
+
+
+def _localize(d: dict[str, Any], overrides: dict[str, dict[str, Any]], language: str | None) -> dict[str, Any]:
+    """*d* with the ``l`` block of *language* (``fr``, or ``fr-FR`` → ``fr``) merged over it — the
+    string fields the operator translated; the block itself never travels."""
+    if not overrides or not language:
+        return d
+    lang = language.lower()
+    block = overrides.get(lang) or overrides.get(lang.split("-")[0]) or {}
+    return {**d, **{k: v for k, v in block.items() if isinstance(v, str) and v}}
 
 
 def _widget_query(widget_dict: dict[str, Any]) -> tuple[str, str] | None:
@@ -152,7 +162,7 @@ def _can_read(principal: Principal, widget_dict: dict[str, Any]) -> bool:
     return principal.has_permission(f"sql:{target[0]}:{target[1]}")
 
 
-def _resolve_filters(dashboard: Dashboard, principal: Principal) -> list[dict[str, Any]]:
+def _resolve_filters(dashboard: Dashboard, principal: Principal, language: str | None = None) -> list[dict[str, Any]]:
     """Build the wire shape for the dashboard's filter bar. A filter is included iff the caller
     holds the permission for its options query (the dropdown can't render otherwise); the rest
     of the dashboard is unaffected."""
@@ -162,7 +172,7 @@ def _resolve_filters(dashboard: Dashboard, principal: Principal) -> list[dict[st
             continue
         out.append({
             "id": f.id,
-            "label": f.label,
+            "label": _localize({"label": f.label}, f.l, language)["label"],
             "dictionary_key": f.dictionary_key,
             **({"default_value": f.default_value} if f.default_value else {}),
             "options": {
@@ -175,7 +185,7 @@ def _resolve_filters(dashboard: Dashboard, principal: Principal) -> list[dict[st
     return out
 
 
-def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Principal) -> dict[str, Any] | None:
+def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Principal, language: str | None = None) -> dict[str, Any] | None:
     """Build the wire shape for one dashboard — resolves chart references, applies the
     per-widget permission gate, drops what the caller can't see. Returns ``None`` when the
     dashboard is explicitly **denied** (``!dashboard:<id>`` — the first-class RBAC overlay, so
@@ -199,11 +209,12 @@ def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Prin
             continue                 # unresolvable chart reference — logged in the resolver
         if not _can_read(principal, wd):
             continue
-        resolved.append(wd)
-    out: dict[str, Any] = {"id": dashboard.qualified_id, "label": dashboard.label, "widgets": resolved}
-    if dashboard.description:
-        out["description"] = dashboard.description
-    filters = _resolve_filters(dashboard, principal)
+        resolved.append(_localize(wd, w.l, language))
+    head = _localize({"label": dashboard.label, "description": dashboard.description or ""}, dashboard.l, language)
+    out: dict[str, Any] = {"id": dashboard.qualified_id, "label": head["label"], "widgets": resolved}
+    if head["description"]:
+        out["description"] = head["description"]
+    filters = _resolve_filters(dashboard, principal, language)
     if filters:
         out["filters"] = filters
     if dashboard.period is not None:
@@ -216,11 +227,12 @@ def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Prin
     summary="List dashboards",
     responses={401: {"description": "Missing / invalid access token."}},
 )
-async def list_dashboards(principal: CurrentPrincipal, dashboards: Dashboards, charts: Charts) -> dict[str, Any]:
+async def list_dashboards(request: Request, principal: CurrentPrincipal, dashboards: Dashboards, charts: Charts) -> dict[str, Any]:
     """Returns the resolved dashboards — widget lists already filtered to only the
     widgets the caller can populate (each widget gates on the underlying connector +
     query's permission). A dashboard with zero readable widgets is dropped entirely."""
-    out = [r for _, _, d in dashboards.iter_dashboards() if (r := _resolve_dashboard(d, charts, principal)) is not None]
+    language = request_language(request)
+    out = [r for _, _, d in dashboards.iter_dashboards() if (r := _resolve_dashboard(d, charts, principal, language)) is not None]
     return {"dashboards": out}
 
 
@@ -233,7 +245,7 @@ async def list_dashboards(principal: CurrentPrincipal, dashboards: Dashboards, c
     },
 )
 async def get_dashboard(
-    dashboard_id: str, principal: CurrentPrincipal, dashboards: Dashboards, charts: Charts,
+    dashboard_id: str, request: Request, principal: CurrentPrincipal, dashboards: Dashboards, charts: Charts,
 ) -> dict[str, Any]:
     """``dashboard_id`` is the qualified ``<scope>.<id>`` form (e.g. ``nomasx1.overview``).
     Returns the dashboard with each widget resolved (chart-refs flattened to inline
@@ -242,7 +254,7 @@ async def get_dashboard(
     chosen value rebinds each applicable widget's query."""
     # ``dashboard_id`` is the qualified ``<scope>.<id>`` (e.g. ``nomasx1.overview``).
     d = dashboards.find(dashboard_id)
-    resolved = _resolve_dashboard(d, charts, principal) if d is not None else None
+    resolved = _resolve_dashboard(d, charts, principal, request_language(request)) if d is not None else None
     if resolved is None:
         # Unknown id OR explicitly denied — same 404 either way (don't leak existence to a
         # caller who's been denied the dashboard).
@@ -276,11 +288,11 @@ async def export_dashboard(
     from liberty.explorer.report import sections_to_pdf, sections_to_xlsx
     from liberty.web.connectors import _build_dd_map_for, _run_sql, _request_pool
 
+    language = request_language(request)
     d = dashboards.find(dashboard_id)
-    resolved = _resolve_dashboard(d, charts, principal) if d is not None else None
+    resolved = _resolve_dashboard(d, charts, principal, language) if d is not None else None
     if resolved is None or d is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Unknown dashboard {dashboard_id!r}")
-    language = request_language(request)
     pool = _request_pool(request)
     pick = PeriodPick(body.period.from_, body.period.to, body.period.basis) if (body.period and resolved.get("period")) else (PeriodPick() if resolved.get("period") else None)
 
@@ -300,7 +312,7 @@ async def export_dashboard(
         rows = await _filter_rows(resolved, body.filters, run)
         try:
             data = sections_to_pdf(
-                sections, d.label, app_name=getattr(settings.app, "name", ""), branding=branding.model_dump() if branding is not None else None,
+                sections, resolved["label"], app_name=getattr(settings.app, "name", ""), branding=branding.model_dump() if branding is not None else None,
                 lang=language, author=principal.username, period=period, cover_rows=rows,
             )
         except ReportsUnavailableError as exc:

@@ -268,7 +268,7 @@ async def export_model(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="give an analysis, a dashboard or a definition")
     window = (body.from_, body.to) if (body.from_ and body.to) else None
     try:
-        sections = await build_sections(connectors, screens, view, items, window=window, scope=current_scope.get())
+        sections = await build_sections(connectors, screens, view, items, window=window, scope=current_scope.get(), lang=language)
     except SQLAlchemyError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=db_error_detail(exc, context=f"explorer {app} export failed", verbose=principal.is_superuser, log=_log)) from exc
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in (title or "explorer")).strip("_") or "explorer"

@@ -76,6 +76,15 @@
   become cards; the numbers follow the reader's language (`1 234,5` / `1,234.5`); the
   template's own words (cover labels, confidential lines) follow it too. Excel keeps the data
   only.
+- **Dashboards in the reader's language.** A dashboard, a filter and a widget take an `l`
+  block of per-language overrides for their texts — `l.fr = { label = "…", description = "…",
+  sub = "…", count_label = "…" }` — including the column a list reads a text from
+  (`title_column = "TITLE_FR"`), so a query can carry a French column next to the English one.
+  The routes and the export apply the block of the request language (`X-Liberty-Lang`,
+  region stripped); the block itself never travels. The Explorer PDF's note under a section
+  (period, filters, groups) follows the language too. The widget and chart editors show a
+  configured column in the sample's spelling, so an upper-case name in the TOML matches the
+  lower-case column Postgres returns.
 - **Explorer: the pickers follow the model.** Switching models quickly (the first model, then
   the current app's) could leave another model's saved analyses in the pickers: a response for a
   model the page has left is now dropped, and a failed list empties the pickers. After a deploy

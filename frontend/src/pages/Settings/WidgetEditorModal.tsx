@@ -12,6 +12,7 @@ import { EditorModalShell } from '../../common/EditorModalShell'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { ChartSpecEditor } from '../TableView/ChartSpecEditor'
 import { ChartCanvas } from '../TableView/ChartCanvas'
+import { resolveColumnName } from '../../services/chartData'
 import { KpiWidget } from '../DashboardView/KpiWidget'
 import { TableWidget } from '../DashboardView/TableWidget'
 import { StatWidget } from '../DashboardView/StatWidget'
@@ -208,9 +209,12 @@ export function WidgetEditorModal({
         share: plain.share === 'max' ? 'max' : 'total', note: plain.note || undefined, max_rows: Number.isFinite(mr) && mr > 0 ? mr : 10 }
     : null
   const formatOpts: SearchSelectOption[] = [{ value: 'number', label: t('settings.dash.fmtNumber', 'Number') }, { value: 'integer', label: t('settings.dash.fmtInteger', 'Integer') }, { value: 'currency', label: t('settings.dash.fmtCurrency', 'Currency') }, { value: 'percent', label: t('settings.dash.fmtPercent', 'Percent (0–1)') }]
+  // A configured column name may be spelled in another case than the sample returns it (TOML
+  // upper-case, Postgres lower-case): the pickers show the sample's spelling so the match is found.
+  const canon = (v: string) => (sample && v ? resolveColumnName(sample, v) : v)
   const colPick = (key: string, lbl: string) => (
     <Field label={lbl}>
-      <SearchSelect value={plain[key]} onChange={(v) => setP(key, v)} options={colOpts} placeholder={t('chart.spec.pick', 'Pick…')} anyLabel={t('common.none', 'None')} allowCustom />
+      <SearchSelect value={canon(plain[key])} onChange={(v) => setP(key, v)} options={colOpts} placeholder={t('chart.spec.pick', 'Pick…')} anyLabel={t('common.none', 'None')} allowCustom />
     </Field>
   )
   const tablePreview: TableWidgetWire | null = kind === 'table' && connector && query
@@ -294,7 +298,7 @@ export function WidgetEditorModal({
             <>
               <Grid2>
                 <Field label={t('settings.dash.column', 'Column')}>
-                  <SearchSelect value={column} onChange={setColumn} options={colOpts} placeholder={t('chart.spec.pick', 'Pick…')} allowCustom />
+                  <SearchSelect value={canon(column)} onChange={setColumn} options={colOpts} placeholder={t('chart.spec.pick', 'Pick…')} allowCustom />
                 </Field>
                 <Field label={t('chart.spec.aggregation', 'Aggregation')}>
                   <SearchSelect value={aggregation} onChange={setAggregation} options={aggOpts} />
@@ -407,7 +411,7 @@ export function WidgetEditorModal({
                   ))}
                   <div style={{ minWidth: 180 }}>
                     <SearchSelect value="" onChange={(v) => { if (v && !columns.includes(v)) setColumns([...columns, v]) }}
-                      options={colOpts.filter((o) => !columns.includes(o.value))} placeholder={t('settings.dash.addColumn', 'Add column…')} allowCustom />
+                      options={colOpts.filter((o) => !columns.some((c) => c.toLowerCase() === o.value.toLowerCase()))} placeholder={t('settings.dash.addColumn', 'Add column…')} allowCustom />
                   </div>
                 </Chips>
               </Field>
