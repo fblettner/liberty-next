@@ -113,6 +113,10 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
   changesets/             change packages: capture writes, lifecycle, compaction, apply bundle
   versioning/             config snapshot history (.versions/) + upgrade journal
   userviews/              DB-backed saved grid / chart views (shared + per user)
+  explorer/               the Data Explorer (C3): config.py (explorer.toml: hub, entities with cardinality /
+                          key / measures / default_date, relations on column pairs, path_to_hub), model.py
+                          (fields discovered from each entity query's columns + dictionary / screen hints,
+                          type classes, ModelCache per app cleared on reload)
   notify/                 notifications: store.py (ly2_notification inbox, schema_sync), dispatcher.py
                           (Message → portal rows + Socket.IO push / SMTP email / a connector query or
                           endpoint; recipients user: role: email:; channels isolated), rules.py
@@ -149,6 +153,7 @@ tests/                    pytest (asyncio auto mode); SQLite fixtures; no live D
 | `/api` | `web/menus.py`, `web/screens.py`, `web/export.py`, `web/charts.py`, `web/dashboards.py`, `web/actions.py`, `web/license.py`, `web/theme.py` | permission-pruned catalogs: menus, screens (+ dialog / actions resolved), workbook export, charts, dashboards, shared actions, license status, theme |
 | `/api/reports` `/api/views` `/api/plugins` | `web/reports.py`, `web/views.py`, `web/plugins.py` | run / download reports, saved views, invoke app callables |
 | `/api/notifications` `/admin/notify/test` | `web/notifications.py` | my inbox (list, unread count, mark read); a superuser's test send through the dispatcher |
+| `/api/explorer` | `web/explorer.py` | the explorer models the caller may use (perm `explorer:{app}`), `{app}/model` with the discovered fields (`?refresh=1`) |
 | `/ai` | `ai/routes.py` | `POST /ai/chat` (SSE), `GET /ai/tools` — perm `ai:chat` |
 | `/admin` | `web/admin.py` (3.3k lines — the config builders' backend), `web/dictgen.py` | reload, `GET /admin/config/schema`, `GET/PUT /admin/config/<section>/parsed`, rename / move / clone / delete-with-deps / find-usages / dependencies / integrity, packages (build / import), versions, AI proposal apply, API test, dictionary scan — **superuser** |
 | `/admin/access` `/admin/jobs` `/admin/changesets` | `web/access.py`, `web/jobs.py`, `web/changesets.py` | roles / permissions, nomaflow jobs + runs + presets + `{job}/upload` / `runs/{id}/files/{name}` + `retention` / `missed` policies, change packages |
@@ -188,6 +193,7 @@ hot-reloadable (`[app] hot_reload = true`, `web/hot_reload.py`) or reloaded via
 | `theme.toml` | `[theme]` | `theme.py::ThemeFile` | Theme |
 | `reports.toml` | `[reports] templates_config_path` | `reports/schema.py` | Reports |
 | `jobs.toml` | `[jobs]` (default `${LIBERTY_APPS_DIR}/../plugins/nomaflow/jobs.toml`) | `jobs/schema.py` | nomaflow → Jobs |
+| `explorer.toml` | `[explorer]` | `explorer/config.py::ExplorerFile` | Explorer (model: hub, entities, relations) |
 | `notifications.toml` | `[notify] config_path` (+ the inbox pool and SMTP, edited under App) | `notify/rules.py::NotificationsFile` | Notifications |
 | `auth.toml` | `[auth] backend = "toml"` | `auth/authstore.py::AuthFile` | Access |
 

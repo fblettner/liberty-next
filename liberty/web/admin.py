@@ -59,6 +59,7 @@ from liberty.actions.config import SharedActionsFile, parse_actions
 from liberty.charts import load_charts
 from liberty.charts.config import ChartsFile, parse_charts
 from liberty.dashboards import load_dashboards
+from liberty.explorer import ExplorerFile
 from liberty.dashboards.config import DashboardsFile, parse_dashboards
 from liberty.theme import font_choices, load_theme, parse_theme, preset_choices, resolve_theme
 from liberty.web.clone import CloneError, clone_app, delete_app
@@ -546,6 +547,7 @@ async def get_config_schema(request: Request, _: Superuser) -> dict[str, Any]:
         "charts": ChartsFile.model_json_schema(),
         "actions": SharedActionsFile.model_json_schema(),
         "dashboards": DashboardsFile.model_json_schema(),
+        "explorer": ExplorerFile.model_json_schema(),
         "framework_enums": bundled,
     }
 
@@ -1235,6 +1237,58 @@ async def put_charts_parsed(body: ChartsBody, request: Request, _: Superuser) ->
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting charts are invalid: {exc}") from exc
 
     path = Path(request.app.state.settings.charts.config_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
+    path.write_text(new_text, encoding="utf-8")
+    return {"saved": True, "path": str(path)}
+
+
+@router.get("/config/explorer/parsed", summary="Get explorer config")
+async def get_explorer_parsed(request: Request, _: Superuser) -> dict[str, Any]:
+    """The current ``explorer.toml`` parsed — ``{path, explorer: {<app>: model dict}}``; a missing
+    file is an empty set. Relations keep their ``from`` key; entity ids are the table keys."""
+    from liberty.explorer import load_explorer
+    path = Path(request.app.state.settings.explorer.config_path)
+    cfg = load_explorer(path)
+    out = {}
+    for app, m in cfg.explorer.items():
+        d = m.model_dump(by_alias=True, exclude_none=True, exclude_defaults=True, exclude={"id"})
+        d["hub"] = m.hub
+        for eid, e in d.get("entities", {}).items():
+            e.pop("id", None)
+            e.setdefault("query", m.entities[eid].query)
+        out[app] = d
+    return {"path": str(path), "explorer": out}
+
+
+class ExplorerBody(BaseModel):
+    explorer: dict[str, dict[str, Any]]
+
+
+@router.put("/config/explorer/parsed", summary="Update explorer config")
+async def put_explorer_parsed(body: ExplorerBody, request: Request, _: Superuser) -> dict[str, object]:
+    """Validate against :class:`ExplorerFile`, rewrite ``explorer.toml`` through ``tomli-w`` (the
+    builder owns the file). Does not reload — call ``POST /admin/reload``."""
+    from liberty.explorer import parse_explorer
+    try:
+        validated = parse_explorer({"explorer": _drop_none(body.explorer)})
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid explorer config: {exc}") from exc
+    normalized: dict[str, Any] = {"explorer": {}}
+    for app, m in validated.explorer.items():
+        d = m.model_dump(by_alias=True, exclude_none=True, exclude_defaults=True, exclude={"id"})
+        d["hub"] = m.hub
+        for eid, e in d.get("entities", {}).items():
+            e.pop("id", None)
+            e.setdefault("query", m.entities[eid].query)
+        normalized["explorer"][app] = d
+    import tomli_w
+    new_text = tomli_w.dumps(normalized)
+    try:
+        parse_explorer(tomllib.loads(new_text))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting explorer config is invalid: {exc}") from exc
+    path = Path(request.app.state.settings.explorer.config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")

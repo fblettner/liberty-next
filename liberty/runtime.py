@@ -51,7 +51,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 _log = logging.getLogger("liberty.runtime")
 
 ALL_SECTIONS: frozenset[str] = frozenset(
-    {"license", "connectors", "menus", "screens", "charts", "actions", "dashboards", "jobs", "notifications"}
+    {"license", "connectors", "menus", "screens", "charts", "actions", "dashboards", "explorer", "jobs", "notifications"}
 )
 
 
@@ -243,6 +243,15 @@ async def rebuild_runtime(
             from liberty.dashboards import load_dashboards
 
             app.state.dashboards = load_dashboards(settings.dashboards.config_path)
+        if "explorer" in wanted:
+            from liberty.explorer import load_explorer
+
+            app.state.explorer = load_explorer(settings.explorer.config_path)
+        # The explorer's discovered fields depend on the connectors, the screens, the dictionary
+        # and the model: any reload empties the cache.
+        cache = getattr(app.state, "explorer_cache", None)
+        if cache is not None:
+            cache.clear()
         if "notifications" in wanted and getattr(settings, "notify", None) is not None:
             from liberty.notify import load_notification_rules
 

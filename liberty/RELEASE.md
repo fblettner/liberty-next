@@ -59,6 +59,26 @@
   a "Missed schedules" panel next to the retention one edits the policy, shows the last check and
   runs one ("Check now"); routes `GET /admin/jobs/missed`, `POST /admin/jobs/missed/check`.
 
+**Data Explorer (first part): the model**
+- `explorer.toml`, one model per app (`[explorer.<app>]`): a **hub** entity and the entities around
+  it, each a parameterless query of a connector with a `cardinality` (one row per hub row, or
+  many), a `key`, a `default_date`, `measures` (column → default aggregate) and `hidden` columns;
+  `relations` join entities on column pairs (`on = [["COMPANY", "COMPANY"]]`, any key, one or
+  more hops to the hub). No SQL in the file: the **fields** are discovered from each entity
+  query's result columns at request time, labelled, formatted and typed through the dictionary
+  and the entity's `screen` column hints (a LOOKUP or ENUM rule becomes the field's reference
+  list), classified as `string` / `number` / `date` / `datetime` / `boolean` and as dimension or
+  measure; field names are upper-cased (`sales.QTY` on Postgres as on Oracle, the framework's
+  convention) so an analysis moves between dialects. `GET /api/explorer` lists the models the caller may use (new permission
+  `explorer:<app>`), `GET /api/explorer/<app>/model` returns the model with its fields
+  (`?refresh=1` bypasses the per-app cache, which every reload empties); a broken entity is
+  reported on the model, not raised. Settings → Explorer edits the model: the hub, the entities
+  (the entity editor discovers the query's columns and lets the operator tick the key, the
+  measures with their aggregate, the hidden ones and the default date) and the relations;
+  `GET/PUT /admin/config/explorer/parsed`, hot-reloaded, part of the apps bundle merge. The
+  Access editor offers "Data Explorer" as a rule type. The engine, the UI, saved analyses and
+  the export follow in the next parts.
+
 **Screens: `editable_when`, a row-level read-only rule**
 - A screen can say when an existing row may be changed: `editable_when = [{ field = "PERIOD_STATUS",
   value = ["open", "validated"] }]` keeps the rows of a closed period read-only. The grid's edit mode

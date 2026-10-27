@@ -69,6 +69,27 @@
   politique, montre le dernier contrôle et en lance un (« Contrôler maintenant ») ; routes
   `GET /admin/jobs/missed`, `POST /admin/jobs/missed/check`.
 
+**Explorateur de données (première partie) : le modèle**
+- `explorer.toml`, un modèle par app (`[explorer.<app>]`) : une entité **pivot** et les entités
+  autour, chacune une requête sans paramètre d'un connecteur avec une `cardinality` (une ligne par
+  ligne du pivot, ou plusieurs), une `key`, une `default_date`, des `measures` (colonne → agrégat
+  par défaut) et des colonnes `hidden` ; les `relations` joignent les entités sur des paires de
+  colonnes (`on = [["COMPANY", "COMPANY"]]`, n'importe quelle clé, un ou plusieurs sauts jusqu'au
+  pivot). Aucun SQL dans le fichier : les **champs** sont découverts à la demande à partir des
+  colonnes résultat de chaque requête, libellés, formatés et typés par le dictionnaire et les
+  indications de colonnes de l'écran (`screen`) de l'entité (une règle LOOKUP ou ENUM devient la
+  liste de référence du champ), classés `string` / `number` / `date` / `datetime` / `boolean` et
+  dimension ou mesure ; les noms de champs sont en majuscules (`sales.QTY` sur Postgres comme sur
+  Oracle, la convention du framework) pour qu'une analyse passe d'un dialecte à l'autre. `GET /api/explorer` liste les modèles accessibles (nouvelle permission
+  `explorer:<app>`), `GET /api/explorer/<app>/model` renvoie le modèle avec ses champs
+  (`?refresh=1` ignore le cache par app, vidé à chaque rechargement) ; une entité en erreur est
+  signalée sur le modèle, pas levée. Configuration → Explorateur modifie le modèle : le pivot, les
+  entités (l'éditeur d'entité découvre les colonnes de la requête et laisse cocher la clé, les
+  mesures avec leur agrégat, les colonnes masquées et la date par défaut) et les relations ;
+  `GET/PUT /admin/config/explorer/parsed`, rechargé à chaud, inclus dans la fusion du bundle des
+  apps. L'éditeur d'accès propose « Explorateur de données » comme type de règle. Le moteur,
+  l'interface, les analyses enregistrées et l'export suivent dans les parties suivantes.
+
 **Écrans : `editable_when`, une règle de lecture seule par ligne**
 - Un écran peut dire quand une ligne existante peut être modifiée : `editable_when = [{ field =
   "PERIOD_STATUS", value = ["open", "validated"] }]` garde en lecture seule les lignes d'une période

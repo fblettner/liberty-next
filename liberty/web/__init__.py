@@ -8,6 +8,7 @@ from liberty.web.charts import router as charts_router
 from liberty.web.dictgen import router as dictgen_router
 from liberty.web.connectors import router as connectors_router
 from liberty.web.dashboards import router as dashboards_router
+from liberty.web.explorer import router as explorer_router
 from liberty.web.export import router as export_router
 from liberty.web.jobs import router as jobs_router
 from liberty.web.license import router as license_router
@@ -28,6 +29,7 @@ __all__ = [
     "dictgen_router",
     "connectors_router",
     "dashboards_router",
+    "explorer_router",
     "export_router",
     "jobs_router",
     "license_router",

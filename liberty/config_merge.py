@@ -55,7 +55,7 @@ import tomli_w
 
 MERGEABLE = frozenset({
     "connectors.toml", "dictionary.toml", "screens.toml", "menus.toml",
-    "charts.toml", "dashboards.toml", "actions.toml",
+    "charts.toml", "dashboards.toml", "actions.toml", "explorer.toml",
 })
 PRESERVED = frozenset({"theme.toml"})  # the operator's branding: added when absent, never refreshed
 BUNDLED_DIR = ".bundled"
@@ -73,6 +73,7 @@ def enumerate_entities(data: dict[str, Any], filename: str) -> Iterator[tuple[st
         screens.toml     screens.<app>.<id>
         charts.toml      charts.<scope>.<id>        dashboards.toml  dashboards.<scope>.<id>
         actions.toml     actions.<id>
+        explorer.toml    explorer.<app>
         menus.toml       menus.<app> (the header: everything but items) · menus.<app>.items[].id
     """
     if filename == "connectors.toml":
@@ -101,6 +102,9 @@ def enumerate_entities(data: dict[str, Any], filename: str) -> Iterator[tuple[st
     elif filename == "actions.toml":
         for n, v in (data.get("actions") or {}).items():
             yield "action", {n: v}
+    elif filename == "explorer.toml":
+        for n, v in (data.get("explorer") or {}).items():
+            yield "explorer", {n: v}
     elif filename == "menus.toml":
         for app, app_menu in (data.get("menus") or {}).items():
             if not isinstance(app_menu, dict):
@@ -134,6 +138,8 @@ def resolve_path(kind: str, name: str, filename: str) -> tuple[list[str], str]:
         return [{"screens.toml": "screens", "charts.toml": "charts", "dashboards.toml": "dashboards"}[filename], scope], name
     if filename == "actions.toml":
         return ["actions"], name
+    if filename == "explorer.toml":
+        return ["explorer"], name
     if filename == "menus.toml" and kind == "menu_app":
         return ["menus"], name
     raise KeyError(f"{kind!r} is not a dict-keyed entity of {filename}")

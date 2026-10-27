@@ -1,0 +1,27 @@
+# Data Explorer models — one per app. Copy to explorer.toml (or edit through Settings → Explorer).
+# An entity is a parameterless SELECT of a connector; its fields are the query's result columns,
+# labelled and typed through the dictionary and the screen's column hints. No SQL lives here.
+
+[explorer.nomajde]
+label = "Sales"
+hub = "sales"                         # the entity every analysis starts from
+
+[explorer.nomajde.entities.sales]
+label = "Sales"
+query = "fact_sales_get"              # of the app's connector (or set `connector = "..."`)
+screen = "fact_sales"                 # optional: this screen's column hints (labels, formats, hidden)
+key = ["ID"]
+default_date = "SOLD_ON"              # the date a period applies to by default
+measures = { QTY = "sum", REVENUE = "sum" }   # sum | avg | min | max | count | count_distinct
+hidden = ["ID", "BATCH_ID"]
+
+[explorer.nomajde.entities.period]
+label = "Period"
+query = "period_status_get"
+key = ["PERIOD"]
+cardinality = "one"                   # rows of this entity per hub row: one (a dimension) | many (lines)
+
+[[explorer.nomajde.relations]]        # every entity must reach the hub through relations
+from = "sales"
+to = "period"
+on = [["PERIOD", "PERIOD"]]           # pairs: a column of `from`, a column of `to`

@@ -228,6 +228,35 @@ export interface ChartsDoc {
  *  dashboard`. The owning connector is the `<scope>` path key; the body is a
  *  `liberty/dashboards/config.py::Dashboard` minus the path-derived `id`/`connector`. The public
  *  id (menus / URL / permissions) is the qualified `<scope>.<id>`. */
+export interface ExplorerEntityBody {
+  label?: string
+  description?: string
+  connector?: string
+  query: string
+  screen?: string
+  params?: Record<string, unknown>
+  key?: string[]
+  cardinality?: 'one' | 'many'
+  default_date?: string
+  measures?: Record<string, string>
+  hidden?: string[]
+  override?: boolean
+}
+export interface ExplorerRelationBody { from: string; to: string; on: string[][] }
+export interface ExplorerModelBody {
+  label?: string
+  description?: string
+  hub: string
+  entities: Record<string, ExplorerEntityBody>
+  relations?: ExplorerRelationBody[]
+  override?: boolean
+}
+/** `GET /admin/config/explorer/parsed` — one model per app. */
+export interface ExplorerDoc {
+  path: string
+  explorer: Record<string, ExplorerModelBody>
+}
+
 export interface DashboardsDoc {
   path: string
   dashboards: Record<string, Record<string, Record<string, unknown>>>

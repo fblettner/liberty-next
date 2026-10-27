@@ -27,7 +27,7 @@ const SegBtn = styled.button<{ $active?: boolean; $tone?: 'allow' | 'deny' }>`
 `
 const AddRow = styled.div`display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px;`
 
-type RuleType = 'connector' | 'query' | 'api' | 'dashboard' | 'ai' | 'pattern'
+type RuleType = 'connector' | 'query' | 'api' | 'dashboard' | 'explorer' | 'ai' | 'pattern'
 
 interface Props { value: string[]; onChange: (next: string[]) => void; dashboardIds: string[] }
 
@@ -46,6 +46,7 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
     if (type === 'query') return sqlConns.flatMap((c) => c.queries.map((q) => ({ value: `sql:${c.name}:${q.name}`, label: `${c.name} · ${q.label || q.name}`, mono: `sql:${c.name}:${q.name}` })))
     if (type === 'api') return apiConns.flatMap((c) => c.endpoints.map((e) => ({ value: `api:${c.name}:${e.name}`, label: `${c.name} · ${e.label || e.name}`, mono: `api:${c.name}:${e.name}` })))
     if (type === 'dashboard') return dashboardIds.map((d) => ({ value: `dashboard:${d}`, label: d, mono: `dashboard:${d}` }))
+    if (type === 'explorer') return sqlConns.map((c) => ({ value: `explorer:${c.name}`, label: c.name, mono: `explorer:${c.name}` }))
     if (type === 'ai') return [{ value: 'ai:chat', label: t('settings.access.aiChat', 'AI assistant'), mono: 'ai:chat' }]
     return []
   }, [type, sqlConns, apiConns, dashboardIds, t])
@@ -63,6 +64,7 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
     { value: 'query', label: t('settings.access.tQuery', 'Query') },
     { value: 'api', label: t('settings.access.tApi', 'API endpoint') },
     { value: 'dashboard', label: t('settings.access.tDashboard', 'Dashboard') },
+    { value: 'explorer', label: t('settings.access.tExplorer', 'Data Explorer') },
     { value: 'ai', label: t('settings.access.tAi', 'AI assistant') },
     { value: 'pattern', label: t('settings.access.tPattern', 'Pattern (expert)') },
   ]

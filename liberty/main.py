@@ -42,6 +42,7 @@ from liberty.web import (
     dictgen_router,
     connectors_router,
     dashboards_router,
+    explorer_router,
     export_router,
     jobs_router,
     license_router,
@@ -166,6 +167,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.charts = load_charts(settings.charts.config_path)
         app.state.actions = load_actions(settings.actions.config_path)
         app.state.dashboards = load_dashboards(settings.dashboards.config_path)
+        from liberty.explorer import load_explorer
+        from liberty.explorer.model import ModelCache
+        app.state.explorer = load_explorer(settings.explorer.config_path)
+        app.state.explorer_cache = ModelCache()
         from liberty.notify import load_notification_rules
         app.state.notification_rules = load_notification_rules(settings.notify.config_path, strict=False)
         # Config file versioning — filesystem snapshot history (.versions/ next to the TOMLs) so the
@@ -601,6 +606,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(charts_router)
     app.include_router(actions_router)
     app.include_router(dashboards_router)
+    app.include_router(explorer_router)
     app.include_router(license_router)
     app.include_router(theme_router)
     app.include_router(ai_router)
@@ -675,6 +681,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
             "charts": {"total": sum(len(by_id) for by_id in app.state.charts.charts.values())},
             "dashboards": {"total": sum(len(by_id) for by_id in app.state.dashboards.dashboards.values())},
+            "explorer": {"apps": list(app.state.explorer.explorer)},
             "auth": {
                 "backend": s.auth.backend,
                 **(({"pool": s.auth.pool} if s.auth.backend == "db" else {"toml": str(s.auth.toml_path)})

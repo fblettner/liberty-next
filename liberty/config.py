@@ -199,6 +199,13 @@ class ActionSettings(BaseModel):
     config_path: Path = Field(default_factory=lambda: _default_config_path("actions"))
 
 
+class ExplorerSettings(BaseModel):
+    """The Data Explorer models (see :mod:`liberty.explorer`). ``[explorer.<app>]`` per app; a
+    missing file is fine (no explorer)."""
+
+    config_path: Path = Field(default_factory=lambda: _default_config_path("explorer"))
+
+
 class DashboardSettings(BaseModel):
     """Dashboard layouts — Phase 8 slice 3 (see :mod:`liberty.dashboards`). A dashboard is a
     grid of widgets (chart, kpi, …) surfaced through the menu system like any other screen."""
@@ -441,6 +448,7 @@ class Settings(BaseModel):
     charts: ChartSettings = Field(default_factory=ChartSettings)
     actions: ActionSettings = Field(default_factory=ActionSettings)
     dashboards: DashboardSettings = Field(default_factory=DashboardSettings)
+    explorer: ExplorerSettings = Field(default_factory=ExplorerSettings)
     theme: ThemeSettings = Field(default_factory=ThemeSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)

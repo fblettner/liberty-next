@@ -25,6 +25,7 @@ const MenusBuilder = lazy(() => import('./MenusBuilder'))
 const ScreensBuilder = lazy(() => import('./ScreensBuilder'))
 const DashboardsBuilder = lazy(() => import('./DashboardsBuilder'))
 const ChartsBuilder = lazy(() => import('./ChartsBuilder'))
+const ExplorerBuilder = lazy(() => import('./ExplorerBuilder'))
 const ThemeBuilder = lazy(() => import('./ThemeBuilder'))
 const AccessBuilder = lazy(() => import('./AccessBuilder'))
 const AppBuilder = lazy(() => import('./AppBuilder'))
@@ -41,7 +42,7 @@ const ReleaseNotes = lazy(() => import('./ReleaseNotes'))
 // components still live in this folder (they share FindDependenciesModal / FindUsagesModal with the
 // other config editors); the nomaflow pages import them. See pages/Nomaflow/{Package,Changes,Integrity}Page.
 
-const TABS = ['pools', 'connectors', 'dictionary', 'actions', 'menus', 'screens', 'charts', 'dashboards', 'reports', 'notifications', 'theme', 'access', 'app', 'versions', 'releasenotes'] as const
+const TABS = ['pools', 'connectors', 'dictionary', 'actions', 'menus', 'screens', 'charts', 'dashboards', 'explorer', 'reports', 'notifications', 'theme', 'access', 'app', 'versions', 'releasenotes'] as const
 type Tab = typeof TABS[number]
 const isTab = (v: string | null): v is Tab => v != null && (TABS as readonly string[]).includes(v)
 
@@ -111,6 +112,7 @@ export default function Settings() {
         <TabBtn $active={tab === 'screens'} onClick={() => setTab('screens')}>{t('settings.tabs.screens')}</TabBtn>
         <TabBtn $active={tab === 'charts'} onClick={() => setTab('charts')}>{t('settings.tabs.charts', 'Charts')}</TabBtn>
         <TabBtn $active={tab === 'dashboards'} onClick={() => setTab('dashboards')}>{t('settings.tabs.dashboards')}</TabBtn>
+        <TabBtn $active={tab === 'explorer'} onClick={() => setTab('explorer')}>{t('settings.tabs.explorer')}</TabBtn>
         {/* Reports — operator-authored Jinja markdown templates rendered through
             the framework. Sits next to dashboards as the other "visualization
             output" surface. Install-wide PDF branding is in the App tab now. */}
@@ -140,6 +142,7 @@ export default function Settings() {
           : tab === 'menus' ? <MenusBuilder />
           : tab === 'screens' ? <ScreensBuilder />
           : tab === 'charts' ? <ChartsBuilder />
+          : tab === 'explorer' ? <ExplorerBuilder />
           : tab === 'dashboards' ? <DashboardsBuilder />
           : tab === 'reports' ? <ReportsBuilder />
           : tab === 'actions' ? <ActionsBuilder />
