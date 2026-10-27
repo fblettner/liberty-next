@@ -50,7 +50,8 @@ def build_instance_tools(state: Callable[[], Any], *, allowed: list[str] | None 
                 ]
             by_id = screens.get(name) or {}
             if by_id:
-                app["screens"] = [{"id": sid, "label": s.label or s.description or sid} for sid, s in by_id.items()]
+                # the read query by its exact name: the model must not guess `<screen>_get`
+                app["screens"] = [{"id": sid, "label": s.label or s.description or sid, "read_query": s.read_query} for sid, s in by_id.items()]
             apps.append(app)
         out: dict[str, Any] = {"apps": apps}
         dashboards = getattr(st, "dashboards", None)

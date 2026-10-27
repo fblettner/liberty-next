@@ -48,7 +48,7 @@ def _tools(**kw):
 async def test_describe_instance_summarises_the_state() -> None:
     out = await _tools()["describe_instance"].run({})
     nomajde = next(a for a in out["apps"] if a["id"] == "nomajde")
-    assert nomajde["label"] == "JDE administration" and nomajde["screens"] == [{"id": "f0092", "label": "Users"}]
+    assert nomajde["label"] == "JDE administration" and nomajde["screens"] == [{"id": "f0092", "label": "Users", "read_query": "f0092_get"}]
     assert nomajde["menu"] == [{"id": "users", "label": "Users", "type": "screen", "target": "f0092"}, {"id": "sec", "label": "Security"}]
     assert out["dashboards"] == [{"id": "nomasx1.overview", "label": "Security Overview"}]
     assert out["jobs"] == [{"id": "nightly", "description": "Collect", "schedule": "0 2 * * *", "enabled": True, "steps": ["collect"]}]
