@@ -35,7 +35,7 @@ from liberty.connectors.registry import ConnectorRegistry
 from liberty.explorer import ExplorerFile
 from liberty.explorer.engine import AggregateRequest, CalcTestRequest, DetailRequest, ExplorerError, run_aggregate, run_calc_test, run_detail
 from liberty.explorer.model import ModelCache
-from liberty.explorer.report import build_sections, sections_to_pdf, sections_to_xlsx
+from liberty.explorer.report import build_sections, common_period, sections_to_pdf, sections_to_xlsx
 from liberty.explorer.store import KIND_ANALYSIS, KIND_DASHBOARD, AnalysisStore
 from liberty.web.errors import db_error_detail, http_for_connector_error
 
@@ -277,7 +277,10 @@ async def export_model(
         settings = request.app.state.settings
         branding = getattr(getattr(settings, "reports", None), "branding", None)
         try:
-            data = sections_to_pdf(sections, title or "Explorer", app_name=getattr(settings.app, "name", ""), branding=branding.model_dump() if branding is not None else None)
+            data = sections_to_pdf(
+                sections, title or "Explorer", app_name=getattr(settings.app, "name", ""), branding=branding.model_dump() if branding is not None else None,
+                lang=language, author=principal.username, period=common_period(items, window),
+            )
         except ReportsUnavailableError as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
         return StreamingResponse(iter([data]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{safe}.pdf"'})

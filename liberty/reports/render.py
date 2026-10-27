@@ -21,7 +21,8 @@ from __future__ import annotations
 
 import io
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from html import escape as html_escape
 from typing import Any, Optional
 
 import markdown
@@ -82,6 +83,29 @@ class BuildOptions:
     # Theme color (hex). Used for headings, table headers, cover gradient base.
     primary_color: str = "#0b3a82"
     primary_color_light: str = "#2563eb"
+
+    # Document shape. ``lang`` localises the template's own words (the cover labels, the TOC
+    # heading, the confidential lines) when they are left at their French defaults; ``toc``
+    # drops the contents page; ``section_breaks`` lets the h2 sections flow instead of each
+    # starting a page (a synthesis: cover, then the sections one after the other);
+    # ``cover_meta`` adds rows to the cover's metadata block after Client / Date / Auteur / Version.
+    lang: str = "fr"
+    toc: bool = True
+    section_breaks: bool = True
+    cover_meta: list[tuple[str, str]] = field(default_factory=list)
+
+
+# The template's own words, written for French reports; an English document gets these when
+# an option still carries the French default (an operator's branding text is never touched).
+_EN = {
+    "Rapport": "Report", "Document confidentiel": "Confidential document", "Confidentiel": "Confidential",
+    "Client": "Client", "Date": "Date", "Auteur": "Author", "Version": "Version", "Table des matières": "Contents",
+    "Document confidentiel — Reproduction et diffusion interdites sans autorisation": "Confidential document — not to be reproduced or distributed without permission",
+}
+
+
+def _tx(options: BuildOptions, text: str) -> str:
+    return _EN.get(text, text) if not options.lang.lower().startswith("fr") else text
 
 
 # ---------------------------------------------------------------------------
@@ -273,12 +297,13 @@ def md_to_html_body(
         # No SVG provided: just clean up the placeholder
         html_body = html_body.replace("<!-- ARCHITECTURE_SVG_PLACEHOLDER -->", "")
 
-    # Force a page break before every top-level section (h2)
-    html_body = re.sub(
-        r'<h2 id="([^"]+)">',
-        r'<h2 id="\1" class="section-start">',
-        html_body,
-    )
+    # Force a page break before every top-level section (h2) — unless the document flows
+    if options.section_breaks:
+        html_body = re.sub(
+            r'<h2 id="([^"]+)">',
+            r'<h2 id="\1" class="section-start">',
+            html_body,
+        )
 
     # Special case: the h2 immediately after the landscape page should NOT
     # have page-break-before, otherwise the orientation change + the break
@@ -306,23 +331,31 @@ def _build_full_html(
     brand = options.cover_brand or options.author or ""
     meta_rows = []
     if options.client:
-        meta_rows.append(f"<tr><td>Client</td><td>{options.client}</td></tr>")
+        meta_rows.append(f"<tr><td>{_tx(options, 'Client')}</td><td>{options.client}</td></tr>")
     if options.date:
-        meta_rows.append(f"<tr><td>Date</td><td>{options.date}</td></tr>")
+        meta_rows.append(f"<tr><td>{_tx(options, 'Date')}</td><td>{options.date}</td></tr>")
     if options.author:
-        meta_rows.append(f"<tr><td>Auteur</td><td>{options.author}</td></tr>")
+        meta_rows.append(f"<tr><td>{_tx(options, 'Auteur')}</td><td>{options.author}</td></tr>")
     if options.version:
-        meta_rows.append(f"<tr><td>Version</td><td>{options.version}</td></tr>")
+        meta_rows.append(f"<tr><td>{_tx(options, 'Version')}</td><td>{options.version}</td></tr>")
+    for label, value in options.cover_meta:
+        meta_rows.append(f"<tr><td>{html_escape(label)}</td><td>{html_escape(value)}</td></tr>")
     meta_html = "\n".join(meta_rows)
 
     confidential_footer = (
-        "Document confidentiel — Reproduction et diffusion interdites sans autorisation"
+        _tx(options, "Document confidentiel — Reproduction et diffusion interdites sans autorisation")
         if options.confidential
         else ""
     )
+    toc_section = f"""
+<section class="toc-page">
+  <h1 class="toc-heading">{_tx(options, "Table des matières")}</h1>
+  {toc_html}
+</section>
+""" if options.toc else ""
 
     return f"""<!DOCTYPE html>
-<html lang="fr">
+<html lang="{options.lang}">
 <head>
 <meta charset="utf-8"/>
 <title>{options.title}</title>
@@ -332,11 +365,11 @@ def _build_full_html(
 <section class="cover">
   <div class="cover-top">
     <div class="cover-brand">{brand}</div>
-    <div class="cover-ref">{options.cover_ref}</div>
+    <div class="cover-ref">{_tx(options, options.cover_ref)}</div>
   </div>
 
   <div class="cover-center">
-    <div class="cover-eyebrow">{options.cover_eyebrow}</div>
+    <div class="cover-eyebrow">{_tx(options, options.cover_eyebrow)}</div>
     <h1 class="cover-title">{options.title}</h1>
     <div class="cover-subtitle">{options.subtitle}</div>
     <div class="cover-rule"></div>
@@ -346,11 +379,7 @@ def _build_full_html(
   <div class="cover-bottom">{confidential_footer}</div>
 </section>
 
-<section class="toc-page">
-  <h1 class="toc-heading">Table des matières</h1>
-  {toc_html}
-</section>
-
+{toc_section}
 <main class="content">
 {html_body}
 </main>
@@ -376,7 +405,7 @@ def _build_css(options: BuildOptions) -> str:
         f"{options.author} · {options.date}" if options.author and options.date
         else options.author or options.date
     )
-    footer_left = options.footer_left
+    footer_left = _tx(options, options.footer_left)
 
     return f"""
 /* ============ PAGE LAYOUT ============ */
@@ -647,6 +676,18 @@ html, body {{
   page-break-inside: avoid; page-break-before: avoid;
 }}
 .svg-container svg {{ display: block; margin: 0 auto; }}
+
+/* ============ FIGURES (charts drawn by liberty.explorer.chart_svg) ============ */
+.chart-figure {{ margin: 2mm 0 3mm 0; page-break-inside: avoid; }}
+.chart-figure svg {{ display: block; }}
+.kpi-row {{ display: flex; flex-wrap: wrap; gap: 4mm; margin: 2mm 0 4mm 0; }}
+.kpi {{
+  flex: 1 1 40mm; min-width: 40mm;
+  border: 0.5pt solid #e5e7eb; border-radius: 2pt; background: #f8fafc;
+  padding: 3mm 4mm; page-break-inside: avoid;
+}}
+.kpi-label {{ font-size: 8pt; color: #6b7280; text-transform: uppercase; letter-spacing: 1pt; margin-bottom: 1.5mm; }}
+.kpi-value {{ font-size: 16pt; font-weight: 700; color: {primary}; }}
 
 /* ============ LINKS ============ */
 a {{ color: #1d4ed8; text-decoration: none; }}

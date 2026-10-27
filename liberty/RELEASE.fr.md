@@ -75,6 +75,17 @@
   la configuration). L'assistant lit le serveur au lieu de deviner quand quelque chose a échoué,
   est en retard ou manque. Désactivés par défaut car le journal peut contenir ce que le serveur
   a consigné.
+- **Le PDF de l'Explorateur est une synthèse, avec ses graphiques.** Une analyse ou un tableau
+  de bord exporté en PDF (depuis la page ou par une étape `report` d'une tâche) se lit désormais
+  comme les rapports de nomaubl : une couverture avec l'application, la période, la date,
+  l'auteur et la version, puis les sections qui s'enchaînent (pas de sommaire, pas de page par
+  section). Chaque graphique est dessiné côté serveur à partir des données de la section
+  (`liberty/explorer/chart_svg.py` : barres groupées, empilées ou horizontales, courbes,
+  camembert ou anneau) aux couleurs d'impression, avec légende, graduations compactes et les
+  valeurs sur les barres — la même figure qu'un utilisateur exporte ou qu'une tâche rende un
+  digest. Les KPI deviennent des cartes ; les nombres suivent la langue du lecteur (`1 234,5` /
+  `1,234.5`), les mots du gabarit (libellés de couverture, mentions de confidentialité) aussi.
+  Excel garde les données seules.
 - **Le volet de chat sur la mise en page de nomaubl** : une ligne d'en-tête (titre, choix du modèle
   s'il y en a un, « + » nouvelle conversation, ×), une ligne de contexte dessous quand la page en
   donne un, une bulle d'accueil, et les questions de départ en puces au-dessus de la saisie, sous

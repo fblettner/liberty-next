@@ -8,8 +8,11 @@ requests from it, with the period presets resolved here (the same rules as
 export route, the dashboards and the C5 digest all come through :func:`build_sections`, so a
 figure is the same everywhere.
 
-A chart section exports as its data table (x, one column per series); a KPI section as one
-row of totals; a pivot section as the hierarchy flattened, group rows bold with their subtotals.
+A chart section exports as its data table (x, one column per series) — and, in a PDF, as the
+figure drawn by :mod:`liberty.explorer.chart_svg` above it; a KPI section as one row of totals
+(cards in a PDF); a pivot section as the hierarchy flattened, group rows bold with their subtotals.
+The PDF is a synthesis on the reports template: a cover (application, period, date, author,
+version), then the sections flowing one after the other, no contents page.
 """
 
 from __future__ import annotations
@@ -21,8 +24,10 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
+from liberty import __version__
 from liberty.auth.scope import DataScope
 from liberty.connectors.registry import ConnectorRegistry
+from liberty.explorer.chart_svg import Series, fmt_number, render_chart
 from liberty.explorer.engine import AggregateRequest, DetailRequest, ExplorerError, run_aggregate, run_detail
 from liberty.explorer.model import ModelView
 from liberty.screens.config import ScreensFile
@@ -153,12 +158,28 @@ def definition_to_detail(definition: dict[str, Any], *, window: tuple[date, date
 @dataclass(slots=True)
 class Section:
     title: str
-    kind: str                       # table | pivot | chart | kpi | detail
+    kind: str                       # table | pivot | chart | kpi | detail | error
     headers: list[str]
     rows: list[list[Any]] = field(default_factory=list)
     bold: list[bool] = field(default_factory=list)      # per row: a group / total row
     note: str | None = None
     truncated: bool = False
+    chart: str | None = None        # a chart section: bar | line | pie, drawn in the PDF
+    stacked: bool = False
+    horizontal: bool = False
+    donut: bool = False
+
+
+CHART_WIDTH_MM = 174.0              # the A4 page minus the template's 18 mm margins
+
+
+def section_chart_svg(s: Section, lang: str | None = None, width_mm: float = CHART_WIDTH_MM) -> str | None:
+    """The figure of a chart section (``None`` for any other section, or without data)."""
+    if s.chart is None or not s.rows or len(s.headers) < 2:
+        return None
+    labels = [str(r[0]) if r and r[0] not in (None, "") else "" for r in s.rows]
+    series = [Series(name=str(h), values=[_num(r[i]) if i < len(r) else None for r in s.rows]) for i, h in enumerate(s.headers) if i > 0]
+    return render_chart(s.chart, labels, series, stacked=s.stacked, horizontal=s.horizontal, donut=s.donut, lang=lang, width_mm=width_mm)
 
 
 def _label(c: dict[str, Any]) -> str:
@@ -297,8 +318,10 @@ async def build_sections(
             headers = [*[x["label"] for x in row_dims], *headers[len(row_dims):-1], "Total" if len(headers) - len(row_dims) > 1 else _label(m)]
             out.append(Section(title, "pivot", headers, rows[:MAX_ROWS], bold[:MAX_ROWS], note, truncated=len(rows) > MAX_ROWS))
         elif kind in ("bar", "line", "pie"):
-            headers, rows = _chart_rows(res, (d.get("chart") or {}).get("measure"), d.get("pivotColumn"))
-            out.append(Section(title, "chart", headers, rows[:MAX_ROWS], note=note, truncated=len(rows) > MAX_ROWS))
+            c = d.get("chart") or {}
+            headers, rows = _chart_rows(res, c.get("measure"), d.get("pivotColumn"))
+            out.append(Section(title, "chart", headers, rows[:MAX_ROWS], note=note, truncated=len(rows) > MAX_ROWS,
+                               chart=kind, stacked=bool(c.get("stacked")), horizontal=bool(c.get("horizontal")), donut=bool(c.get("donut"))))
         elif kind == "kpi":
             measures = [c for c in cols if c["kind"] == "measure"]
             totals = []
@@ -327,7 +350,48 @@ def _note(d: dict[str, Any], res: dict[str, Any], window: tuple[date, date] | No
     return " · ".join(parts) or None
 
 
+def common_period(items: list[tuple[str, dict[str, Any]]], window: tuple[date, date] | None = None, today: date | None = None) -> tuple[date, date] | None:
+    """The one period the items share (the forced window, or every definition's resolved
+    period when they agree) — the cover's "Period" row; ``None`` when they differ or none has one."""
+    if window is not None:
+        return window
+    found: set[tuple[str, str]] = set()
+    for _t, d in items:
+        p = _period_of(d, None, today)
+        if p and p.get("from") and p.get("to"):
+            found.add((p["from"], p["to"]))
+    if len(found) != 1:
+        return None
+    f, t = found.pop()
+    return date.fromisoformat(f), date.fromisoformat(t)
+
+
 # ── renderers ──────────────────────────────────────────────────────────────────
+
+_MONTHS_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
+_MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+_WORDS = {
+    "en": {"application": "Application", "period": "Period", "no_data": "no data", "truncated": "truncated at {n} rows"},
+    "fr": {"application": "Application", "period": "Période", "no_data": "aucune donnée", "truncated": "tronqué à {n} lignes"},
+}
+
+
+def _words(lang: str | None) -> dict[str, str]:
+    return _WORDS["fr" if (lang or "").lower().startswith("fr") else "en"]
+
+
+def long_date(d: date, lang: str | None = None) -> str:
+    """``27 octobre 2026`` / ``October 27, 2026``."""
+    if (lang or "").lower().startswith("fr"):
+        return f"{d.day} {_MONTHS_FR[d.month - 1]} {d.year}"
+    return f"{_MONTHS_EN[d.month - 1]} {d.day}, {d.year}"
+
+
+def period_label(period: tuple[date, date], lang: str | None = None) -> str:
+    f, t = period
+    if (lang or "").lower().startswith("fr"):
+        return f"{f.strftime('%d/%m/%Y')} – {t.strftime('%d/%m/%Y')}"
+    return f"{f.isoformat()} – {t.isoformat()}"
 
 
 def _xl_value(v: Any) -> Any:
@@ -373,41 +437,82 @@ def sections_to_xlsx(sections: list[Section]) -> bytes:
     return buf.getvalue()
 
 
-def _md_cell(v: Any, bold: bool) -> str:
+def _md_cell(v: Any, bold: bool, lang: str | None = None) -> str:
     if v is None:
         return ""
-    s = f"{v:,.2f}".rstrip("0").rstrip(".") if isinstance(v, float) else str(v)
+    if isinstance(v, bool):
+        s = str(v)
+    elif isinstance(v, float) or (isinstance(v, int) and abs(v) >= 10000):
+        s = fmt_number(v, lang)
+    else:
+        s = str(v)
     s = s.replace("|", "\\|").replace("\n", " ")
     return f"**{s}**" if bold and s else s
 
 
-def sections_to_markdown(sections: list[Section], title: str) -> str:
-    lines = [f"# {title}", ""]
+def _kpi_cards(s: Section, lang: str | None) -> list[str]:
+    cards = "".join(
+        f'<div class="kpi"><div class="kpi-label">{_md_cell(h, False)}</div><div class="kpi-value">{_md_cell(v, False, lang) or "—"}</div></div>'
+        for h, v in zip(s.headers, s.rows[0] if s.rows else [], strict=False)
+    )
+    return [f'<div class="kpi-row">{cards}</div>', ""]
+
+
+def sections_to_markdown(sections: list[Section], title: str, *, lang: str | None = None, heading: bool = True, figures: bool = False) -> str:
+    """The sections as markdown: a heading per section when there are several, the note in
+    italics, the data table with the numbers in the reader's language. *figures* adds what
+    the PDF template renders from raw HTML: a chart section's SVG above its table, a KPI
+    section as cards instead of a one-row table."""
+    w = _words(lang)
+    lines = [f"# {title}", ""] if heading else []
     for s in sections:
         if len(sections) > 1:
             lines += [f"## {s.title}", ""]
         if s.note:
             lines += [f"*{s.note}*", ""]
+        if figures and s.kind == "kpi" and s.headers:
+            lines += _kpi_cards(s, lang)
+            continue
+        if figures:
+            svg = section_chart_svg(s, lang)
+            if svg:
+                lines += [f'<div class="chart-figure">{svg}</div>', ""]
         if not s.headers:
-            lines += ["_no data_", ""]
+            lines += [f"_{w['no_data']}_", ""]
             continue
         lines.append("| " + " | ".join(_md_cell(h, False) for h in s.headers) + " |")
         lines.append("|" + "|".join(" --- " for _ in s.headers) + "|")
         for k, row in enumerate(s.rows):
             b = k < len(s.bold) and s.bold[k]
-            lines.append("| " + " | ".join(_md_cell(v, b) for v in row) + " |")
+            lines.append("| " + " | ".join(_md_cell(v, b, lang) for v in row) + " |")
         if s.truncated:
-            lines.append(f"| … truncated at {MAX_ROWS} rows |" + " |" * (len(s.headers) - 1))
+            lines.append(f"| … {w['truncated'].format(n=MAX_ROWS)} |" + " |" * (len(s.headers) - 1))
         lines.append("")
     return "\n".join(lines)
 
 
-def sections_to_pdf(sections: list[Section], title: str, *, app_name: str = "", branding: dict[str, Any] | None = None) -> bytes:
+def sections_to_pdf(
+    sections: list[Section], title: str, *, app_name: str = "", branding: dict[str, Any] | None = None, lang: str | None = None,
+    author: str = "", period: tuple[date, date] | None = None, today: date | None = None,
+) -> bytes:
     """Through the reports pipeline (needs the ``reports`` extra — raises
-    :class:`liberty.reports.render.ReportsUnavailableError` otherwise)."""
+    :class:`liberty.reports.render.ReportsUnavailableError` otherwise): a cover carrying the
+    application, the period, the date, the author and the version, then the sections flowing
+    (no contents page, no page per section), the charts drawn in print colours."""
     from liberty.reports.render import render_content
     from liberty.reports.schema import ReportContent
 
-    content = ReportContent(markdown=sections_to_markdown(sections, title), title=title, filename_base=re.sub(r"[^A-Za-z0-9_-]+", "-", title).strip("-").lower() or "explorer")
+    w = _words(lang)
+    meta = [(w["application"], app_name)] if app_name else []
+    if period is not None:
+        meta.append((w["period"], period_label(period, lang)))
+    options: dict[str, Any] = {
+        "lang": "fr" if (lang or "").lower().startswith("fr") else "en", "toc": False, "section_breaks": False,
+        "date": long_date(today or date.today(), lang), "author": author or app_name, "version": __version__, "cover_meta": meta,
+    }
+    content = ReportContent(
+        markdown=sections_to_markdown(sections, title, lang=lang, heading=False, figures=True), title=title,
+        filename_base=re.sub(r"[^A-Za-z0-9_-]+", "-", title).strip("-").lower() or "explorer", pdf_options=options,
+    )
     body, _ct, _fn = render_content(content, "pdf", app_name=app_name, report_title=title, branding=branding)
     return body

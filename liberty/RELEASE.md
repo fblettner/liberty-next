@@ -66,6 +66,16 @@
   `integrity_checks` (the configuration cross-reference checks). The assistant reads the running
   server instead of guessing when something failed, is late or is missing. Off by default because
   the log can carry what the server logged.
+- **The Explorer's PDF is a synthesis, with its charts.** An analysis or a dashboard exported to
+  PDF (from the page or by a `report` job step) now reads like nomaubl's reports: a cover with
+  the application, the period, the date, the author and the version, then the sections flowing
+  one after the other (no contents page, no page per section). Every chart is drawn
+  server-side from the section's data (`liberty/explorer/chart_svg.py`: bar, grouped, stacked or
+  horizontal, line, pie or donut) in print colours with a legend, compact axis ticks and the
+  values on the bars — the same figure whether a user exports or a job renders a digest. KPIs
+  become cards; the numbers follow the reader's language (`1 234,5` / `1,234.5`); the
+  template's own words (cover labels, confidential lines) follow it too. Excel keeps the data
+  only.
 - **The chat drawer on nomaubl's layout**: a header line (title, the model picker when there is a
   choice, "+" new conversation, ×), a context line under it when the page gives one, a greeting
   bubble, and the starter questions as chips above the composer, under headings when the app

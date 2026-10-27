@@ -99,3 +99,64 @@ async def test_sections_xlsx_and_markdown(env) -> None:  # noqa: F811
     assert ws.cell(row=1, column=1).font.italic and ws.cell(row=2, column=1).font.bold and ws.cell(row=3, column=1).value == "Corp one"
     md = sections_to_markdown(sections, "Sales report")
     assert md.startswith("# Sales report") and "## Revenue pivot" in md and "| **Total** |" in md and "| --- |" in md
+
+
+def test_chart_svg_draws_each_kind_in_print_colours() -> None:
+    from liberty.explorer.chart_svg import PALETTE, Series, fmt_compact, fmt_number, nice_axis, render_chart
+    assert fmt_number(1234567.891, "fr") == "1\u00a0234\u00a0567,89" and fmt_number(1234567.891, "en") == "1,234,567.89" and fmt_number(12.0) == "12"
+    assert fmt_compact(1234567) == "1.2\u00a0M" and fmt_compact(35000) == "35\u00a0k" and fmt_compact(950.4) == "950" and fmt_compact(None) == ""
+    assert nice_axis(0, 123456) == (0, 150000, 50000) and nice_axis(-3, 7)[0] < 0 and nice_axis(0, 0) == (0.0, 1.0, 0.25)
+    labels = ["2026-01", "2026-02", "2026-03"]
+    two = [Series("Alpha", [10, 20, 30]), Series("Beta", [5, None, 12])]
+    bars = render_chart("bar", labels, two, lang="fr", width_mm=174)
+    assert bars and bars.startswith("<svg") and 'width="174.0mm"' in bars and PALETTE[0] in bars and PALETTE[1] in bars
+    assert "Alpha" in bars and "Beta" in bars and "2026-02" in bars         # the legend and the x labels
+    assert "<script" not in bars and "url(" not in bars and "var(" not in bars    # print-safe: no page CSS, nothing external
+    stacked = render_chart("bar", labels, two, stacked=True)
+    assert stacked and stacked.count("<rect") >= 5 and ">42<" in stacked        # the total above the 3rd bar (30 + 12)
+    assert "<polyline" in (render_chart("line", labels, two) or "")
+    assert render_chart("bar", labels, [Series("v", [1, 2, 3])], horizontal=True) and "<path" in (render_chart("pie", labels, [Series("v", [1, 2, 3])], donut=True) or "")
+    pie = render_chart("pie", [f"c{i}" for i in range(20)], [Series("v", [20 - i for i in range(20)])])
+    assert pie and "Others" in pie and pie.count("<path") == 12                   # the smallest slices gathered
+    assert render_chart("bar", [], []) is None and render_chart("bar", labels, [Series("v", [])]) is None
+    assert "&lt;b&gt;" in (render_chart("bar", ["<b>"], [Series("v", [1])]) or "")  # labels escaped
+
+
+@pytest.mark.asyncio
+async def test_pdf_markdown_draws_the_charts_and_localises(env) -> None:  # noqa: F811
+    from liberty.explorer.report import common_period, long_date, period_label, section_chart_svg
+    registry, screens, view = env
+    base = {"entity": "sales", "rows": [{"field": "company.NAME"}], "measures": [{"field": "sales.REVENUE", "agg": "sum"}], "filterRows": [], "sort": [], "limit": 100, "calculated": []}
+    period = {"field": "sales.SOLD_ON", "preset": "custom", "range": {"dateFrom": "2026-01-01", "dateTo": "2026-12-31"}}
+    items = [("Table", {**base, "view": "table"}), ("Chart", {**base, "view": "bar", "chart": {"stacked": True}, "period": period}), ("KPI", {**base, "view": "kpi"})]
+    sections = await build_sections(registry, screens, view, items)
+    assert sections[0].chart is None and sections[1].chart == "bar" and sections[1].stacked
+    assert section_chart_svg(sections[0]) is None and (section_chart_svg(sections[1]) or "").startswith("<svg")
+    md = sections_to_markdown(sections, "Report", lang="fr", heading=False, figures=True)
+    assert not md.startswith("# ") and md.count("<svg") == 1 and '<div class="chart-figure">' in md and "| NAME |" in md
+    assert '<div class="kpi-row">' in md and "<b>Total" not in md and "259" in md
+    plain = sections_to_markdown(sections, "Report")
+    assert plain.startswith("# Report") and "<svg" not in plain and "| 259 |" in plain
+    assert load_workbook(io.BytesIO(sections_to_xlsx(sections))).sheetnames == ["Table", "Chart", "KPI"]
+    # the cover's period: the window, or the one period the items share
+    assert common_period(items, (date(2026, 9, 1), date(2026, 9, 30))) == (date(2026, 9, 1), date(2026, 9, 30))
+    assert common_period(items) == (date(2026, 1, 1), date(2026, 12, 31))        # only one item carries a period
+    assert common_period([*items, ("Other", {**base, "view": "table", "period": {**period, "range": {"dateFrom": "2025-01-01", "dateTo": "2025-12-31"}}})]) is None
+    assert long_date(TODAY, "fr") == "27 octobre 2026" and long_date(TODAY) == "October 27, 2026"
+    assert period_label((date(2026, 1, 1), date(2026, 3, 31)), "fr") == "01/01/2026 – 31/03/2026" and period_label((date(2026, 1, 1), date(2026, 3, 31))) == "2026-01-01 – 2026-03-31"
+
+
+def test_pdf_template_options_flow_and_localise() -> None:
+    from liberty.reports.render import BuildOptions, _build_css, _build_full_html, md_to_html_body
+    md = "## One\n\ntext\n\n## Two\n\nmore\n"
+    html, toc = md_to_html_body(md, None, BuildOptions(section_breaks=False))
+    assert "section-start" not in html
+    html, toc = md_to_html_body(md, None, BuildOptions())
+    assert html.count("section-start") == 2
+    en = _build_full_html(html, toc, BuildOptions(lang="en", toc=False, author="franck", date="October 27, 2026", cover_meta=[("Period", "2026-01-01 – 2026-03-31")]))
+    assert "toc-page" not in en and "<td>Author</td>" in en and "<td>Period</td>" in en and "Confidential document" in en and 'lang="en"' in en
+    fr = _build_full_html(html, toc, BuildOptions(author="franck"))
+    assert "toc-page" in fr and "<td>Auteur</td>" in fr and "Table des matières" in fr
+    kept = _build_full_html(html, toc, BuildOptions(lang="en", cover_eyebrow="Rapport d'audit"))
+    assert "Rapport d'audit" in kept                                             # an operator's own text is never translated
+    assert "Confidential" in _build_css(BuildOptions(lang="en")) and ".chart-figure" in _build_css(BuildOptions())

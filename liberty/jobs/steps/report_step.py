@@ -98,7 +98,7 @@ class ReportStepExecutor:
     async def _explorer(
         self, st: Any, step: Step, kind: str, obj_id: str, fmt: str, window: tuple[date, date] | None, scope: DataScope | None,
     ) -> tuple[bytes, str, list[Any]]:
-        from liberty.explorer.report import build_sections, sections_to_pdf, sections_to_xlsx
+        from liberty.explorer.report import build_sections, common_period, sections_to_pdf, sections_to_xlsx
         from liberty.explorer.store import KIND_ANALYSIS, KIND_DASHBOARD, AnalysisStore
         explorer = getattr(st, "explorer", None)
         cache = getattr(st, "explorer_cache", None)
@@ -139,7 +139,10 @@ class ReportStepExecutor:
         if fmt == "pdf":
             settings = st.settings
             branding = getattr(getattr(settings, "reports", None), "branding", None)
-            data = sections_to_pdf(sections, title, app_name=getattr(settings.app, "name", ""), branding=branding.model_dump() if branding is not None else None)
+            data = sections_to_pdf(
+                sections, title, app_name=getattr(settings.app, "name", ""), branding=branding.model_dump() if branding is not None else None,
+                period=common_period(items, window),
+            )
         else:
             data = sections_to_xlsx(sections)
         return data, title, sections
