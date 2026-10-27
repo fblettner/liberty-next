@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import mimetypes
 import smtplib
 import string
 from dataclasses import dataclass, field
@@ -148,6 +149,7 @@ class Dispatcher:
     # ── dispatch ────────────────────────────────────────────────────────────────
     async def dispatch(
         self, message: Message, *, channels: list[str], recipients: list[str], action: ActionTarget | None = None,
+        attachments: list[tuple[str, bytes]] | None = None,
     ) -> DispatchReport:
         report = DispatchReport()
         subject = render(message.subject, message.payload)
@@ -178,7 +180,7 @@ class Dispatcher:
             addresses = [r.email for r in targets if r.email]
             if addresses:
                 try:
-                    await asyncio.to_thread(self._send_email, addresses, subject, body, link)
+                    await asyncio.to_thread(self._send_email, addresses, subject, body, link, attachments or [])
                     report.emails = addresses
                 except Exception as exc:  # noqa: BLE001
                     _log.warning("notify: email channel failed: %s", exc)
@@ -197,7 +199,9 @@ class Dispatcher:
     def _cfg(self) -> Any:
         return self._settings() if callable(self._settings) else self._settings
 
-    def _send_email(self, addresses: list[str], subject: str, body: str, link: str | None = None) -> None:
+    def _send_email(
+        self, addresses: list[str], subject: str, body: str, link: str | None = None, attachments: list[tuple[str, bytes]] | None = None,
+    ) -> None:
         n = self._cfg().notify
         if not n.smtp_host:
             raise RuntimeError("[notify] smtp_host is not set")
@@ -213,6 +217,10 @@ class Dispatcher:
         if link:
             text = f"{text}\n\n{link}"
         msg.set_content(text)
+        for name, data in attachments or []:
+            ctype, _enc = mimetypes.guess_type(name)
+            maintype, _, subtype = (ctype or "application/octet-stream").partition("/")
+            msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=name)
         smtp_cls = smtplib.SMTP_SSL if n.smtp_ssl else smtplib.SMTP
         try:
             with smtp_cls(n.smtp_host, n.smtp_port, timeout=n.smtp_timeout) as smtp:

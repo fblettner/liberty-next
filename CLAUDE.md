@@ -104,7 +104,9 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
   jobs/ (nomaflow)        schema.py (jobs.toml), registry, runner (state machine, retries,
                           cancel), scheduler (APScheduler, single process), recovery, retention,
                           missed.py (missed-schedule check: expected cron instants vs the run
-                          history → MISSED runs + the `missed` job event), runlog, wiring, steps/{sql_query,sql_copy,http,python,ldap_sync,call_job,
+                          history → MISSED runs + the `missed` job event), runlog, wiring, steps/{sql_query,sql_copy,http,python,ldap_sync,call_job,report (a saved
+                          explorer analysis / dashboard or a plugin report → xlsx / pdf in the run's work area, under
+                          a user's or role's scope), notify (the dispatcher, the run's files attached),
                           file_load (xlsx / csv → table, replace_partition in one transaction; the file
                           from `path`, a per-fire upload or a watched folder)}, files.py (the work area:
                           `[jobs] files_dir`, uploads, rejects reports)

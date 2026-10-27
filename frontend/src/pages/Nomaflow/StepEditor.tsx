@@ -67,9 +67,9 @@ const TextArea = styled.textarea`
 `
 
 const STEP_TONE: Record<StepType, 'blue' | 'green' | 'orange' | 'purple' | 'neutral' | 'yellow'> = {
-  sql_copy: 'blue', sql_query: 'green', python: 'purple', ldap_sync: 'orange', http: 'neutral', call_job: 'yellow', file_load: 'green',
+  sql_copy: 'blue', sql_query: 'green', python: 'purple', ldap_sync: 'orange', http: 'neutral', call_job: 'yellow', file_load: 'green', report: 'purple', notify: 'blue',
 }
-const STEP_TYPES: StepType[] = ['sql_copy', 'sql_query', 'python', 'ldap_sync', 'http', 'call_job', 'file_load']
+const STEP_TYPES: StepType[] = ['sql_copy', 'sql_query', 'python', 'ldap_sync', 'http', 'call_job', 'file_load', 'report', 'notify']
 
 /** A fresh blank step of *type* — the "+ Add" buttons append one of these. */
 function blankStep(type: StepType): StepConfig {
@@ -88,6 +88,10 @@ function blankStep(type: StepType): StepConfig {
       return { type, name: '', target_job_id: '' }
     case 'file_load':
       return { type, name: '', path: '', target: {}, load_mode: 'append', on_error: 'fail' }
+    case 'report':
+      return { type, name: '', report: 'analysis:', app: '', model: '', format: 'xlsx', period: 'lastMonth' }
+    case 'notify':
+      return { type, name: '', recipients: [], subject: '', attach: ['*'], channels: ['portal', 'email'] }
   }
 }
 
@@ -105,6 +109,8 @@ function stepSummary(s: StepConfig): string {
     case 'http': return `${f.method ?? 'GET'} ${f.url ?? ''}`
     case 'call_job': return `→ ${f.target_job_id ?? '?'}`
     case 'file_load': return `${String(f.path ?? '').split('/').pop() || '?'} → ${ep(f.target)}`
+    case 'report': return `${String(f.report ?? '')} → ${String(f.format ?? 'xlsx')}${f.as_user ? ` as ${f.as_user}` : f.as_role ? ` as role ${f.as_role}` : ''}`
+    case 'notify': return `${((f.recipients as string[] | undefined) ?? []).join(', ') || '?'} · ${String(f.subject ?? '')}`
     default: return ''
   }
 }
@@ -981,9 +987,128 @@ function StepCard({ step, index, count, sqlConnectors, onPatch, onMove, onDuplic
           {step.type === 'http' && <HttpForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
           {step.type === 'call_job' && <CallJobForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
           {step.type === 'file_load' && <FileLoadForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
+          {step.type === 'report' && <ReportForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
+          {step.type === 'notify' && <NotifyForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
         </Body>
       )}
     </Card>
+  )
+}
+
+// ── report (C5): a saved explorer analysis / dashboard, or a plugin report, to a run file ──
+const PERIOD_PRESETS = ['lastMonth', 'thisMonth', 'lastYear', 'thisYear', 'thisQuarter', 'last30', 'last7', 'yesterday', 'today', 'all']
+
+function ReportForm({ step, patch }: FormProps) {
+  const { t } = useTranslation()
+  const f = step as Record<string, unknown>
+  const ref = String(f.report ?? 'analysis:')
+  const [kind, , rest] = ref.includes(':') ? [ref.slice(0, ref.indexOf(':')), ':', ref.slice(ref.indexOf(':') + 1)] : ['analysis', ':', '']
+  const app = String(f.app ?? ''), model = String(f.model ?? '')
+  const [models, setModels] = useState<{ app: string; model: string; label: string }[]>([])
+  const [saved, setSaved] = useState<{ id: string; name: string }[]>([])
+  const [reports, setReports] = useState<{ scope: string; id: string; title: string; formats: string[] }[]>([])
+  const [roles, setRoles] = useState<string[]>([])
+  useEffect(() => {
+    api.get<{ models: { app: string; model: string; label: string }[] }>('/api/explorer').then((r) => setModels(r.models)).catch(() => setModels([]))
+    api.get<{ reports: { scope: string; id: string; title: string; formats: string[] }[] }>('/api/reports').then((r) => setReports(r.reports)).catch(() => setReports([]))
+    api.get<{ roles: { name: string }[] }>('/admin/access/roles').then((r) => setRoles(r.roles.map((x) => x.name))).catch(() => setRoles([]))
+  }, [])
+  useEffect(() => {
+    if (!app || !model || kind === 'report') { setSaved([]); return }
+    api.get<{ items: { id: string; name: string; shared: boolean }[] }>(`/api/explorer/${encodeURIComponent(app)}/${encodeURIComponent(model)}/saved/${kind === 'dashboard' ? 'dashboards' : 'analyses'}`)
+      .then((r) => setSaved(r.items.filter((i) => i.shared))).catch(() => setSaved([]))
+  }, [app, model, kind])
+  const setRef = (k: string, id: string) => patch({ report: `${k}:${id}` } as Partial<StepConfig>)
+  const kindOpts: SearchSelectOption[] = [
+    { value: 'analysis', label: t('nomaflow.steps.reportAnalysis') }, { value: 'dashboard', label: t('nomaflow.steps.reportDashboard') }, { value: 'report', label: t('nomaflow.steps.reportPlugin') },
+  ]
+  const modelOpts: SearchSelectOption[] = models.map((m) => ({ value: `${m.app}/${m.model}`, label: m.label, mono: `${m.app} · ${m.model}` }))
+  const periodOpts: SearchSelectOption[] = PERIOD_PRESETS.map((p) => ({ value: p, label: p === 'all' ? t('explorer.bucket.none') : t(`period.presets.${p}`, p) }))
+  return (
+    <>
+      <SubHead>{t('nomaflow.steps.reportWhat')}</SubHead>
+      <Grid>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.reportKind')}</FieldLabel>
+          <SearchSelect value={kind} onChange={(v) => setRef(v, '')} options={kindOpts} />
+        </Field>
+        {kind !== 'report' ? (
+          <>
+            <Field>
+              <FieldLabel>{t('nomaflow.steps.reportModel')}</FieldLabel>
+              <SearchSelect value={app && model ? `${app}/${model}` : ''} options={modelOpts} placeholder={t('common.pick', 'Pick…')}
+                onChange={(v) => { const [a, m] = v.split('/'); patch({ app: a, model: m } as Partial<StepConfig>) }} />
+            </Field>
+            <Field>
+              <FieldLabel>{kind === 'dashboard' ? t('explorer.dashboards') : t('explorer.analyses')}</FieldLabel>
+              <SearchSelect value={rest} onChange={(v) => setRef(kind, v)} options={saved.map((s) => ({ value: s.id, label: s.name, mono: s.id }))} allowCustom placeholder={t('nomaflow.steps.reportSharedOnly')} />
+            </Field>
+          </>
+        ) : (
+          <Field $span={2}>
+            <FieldLabel>{t('nomaflow.steps.reportPlugin')}</FieldLabel>
+            <SearchSelect value={rest} onChange={(v) => setRef('report', v)} options={reports.map((r) => ({ value: `${r.scope}:${r.id}`, label: r.title, mono: `${r.scope}:${r.id}` }))} allowCustom />
+          </Field>
+        )}
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.reportFormat')}</FieldLabel>
+          <SearchSelect value={String(f.format ?? 'xlsx')} onChange={(v) => patch({ format: v } as Partial<StepConfig>)} options={[{ value: 'xlsx', label: 'Excel' }, { value: 'pdf', label: 'PDF' }]} />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.reportPeriod')}</FieldLabel>
+          <SearchSelect value={String(f.period ?? '')} onChange={(v) => patch({ period: v || undefined } as Partial<StepConfig>)} options={periodOpts} anyLabel={t('nomaflow.steps.reportPeriodOwn')} />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.reportFilename')}</FieldLabel>
+          <Input value={String(f.filename ?? '')} onChange={(e) => patch({ filename: e.target.value || undefined } as Partial<StepConfig>)} placeholder="monthly-sales" />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.reportAsUser')}</FieldLabel>
+          <Input value={String(f.as_user ?? '')} onChange={(e) => patch({ as_user: e.target.value || undefined } as Partial<StepConfig>)} placeholder="cfo" />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.reportAsRole')}</FieldLabel>
+          <SearchSelect value={String(f.as_role ?? '')} onChange={(v) => patch({ as_role: v || undefined } as Partial<StepConfig>)} options={roles.map((r) => ({ value: r, label: r }))} anyLabel={t('nomaflow.steps.reportUnrestricted')} allowCustom />
+        </Field>
+      </Grid>
+    </>
+  )
+}
+
+// ── notify (C5): the message, the recipients, the run's files attached ─────────────────
+function NotifyForm({ step, patch }: FormProps) {
+  const { t } = useTranslation()
+  const f = step as Record<string, unknown>
+  const channels = (f.channels as string[] | undefined) ?? ['portal', 'email']
+  const toggle = (c: string) => patch({ channels: channels.includes(c) ? channels.filter((x) => x !== c) : [...channels, c] } as Partial<StepConfig>)
+  return (
+    <>
+      <SubHead>{t('nomaflow.steps.notifyMessage')}</SubHead>
+      <Grid>
+        <Field $span={3}>
+          <FieldLabel>{t('nomaflow.steps.notifyRecipients')}</FieldLabel>
+          <StringListEditor value={(f.recipients as string[] | undefined) ?? []} onChange={(v) => patch({ recipients: v } as Partial<StepConfig>)} allowCustom />
+        </Field>
+        <Field $span={3}>
+          <FieldLabel>{t('nomaflow.steps.notifySubject')}</FieldLabel>
+          <Input value={String(f.subject ?? '')} onChange={(e) => patch({ subject: e.target.value } as Partial<StepConfig>)} placeholder="Sales digest {DATE}" />
+        </Field>
+        <Field $span={3}>
+          <FieldLabel>{t('nomaflow.steps.notifyBody')}</FieldLabel>
+          <TextArea value={typeof f.body === 'string' ? f.body : ''} onChange={(e) => patch({ body: e.target.value || undefined } as Partial<StepConfig>)} placeholder={t('nomaflow.steps.notifyBodyPlaceholder')} />
+        </Field>
+        <Field $span={2}>
+          <FieldLabel>{t('nomaflow.steps.notifyAttach')}</FieldLabel>
+          <StringListEditor value={(f.attach as string[] | undefined) ?? ['*']} onChange={(v) => patch({ attach: v } as Partial<StepConfig>)} allowCustom />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.notifyChannels')}</FieldLabel>
+          <div style={{ display: 'flex', gap: 12, paddingTop: 6 }}>
+            {['portal', 'email'].map((c) => <Checkbox key={c} checked={channels.includes(c)} onChange={() => toggle(c)} label={c} />)}
+          </div>
+        </Field>
+      </Grid>
+    </>
   )
 }
 

@@ -62,7 +62,7 @@ export interface JobAlerts {
   recipients: string[]
 }
 
-export type StepType = 'sql_copy' | 'sql_query' | 'python' | 'ldap_sync' | 'http' | 'call_job' | 'file_load'
+export type StepType = 'sql_copy' | 'sql_query' | 'python' | 'ldap_sync' | 'http' | 'call_job' | 'file_load' | 'report' | 'notify'
 
 /** One step. Typed loosely — the per-type forms (increment 4–5) narrow it; the
  *  list view only needs `type` + `name`. */
@@ -172,6 +172,11 @@ export interface StepRunInfo {
     rejected?: number
     deleted?: number
     rejects_file?: string
+    /** report: the file written to the run's work area (downloadable); notify: the names attached. */
+    file?: string
+    format?: string
+    title?: string
+    attached?: string[]
   } | null
 }
 

@@ -275,6 +275,8 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
                 const childRunId = s.extras?.child_run_id
                 const childJobId = s.extras?.child_job_id
                 const rejectsFile = s.extras?.rejects_file
+                const reportFile = s.step_type === 'report' ? s.extras?.file : undefined
+                const attached = s.step_type === 'notify' && Array.isArray(s.extras?.attached) ? (s.extras.attached as string[]) : []
                 const loadCounts = s.step_type === 'file_load' && s.extras && typeof s.extras.read === 'number'
                   ? t('nomaflow.run.loadCounts', '{{read}} read · {{inserted}} inserted · {{rejected}} rejected', { read: s.extras.read, inserted: s.extras.inserted ?? 0, rejected: s.extras.rejected ?? 0 })
                   : null
@@ -302,6 +304,14 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
                           </ChildRunLink>
                         </div>
                       )}
+                      {reportFile && (
+                        <div>
+                          <ChildRunLink onClick={() => { if (runId) void downloadRunFile(runId, reportFile).catch(() => undefined) }} title={reportFile}>
+                            <Download size={11} /> {reportFile.replace(`${runId}-`, '')}
+                          </ChildRunLink>
+                        </div>
+                      )}
+                      {attached.length > 0 && <div style={{ fontSize: fontSize.micro, color: colors.text.muted }}>{t('nomaflow.run.attached', { files: attached.join(', ') })}</div>}
                     </StepCell>
                     <StepCell>{s.step_type}</StepCell>
                     <StepCell>{s.attempt}</StepCell>

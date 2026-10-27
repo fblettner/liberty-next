@@ -88,6 +88,9 @@ class NomaflowComponents:
     # hot-reload rebuilds the executors (it doesn't change on reload, but the rebuilt executors
     # would otherwise lose the injection).
     changesets: Any | None = None
+    # ``() -> app.state`` for the report / notify steps (the explorer, the reports registry, the
+    # dispatcher, the auth backend are read at run time, so a reload is seen).
+    state: Any | None = None
 
 
 def build_executors(
@@ -96,6 +99,7 @@ def build_executors(
     settings: Settings | None = None,
     registry: Any | None = None,
     changesets: Any | None = None,
+    state: Any | None = None,
 ) -> dict[StepType, StepExecutor]:
     """The default executor wiring — one per implemented :class:`StepType`.
 
@@ -124,6 +128,11 @@ def build_executors(
         StepType.HTTP: HttpStepExecutor(),
         StepType.FILE_LOAD: FileLoadExecutor(connectors, settings=settings),
     }
+    if state is not None:
+        from liberty.jobs.steps.notify_step import NotifyStepExecutor
+        from liberty.jobs.steps.report_step import ReportStepExecutor
+        out[StepType.REPORT] = ReportStepExecutor(state)
+        out[StepType.NOTIFY] = NotifyStepExecutor(state)
     if registry is not None:
         # The runner reference is back-filled by build_nomaflow after the
         # JobRunner is constructed (see attach_runner there) — registry alone
@@ -154,7 +163,7 @@ def refresh_executors(
     don't need rebuilding — they look up pools by name through the new registry
     on every fire."""
     new = build_executors(
-        connectors, settings=settings, registry=components.registry, changesets=components.changesets,
+        connectors, settings=settings, registry=components.registry, changesets=components.changesets, state=components.state,
     )
     for step_type, executor in new.items():
         components.runner.add_executor(step_type, executor)
@@ -168,6 +177,7 @@ async def build_nomaflow(
     changesets: Any | None = None,
     on_finished: Any | None = None,
     on_missed: Any | None = None,
+    state: Any | None = None,
 ) -> NomaflowComponents | None:
     """Build the nomaflow stack from a (settings, connectors) pair, or return
     None if the deployment isn't carrying enough to start it.
@@ -259,7 +269,7 @@ async def build_nomaflow(
     # Order matters — the runner needs the executor map at __init__ time, but
     # the call_job executor needs the runner to spawn children. The
     # post-construction attach_runner is the bridge.
-    executors = build_executors(connectors, settings=settings, registry=registry, changesets=changesets)
+    executors = build_executors(connectors, settings=settings, registry=registry, changesets=changesets, state=state)
     runner = JobRunner(db, executors, broadcaster=broadcaster, on_finished=on_finished)
     call_job_exec = executors.get(StepType.CALL_JOB)
     if isinstance(call_job_exec, CallJobExecutor):
@@ -276,7 +286,7 @@ async def build_nomaflow(
     else:
         _log.info("nomaflow.wiring scheduler disabled via [jobs] enabled=false")
 
-    return NomaflowComponents(registry=registry, runner=runner, scheduler=scheduler, db=db, changesets=changesets)
+    return NomaflowComponents(registry=registry, runner=runner, scheduler=scheduler, db=db, changesets=changesets, state=state)
 
 
 async def shutdown_nomaflow(components: NomaflowComponents | None) -> None:

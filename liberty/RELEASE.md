@@ -206,6 +206,21 @@
   `POST /admin/explorer/describe-entity`; the Screen Assistant's catalogue reads the same files
   through the new `liberty.presets` loader.
 
+**nomaflow: the digest — `report` and `notify` steps**
+- Two new step types make a scheduled, e-mailed digest a plain job. **`report`** renders a saved
+  Explorer analysis (`report = "analysis:<id>"`) or dashboard (`dashboard:<id>`, one section per
+  tile) of an `app` / `model`, or a plugin report (`report:<scope>:<id>`, with `params`), to
+  `format` xlsx or pdf, into the run's work area (the Run detail offers the file). The period is
+  the step's `period` preset (`lastMonth`, `thisQuarter`…) or `window_from` / `window_to`, else
+  the analysis's own. **Visibility**: `as_user = "cfo"` renders under that user's row-level scope
+  (their roles' rules with their attributes — a "filiale" digest contains that company only);
+  `as_role` under a role's literal rules; neither, unrestricted. **`notify`** sends the message
+  through the notification dispatcher — `recipients` (`user:` / `role:` / `email:`), `subject`
+  and `body` with `{JOB}` `{RUN_ID}` `{FILES}` `{DATE}`, `channels` — with the run's files
+  **attached** (`attach = ["*"]`, or names). Both edit in the Job editor (the model, the shared
+  analyses and dashboards, the reports, the roles are picked from lists); the schedule is the
+  job's cron or presets as usual. The executors read the live app state, so a reload is seen.
+
 **Screens: `editable_when`, a row-level read-only rule**
 - A screen can say when an existing row may be changed: `editable_when = [{ field = "PERIOD_STATUS",
   value = ["open", "validated"] }]` keeps the rows of a closed period read-only. The grid's edit mode

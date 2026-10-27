@@ -234,6 +234,24 @@
   `POST /admin/explorer/describe-entity` ; le catalogue de l'assistant écran lit les mêmes fichiers
   par le nouveau chargeur `liberty.presets`.
 
+**nomaflow : le digest — étapes `report` et `notify`**
+- Deux nouveaux types d'étape font d'un digest planifié et envoyé par e-mail une simple tâche.
+  **`report`** rend une analyse enregistrée de l'Explorateur (`report = "analysis:<id>"`) ou un
+  tableau de bord (`dashboard:<id>`, une section par tuile) d'une `app` / `model`, ou un rapport
+  de plugin (`report:<scope>:<id>`, avec `params`), au `format` xlsx ou pdf, dans l'espace de
+  travail du run (le détail du run propose le fichier). La période est le préréglage `period` de
+  l'étape (`lastMonth`, `thisQuarter`…) ou `window_from` / `window_to`, sinon celle de l'analyse.
+  **Visibilité** : `as_user = "cfo"` rend sous la portée de données de cet utilisateur (les
+  règles de ses rôles avec ses attributs — un digest « filiale » ne contient que cette société) ;
+  `as_role` sous les règles littérales d'un rôle ; ni l'un ni l'autre, sans restriction.
+  **`notify`** envoie le message par le distributeur de notifications — `recipients` (`user:` /
+  `role:` / `email:`), `subject` et `body` avec `{JOB}` `{RUN_ID}` `{FILES}` `{DATE}`, `channels`
+  — avec les fichiers du run **en pièces jointes** (`attach = ["*"]`, ou des noms). Les deux se
+  modifient dans l'éditeur de tâche (le modèle, les analyses et tableaux de bord partagés, les
+  rapports, les rôles se choisissent dans des listes) ; la planification est le cron ou les
+  préréglages de la tâche, comme d'habitude. Les exécuteurs lisent l'état vivant de l'application,
+  un rechargement est donc vu.
+
 **Écrans : `editable_when`, une règle de lecture seule par ligne**
 - Un écran peut dire quand une ligne existante peut être modifiée : `editable_when = [{ field =
   "PERIOD_STATUS", value = ["open", "validated"] }]` garde en lecture seule les lignes d'une période

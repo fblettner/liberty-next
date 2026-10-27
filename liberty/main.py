@@ -261,6 +261,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.jobs = await build_nomaflow(
             settings, app.state.connectors, sio_layer=sio_layer,
             changesets=app.state.changesets_db, on_finished=_on_run_finished, on_missed=_on_run_missed,
+            state=lambda: app.state,
         )
         # Optional filesystem watcher — when ``[app] hot_reload = true``, edits to the
         # config TOMLs reload the matching subsystem without an explicit Settings →

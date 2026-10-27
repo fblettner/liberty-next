@@ -43,6 +43,10 @@ class StepType(str, Enum):
     # params_override (so an operator's "run with apps_id=42" cascades).
     CALL_JOB = "call_job"
     FILE_LOAD = "file_load"
+    # C5 — the digest: render a saved explorer analysis / dashboard or a plugin report to a
+    # file in the run's work area, then mail it (``notify`` attaches the run's files).
+    REPORT = "report"
+    NOTIFY = "notify"
 
 
 class CopyMode(str, Enum):
@@ -235,6 +239,29 @@ class Step(BaseModel):
     control_total: str | None = None
     control_tolerance: float = Field(0.0, ge=0)
 
+    # report — ``analysis:<id>`` / ``dashboard:<id>`` (a saved explorer object of ``app`` /
+    # ``model``) or ``report:<scope>:<id>`` (a plugin report, with ``params``); rendered to
+    # ``format`` under ``as_user``'s or ``as_role``'s row-level visibility, over ``period`` (a
+    # preset such as ``lastMonth``) or ``window_from`` / ``window_to``; the file lands in the
+    # run's work area as ``filename`` (default: the object's id).
+    report: str | None = None
+    app: str | None = None
+    model: str | None = None
+    format: Literal["xlsx", "pdf"] | None = None
+    period: str | None = None
+    window_from: str | None = None
+    window_to: str | None = None
+    as_user: str | None = None
+    as_role: str | None = None
+    filename: str | None = None
+    # notify — the recipients (``user:`` / ``role:`` / ``email:``), the subject / body (with
+    # ``{JOB}`` ``{RUN_ID}`` ``{FILES}`` placeholders), the run files to attach (``["*"]`` = every
+    # file this run produced) and the channels.
+    recipients: list[str] = Field(default_factory=list)
+    subject: str | None = None
+    attach: list[str] = Field(default_factory=lambda: ["*"])
+    channels: list[Literal["portal", "email", "action"]] = Field(default_factory=lambda: ["portal", "email"])
+
     # universal
     timeout_seconds: int = Field(3600, ge=1)
 
@@ -264,6 +291,19 @@ class Step(BaseModel):
             self._require("url")
         elif self.type is StepType.CALL_JOB:
             self._require("target_job_id")
+        elif self.type is StepType.REPORT:
+            self._require("report")
+            kind, _, rest = (self.report or "").partition(":")
+            if kind not in ("analysis", "dashboard", "report") or not rest:
+                raise ValueError(f"step {self.name!r}: `report` is analysis:<id>, dashboard:<id> or report:<scope>:<id>")
+            if kind in ("analysis", "dashboard"):
+                self._require("app", "model")
+            elif ":" not in rest:
+                raise ValueError(f"step {self.name!r}: a plugin report is report:<scope>:<id>")
+            if (self.window_from is None) != (self.window_to is None):
+                raise ValueError(f"step {self.name!r}: `window_from` and `window_to` go together")
+        elif self.type is StepType.NOTIFY:
+            self._require("recipients", "subject")
         elif self.type is StepType.FILE_LOAD:
             self._require("target")   # the file comes from `path`, `watch_dir`, or an upload at run time
             if (self.control_column is None) != (self.control_total is None):
