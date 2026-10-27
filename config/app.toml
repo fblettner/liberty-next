@@ -99,6 +99,18 @@ web_fetch_max_uses = 5
 # operator guide and docs/PHASE13.md for the spec. Missing/unreachable pool →
 # nomaflow logs a warning and skips startup (rest of the app boots normally).
 scaffold_tools = true
+[notify]
+# Notifications: the inbox table lives on `pool`; the email channel sends through this SMTP account.
+# enabled = true
+# pool = "default"
+# smtp_host = "smtp.example.com"   # empty = the email channel is off (portal + action still work)
+# smtp_port = 587
+# smtp_user = ""
+# smtp_password = ""               # set via Settings → App (encrypted at rest) or ${SMTP_PASSWORD}
+# smtp_from = "liberty@example.com"
+# smtp_tls = true                  # STARTTLS (587); smtp_ssl = true for implicit TLS (465)
+# retention_days = 90              # read notifications older than this are swept
+
 [jobs]
 # LIBERTY_APPS_DIR points at the apps repo's `config/` subdir by convention; plugins/
 # is the sibling dir, so the default resolves to

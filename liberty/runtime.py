@@ -121,6 +121,40 @@ async def build_user_views(settings: Settings, connectors: ConnectorRegistry) ->
         return None
 
 
+async def build_notifications(settings: Settings, connectors: ConnectorRegistry) -> Any | None:
+    """The notification inbox store on ``[notify] pool`` — ``None`` when disabled or the pool is
+    unusable (logged; the bell then shows nothing, the dispatcher's portal channel reports it)."""
+    notify = getattr(settings, "notify", None)
+    if notify is None or not notify.enabled:
+        return None
+    try:
+        from liberty.notify import NotificationStore
+
+        st = NotificationStore(connectors.pools, notify.pool)
+        journal_schema(settings, await st.create_schema())
+        return st
+    except Exception as exc:  # noqa: BLE001 — never let the inbox take the app down
+        _log.warning("notification store on pool %r unusable (%s) — the inbox is disabled", notify.pool, exc)
+        return None
+
+
+def build_dispatcher(app: Any, settings: Settings) -> Any | None:
+    """The dispatcher reads the app's holders through callables, so a reload that rebuilds the
+    auth backend, the registry or the store needs no new dispatcher."""
+    notify = getattr(settings, "notify", None)
+    if notify is None or not notify.enabled:
+        return None
+    from liberty.notify import Dispatcher
+
+    state = app.state
+    return Dispatcher(
+        getattr(state, "notifications", None), settings,
+        auth_backend=lambda: getattr(state, "auth_backend", None),
+        connectors=lambda: getattr(state, "connectors", None),
+        sio=lambda: getattr(state, "sio", None),
+    )
+
+
 @dataclass
 class RebuildResult:
     """What a rebuild touched — the ``POST /admin/reload`` reply is built from it."""
@@ -252,6 +286,14 @@ async def _rebind_pool_holders(app: Any, settings: Settings, new: ConnectorRegis
             state.user_views.rebind(new.pools)
         else:
             state.user_views = await build_user_views(settings, new)
+
+    # Notifications — the inbox store rebinds; the dispatcher reads the holders lazily.
+    if hasattr(state, "notifications"):
+        if state.notifications is not None:
+            state.notifications.rebind(new.pools)
+        else:
+            state.notifications = await build_notifications(settings, new)
+        state.notify = build_dispatcher(app, settings)
 
     # nomaflow — the job DB holds the pools; the step executors captured the registry.
     jobs = getattr(state, "jobs", None)

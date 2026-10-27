@@ -21,7 +21,7 @@ from liberty.auth.oidc import build_oidc
 from liberty.auth.routes import router as auth_router
 from liberty.auth.dependencies import OptionalPrincipal
 from liberty.auth.tokens import MIN_SECRET_BYTES, TokenConfig, TokenService
-from liberty.runtime import build_changesets_db, build_user_views, load_registry
+from liberty.runtime import build_changesets_db, build_dispatcher, build_notifications, build_user_views, load_registry
 from liberty.config import AuthSettings, Settings, load_settings
 from liberty.connectors import ConnectorRegistry
 from liberty.connectors.base import ConnectorError
@@ -49,6 +49,7 @@ from liberty.web import (
     screens_router,
     theme_router,
     views_router,
+    notifications_router,
 )
 
 _log = logging.getLogger("liberty")
@@ -191,6 +192,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # like the changesets table above so a bad/unreachable pool degrades the
         # feature rather than failing boot (the grid then just won't persist).
         app.state.user_views = await build_user_views(settings, app.state.connectors)
+        # Notifications — the inbox table on [notify] pool (self-bootstrapping, guarded like the
+        # two above) and the dispatcher (portal / email / action) the routes, hooks and jobs call.
+        app.state.notifications = await build_notifications(settings, app.state.connectors)
+        app.state.notify = build_dispatcher(app, settings)
 
         app.state.token_service = token_service
         from liberty.auth.throttle import LoginThrottle
@@ -580,6 +585,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(reports_router)
     app.include_router(changesets_router)
     app.include_router(views_router)
+    app.include_router(notifications_router)
 
     @app.get("/health", tags=["meta"], summary="Liveness probe")
     async def health() -> dict[str, str]:

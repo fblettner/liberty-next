@@ -15,6 +15,19 @@
   only a fresh database.)
 - The upgrade report's "Image tag" no longer shows "-" for an unpinned install.
 
+**Notifications (first part): the inbox and the dispatcher**
+- A notifications inbox (`ly2_notification` on `[notify] pool`, created at startup like the other
+  framework tables) and a dispatcher with three channels: **portal** (an inbox row per recipient,
+  pushed at once to the user's Socket.IO room), **email** (SMTP from `[notify]` in `app.toml`:
+  host, port, user, an `ENC:` password, from, STARTTLS or implicit TLS) and **action** (a
+  connector query or endpoint run with the message's values, for a webhook or a log table).
+  Recipients: `user:<name>`, `role:<name>` (every active holder), `email:<address>`. Subject,
+  body and link take `{placeholders}` from the event's values. A channel that fails is logged and
+  reported, never blocks the others. Routes: `GET /api/notifications` (`?unread=1`),
+  `GET /api/notifications/unread_count`, `POST /api/notifications/read`, and for a superuser
+  `POST /admin/notify/test` to try the channels. The rules (screen and job events), the bell and
+  the inbox page come next.
+
 **Screens: `editable_when`, a row-level read-only rule**
 - A screen can say when an existing row may be changed: `editable_when = [{ field = "PERIOD_STATUS",
   value = ["open", "validated"] }]` keeps the rows of a closed period read-only. The grid's edit mode

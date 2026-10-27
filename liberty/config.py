@@ -398,6 +398,26 @@ class PostApplyStep(BaseModel):
     label: str | None = Field(default=None, description="Display label in the apply report.")
 
 
+class NotifySettings(BaseModel):
+    """Notifications (``liberty.notify``): the inbox table's pool and the SMTP account the email
+    channel sends from. ``smtp_password`` may be ``ENC:…`` (encrypted with the master key, like the
+    other secrets). ``smtp_host`` empty → the email channel reports "not configured" and the
+    portal / action channels still work."""
+
+    enabled: bool = True
+    pool: str = "default"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_tls: bool = True      # STARTTLS after connecting (port 587)
+    smtp_ssl: bool = False     # implicit TLS from the first byte (port 465)
+    smtp_timeout: int = 20
+    # Read notifications older than this are swept by the retention job (0 = keep forever).
+    retention_days: int = 90
+
+
 class ChangeSetsSettings(BaseModel):
     """Change packages — capture tracked writes into reviewable, promotable change-sets (see
     ``project_nomajde_change_packages``). ``pool`` defaults to ``"default"`` so the ``ly_change_*``
@@ -428,6 +448,7 @@ class Settings(BaseModel):
     jobs: JobsSettings = Field(default_factory=JobsSettings)
     reports: ReportsSettings = Field(default_factory=ReportsSettings)
     changesets: ChangeSetsSettings = Field(default_factory=ChangeSetsSettings)
+    notify: NotifySettings = Field(default_factory=NotifySettings)
 
 
 def load_settings(

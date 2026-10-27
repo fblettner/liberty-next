@@ -263,6 +263,11 @@ class _LogHandler(logging.Handler):
 DASHBOARD_REFRESH_S = 5.0
 LOCK_NS = "/"                # default namespace; everything lives here for simplicity
 DASHBOARD_ROOM = "dashboard"
+
+
+def user_room(username: str) -> str:
+    """The Socket.IO room every socket of a user joins at connect."""
+    return f"user:{username}"
 LOGS_ROOM = "logs"
 
 
@@ -299,6 +304,10 @@ class LibertySio:
         self._register_handlers()
 
     # ── Socket.IO handlers ──────────────────────────────────────────────────
+    async def notify_user(self, username: str, payload: dict[str, Any]) -> None:
+        """Push a ``notification`` event (one inbox row) to every socket of *username*."""
+        await self.sio.emit("notification", payload, room=user_room(username))
+
     def _register_handlers(self) -> None:
         sio = self.sio
 
@@ -322,6 +331,9 @@ class LibertySio:
             sess = ConnectedSession(principal=principal, client_id=client_id)
             self._sessions[sid] = sess
             await sio.save_session(sid, sess)
+            # Every socket of a user joins the user's room — the notification dispatcher pushes
+            # a new inbox row there so the bell updates without polling.
+            await sio.enter_room(sid, user_room(principal.username))
             _log.info("sio.connect sid=%s user=%s client=%s", sid, principal.username, client_id)
             return True
 

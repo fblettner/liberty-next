@@ -111,6 +111,9 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
   changesets/             change packages: capture writes, lifecycle, compaction, apply bundle
   versioning/             config snapshot history (.versions/) + upgrade journal
   userviews/              DB-backed saved grid / chart views (shared + per user)
+  notify/                 notifications: store.py (ly2_notification inbox, schema_sync), dispatcher.py
+                          (Message → portal rows + Socket.IO push / SMTP email / a connector query or
+                          endpoint; recipients user: role: email:; channels isolated); rules come next
   plugins/invoke.py       module:function resolution for the apps' Python (allow-listed)
   config_merge.py         per-entity additive merge of a shipped config into the live one (the apps
                           installer + Package & Deploy): override / untouched-vs-.bundled snapshot /
@@ -140,6 +143,7 @@ tests/                    pytest (asyncio auto mode); SQLite fixtures; no live D
 | `/api` | `web/connectors.py` | `GET/POST /api/sql/{c}/{q}` (+ `?_stream=1` NDJSON, `_limit`, `_chunk_size`, screen-aware), `/api/http/{c}/{e}`, `/api/connectors`, `_schemas` / `_schema` introspection, `_import` |
 | `/api` | `web/menus.py`, `web/screens.py`, `web/export.py`, `web/charts.py`, `web/dashboards.py`, `web/actions.py`, `web/license.py`, `web/theme.py` | permission-pruned catalogs: menus, screens (+ dialog / actions resolved), workbook export, charts, dashboards, shared actions, license status, theme |
 | `/api/reports` `/api/views` `/api/plugins` | `web/reports.py`, `web/views.py`, `web/plugins.py` | run / download reports, saved views, invoke app callables |
+| `/api/notifications` `/admin/notify/test` | `web/notifications.py` | my inbox (list, unread count, mark read); a superuser's test send through the dispatcher |
 | `/ai` | `ai/routes.py` | `POST /ai/chat` (SSE), `GET /ai/tools` — perm `ai:chat` |
 | `/admin` | `web/admin.py` (3.3k lines — the config builders' backend), `web/dictgen.py` | reload, `GET /admin/config/schema`, `GET/PUT /admin/config/<section>/parsed`, rename / move / clone / delete-with-deps / find-usages / dependencies / integrity, packages (build / import), versions, AI proposal apply, API test, dictionary scan — **superuser** |
 | `/admin/access` `/admin/jobs` `/admin/changesets` | `web/access.py`, `web/jobs.py`, `web/changesets.py` | roles / permissions, nomaflow jobs + runs + presets + `{job}/upload` / `runs/{id}/files/{name}`, change packages |
@@ -179,6 +183,7 @@ hot-reloadable (`[app] hot_reload = true`, `web/hot_reload.py`) or reloaded via
 | `theme.toml` | `[theme]` | `theme.py::ThemeFile` | Theme |
 | `reports.toml` | `[reports] templates_config_path` | `reports/schema.py` | Reports |
 | `jobs.toml` | `[jobs]` (default `${LIBERTY_APPS_DIR}/../plugins/nomaflow/jobs.toml`) | `jobs/schema.py` | nomaflow → Jobs |
+| (none) | `[notify]` — the inbox pool + SMTP for the email channel | `config.py::NotifySettings` | App (next) |
 | `auth.toml` | `[auth] backend = "toml"` | `auth/authstore.py::AuthFile` | Access |
 
 Secrets: `${ENV_VAR}` / `${VAR:-default}` substitution in every TOML; `ENC:` values decrypted

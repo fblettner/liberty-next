@@ -17,6 +17,20 @@
 - Le rapport de mise à jour n'affiche plus « - » comme étiquette d'image sur une installation non
   épinglée.
 
+**Notifications (première partie) : la boîte de réception et le distributeur**
+- Une boîte de réception (`ly2_notification` sur `[notify] pool`, créée au démarrage comme les
+  autres tables du framework) et un distributeur à trois canaux : **portail** (une ligne par
+  destinataire, poussée aussitôt vers la salle Socket.IO de l'utilisateur), **e-mail** (SMTP
+  d'après `[notify]` dans `app.toml` : hôte, port, utilisateur, mot de passe `ENC:`, expéditeur,
+  STARTTLS ou TLS implicite) et **action** (une requête ou un point d'accès d'un connecteur, lancé
+  avec les valeurs du message, pour un webhook ou une table de journal). Destinataires :
+  `user:<nom>`, `role:<nom>` (chaque titulaire actif), `email:<adresse>`. Sujet, corps et lien
+  prennent des `{marqueurs}` dans les valeurs de l'événement. Un canal qui échoue est journalisé
+  et signalé, sans bloquer les autres. Routes : `GET /api/notifications` (`?unread=1`),
+  `GET /api/notifications/unread_count`, `POST /api/notifications/read`, et pour un
+  superutilisateur `POST /admin/notify/test` pour essayer les canaux. Les règles (événements
+  d'écran et de tâche), la cloche et la page de réception arrivent ensuite.
+
 **Écrans : `editable_when`, une règle de lecture seule par ligne**
 - Un écran peut dire quand une ligne existante peut être modifiée : `editable_when = [{ field =
   "PERIOD_STATUS", value = ["open", "validated"] }]` garde en lecture seule les lignes d'une période
