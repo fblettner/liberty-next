@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from liberty.auth.authstore import AuthBackend, AuthError
 from liberty.auth.dependencies import CurrentPrincipal, get_auth_backend, require_superuser
 from liberty.auth.principal import Principal
+from liberty.auth.scope import ScopeRule
 
 router = APIRouter(prefix="/admin/access", tags=["access"])
 
@@ -37,6 +38,7 @@ class UserCreate(BaseModel):
     roles: list[str] = Field(default_factory=list)
     is_superuser: bool = False
     is_active: bool = True
+    attributes: dict[str, str | list[str]] = Field(default_factory=dict)
 
 
 class UserUpdate(BaseModel):
@@ -46,6 +48,7 @@ class UserUpdate(BaseModel):
     roles: list[str] | None = None
     is_active: bool | None = None
     is_superuser: bool | None = None
+    attributes: dict[str, str | list[str] | None] | None = None   # replaces the user's attributes
 
 
 class PasswordSet(BaseModel):
@@ -55,11 +58,12 @@ class PasswordSet(BaseModel):
 class RoleUpsert(BaseModel):
     permissions: list[str] = Field(default_factory=list)
     description: str | None = Field(default=None, max_length=500)
+    scope: list[ScopeRule] | None = None   # None keeps the role's current rules; [] clears them
 
 
-def _role_dict(t: tuple[str, list[str], str | None]) -> dict[str, Any]:
-    name, perms, desc = t
-    return {"name": name, "permissions": perms, "description": desc}
+def _role_dict(t: tuple[str, list[str], str | None, list[dict]]) -> dict[str, Any]:
+    name, perms, desc, scope = t
+    return {"name": name, "permissions": perms, "description": desc, "scope": scope}
 
 
 # ── users ─────────────────────────────────────────────────────────────────────────────────
@@ -74,6 +78,7 @@ async def create_user(body: UserCreate, _: Superuser, backend: Backend) -> dict[
         u = await backend.create_user(
             body.username, password=body.password, email=body.email, full_name=body.full_name,
             is_superuser=body.is_superuser, is_active=body.is_active, roles=body.roles,
+            attributes=body.attributes or None,
         )
     except AuthError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -102,6 +107,8 @@ async def update_user(username: str, body: UserUpdate, principal: CurrentPrincip
             await backend.set_active(username, body.is_active)
         if body.is_superuser is not None:
             await backend.set_superuser(username, body.is_superuser)
+        if body.attributes is not None:
+            await backend.set_attributes(username, body.attributes, replace=True)
     except AuthError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     u = await backend.get_by_username(username)
@@ -128,5 +135,5 @@ async def list_roles(_: Superuser, backend: Backend) -> dict[str, Any]:
 @router.put("/roles/{name}", summary="Upsert role")
 async def upsert_role(name: str, body: RoleUpsert, _: Superuser, backend: Backend) -> dict[str, Any]:
     # get_or_create_role is an upsert — creates the role or replaces its permissions / description.
-    t = await backend.get_or_create_role(name, permissions=body.permissions, description=body.description)
+    t = await backend.get_or_create_role(name, permissions=body.permissions, description=body.description, scope=body.scope)
     return _role_dict(t)

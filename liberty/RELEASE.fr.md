@@ -41,9 +41,14 @@
 - Appliqué en un seul endroit, le connecteur SQL : chaque SELECT (grille, flux, synthèse, export,
   tableaux de bord, requêtes de l'assistant, rapports) est enveloppé dans `SELECT * FROM (<sql>)
   lib_rls WHERE …` avec de vrais paramètres, et une mise à jour ou une suppression d'une ligne hors
-  périmètre est refusée (403). `/auth/me` renvoie les attributs et le périmètre calculé. L'éditeur
-  des périmètres et attributs dans Paramètres, et la correspondance des claims OIDC, arrivent
-  ensuite.
+  périmètre est refusée (403). `/auth/me` renvoie les attributs et le périmètre calculé.
+- Mise en place sans l'interface (qui arrive ensuite) : `liberty-admin create-role <r> --scope '{dd =
+  "CO", source = "#USER.company#", mode = "deny"}'`, `set-scope <r> --rule … | --clear`,
+  `list-roles`, `create-user --attribute company=00001,00050`, `set-attributes <u> CLÉ=VALEUR…
+  [--replace]` (`CLÉ=` supprime) ; la même chose par `PUT /admin/access/roles/{name}` (`scope`) et
+  les `attributes` des utilisateurs. Avec OIDC, `[oidc] attribute_claims = { company = "company",
+  pole = "department" }` remplit les attributs depuis le jeton d'identité à chaque connexion (un
+  claim qui disparaît retire son attribut ; les attributs posés localement sont conservés).
 
 ## 7.0.58 — 2026-10-27
 

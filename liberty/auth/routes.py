@@ -357,6 +357,7 @@ async def oidc_callback(
         username_claim=s.username_claim,
         email_claim=s.email_claim,
         name_claim=s.name_claim,
+        attribute_claims=s.attribute_claims or None,
     )
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account is disabled")

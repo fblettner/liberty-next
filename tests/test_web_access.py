@@ -118,3 +118,25 @@ def test_short_password_rejected(app) -> None:
         h = _h(client, "admin")
         assert client.post("/admin/access/users", json={"username": "x", "password": "short"}, headers=h).status_code == 422
         assert client.post("/admin/access/users/alice/password", json={"password": "short"}, headers=h).status_code == 422
+
+
+def test_role_scope_and_user_attributes(app) -> None:
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        rule = {"dd": "CO", "source": "#USER.company#", "mode": "deny"}
+        r = client.put("/admin/access/roles/filiale", json={"permissions": ["sql:*"], "scope": [rule]}, headers=h)
+        assert r.status_code == 200 and r.json()["scope"] == [{**rule, "exclude": False}]
+        # omitted scope keeps the rules; [] clears them
+        r = client.put("/admin/access/roles/filiale", json={"permissions": ["sql:x"]}, headers=h)
+        assert r.json()["scope"][0]["dd"] == "CO"
+        assert any(x["name"] == "filiale" and x["scope"] for x in client.get("/admin/access/roles", headers=h).json()["roles"])
+        r = client.post("/admin/access/users", json={"username": "ann", "password": "annpw123", "roles": ["filiale"], "attributes": {"company": ["00001"]}}, headers=h)
+        assert r.status_code == 201 and r.json()["attributes"] == {"company": ["00001"]}
+        assert r.json()["scope"] == [[{"column": None, "dd": "CO", "values": ["00001"], "mode": "deny"}]]
+        r = client.patch("/admin/access/users/ann", json={"attributes": {"company": "00050", "pole": "N"}}, headers=h)
+        assert r.status_code == 200 and r.json()["attributes"] == {"company": "00050", "pole": "N"}
+        # a malformed rule is a 422
+        r = client.put("/admin/access/roles/filiale", json={"permissions": [], "scope": [{"values": ["1"]}]}, headers=h)
+        assert r.status_code == 422
+        r = client.put("/admin/access/roles/filiale", json={"permissions": [], "scope": []}, headers=h)
+        assert r.json()["scope"] == []

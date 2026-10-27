@@ -109,6 +109,44 @@ def resolve_scope(
     return groups or None
 
 
+def normalize_attributes(raw: Mapping[str, Any] | None) -> dict[str, str | list[str]]:
+    """User attributes as stored: ``str`` or ``list[str]`` values, empty / None values dropped."""
+    out: dict[str, str | list[str]] = {}
+    for k, v in (raw or {}).items():
+        if v is None or v == "" or v == []:
+            continue
+        out[str(k)] = [str(x) for x in v] if isinstance(v, (list, tuple, set)) else str(v)
+    return out
+
+
+def apply_claim_attributes(
+    current: Mapping[str, Any] | None, claims: Mapping[str, Any], mapping: Mapping[str, str] | None,
+) -> dict[str, str | list[str]]:
+    """The user's attributes after an OIDC login: every attribute named in *mapping*
+    (``{attribute: claim}``, ``[oidc] attribute_claims``) is taken from the ID-token claims —
+    set when the claim is present, **removed** when it is absent (the IdP owns those keys, a
+    company the IdP no longer asserts must not linger). Other attributes are kept as they are."""
+    out: dict[str, Any] = {k: v for k, v in (current or {}).items() if k not in (mapping or {})}
+    for attr, claim in (mapping or {}).items():
+        if claim in claims:
+            out[attr] = claims[claim]
+    return normalize_attributes(out)
+
+
+def merge_attributes(
+    current: Mapping[str, Any] | None, changes: Mapping[str, Any], *, replace: bool = False,
+) -> dict[str, str | list[str]]:
+    """The attributes after an edit: *replace* swaps the whole dict, else *changes* are merged
+    over *current* and a ``None`` / empty value removes its key."""
+    base: dict[str, Any] = {} if replace else dict(current or {})
+    for k, v in changes.items():
+        if v is None or v == "" or v == []:
+            base.pop(k, None)
+        else:
+            base[k] = v
+    return normalize_attributes(base)
+
+
 class ScopeDeniedError(Exception):
     """A write targets a row outside the caller's data scope (→ HTTP 403)."""
 

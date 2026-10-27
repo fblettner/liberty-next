@@ -9,10 +9,14 @@ objects stay usable after the session closes.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from liberty.auth.models import Role, User
+from liberty.auth.scope import ScopeRule, apply_claim_attributes, merge_attributes, normalize_attributes
 from liberty.auth.password import hash_password, needs_rehash, verify_password
 
 
@@ -78,6 +82,7 @@ class AuthService:
         roles: list[str] | None = None,
         provider: str = "local",
         provider_subject: str | None = None,
+        attributes: Mapping[str, Any] | None = None,
     ) -> User:
         if await self.get_user_by_username(username) is not None:
             raise AuthError(f"user {username!r} already exists")
@@ -90,6 +95,7 @@ class AuthService:
             is_active=is_active,
             provider=provider,
             provider_subject=provider_subject,
+            attributes=normalize_attributes(attributes),
         )
         # Assign the collection explicitly (even if empty) so it counts as loaded —
         # a freshly-flushed object's relationship would otherwise lazy-load on
@@ -118,6 +124,11 @@ class AuthService:
         user.email = email
         await self.session.flush()
 
+    async def set_attributes(self, user: User, attributes: Mapping[str, Any], *, replace: bool = False) -> None:
+        # a new dict every time: SQLAlchemy's JSON column only notices a reassignment
+        user.attributes = merge_attributes(user.attributes, attributes, replace=replace)
+        await self.session.flush()
+
     async def assign_roles(self, user: User, role_names: list[str], *, replace: bool = False) -> None:
         roles = await self._resolve_roles(role_names)
         if replace:
@@ -128,18 +139,22 @@ class AuthService:
         await self.session.flush()
 
     async def get_or_create_role(
-        self, name: str, *, permissions: list[str] | None = None, description: str | None = None
+        self, name: str, *, permissions: list[str] | None = None, description: str | None = None,
+        scope: list[ScopeRule] | None = None,
     ) -> Role:
+        rules = [r.model_dump(exclude_none=True) for r in scope] if scope is not None else None
         role = await self.get_role(name)
         if role is None:
-            role = Role(name=name, permissions=list(permissions or []), description=description)
+            role = Role(name=name, permissions=list(permissions or []), description=description, scope=rules or [])
             self.session.add(role)
             await self.session.flush()
-        elif permissions is not None or description is not None:
+        elif permissions is not None or description is not None or rules is not None:
             if permissions is not None:
                 role.permissions = list(permissions)
             if description is not None:
                 role.description = description
+            if rules is not None:
+                role.scope = rules
             await self.session.flush()
         return role
 
@@ -153,9 +168,10 @@ class AuthService:
         email_claim: str = "email",
         name_claim: str = "name",
         default_roles: list[str] | None = None,
+        attribute_claims: Mapping[str, str] | None = None,
     ) -> User:
         """Find the local account for an OIDC ``sub`` (creating it on first login),
-        refresh its profile fields, and return it."""
+        refresh its profile fields and the attributes mapped from claims, and return it."""
         subject = claims.get("sub")
         if not subject:
             raise AuthError("OIDC claims missing 'sub'")
@@ -178,6 +194,7 @@ class AuthService:
                 password_hash=None,
                 provider="oidc",
                 provider_subject=subject,
+                attributes=apply_claim_attributes({}, claims, attribute_claims),
             )
             user.roles = await self._resolve_roles(default_roles) if default_roles else []
             self.session.add(user)
@@ -186,6 +203,7 @@ class AuthService:
                 user.email = email
             if full_name is not None:
                 user.full_name = full_name
+            user.attributes = apply_claim_attributes(user.attributes, claims, attribute_claims)
         await self.session.flush()
         return user
 

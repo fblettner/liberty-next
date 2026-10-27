@@ -246,3 +246,31 @@ def test_create_role(env, capsys) -> None:
     assert out["role"]["name"] == "ops"
     assert out["role"]["permissions"] == ["a:b:c", "x:*"]
     assert out["role"]["description"] == "ops"
+
+
+def test_attributes_and_scope_commands(env, capsys) -> None:
+    base, db_url = env
+    _run(base, "init-db", capsys=capsys)
+    rc, out = _run(base, "create-role", "filiale", "--permission", "sql:*", "--scope", '{dd = "CO", source = "#USER.company#", mode = "deny"}', capsys=capsys)
+    assert rc == 0 and out["role"]["scope"] == [{"dd": "CO", "source": "#USER.company#", "exclude": False, "mode": "deny"}]
+    rc, out = _run(base, "create-user", "ann", "--password", "annpw123", "--role", "filiale", "--attribute", "company=00001,00050", "--attribute", "pole=N", capsys=capsys)
+    assert rc == 0 and out["user"]["attributes"] == {"company": ["00001", "00050"], "pole": "N"}
+    assert out["user"]["scope"] == [[{"column": None, "dd": "CO", "values": ["00001", "00050"], "mode": "deny"}]]
+    rc, out = _run(base, "set-attributes", "ann", "company=00070", "pole=", capsys=capsys)
+    assert rc == 0 and out["user"]["attributes"] == {"company": "00070"}
+    rc, out = _run(base, "set-attributes", "ann", "region=EU", "--replace", capsys=capsys)
+    assert out["user"]["attributes"] == {"region": "EU"}
+    # set-scope replaces the rules (JSON accepted too); list-roles shows them; --clear empties
+    rc, out = _run(base, "set-scope", "filiale", "--rule", '{"dd": "SY", "values": ["00"], "exclude": true}', capsys=capsys)
+    assert rc == 0 and out["role"]["scope"] == [{"dd": "SY", "values": ["00"], "exclude": True, "mode": "ignore"}]
+    rc, out = _run(base, "list-roles", capsys=capsys)
+    assert {r["name"]: r["scope"] for r in out}["filiale"][0]["dd"] == "SY"
+    rc, out = _run(base, "set-scope", "filiale", "--clear", capsys=capsys)
+    assert out["role"]["scope"] == []
+    # errors: unknown role, malformed rule / attribute → exit 2
+    rc, _ = _run(base, "set-scope", "nope", "--rule", '{dd = "SY", values = ["00"]}', capsys=capsys)
+    assert rc == 2
+    rc, _ = _run(base, "set-scope", "filiale", "--rule", '{values = ["00"]}', capsys=capsys)
+    assert rc == 2
+    rc, _ = _run(base, "set-attributes", "ann", "novalue", capsys=capsys)
+    assert rc == 2

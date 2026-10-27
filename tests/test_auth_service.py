@@ -157,3 +157,29 @@ async def test_count_users(auth_db: AuthDatabase) -> None:
         await svc.create_user("h1", password="p")
         await svc.create_user("h2", password="p")
         assert await svc.count_users() == 2
+
+
+@pytest.mark.asyncio
+async def test_attributes_scope_and_oidc_claims(auth_db: AuthDatabase) -> None:
+    from liberty.auth.scope import ScopeRule
+
+    mapping = {"company": "company"}
+    async with auth_db.session() as s:
+        svc = AuthService(s)
+        role = await svc.get_or_create_role("filiale", permissions=["sql:*"], scope=[ScopeRule(dd="CO", source="#USER.company#")])
+        assert role.scope == [{"dd": "CO", "source": "#USER.company#", "exclude": False, "mode": "ignore"}]
+        u = await svc.create_user("ann", password="pw", roles=["filiale"], attributes={"company": "00001"})
+        await svc.set_attributes(u, {"pole": "N", "company": None})
+        o = await svc.provision_oidc_user({"sub": "s1", "company": ["00001", "00050"]}, default_roles=["filiale"], attribute_claims=mapping)
+        oid = o.id
+    async with auth_db.session() as s:
+        svc = AuthService(s)
+        u = await svc.get_user_by_username("ann")
+        assert u.attributes == {"pole": "N"}
+        o = await svc.get_user(oid)
+        assert o.attributes == {"company": ["00001", "00050"]}
+        o = await svc.provision_oidc_user({"sub": "s1"}, attribute_claims=mapping)   # claim gone → attribute gone
+        assert o.attributes == {}
+        # the role keeps its scope when only the permissions change
+        role = await svc.get_or_create_role("filiale", permissions=["sql:a"])
+        assert role.scope and role.scope[0]["dd"] == "CO"

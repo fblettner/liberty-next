@@ -218,11 +218,49 @@ async def _cmd_init_db(ctx: _Context, args: argparse.Namespace) -> int:
     return 0
 
 
+def parse_attributes(items: list[str] | None) -> dict[str, str | list[str] | None]:
+    """``KEY=VALUE`` pairs → attributes. ``KEY=a,b`` is a list, ``KEY=`` removes the key."""
+    out: dict[str, str | list[str] | None] = {}
+    for raw in items or []:
+        key, sep, value = raw.partition("=")
+        key = key.strip()
+        if not key or not sep:
+            raise ValueError(f"attribute {raw!r}: expected KEY=VALUE")
+        value = value.strip()
+        out[key] = None if value == "" else ([v.strip() for v in value.split(",")] if "," in value else value)
+    return out
+
+
+def parse_scope_rule(raw: str):
+    """One data-scope rule from the command line — a TOML inline table (``{dd = "SY", values =
+    ["00"], exclude = true}``) or a JSON object."""
+    import json
+    import tomllib
+
+    from liberty.auth.scope import ScopeRule
+
+    text = raw.strip()
+    data = None
+    try:
+        data = tomllib.loads(f"r = {text}")["r"]
+    except tomllib.TOMLDecodeError:
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"scope rule {raw!r}: neither a TOML inline table nor JSON ({exc})") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"scope rule {raw!r}: expected a table / object")
+    try:
+        return ScopeRule.model_validate(data)
+    except ValueError as exc:
+        raise ValueError(f"scope rule {raw!r}: {exc}") from exc
+
+
 async def _cmd_create_user(ctx: _Context, args: argparse.Namespace) -> int:
     password, generated = _resolve_password(args)
     user = await ctx.backend.create_user(
         args.username, password=password, email=args.email, full_name=args.full_name,
-        is_superuser=args.superuser, roles=args.role or None,
+        is_superuser=args.superuser, roles=args.role or None, attributes=parse_attributes(args.attribute) or None,
     )
     out = {"user": user.public_dict()}
     if generated:
@@ -248,6 +286,32 @@ async def _cmd_set_active(ctx: _Context, args: argparse.Namespace) -> int:
 
 async def _cmd_list_users(ctx: _Context, args: argparse.Namespace) -> int:
     _print([u.public_dict() for u in await ctx.backend.list_users()])
+    return 0
+
+
+async def _cmd_set_attributes(ctx: _Context, args: argparse.Namespace) -> int:
+    user = await ctx.backend.set_attributes(args.username, parse_attributes(args.attribute), replace=args.replace)
+    _print({"user": user.public_dict()})
+    return 0
+
+
+def _role_out(t) -> dict:
+    name, perms, desc, scope = t
+    return {"name": name, "permissions": perms, "description": desc, "scope": scope}
+
+
+async def _cmd_list_roles(ctx: _Context, args: argparse.Namespace) -> int:
+    _print([_role_out(t) for t in await ctx.backend.list_roles()])
+    return 0
+
+
+async def _cmd_set_scope(ctx: _Context, args: argparse.Namespace) -> int:
+    if args.name not in {t[0] for t in await ctx.backend.list_roles()}:
+        print(f"error: unknown role {args.name!r} (create-role first)", file=sys.stderr)
+        return 2
+    rules = [] if args.clear else [parse_scope_rule(r) for r in args.rule or []]
+    t = await ctx.backend.get_or_create_role(args.name, scope=rules)
+    _print({"role": _role_out(t)})
     return 0
 
 
@@ -327,10 +391,11 @@ async def _cmd_run_install_jobs(ctx: _Context, args: argparse.Namespace) -> int:
 
 
 async def _cmd_create_role(ctx: _Context, args: argparse.Namespace) -> int:
-    name, perms, desc = await ctx.backend.get_or_create_role(
-        args.name, permissions=args.permission or [], description=args.description
+    scope = [parse_scope_rule(r) for r in args.scope] if args.scope else None
+    t = await ctx.backend.get_or_create_role(
+        args.name, permissions=args.permission or [], description=args.description, scope=scope,
     )
-    _print({"role": {"name": name, "permissions": perms, "description": desc}})
+    _print({"role": _role_out(t)})
     return 0
 
 
@@ -662,6 +727,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_cu.add_argument("--email")
     p_cu.add_argument("--full-name")
     p_cu.add_argument("--role", action="append", metavar="ROLE", help="repeatable")
+    p_cu.add_argument("--attribute", action="append", metavar="KEY=VALUE", help="data-scope attribute (repeatable; KEY=a,b for a list)")
     p_cu.add_argument("--superuser", action="store_true")
     _add_password_args(p_cu)
     p_cu.set_defaults(func=_cmd_create_user)
@@ -680,11 +746,30 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("list-users", help="list all users").set_defaults(func=_cmd_list_users)
 
+    p_sat = sub.add_parser("set-attributes", help="set a user's data-scope attributes (company, pole, …)")
+    p_sat.add_argument("username")
+    p_sat.add_argument("attribute", nargs="+", metavar="KEY=VALUE", help="KEY=a,b for a list; KEY= removes the key")
+    p_sat.add_argument("--replace", action="store_true", help="replace every attribute instead of merging")
+    p_sat.set_defaults(func=_cmd_set_attributes)
+
     p_cr = sub.add_parser("create-role", help="create or update a role")
     p_cr.add_argument("name")
     p_cr.add_argument("--permission", action="append", metavar="PERM", help="repeatable")
     p_cr.add_argument("--description")
+    p_cr.add_argument(
+        "--scope", action="append", metavar="RULE",
+        help='data-scope rule, repeatable — a TOML inline table: \'{dd = "CO", source = "#USER.company#", mode = "deny"}\' '
+             '(replaces the role\'s rules when given)',
+    )
     p_cr.set_defaults(func=_cmd_create_role)
+
+    sub.add_parser("list-roles", help="list roles with their permissions and data scope").set_defaults(func=_cmd_list_roles)
+
+    p_ss = sub.add_parser("set-scope", help="replace a role's data-scope rules")
+    p_ss.add_argument("name")
+    p_ss.add_argument("--rule", action="append", metavar="RULE", help='TOML inline table or JSON, repeatable: \'{dd = "SY", values = ["00"], exclude = true}\'')
+    p_ss.add_argument("--clear", action="store_true", help="remove every rule (the role grants every row again)")
+    p_ss.set_defaults(func=_cmd_set_scope)
 
     p_rij = sub.add_parser(
         "run-install-jobs",
@@ -747,7 +832,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return asyncio.run(_run(args))
-    except AuthError as exc:
+    except (AuthError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

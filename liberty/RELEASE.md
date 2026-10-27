@@ -36,8 +36,14 @@
 - Enforced in one place, the SQL connector: every SELECT (grid, stream, summary, export, dashboards,
   the AI assistant's queries, reports) is wrapped as `SELECT * FROM (<sql>) lib_rls WHERE …` with
   real binds, and an update or delete whose row lies outside the scope is refused (403). `/auth/me`
-  reports the attributes and the resolved scope. The Settings editor for scopes and attributes,
-  and the OIDC claim mapping, come next.
+  reports the attributes and the resolved scope.
+- Setting it up without the UI (which comes next): `liberty-admin create-role <r> --scope '{dd =
+  "CO", source = "#USER.company#", mode = "deny"}'`, `set-scope <r> --rule … | --clear`,
+  `list-roles`, `create-user --attribute company=00001,00050`, `set-attributes <u> KEY=VALUE…
+  [--replace]` (`KEY=` removes); the same through `PUT /admin/access/roles/{name}` (`scope`) and
+  the users' `attributes`. With OIDC, `[oidc] attribute_claims = { company = "company", pole =
+  "department" }` fills the attributes from the ID token at every login (a mapped claim that
+  disappears removes its attribute; attributes set locally are kept).
 
 ## 7.0.58 — 2026-10-27
 

@@ -245,6 +245,9 @@ class OIDCSettings(BaseModel):
     username_claim: str = "preferred_username"
     email_claim: str = "email"
     name_claim: str = "name"
+    # ``{attribute: claim}`` — user attributes a role's data scope reads (``#USER.company#``),
+    # refreshed from the ID token at every login; a mapped claim that is absent removes the attribute.
+    attribute_claims: dict[str, str] = Field(default_factory=dict)
     redirect_url: str = ""  # override the auto-derived /auth/oidc/callback URL (proxies)
     # If set, /auth/oidc/callback redirects here with the JWTs in the URL fragment
     # (#access_token=…&refresh_token=…) — for SPAs. Empty → the callback returns JSON.

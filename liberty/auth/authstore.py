@@ -19,6 +19,7 @@ import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
 
 import tomli_w
@@ -27,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from liberty.auth.db import AuthDatabase
 from liberty.auth.models import User
 from liberty.auth.password import hash_password, needs_rehash, verify_password
-from liberty.auth.scope import ScopeRule, resolve_scope
+from liberty.auth.scope import ScopeRule, apply_claim_attributes, merge_attributes, normalize_attributes, resolve_scope
 from liberty.auth.service import AuthError, AuthService
 
 ADMIN_ROLE = "admin"
@@ -153,14 +154,16 @@ class AuthBackend(Protocol):
     async def provision_oidc_user(
         self, claims: dict, *, username_claim: str = "preferred_username",
         email_claim: str = "email", name_claim: str = "name", default_roles: list[str] | None = None,
+        attribute_claims: Mapping[str, str] | None = None,
     ) -> UserRecord: ...
     async def list_users(self) -> list[UserRecord]: ...
-    async def list_roles(self) -> list[tuple[str, list[str], str | None]]: ...  # (name, permissions, description)
+    async def list_roles(self) -> list[tuple[str, list[str], str | None, list[dict]]]: ...  # (name, permissions, description, scope)
     async def count_users(self) -> int: ...
     async def create_user(
         self, username: str, *, password: str | None = None, email: str | None = None,
         full_name: str | None = None, is_superuser: bool = False, is_active: bool = True,
         roles: list[str] | None = None, provider: str = "local", provider_subject: str | None = None,
+        attributes: Mapping[str, Any] | None = None,
     ) -> UserRecord: ...
     async def set_password(self, username: str, password: str) -> UserRecord: ...
     async def set_active(self, username: str, active: bool) -> UserRecord: ...
@@ -171,13 +174,19 @@ class AuthBackend(Protocol):
     async def assign_roles(self, username: str, roles: list[str], *, replace: bool = False) -> UserRecord: ...
     async def get_or_create_role(
         self, name: str, *, permissions: list[str] | None = None, description: str | None = None,
-    ) -> tuple[str, list[str], str | None]: ...
+        scope: list[ScopeRule] | None = None,
+    ) -> tuple[str, list[str], str | None, list[dict]]: ...
+    async def set_attributes(self, username: str, attributes: Mapping[str, Any], *, replace: bool = False) -> UserRecord: ...
     async def ready(self) -> None: ...  # backend-specific "make sure it can be used" (init-db / touch the file)
 
 
 # --------------------------------------------------------------------------- #
 # TOML backend
 # --------------------------------------------------------------------------- #
+
+
+def _role_tuple(name: str, r: AuthRole) -> tuple[str, list[str], str | None, list[dict]]:
+    return (name, list(r.permissions), r.description, [x.model_dump(exclude_none=True) for x in r.scope])
 
 
 class TomlAuthBackend:
@@ -243,6 +252,7 @@ class TomlAuthBackend:
     async def provision_oidc_user(
         self, claims: dict, *, username_claim: str = "preferred_username",
         email_claim: str = "email", name_claim: str = "name", default_roles: list[str] | None = None,
+        attribute_claims: Mapping[str, str] | None = None,
     ) -> UserRecord:
         sub = claims.get("sub")
         if not sub:
@@ -255,6 +265,7 @@ class TomlAuthBackend:
                     u.email = email
                 if full_name is not None:
                     u.full_name = full_name
+                u.attributes = apply_claim_attributes(u.attributes, claims, attribute_claims)
                 save_auth(self.path, f)
                 return self._record(f, un, u)
         base = str(claims.get(username_claim) or email or f"oidc:{sub}")
@@ -262,7 +273,10 @@ class TomlAuthBackend:
         while cand in f.users:
             n += 1
             cand = f"{base}-{n}"
-        u = AuthUser(roles=list(default_roles or []), provider="oidc", sub=sub, email=email, full_name=full_name)
+        u = AuthUser(
+            roles=list(default_roles or []), provider="oidc", sub=sub, email=email, full_name=full_name,
+            attributes=apply_claim_attributes({}, claims, attribute_claims),
+        )
         f.users[cand] = u
         save_auth(self.path, f)
         return self._record(f, cand, u)
@@ -271,9 +285,9 @@ class TomlAuthBackend:
         f = load_auth(self.path)
         return [self._record(f, un, u) for un, u in sorted(f.users.items())]
 
-    async def list_roles(self) -> list[tuple[str, list[str], str | None]]:
+    async def list_roles(self) -> list[tuple[str, list[str], str | None, list[dict]]]:
         f = load_auth(self.path)
-        return [(n, list(r.permissions), r.description) for n, r in sorted(f.roles.items())]
+        return [_role_tuple(n, r) for n, r in sorted(f.roles.items())]
 
     async def count_users(self) -> int:
         return len(load_auth(self.path).users)
@@ -282,6 +296,7 @@ class TomlAuthBackend:
         self, username: str, *, password: str | None = None, email: str | None = None,
         full_name: str | None = None, is_superuser: bool = False, is_active: bool = True,
         roles: list[str] | None = None, provider: str = "local", provider_subject: str | None = None,
+        attributes: Mapping[str, Any] | None = None,
     ) -> UserRecord:
         f = load_auth(self.path)
         if username in f.users:
@@ -292,7 +307,7 @@ class TomlAuthBackend:
         u = AuthUser(
             password_hash=hash_password(password) if password else None, roles=list(roles or []),
             active=is_active, superuser=is_superuser, provider=provider, sub=provider_subject,
-            email=email, full_name=full_name,
+            email=email, full_name=full_name, attributes=normalize_attributes(attributes),
         )
         f.users[username] = u
         save_auth(self.path, f)
@@ -327,6 +342,13 @@ class TomlAuthBackend:
         save_auth(self.path, f)
         return self._record(f, username, u)
 
+    async def set_attributes(self, username: str, attributes: Mapping[str, Any], *, replace: bool = False) -> UserRecord:
+        f = load_auth(self.path)
+        u = self._get(f, username)
+        u.attributes = merge_attributes(u.attributes, attributes, replace=replace)
+        save_auth(self.path, f)
+        return self._record(f, username, u)
+
     async def assign_roles(self, username: str, roles: list[str], *, replace: bool = False) -> UserRecord:
         f = load_auth(self.path)
         u = self._get(f, username)
@@ -339,19 +361,22 @@ class TomlAuthBackend:
 
     async def get_or_create_role(
         self, name: str, *, permissions: list[str] | None = None, description: str | None = None,
-    ) -> tuple[str, list[str], str | None]:
+        scope: list[ScopeRule] | None = None,
+    ) -> tuple[str, list[str], str | None, list[dict]]:
         f = load_auth(self.path)
         r = f.roles.get(name)
         if r is None:
-            r = AuthRole(permissions=list(permissions or []), description=description)
+            r = AuthRole(permissions=list(permissions or []), description=description, scope=list(scope or []))
             f.roles[name] = r
         else:
             if permissions is not None:
                 r.permissions = list(permissions)
             if description is not None:
                 r.description = description
+            if scope is not None:
+                r.scope = list(scope)
         save_auth(self.path, f)
-        return (name, list(r.permissions), r.description)
+        return _role_tuple(name, r)
 
 
 # --------------------------------------------------------------------------- #
@@ -404,11 +429,12 @@ class DbAuthBackend:
     async def provision_oidc_user(
         self, claims: dict, *, username_claim: str = "preferred_username",
         email_claim: str = "email", name_claim: str = "name", default_roles: list[str] | None = None,
+        attribute_claims: Mapping[str, str] | None = None,
     ) -> UserRecord:
         async with self.db.session() as s:
             u = await AuthService(s).provision_oidc_user(
                 claims, username_claim=username_claim, email_claim=email_claim, name_claim=name_claim,
-                default_roles=default_roles,
+                default_roles=default_roles, attribute_claims=attribute_claims,
             )
             return self._record(u)
 
@@ -416,12 +442,12 @@ class DbAuthBackend:
         async with self.db.session() as s:
             return [self._record(u) for u in await AuthService(s).list_users()]
 
-    async def list_roles(self) -> list[tuple[str, list[str], str | None]]:
+    async def list_roles(self) -> list[tuple[str, list[str], str | None, list[dict]]]:
         from sqlalchemy import select
         from liberty.auth.models import Role
         async with self.db.session() as s:
             rows = (await s.execute(select(Role).order_by(Role.name))).scalars().all()
-            return [(r.name, list(r.permissions or []), r.description) for r in rows]
+            return [(r.name, list(r.permissions or []), r.description, list(r.scope or [])) for r in rows]
 
     async def count_users(self) -> int:
         async with self.db.session() as s:
@@ -431,11 +457,13 @@ class DbAuthBackend:
         self, username: str, *, password: str | None = None, email: str | None = None,
         full_name: str | None = None, is_superuser: bool = False, is_active: bool = True,
         roles: list[str] | None = None, provider: str = "local", provider_subject: str | None = None,
+        attributes: Mapping[str, Any] | None = None,
     ) -> UserRecord:
         async with self.db.session() as s:
             u = await AuthService(s).create_user(
                 username, password=password, email=email, full_name=full_name, is_superuser=is_superuser,
                 is_active=is_active, roles=roles, provider=provider, provider_subject=provider_subject,
+                attributes=attributes,
             )
             return self._record(u)
 
@@ -475,6 +503,15 @@ class DbAuthBackend:
             await svc.update_profile(u, full_name=full_name, email=email)
             return self._record(u)
 
+    async def set_attributes(self, username: str, attributes: Mapping[str, Any], *, replace: bool = False) -> UserRecord:
+        async with self.db.session() as s:
+            svc = AuthService(s)
+            u = await svc.get_user_by_username(username)
+            if u is None:
+                raise AuthError(f"unknown user {username!r}")
+            await svc.set_attributes(u, attributes, replace=replace)
+            return self._record(u)
+
     async def assign_roles(self, username: str, roles: list[str], *, replace: bool = False) -> UserRecord:
         async with self.db.session() as s:
             svc = AuthService(s)
@@ -486,10 +523,11 @@ class DbAuthBackend:
 
     async def get_or_create_role(
         self, name: str, *, permissions: list[str] | None = None, description: str | None = None,
-    ) -> tuple[str, list[str], str | None]:
+        scope: list[ScopeRule] | None = None,
+    ) -> tuple[str, list[str], str | None, list[dict]]:
         async with self.db.session() as s:
-            r = await AuthService(s).get_or_create_role(name, permissions=permissions, description=description)
-            return (r.name, list(r.permissions or []), r.description)
+            r = await AuthService(s).get_or_create_role(name, permissions=permissions, description=description, scope=scope)
+            return (r.name, list(r.permissions or []), r.description, list(r.scope or []))
 
 
 def build_auth_backend(settings, pools) -> AuthBackend:  # settings: liberty.config.Settings

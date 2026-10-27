@@ -114,6 +114,46 @@ def test_provision_oidc_user(backend: TomlAuthBackend) -> None:
         _run(backend.provision_oidc_user({"email": "no-sub@x.test"}))
 
 
+def test_attributes_and_role_scope(backend: TomlAuthBackend) -> None:
+    from liberty.auth.scope import ScopeRule
+
+    name, perms, desc, scope = _run(backend.get_or_create_role(
+        "filiale", permissions=["sql:*"], scope=[ScopeRule(dd="CO", source="#USER.company#", mode="deny")],
+    ))
+    assert scope == [{"dd": "CO", "source": "#USER.company#", "exclude": False, "mode": "deny"}]
+    assert _run(backend.list_roles())[0][3] == scope
+    u = _run(backend.create_user("ann", password="pw", roles=["filiale"], attributes={"company": ["00001", "00050"], "pole": "N"}))
+    assert u.attributes == {"company": ["00001", "00050"], "pole": "N"}
+    assert u.scope == [[{"column": None, "dd": "CO", "values": ["00001", "00050"], "mode": "deny"}]]
+    # merge: change one key, remove another (empty value), keep the rest
+    u = _run(backend.set_attributes("ann", {"company": "00070", "pole": ""}))
+    assert u.attributes == {"company": "00070"} and u.scope[0][0]["values"] == ["00070"]
+    # replace
+    u = _run(backend.set_attributes("ann", {"region": "EU"}, replace=True))
+    assert u.attributes == {"region": "EU"} and u.scope[0][0]["values"] == []   # attribute gone → nothing allowed
+    # scope kept when only permissions change; cleared with []
+    assert _run(backend.get_or_create_role("filiale", permissions=["sql:x"]))[3] == scope
+    assert _run(backend.get_or_create_role("filiale", scope=[]))[3] == []
+    assert _run(backend.get_by_username("ann")).scope is None
+    with pytest.raises(AuthError):
+        _run(backend.set_attributes("nobody", {"a": "b"}))
+
+
+def test_provision_oidc_user_maps_attribute_claims(backend: TomlAuthBackend) -> None:
+    mapping = {"company": "company", "pole": "department"}
+    u = _run(backend.provision_oidc_user(
+        {"sub": "s1", "email": "x@corp.test", "company": "00001", "department": ["N", "S"]}, attribute_claims=mapping,
+    ))
+    assert u.attributes == {"company": "00001", "pole": ["N", "S"]}
+    # a locally set attribute survives; a mapped claim that disappears removes its attribute
+    _run(backend.set_attributes(u.username, {"local": "yes"}))
+    u = _run(backend.provision_oidc_user({"sub": "s1", "company": "00050"}, attribute_claims=mapping))
+    assert u.attributes == {"company": "00050", "local": "yes"}
+    # no mapping → attributes untouched
+    u = _run(backend.provision_oidc_user({"sub": "s1", "company": "00099"}))
+    assert u.attributes == {"company": "00050", "local": "yes"}
+
+
 def test_build_auth_backend_picks_by_settings(tmp_path) -> None:
     assert isinstance(build_auth_backend(Settings(auth=AuthSettings(backend="toml", toml_path=tmp_path / "a.toml")), None), TomlAuthBackend)
 
