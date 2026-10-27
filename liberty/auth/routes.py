@@ -76,6 +76,8 @@ def _issue_pair(tokens: TokenService, user: UserRecord) -> TokenPair:
         permissions=user.permissions,
         is_superuser=user.is_superuser,
         provider=user.provider,
+        scope=user.scope,
+        attributes=user.attributes,
     )
     refresh = tokens.refresh_token(subject=user.id)
     return TokenPair(

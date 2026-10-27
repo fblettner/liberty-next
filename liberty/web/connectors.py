@@ -28,6 +28,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from liberty.auth.dependencies import CurrentPrincipal
 from liberty.connectors import ConnectorRegistry
+from liberty.auth.scope import DataScope, ScopeDeniedError
 from liberty.connectors.base import ConnectorError, detect_statement_type
 from liberty.connectors.config import ColumnHint
 from liberty.connectors.introspect import introspect_pool, list_pool_schemas, resolve_schema_token
@@ -84,7 +85,7 @@ async def describe_connector(connector: str, principal: CurrentPrincipal, connec
     yields no information about what exists vs. what's forbidden."""
     try:
         conn = connectors.get(connector)
-    except ConnectorError as exc:
+    except (ConnectorError, ScopeDeniedError) as exc:
         raise http_for_connector_error(exc) from exc
     view = public_connector(conn.describe(), principal)
     if view is None:
@@ -235,6 +236,7 @@ async def _run_sql(
     summary_dims: list[tuple[str, str | None]] | None = None,
     detail_filters: list[tuple[str, str | None, Any]] | None = None,
     pool: str | None = None,
+    scope: DataScope | None = None,
     verbose_errors: bool = False,
 ) -> dict[str, Any]:
     """Run *query* on *connector* with *params*. When a matching :class:`Screen` is found,
@@ -290,8 +292,9 @@ async def _run_sql(
             query, params, language=language, max_rows=max_rows, user=user,
             column_hints=column_hints, audit_table=audit_table, screen_max_rows=screen_max_rows,
             dictionary_scope=dict_scope, summary_dims=summary_dims, detail_filters=detail_filters,
+            scope=scope,
         )
-    except ConnectorError as exc:
+    except (ConnectorError, ScopeDeniedError) as exc:
         raise http_for_connector_error(exc) from exc
     except SQLAlchemyError as exc:
         # Full text (SQL + binds) → server log; the caller sees it only when superuser.
@@ -378,6 +381,7 @@ def _stream_sql_ndjson(
     screen_hint: tuple[str, str] | None = None,
     pool: str | None = None,
     verbose_errors: bool = False,
+    scope: DataScope | None = None,
 ) -> StreamingResponse:
     """Stream *query*'s rows as NDJSON (``application/x-ndjson``). Same per-screen prep as
     :func:`_run_sql` — column hints, ``screen_max_rows``, dictionary scope — except writes are
@@ -418,7 +422,7 @@ def _stream_sql_ndjson(
         # Reject non-SELECT up front so we don't 200-then-error. ``execute_stream`` also
         # raises, but doing it here gives a clean 405 / 422 instead of an NDJSON error line.
         qdef = conn.get_query(query)
-    except ConnectorError as exc:
+    except (ConnectorError, ScopeDeniedError) as exc:
         raise http_for_connector_error(exc) from exc
     if detect_statement_type(qdef.default_sql) != "SELECT":
         raise HTTPException(
@@ -434,7 +438,7 @@ def _stream_sql_ndjson(
             async for ev in conn.execute_stream(
                 query, params, language=language, max_rows=max_rows, user=user,
                 column_hints=column_hints, screen_max_rows=screen_max_rows,
-                dictionary_scope=dict_scope, chunk_size=chunk_size or 100,
+                dictionary_scope=dict_scope, chunk_size=chunk_size or 100, scope=scope,
             ):
                 # The three concrete event types render to plain dicts; ``json.dumps`` with
                 # ``default=str`` handles dates / datetimes / Decimals the same way the
@@ -462,7 +466,7 @@ def _stream_sql_ndjson(
                     # the stream (the consumer would see an unknown ``kind`` field).
                     payload = {"kind": "unknown"}
                 yield (json.dumps(payload, default=str) + "\n").encode("utf-8")
-        except (ConnectorError, SQLAlchemyError) as exc:
+        except (ConnectorError, ScopeDeniedError, SQLAlchemyError) as exc:
             # The HTTP headers have already gone out (``StreamingResponse`` flushes on the
             # first yield) so we can't switch to a 4xx/5xx. Emit a terminal error line; the
             # consumer's NDJSON parser sees ``{"kind":"error",…}`` and treats it as end-of-
@@ -503,7 +507,7 @@ async def sql_pool_schemas(
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Superuser only")
     try:
         conn = connectors.sql(connector)
-    except ConnectorError as exc:
+    except (ConnectorError, ScopeDeniedError) as exc:
         raise http_for_connector_error(exc) from exc
     try:
         return await list_pool_schemas(connectors.pools, conn.pool_name)
@@ -547,7 +551,7 @@ async def sql_pool_schema(
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Superuser only")
     try:
         conn = connectors.sql(connector)  # UnknownConnectorError → 404; wrong-type → 404
-    except ConnectorError as exc:
+    except (ConnectorError, ScopeDeniedError) as exc:
         raise http_for_connector_error(exc) from exc
     only_schema = request.query_params.get("schema") or None
     # Resolve a ``#SCHEMA.<KEY>#`` token the builder passes from a query's FROM to the pool's real
@@ -631,7 +635,7 @@ async def sql_query_get(
     # GET must not mutate — only SELECTs are allowed here; everything else uses POST.
     try:
         qdef = connectors.sql(connector).get_query(query)
-    except ConnectorError as exc:
+    except (ConnectorError, ScopeDeniedError) as exc:
         raise http_for_connector_error(exc) from exc
     if detect_statement_type(qdef.default_sql) != "SELECT":
         raise HTTPException(status.HTTP_405_METHOD_NOT_ALLOWED, detail="Non-SELECT queries must be run with POST")
@@ -665,6 +669,7 @@ async def sql_query_get(
         return _stream_sql_ndjson(
             connectors, connector, query, qp,
             language=request_language(request), max_rows=limit, user=principal.username,
+            scope=principal.data_scope,
             verbose_errors=principal.is_superuser,
             screens=screens, chunk_size=chunk_size, screen_hint=screen_hint,
             pool=_request_pool(request),
@@ -672,6 +677,7 @@ async def sql_query_get(
     return await _run_sql(
         connectors, connector, query, qp,
         language=request_language(request), max_rows=limit, user=principal.username,
+            scope=principal.data_scope,
             verbose_errors=principal.is_superuser,
         screens=screens, screen_hint=screen_hint,
         summary_dims=summary_dims, detail_filters=detail_filters,
@@ -778,7 +784,7 @@ async def sql_import(
 
     try:
         conn = connectors.sql(connector)
-    except ConnectorError as exc:
+    except (ConnectorError, ScopeDeniedError) as exc:
         raise http_for_connector_error(exc) from exc
     lang = request_language(request)
     user = principal.username
@@ -837,7 +843,7 @@ async def sql_import(
                         continue
                     rc = await _run(body.insert_query, row)
             results.append({"index": i, "action": action, "ok": True, "rowcount": rc})
-        except (ConnectorError, SQLAlchemyError) as exc:
+        except (ConnectorError, ScopeDeniedError, SQLAlchemyError) as exc:
             results.append({"index": i, "action": action, "ok": False, "error": _import_error(exc)})
     valid = sum(1 for r in results if r["ok"])
     return {"committed": body.commit, "mode": mode, "valid": valid,
@@ -889,6 +895,7 @@ async def sql_query_post(
         return _stream_sql_ndjson(
             connectors, connector, query, params,
             language=request_language(request), max_rows=limit, user=principal.username,
+            scope=principal.data_scope,
             verbose_errors=principal.is_superuser,
             screens=screens, chunk_size=chunk_size,
             pool=_request_pool(request),
@@ -896,6 +903,7 @@ async def sql_query_post(
     return await _run_sql(
         connectors, connector, query, params,
         language=request_language(request), max_rows=limit, user=principal.username,
+            scope=principal.data_scope,
             verbose_errors=principal.is_superuser,
         screens=screens, changesets=getattr(request.app.state, "changesets_db", None),
         action_context=action_context if isinstance(action_context, dict) else None,
@@ -936,7 +944,7 @@ async def http_call(
     try:
         conn = connectors.api(connector)  # UnknownConnectorError if missing / wrong type
         conn.get_endpoint(endpoint)  # EndpointNotFoundError if missing
-    except ConnectorError as exc:
+    except (ConnectorError, ScopeDeniedError) as exc:
         raise http_for_connector_error(exc) from exc
     # APIConnector.call never raises — a failed upstream call comes back as a
     # structured ApiResult with success=False; surface it as-is (HTTP 200).

@@ -12,7 +12,7 @@ segment position is a wildcard, and ``"*"`` alone (or :attr:`is_superuser`) mean
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 def _segment_match(pattern: str, value: str) -> bool:
@@ -41,6 +41,16 @@ class Principal:
     permissions: tuple[str, ...] = ()
     is_superuser: bool = False
     provider: str = "local"
+    # Row-level data scope as carried in the token (resolved groups) and the user attributes.
+    scope: tuple = ()
+    attributes: dict = field(default_factory=dict)
+
+    @property
+    def data_scope(self):
+        """The runtime :class:`liberty.auth.scope.DataScope`, or None when unrestricted."""
+        from liberty.auth.scope import DataScope
+
+        return None if self.is_superuser else DataScope.from_claims(list(self.scope))
 
     # -- constructors ------------------------------------------------------ #
 
@@ -54,6 +64,8 @@ class Principal:
             permissions=tuple(claims.get("perms") or ()),
             is_superuser=bool(claims.get("sup")),
             provider=claims.get("provider") or "local",
+            scope=tuple(claims.get("scope") or ()),
+            attributes=dict(claims.get("attrs") or {}),
         )
 
     @classmethod
@@ -106,4 +118,6 @@ class Principal:
             "permissions": list(self.permissions),
             "is_superuser": self.is_superuser,
             "provider": self.provider,
+            "attributes": dict(self.attributes),
+            "scope": [list(g) for g in self.scope] or None,
         }

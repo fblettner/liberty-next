@@ -89,7 +89,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           registry.py (ConnectorRegistry + the shared dictionary), dictionary.py
                           (dictionary.toml: labels, enums, lookups, sequences, rules),
                           introspect.py (schema walk), thick.py / thick_engine.py (Oracle OCI)
-  auth/                   authstore.py (AuthBackend: toml | db), tokens.py (PyJWT access /
+  auth/                   scope.py (row-level data scope: role rules → resolved per user → JWT
+                          `scope` claim → SQLConnector wrap / write check), authstore.py (AuthBackend: toml | db), tokens.py (PyJWT access /
                           refresh with rotation), throttle.py (login throttle), principal.py
                           (colon-glob permissions), oidc.py, dependencies.py, routes.py;
                           models.py / db.py / service.py = the DB backend's ly2_* tables
@@ -141,13 +142,18 @@ tests/                    pytest (asyncio auto mode); SQLite fixtures; no live D
 | `/admin/access` `/admin/jobs` `/admin/changesets` | `web/access.py`, `web/jobs.py`, `web/changesets.py` | roles / permissions, nomaflow jobs + runs + presets, change packages |
 | `/socket.io` | `sio.py` | JWT on handshake; locks, dashboard, log rooms |
 
-Permission strings: `sql:{connector}:{query}`, `api:{connector}:{endpoint}`, `plugin:{ref}`,
+Row-level scope: a role's `scope` rules (dictionary item `dd` or result `column` → values, from a
+user attribute or literal, optional `exclude` / `connector`) are resolved at login into the JWT and applied by
+`SQLConnector` to every SELECT as a `lib_rls` wrap (and to writes); a `dd` rule reaches every column
+carrying the item — hint `dd`, same name, or name minus the connector's `dd_prefix` (JDE: 2, `ABCO`
+→ `CO`); the auth dependency publishes it in `liberty.auth.scope.current_scope` so code without
+principal plumbing is covered; jobs are unrestricted. Permission strings: `sql:{connector}:{query}`, `api:{connector}:{endpoint}`, `plugin:{ref}`,
 `ai:chat`, with colon-segment globs (`sql:nomasx1:*`, `*`); superusers bypass. The permission
 is checked **before** the connector lookup (no name enumeration). A mutating query needs both
 `writable = true` in TOML and the caller's permission. DB errors: non-superusers get the
 driver line + an `error_id`; superusers the full text; the statement and binds are logged
-only when the pool's `debug_sql` is on (`web/errors.py::db_error_detail`). **There is no
-row-level data scoping yet** (`#LOGIN_USER#` is resolved in the browser) — PLAN C1.
+only when the pool's `debug_sql` is on (`web/errors.py::db_error_detail`). `#LOGIN_USER#` is
+still resolved in the browser (a convenience, not a security boundary — the scope is).
 
 ### Config files ↔ settings ↔ builders
 

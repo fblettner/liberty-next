@@ -15,6 +15,30 @@
   only a fresh database.)
 - The upgrade report's "Image tag" no longer shows "-" for an unpinned install.
 
+**Row-level data scope (first part)**
+- A role can now restrict **which rows** its holders see, on top of which queries they may run:
+  `[roles.<r>] scope = [{dd = "CO", values = ["00001"]}, …]` in `auth.toml` (the DB backend keeps
+  the same list in `ly2_roles.scope`). A rule pins a dictionary item (`dd`) or one result column
+  (`column`) to a set of values — literal, or taken from a user attribute (`source =
+  "#USER.company#"`; users carry free-form `attributes`). Roles OR together, columns AND within a
+  role; a role without scope grants everything; superusers bypass. `mode` decides what a query
+  without the item does: `ignore` (unrestricted on that axis) or `deny` (no rows). `exclude = true`
+  turns the list into a black-list (`SY NOT IN ('00')`, nulls kept). A rule may name
+  its `connector`; elsewhere it says nothing. The scope is resolved at login and rides in the token
+  — no database hit per request.
+- The `dd` rule is the one that secures an item across tables. A result column carries the item
+  when the screen's hint says so, when it is named like it, or — on a connector with the new
+  `dd_prefix` (JDE: `dd_prefix = 2`, so `ABCO`, `MCCO`, `SDCO` all carry `CO`) — when its name
+  minus the table prefix is the item. Every matching column of a query is restricted (a join of
+  F0101 and F0006 binds both `ABCO` and `MCCO`), and no screen hint is needed per column. Text
+  columns follow the filters' dialect rules: with the pool's `trim_strings` (JDE CHAR / NCHAR,
+  blank-padded) the column is compared trimmed and the values stripped.
+- Enforced in one place, the SQL connector: every SELECT (grid, stream, summary, export, dashboards,
+  the AI assistant's queries, reports) is wrapped as `SELECT * FROM (<sql>) lib_rls WHERE …` with
+  real binds, and an update or delete whose row lies outside the scope is refused (403). `/auth/me`
+  reports the attributes and the resolved scope. The Settings editor for scopes and attributes,
+  and the OIDC claim mapping, come next.
+
 ## 7.0.58 — 2026-10-27
 
 **Install / upgrade**

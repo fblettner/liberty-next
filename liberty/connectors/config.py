@@ -817,6 +817,14 @@ class SqlConnectorConfig(BaseModel):
     )
     licensed: bool = Field(default=False, description="Require a valid [license] key. Without one this connector isn't loaded.")
     max_rows: int | None = Field(default=None, description="Default SELECT row cap. Falls back to the pool's, then 1000. A per-screen / per-request cap takes precedence.")
+    dd_prefix: int = Field(
+        default=0, ge=0, le=4,
+        description=(
+            "Length of the table prefix in physical column names (JDE: 2 — ABCO, MCCO, SDCO all carry the "
+            "data item CO). Lets a role's data scope on a dictionary item (`dd = \"CO\"`) reach every "
+            "table, whatever the prefix, without a screen hint per column. 0: column names are the items."
+        ),
+    )
     show_in_switcher: bool = Field(
         default=True,
         description="Show this connector in the top app switcher.",

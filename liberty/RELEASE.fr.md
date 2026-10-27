@@ -17,6 +17,34 @@
 - Le rapport de mise à jour n'affiche plus « - » comme étiquette d'image sur une installation non
   épinglée.
 
+**Périmètre de données par ligne (première partie)**
+- Un rôle peut maintenant restreindre **les lignes** que ses titulaires voient, en plus des
+  requêtes qu'ils peuvent exécuter : `[roles.<r>] scope = [{dd = "CO", values = ["00001"]}, …]`
+  dans `auth.toml` (le backend base de données garde la même liste dans `ly2_roles.scope`). Une
+  règle fixe un élément du dictionnaire (`dd`) ou une colonne de résultat (`column`) à un ensemble
+  de valeurs, littérales ou issues d'un attribut de l'utilisateur (`source = "#USER.company#"` ; les
+  utilisateurs portent des `attributes` libres). Les rôles se combinent par OU, les colonnes d'un
+  même rôle par ET ; un rôle sans périmètre donne accès à tout ; les superutilisateurs ne sont pas
+  concernés. `mode` fixe le sort d'une requête sans l'élément : `ignore` (aucune restriction sur cet
+  axe) ou `deny` (aucune ligne). `exclude = true` inverse la liste (`SY NOT IN ('00')`, les valeurs
+  nulles restent visibles). Une règle peut nommer son `connector` ; ailleurs elle ne dit rien.
+  Le périmètre est calculé à la connexion et voyage dans le jeton, sans accès à la base à chaque
+  requête.
+- La règle `dd` est celle qui protège un élément dans toutes les tables. Une colonne de résultat
+  porte l'élément quand l'indication de l'écran le dit, quand elle porte son nom, ou, sur un
+  connecteur avec le nouveau `dd_prefix` (JDE : `dd_prefix = 2`, donc `ABCO`, `MCCO`, `SDCO`
+  portent tous `CO`), quand son nom sans le préfixe de table est l'élément. Toutes les colonnes
+  concernées d'une requête sont restreintes (une jointure F0101 / F0006 filtre `ABCO` et `MCCO`),
+  sans indication d'écran colonne par colonne. Les colonnes texte suivent les règles de dialecte
+  des filtres : avec `trim_strings` sur le pool (CHAR / NCHAR JDE, complétés par des espaces), la
+  colonne est comparée sans ses espaces et les valeurs nettoyées.
+- Appliqué en un seul endroit, le connecteur SQL : chaque SELECT (grille, flux, synthèse, export,
+  tableaux de bord, requêtes de l'assistant, rapports) est enveloppé dans `SELECT * FROM (<sql>)
+  lib_rls WHERE …` avec de vrais paramètres, et une mise à jour ou une suppression d'une ligne hors
+  périmètre est refusée (403). `/auth/me` renvoie les attributs et le périmètre calculé. L'éditeur
+  des périmètres et attributs dans Paramètres, et la correspondance des claims OIDC, arrivent
+  ensuite.
+
 ## 7.0.58 — 2026-10-27
 
 **Installation / mise à jour**

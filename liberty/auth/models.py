@@ -45,6 +45,8 @@ class Role(Base):
     description: Mapped[str | None] = mapped_column(String(255))
     # List[str] of permission strings; "*" is the wildcard.
     permissions: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # Row-level data scope rules (liberty.auth.scope.ScopeRule dicts); [] = unrestricted.
+    scope: Mapped[list[dict] | None] = mapped_column(JSON, default=list, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     users: Mapped[list[User]] = relationship(secondary=user_roles, back_populates="roles")
@@ -66,6 +68,8 @@ class User(Base):
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
     # Identity provider that owns this account: "local" or "oidc".
     provider: Mapped[str] = mapped_column(String(32), default="local")
+    # Free-form attributes a role's scope may read (company, pole, …).
+    attributes: Mapped[dict | None] = mapped_column(JSON, default=dict, nullable=True)
     # The provider's subject identifier (the OIDC ``sub`` claim); NULL for local.
     provider_subject: Mapped[str | None] = mapped_column(String(255), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

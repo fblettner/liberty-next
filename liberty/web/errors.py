@@ -7,6 +7,7 @@ import uuid
 
 from fastapi import HTTPException, status
 
+from liberty.auth.scope import ScopeDeniedError
 from liberty.connectors.base import (
     ConnectorError,
     EndpointNotFoundError,
@@ -55,6 +56,8 @@ def db_error_detail(
 def http_for_connector_error(exc: ConnectorError) -> HTTPException:
     if isinstance(exc, _NOT_FOUND):
         return HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc))
+    if isinstance(exc, ScopeDeniedError):  # a write outside the caller's row-level data scope
+        return HTTPException(status.HTTP_403_FORBIDDEN, detail=str(exc))
     if isinstance(exc, _UNPROCESSABLE):
         return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
     if isinstance(exc, UnknownPoolError):  # pool not defined / empty URL → service misconfigured

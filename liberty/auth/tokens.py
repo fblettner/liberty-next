@@ -116,17 +116,24 @@ class TokenService:
         permissions: list[str] | None = None,
         is_superuser: bool = False,
         provider: str = "local",
+        scope: list | None = None,
+        attributes: dict | None = None,
     ) -> IssuedToken:
+        claims: dict = {
+            "sub": subject,
+            "username": username,
+            "email": email,
+            "roles": roles or [],
+            "perms": permissions or [],
+            "sup": bool(is_superuser),
+            "provider": provider,
+        }
+        if scope:  # the resolved row-level data scope (liberty.auth.scope) — absent = unrestricted
+            claims["scope"] = scope
+        if attributes:
+            claims["attrs"] = attributes
         return self._encode(
-            {
-                "sub": subject,
-                "username": username,
-                "email": email,
-                "roles": roles or [],
-                "perms": permissions or [],
-                "sup": bool(is_superuser),
-                "provider": provider,
-            },
+            claims,
             self.config.access_ttl,
             ACCESS,
         )

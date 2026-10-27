@@ -884,6 +884,7 @@ def _apply_dynamic_justify(
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from liberty.auth.scope import DataScope, ScopeDeniedError, column_items, current_scope
 from liberty.connectors.base import (
     ALLOWED_STATEMENTS,
     WRITE_STATEMENTS,
@@ -1248,6 +1249,7 @@ class SQLConnector:
         )
         self._pools = pools
         self._dict = dictionary or DictionaryFile()
+        self._scope_columns: dict[str, dict[str, str]] = {}  # per-query result columns found by the scope probe
         # App-wide fallback language — used when a request supplies no Accept-Language. Lives on
         # [app] in app.toml; passed through by ConnectorRegistry so it's a single source of truth.
         self._default_language = default_language
@@ -1385,6 +1387,119 @@ class SQLConnector:
         for p in qdef.params:
             bound.setdefault(p.name, merged.get(p.name))
         return bound
+
+    # ── row-level data scope (C1) ───────────────────────────────────────────────────────
+    def _effective_format(self, name: str, column_hints: list[ColumnHint] | None, dict_scope: str | None) -> str | None:
+        """The column's display format: the hint's own, else the dictionary entry's (by dd or
+        name) — what decides whether a scope value must be bound as a number."""
+        for h in column_hints or []:
+            if h.name.lower() == name.lower():
+                if h.format:
+                    return h.format
+                if h.dd == "":
+                    return None
+                entry = self._dict.find_entry(h.dd or h.name, connector=dict_scope or self.name)
+                return entry.format if (entry is not None and entry.format) else None
+        entry = self._dict.find_entry(name, connector=dict_scope or self.name)
+        return entry.format if (entry is not None and entry.format) else None
+
+    async def _discover_columns(self, query_name: str, sql_text: str, qdef: QueryDef, params: dict[str, Any] | None) -> dict[str, str]:
+        """``{lower_name: actual_name}`` of the query's result columns, found once per query
+        with a ``WHERE 1=0`` probe (cached on this connector; a reload rebuilds connectors)."""
+        cached = self._scope_columns.get(query_name)
+        if cached is not None:
+            return cached
+        body, _ = _split_order_by(sql_text)
+        probe = f"SELECT * FROM (\n{body}\n) lib_rls WHERE 1=0"
+        bound = self._build_params(probe, qdef, params)
+        engine: AsyncEngine = self._pools.engine(self.pool_name)
+        async with engine.connect() as conn:
+            result = await conn.execute(_text(probe), bound)
+            names = list(result.keys())
+        cols = {n.lower(): n for n in names}
+        self._scope_columns[query_name] = cols
+        return cols
+
+    async def _apply_scope_wrap(
+        self, sql_text: str, params: dict[str, Any] | None, *, query_name: str, qdef: QueryDef,
+        stmt_type: str, column_hints: list[ColumnHint] | None, dict_scope: str | None,
+        scope: DataScope | None,
+    ) -> tuple[str, dict[str, Any] | None]:
+        """Wrap a SELECT as ``SELECT * FROM (<sql>) lib_rls WHERE <scope>`` with real binds when
+        the caller has a data scope whose columns the query returns. The columns are taken from
+        the screen's hints when they name every scoped column / item, else from a one-time probe
+        (a dictionary-item rule has to see every column: ``ABCO`` and ``MCCO`` both carry ``CO``
+        on a ``dd_prefix = 2`` connector). A rule's values are bound with the column's type (a
+        numeric company id stays numeric). Text columns follow the filter wrap's dialect rules:
+        under the pool's ``trim_strings`` (JDE CHAR / NCHAR blank-padded, sometimes right-
+        justified) the column side is ``TRIM(lib_rls.col)`` and the value is stripped, and the
+        bind side is CAST to the dialect's wide VARCHAR like :func:`_build_filter_predicate`."""
+        if scope is None or stmt_type != "SELECT":
+            return sql_text, params
+        prefix = self.config.dd_prefix
+        dialect = self._resolve_dialect()
+        trim_text = self._pools.trim_strings(self.pool_name)
+        fmt_cache: dict[str, str | None] = {}
+
+        def fmt_of(col: str) -> str | None:
+            if col not in fmt_cache:
+                fmt_cache[col] = self._effective_format(col, column_hints, dict_scope)
+            return fmt_cache[col]
+
+        def is_text(col: str) -> bool:
+            fmt = fmt_of(col)
+            return not fmt or fmt.lower() in _TEXT_FORMATS
+
+        def col_ref(col: str) -> str:
+            return f"TRIM(lib_rls.{col})" if (trim_text and is_text(col)) else f"lib_rls.{col}"
+
+        def bind_ref(bind: str, col: str) -> str:
+            return f"CAST(:{bind} AS {_filter_sql_type(None, dialect)})" if is_text(col) else f":{bind}"
+        hints = {h.name.lower(): h.name for h in column_hints or []}
+        dd_of = {h.name.lower(): (h.dd or h.name) for h in column_hints or [] if h.dd != ""}
+        known: set[str] = set()
+        for low in hints:
+            known |= {low} | column_items(low, dd_of, prefix)
+        if scope.wanted_columns() <= known:
+            columns = hints
+        else:
+            columns = await self._discover_columns(query_name, sql_text, qdef, params)
+            columns = {**columns, **{k: v for k, v in hints.items() if k not in columns}}
+        where, binds = scope.predicate(columns, dd_of, prefix=prefix, connector=self.name, quote=col_ref, bind_ref=bind_ref)
+        if where is None:
+            return sql_text, params
+        # bind values typed like the column (asyncpg refuses a str against an integer column);
+        # text values stripped when the column side is TRIMmed
+        typed: dict[str, Any] = {}
+        col_of_bind = scope.bind_columns(columns, dd_of, prefix=prefix, connector=self.name)
+        for b, v in binds.items():
+            col = col_of_bind.get(b, "")
+            if is_text(col):
+                typed[b] = v.strip() if (trim_text and isinstance(v, str)) else v
+            else:
+                typed[b] = _coerce_value(v, fmt_of(col) or "")
+        body, order_clause = _split_order_by(sql_text)
+        out = f"SELECT * FROM (\n{body}\n) lib_rls\nWHERE {where}"
+        if order_clause:
+            out += f"\nORDER BY {order_clause}"
+        return out, {**(params or {}), **typed}
+
+    def _check_write_scope(
+        self, query_name: str, params: dict[str, Any] | None, *, column_hints: list[ColumnHint] | None,
+        scope: DataScope,
+    ) -> None:
+        """A write must stay inside the scope: the submitted row (and, on an update, the row's
+        previous values under ``<COL>_ORIGINAL``) must satisfy it. A scoped column absent from
+        the parameters follows the rule's mode (ignore / deny)."""
+        values = dict(params or {})
+        after = {k: v for k, v in values.items() if not str(k).upper().endswith("_ORIGINAL")}
+        before = {str(k)[:-9]: v for k, v in values.items() if str(k).upper().endswith("_ORIGINAL")}
+        dd_of = {h.name.lower(): (h.dd or h.name) for h in column_hints or [] if h.dd != ""}
+        kw = {"prefix": self.config.dd_prefix, "connector": self.name}
+        if not scope.allows_row(after, dd_of, **kw) or (before and not scope.allows_row({**after, **before}, dd_of, **kw)):
+            raise ScopeDeniedError(
+                f"{self.name}.{query_name}: the row is outside your data scope"
+            )
 
     def _apply_filter_wrap(
         self, sql_text: str, qdef: QueryDef, params: dict[str, Any] | None, *,
@@ -2027,6 +2142,7 @@ class SQLConnector:
         max_rows: int | None = None, user: str | None = None,
         column_hints: list[ColumnHint] | None = None, audit_table: str | None = None,
         screen_max_rows: int | None = None, dictionary_scope: str | None = None,
+        scope: DataScope | None = None,
         dry_run: bool = False,
         summary_dims: list[tuple[str, str | None]] | None = None,
         detail_filters: list[tuple[str, str | None, Any]] | None = None,
@@ -2099,6 +2215,14 @@ class SQLConnector:
             sql_text, qdef, params, stmt_type=stmt_type, column_hints=column_hints,
             dict_scope=dict_scope,
         )
+        # Row-level data scope (C1) — the caller's, else the request's (set by the auth
+        # dependency), else none (a job). Applied before the summary wrap so aggregates only
+        # count rows the user may see; writes are checked once the binds are final (below).
+        scope = scope if scope is not None else current_scope.get()
+        sql_text, params = await self._apply_scope_wrap(
+            sql_text, params, query_name=query_name, qdef=qdef, stmt_type=stmt_type,
+            column_hints=column_hints, dict_scope=dict_scope, scope=scope,
+        )
         # Summary (aggregate) wrap — only on SELECT. ``summary_dims`` → parent rows
         # (GROUP BY + COUNT); ``detail_filters`` → the rows of one group (filter wrap already
         # applied, so the group predicates layer on top of any active filters). The detail
@@ -2162,6 +2286,8 @@ class SQLConnector:
             dict_scope=dict_scope, context=params,
         )
         bound.update(token_binds)  # server-resolved tokens win, untouched by form rules
+        if scope is not None and stmt_type in WRITE_STATEMENTS:
+            self._check_write_scope(query_name, params, column_hints=column_hints, scope=scope)
         stmt = _text(sql_text)
         is_select = stmt_type == "SELECT"
 
@@ -2388,6 +2514,7 @@ class SQLConnector:
         self, query_name: str, params: dict[str, Any] | None = None, *, language: str | None = None,
         max_rows: int | None = None, user: str | None = None,
         column_hints: list[ColumnHint] | None = None, screen_max_rows: int | None = None,
+        scope: DataScope | None = None,
         dictionary_scope: str | None = None, chunk_size: int = DEFAULT_CHUNK_SIZE,  # type: ignore[name-defined]
     ) -> AsyncIterator[StreamEvent]:
         """Run a **SELECT** query and yield :class:`StreamMeta`, then N :class:`StreamRows`,
@@ -2448,6 +2575,11 @@ class SQLConnector:
         sql_text, params = self._apply_filter_wrap(
             sql_text, qdef, params, stmt_type=stmt_type, column_hints=column_hints,
             dict_scope=dict_scope,
+        )
+        scope = scope if scope is not None else current_scope.get()
+        sql_text, params = await self._apply_scope_wrap(
+            sql_text, params, query_name=query_name, qdef=qdef, stmt_type=stmt_type,
+            column_hints=column_hints, dict_scope=dict_scope, scope=scope,
         )
         bound = self._build_params(sql_text, qdef, params)
         bound = self._apply_form_rules(

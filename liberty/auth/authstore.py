@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from liberty.auth.db import AuthDatabase
 from liberty.auth.models import User
 from liberty.auth.password import hash_password, needs_rehash, verify_password
+from liberty.auth.scope import ScopeRule, resolve_scope
 from liberty.auth.service import AuthError, AuthService
 
 ADMIN_ROLE = "admin"
@@ -44,6 +45,8 @@ class AuthRole(BaseModel):
 
     permissions: list[str] = Field(default_factory=list)
     description: str | None = None
+    # Row-level data scope (C1): which rows a holder of this role may see — see liberty.auth.scope.
+    scope: list[ScopeRule] = Field(default_factory=list)
 
 
 class AuthUser(BaseModel):
@@ -60,6 +63,8 @@ class AuthUser(BaseModel):
     sub: str | None = None           # the OIDC subject, for provider == "oidc"
     email: str | None = None
     full_name: str | None = None
+    # Free-form attributes a role's scope may read (`source = "#USER.company#"`): company, pole, …
+    attributes: dict[str, str | list[str]] = Field(default_factory=dict)
 
 
 class AuthFile(BaseModel):
@@ -123,6 +128,9 @@ class UserRecord:
     provider_subject: str | None
     roles: list[str]
     permissions: list[str]
+    attributes: dict[str, Any] = field(default_factory=dict)
+    # The resolved data scope (liberty.auth.scope.resolve_scope): None = unrestricted.
+    scope: list[list[dict[str, Any]]] | None = None
 
     @property
     def role_names(self) -> list[str]:
@@ -132,7 +140,8 @@ class UserRecord:
         return {
             "id": self.id, "username": self.username, "email": self.email, "full_name": self.full_name,
             "is_active": self.is_active, "is_superuser": self.is_superuser, "provider": self.provider,
-            "roles": self.roles, "permissions": self.permissions,
+            "roles": self.roles, "permissions": self.permissions, "attributes": dict(self.attributes),
+            "scope": self.scope,
         }
 
 
@@ -186,10 +195,14 @@ class TomlAuthBackend:
 
     def _record(self, f: AuthFile, username: str, u: AuthUser) -> UserRecord:
         perms, sup = self._resolve(f, u)
+        scope = resolve_scope(
+            [f.roles[rn].scope for rn in u.roles if rn in f.roles], u.attributes, superuser=sup,
+        )
         return UserRecord(
             id=username, username=username, email=u.email, full_name=u.full_name,
             password_hash=u.password_hash, is_active=u.active, is_superuser=sup,
             provider=u.provider, provider_subject=u.sub, roles=sorted(u.roles), permissions=perms,
+            attributes=dict(u.attributes), scope=scope,
         )
 
     def _get(self, f: AuthFile, username: str) -> AuthUser:
@@ -355,10 +368,15 @@ class DbAuthBackend:
 
     @staticmethod
     def _record(u: User) -> UserRecord:
+        scope = resolve_scope(
+            [[ScopeRule.model_validate(r) for r in (role.scope or [])] for role in u.roles],
+            u.attributes or {}, superuser=bool(u.is_superuser),
+        )
         return UserRecord(
             id=str(u.id), username=u.username, email=u.email, full_name=u.full_name,
             password_hash=u.password_hash, is_active=u.is_active, is_superuser=u.is_superuser,
             provider=u.provider, provider_subject=u.provider_subject, roles=u.role_names, permissions=u.permissions,
+            attributes=dict(u.attributes or {}), scope=scope,
         )
 
     async def ready(self) -> list:

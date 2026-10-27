@@ -22,6 +22,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from liberty.auth.authstore import AuthBackend
 from liberty.auth.oidc import OIDCClient
 from liberty.auth.principal import Principal
+from liberty.auth.scope import current_scope
 from liberty.auth.tokens import ACCESS, TokenError, TokenService
 
 _bearer = HTTPBearer(auto_error=False, description="Liberty access token")
@@ -75,16 +76,21 @@ def _principal_from_credentials(
     return Principal.from_claims(claims)
 
 
-def get_current_principal(
+async def get_current_principal(
     creds: _BearerDep, tokens: Annotated[TokenService, Depends(get_token_service)]
 ) -> Principal:
     principal = _principal_from_credentials(creds, tokens)
     if principal is None:
         raise _UNAUTHENTICATED
+    # Row-level data scope for everything this request runs (contextvars are per task, so one
+    # request never sees another's; this dependency is async on purpose — a sync one runs in a
+    # worker thread whose context copy is thrown away). SQLConnector.execute() falls back to it when no explicit
+    # scope is passed; a background job has no request and stays unrestricted.
+    current_scope.set(principal.data_scope)
     return principal
 
 
-def optional_principal(
+async def optional_principal(
     creds: _BearerDep, tokens: Annotated[TokenService, Depends(get_token_service)]
 ) -> Principal | None:
     return _principal_from_credentials(creds, tokens)
