@@ -236,9 +236,13 @@ export function ScreenDialog({
       }
     }
     // Editable (lock=false) defaults: in a true EDIT, mark the active default as already-applied so
-    // the seed doesn't overwrite the loaded value; in add / duplicate leave it unset so it seeds.
+    // the seed doesn't overwrite the loaded value; in add leave it unset so it seeds (Duplicate
+    // clears the baseline itself). Keyed on ``mode``, not ``effMode``: this effect must NOT re-run
+    // when Duplicate flips the mode — it would re-seed the SOURCE row (key included) into the form
+    // and into ``savedRow``, and the saved key then makes every 1:1 column group look existing, so
+    // the group is UPDATEd under the new key (0 rows, silently) instead of INSERTed.
     const baseline: Record<string, string> = {}
-    if (effMode === 'edit') {
+    if (mode === 'edit') {
       for (const tab of dlg.tabs.filter(isFormTab)) {
         for (const f of (tab as FormTab).fields ?? []) {
           const dw = matchedDefaultWhen(f.default_when, seeded)
@@ -251,7 +255,7 @@ export function ScreenDialog({
     setSavedRow(original)
     setTabIdx(0)
     setError(null)
-  }, [open, mode, effMode, row, dlg, valueFor, colByName])
+  }, [open, mode, row, dlg, valueFor, colByName])
 
   // Conditional forced defaults (column ``default_when``): when a discriminator field matches, set
   // the target field to the rule's value. Reactive — re-runs as the form changes so a discriminator
@@ -628,6 +632,7 @@ export function ScreenDialog({
       return next
     })
     setSavedRow({})
+    seededRef.current = {}   // editable (lock=false) defaults seed again on the copy, as on an Add
     setError(null)
     setDuplicating(true)
   }, [keyColumnSet])

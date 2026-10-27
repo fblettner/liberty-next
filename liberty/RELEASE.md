@@ -5,6 +5,9 @@
 **Fixes from the documentation review (2026-10-27)**
 - Dialog: a `required` field, or a `required_when` that holds, now blocks Save when empty (the
   asterisk was only decorative).
+- Dialog → Duplicate: the related 1:1 rows (column groups) are inserted under the new key. Since
+  June the copy re-seeded the source row behind the form, so the group ran an UPDATE on the new
+  key (0 rows, silently) instead of its INSERT; the source key also reappeared in the form.
 - Parameters: a declared default or a supplied value reaches its bind whatever the case
   (`status` declared, `:STATUS` in the SQL).
 - nomaflow: a cloned job's presets lose their schedules (they fired twice: the scheduler runs a

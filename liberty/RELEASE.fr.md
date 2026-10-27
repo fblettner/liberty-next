@@ -5,6 +5,10 @@
 **Corrections issues de la revue de documentation (27/10/2026)**
 - Dialogue : un champ `required`, ou un `required_when` vérifié, bloque désormais l'enregistrement
   quand il est vide (l'astérisque n'était que décoratif).
+- Dialogue → Dupliquer : les lignes liées 1:1 (groupes de colonnes) sont insérées sous la nouvelle
+  clé. Depuis juin, la copie réinjectait la ligne source derrière le formulaire : le groupe
+  exécutait un UPDATE sur la nouvelle clé (0 ligne, en silence) au lieu de son INSERT, et la clé
+  source réapparaissait dans le formulaire.
 - Paramètres : une valeur par défaut déclarée ou une valeur fournie atteint son bind quelle que
   soit la casse (`status` déclaré, `:STATUS` dans le SQL).
 - nomaflow : les préréglages d'une tâche clonée perdent leur planification (ils tournaient deux
