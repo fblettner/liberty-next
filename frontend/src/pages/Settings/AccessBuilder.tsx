@@ -16,8 +16,10 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 import RoleEditor, { type AppRole } from './Access/RoleEditor'
 import { PermChip } from './Access/OtherAccess'
 import { buildMenuForest, type MenusCatalog } from './Access/permissions'
+import { attributeFromText, attributeKeys, attributeToText, screenColumnNames } from './Access/scopeRules'
+import type { DictionaryDoc, ScreensDoc } from '../../types/config'
 
-interface AppUser { username: string; email: string | null; full_name: string | null; is_active: boolean; is_superuser: boolean; roles: string[] }
+interface AppUser { username: string; email: string | null; full_name: string | null; is_active: boolean; is_superuser: boolean; roles: string[]; attributes?: Record<string, string | string[]> | null }
 
 const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; height: 100%;`
 const Tabs = styled.div`display: flex; gap: 16px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0;`
@@ -47,7 +49,7 @@ const Header = styled.div`display: flex; align-items: center; gap: 10px; padding
 const Placeholder = styled(Card)`flex: 1; display: flex; align-items: center; justify-content: center; color: ${colors.text.muted}; font-size: ${fontSize.sm};`
 
 // ── user editor ─────────────────────────────────────────────────────────────────────────
-function UserModal({ initial, roleNames, onSaved, onClose }: { initial: AppUser | null; roleNames: string[]; onSaved: () => void; onClose: () => void }) {
+function UserModal({ initial, roleNames, attributeNames, onSaved, onClose }: { initial: AppUser | null; roleNames: string[]; attributeNames: string[]; onSaved: () => void; onClose: () => void }) {
   const { t } = useTranslation()
   const isNew = initial == null
   const [username, setUsername] = useState(initial?.username ?? '')
@@ -57,11 +59,15 @@ function UserModal({ initial, roleNames, onSaved, onClose }: { initial: AppUser 
   const [isActive, setIsActive] = useState(initial?.is_active ?? true)
   const [isSuperuser, setIsSuperuser] = useState(initial?.is_superuser ?? false)
   const [password, setPassword] = useState('')
+  // Data-scope attributes as editable rows (key + "a, b" text); an empty value drops the key on save.
+  const [attrs, setAttrs] = useState<{ key: string; text: string }[]>(() => Object.entries(initial?.attributes ?? {}).map(([key, v]) => ({ key, text: attributeToText(v) })))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const roleOpts: SearchSelectOption[] = roleNames.map((r) => ({ value: r, label: r, mono: r }))
   const addRole = (r: string) => { if (r && !roles.includes(r)) setRoles([...roles, r]) }
+  const attrOpts: SearchSelectOption[] = attributeNames.filter((a) => !attrs.some((x) => x.key === a)).map((a) => ({ value: a, label: a, mono: `#USER.${a}#` }))
+  const attributes = Object.fromEntries(attrs.filter((a) => a.key.trim() && a.text.trim()).map((a) => [a.key.trim(), attributeFromText(a.text)]))
 
   const save = async () => {
     const u = username.trim()
@@ -70,9 +76,9 @@ function UserModal({ initial, roleNames, onSaved, onClose }: { initial: AppUser 
     setBusy(true); setError(null)
     try {
       if (isNew) {
-        await api.post('/admin/access/users', { username: u, password, email: email.trim() || null, full_name: fullName.trim() || null, roles, is_superuser: isSuperuser, is_active: isActive })
+        await api.post('/admin/access/users', { username: u, password, email: email.trim() || null, full_name: fullName.trim() || null, roles, is_superuser: isSuperuser, is_active: isActive, attributes })
       } else {
-        await api.patch(`/admin/access/users/${encodeURIComponent(u)}`, { email: email.trim() || null, full_name: fullName.trim() || null, roles, is_active: isActive, is_superuser: isSuperuser })
+        await api.patch(`/admin/access/users/${encodeURIComponent(u)}`, { email: email.trim() || null, full_name: fullName.trim() || null, roles, is_active: isActive, is_superuser: isSuperuser, attributes })
         if (password) await api.post(`/admin/access/users/${encodeURIComponent(u)}/password`, { password })
       }
       onSaved()
@@ -100,6 +106,23 @@ function UserModal({ initial, roleNames, onSaved, onClose }: { initial: AppUser 
               </div>
             </Chips>
           </Field>
+          <Field label={t('settings.access.attributes', 'Data-scope attributes')}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {attrs.map((a, i) => (
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 2fr auto', gap: 8, alignItems: 'center' }}>
+                  <Input value={a.key} placeholder="company" onChange={(e) => setAttrs(attrs.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))} />
+                  <Input value={a.text} placeholder="00001, 00050" onChange={(e) => setAttrs(attrs.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))} />
+                  <Button $size="sm" $variant="ghost" onClick={() => setAttrs(attrs.filter((_, j) => j !== i))} title={t('common.delete')}><X size={13} /></Button>
+                </div>
+              ))}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div style={{ minWidth: 220 }}>
+                  <SearchSelect value="" onChange={(k) => { if (k.trim()) setAttrs([...attrs, { key: k.trim(), text: '' }]) }} options={attrOpts} allowCustom placeholder={t('settings.access.addAttribute', 'Add an attribute…')} />
+                </div>
+                <span style={{ fontSize: fontSize.micro, color: colors.text.muted }}>{t('settings.access.attributesHint', 'Read by the roles\' rules (#USER.company#); a comma makes a list.')}</span>
+              </div>
+            </div>
+          </Field>
           <div style={{ display: 'flex', gap: 20 }}>
             <Checkbox checked={isActive} onChange={setIsActive} label={t('settings.access.active', 'Active')} />
             <Checkbox checked={isSuperuser} onChange={setIsSuperuser} label={t('profile.superuser')} />
@@ -126,6 +149,8 @@ export default function AccessBuilder() {
   const [roles, setRoles] = useState<AppRole[] | null>(null)
   const [menus, setMenus] = useState<MenusCatalog>({})
   const [dashboardIds, setDashboardIds] = useState<string[]>([])
+  const [dictionary, setDictionary] = useState<DictionaryDoc | null>(null)
+  const [columnNames, setColumnNames] = useState<Record<string, string[]>>({})
   const [error, setError] = useState<string | null>(null)
   const [userEdit, setUserEdit] = useState<AppUser | null | undefined>(undefined)
   // undefined = nothing open; null = a new role; a name = that role (keyed so the editor remounts on switch)
@@ -138,13 +163,18 @@ export default function AccessBuilder() {
       api.get<{ roles: AppRole[] }>('/admin/access/roles'),
       api.get<{ menus: MenusCatalog }>('/admin/config/menus/parsed').catch(() => ({ menus: {} as MenusCatalog })),
       api.get<{ dashboards: Record<string, unknown> }>('/admin/config/dashboards/parsed').catch(() => ({ dashboards: {} })),
+      api.get<DictionaryDoc>('/admin/config/dictionary/parsed').catch((): DictionaryDoc | null => null),
+      api.get<ScreensDoc>('/admin/config/screens/parsed').catch((): ScreensDoc | null => null),
     ])
-      .then(([u, r, m, d]) => { setUsers(u.users); setRoles(r.roles); setMenus(m.menus ?? {}); setDashboardIds(Object.keys(d.dashboards ?? {})) })
+      .then(([u, r, m, d, dict, scr]) => {
+        setUsers(u.users); setRoles(r.roles); setMenus(m.menus ?? {}); setDashboardIds(Object.keys(d.dashboards ?? {})); setDictionary(dict); setColumnNames(screenColumnNames(scr))
+      })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
   }, [t])
   useEffect(load, [load])
 
   const roleNames = useMemo(() => (roles ?? []).map((r) => r.name), [roles])
+  const attributeNames = useMemo(() => attributeKeys(roles ?? [], users ?? []), [roles, users])
   // The superuser's screen catalog resolves `screen` leaves to their read query (a superuser sees every screen).
   const forest = useMemo(() => buildMenuForest(menus, screens ?? {}), [menus, screens])
 
@@ -175,6 +205,7 @@ export default function AccessBuilder() {
                     {u.is_superuser && <Tag $tone="orange">{t('profile.superuser')}</Tag>}
                     {u.roles.map((r) => <Tag key={r} $tone="blue">{r}</Tag>)}
                     {u.roles.length === 0 && !u.is_superuser && <span>{t('profile.noRoles')}</span>}
+                    {Object.entries(u.attributes ?? {}).map(([k, v]) => <span key={k} style={{ fontFamily: fonts.mono }}>{k}={attributeToText(v)}</span>)}
                   </span>
                 </span>
               </Item>
@@ -202,7 +233,7 @@ export default function AccessBuilder() {
             </List>
           </Side>
           {editing !== undefined ? (
-            <RoleEditor key={roleEdit ?? '__new__'} initial={editing} takenNames={roleNames} forest={forest} dashboardIds={dashboardIds}
+            <RoleEditor key={roleEdit ?? '__new__'} initial={editing} takenNames={roleNames} forest={forest} dashboardIds={dashboardIds} dictionary={dictionary} attributeNames={attributeNames} columnNames={columnNames}
               onCancel={() => setRoleEdit(undefined)} onSaved={(name) => { setRoleEdit(name); load() }} />
           ) : (
             <Placeholder>{t('settings.access.pickRole', 'Pick a role to edit, or add one.')}</Placeholder>
@@ -211,7 +242,7 @@ export default function AccessBuilder() {
       )}
 
       {userEdit !== undefined && (
-        <UserModal initial={userEdit} roleNames={roleNames} onClose={() => setUserEdit(undefined)} onSaved={() => { setUserEdit(undefined); load() }} />
+        <UserModal initial={userEdit} roleNames={roleNames} attributeNames={attributeNames} onClose={() => setUserEdit(undefined)} onSaved={() => { setUserEdit(undefined); load() }} />
       )}
     </Shell>
   )

@@ -43,10 +43,18 @@
   runs, and an eye tells whether the sidebar will show it for a holder of the role, globs included.
   "Full access minus the Security folder" is the baseline plus one deny on the folder; "that folder
   only" is the empty baseline plus one allow. Rules menus don't cover (a whole connector, a query,
-  an endpoint, a dashboard, the assistant, an expert pattern) sit below the tree, and the resulting
-  permission strings are one click away. The strings written are the ones the previous editor
-  wrote, so existing roles open as they are and nothing changes server-side.
-- Setting it up without the UI (which comes next): `liberty-admin create-role <r> --scope '{dd =
+  an endpoint, a dashboard, the assistant, an expert pattern) sit below the tree. The strings
+  written are the ones the previous editor wrote, so existing roles open as they are and nothing
+  changes server-side.
+- **Data scope in the role editor, attributes on the user.** The role panel has a Data scope tab:
+  one line per rule ("Company (CO) in 00001, 00050", "SY not in 00", "CO = user.company"), with a
+  form that picks the item from the dictionary, or a plain column name for a column that has no
+  item (suggested from the screens of the connector), the values from the item's
+  enum or lookup when it has one, the user attribute to read instead, exclusion, what a query
+  without the item returns, and an optional connector. The user form gets a "Data-scope
+  attributes" list (`company = 00001, 00050`, a comma makes a list; keys suggested from the roles'
+  rules), and the profile shows the user's attributes and resolved scope in words.
+- Setting it up without the UI: `liberty-admin create-role <r> --scope '{dd =
   "CO", source = "#USER.company#", mode = "deny"}'`, `set-scope <r> --rule … | --clear`,
   `list-roles`, `create-user --attribute company=00001,00050`, `set-attributes <u> KEY=VALUE…
   [--replace]` (`KEY=` removes); the same through `PUT /admin/access/roles/{name}` (`scope`) and

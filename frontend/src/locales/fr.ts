@@ -118,6 +118,10 @@ const fr: Resources = {
     passwordOidc: 'Votre mot de passe est géré par votre fournisseur d’identité.',
     save: 'Mettre à jour',
     saving: 'Mise à jour…',
+    attributes: 'Attributs',
+    dataScope: 'Périmètre de données',
+    unrestricted: 'Toutes les lignes',
+    or: 'ou',
   },
   license: {
     licensed: 'Sous licence',

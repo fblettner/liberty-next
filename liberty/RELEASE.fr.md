@@ -50,10 +50,19 @@
   compris. « Tout sauf le dossier Sécurité », c'est la base « accès complet » plus un refus sur le
   dossier ; « ce dossier seulement », c'est la base vide plus une autorisation. Les règles hors
   menus (un connecteur entier, une requête, un point d'accès, un tableau de bord, l'assistant, un
-  motif expert) se trouvent sous l'arbre, et les chaînes de permissions obtenues sont à un clic.
-  Les chaînes écrites sont celles de l'éditeur précédent : les rôles existants s'ouvrent tels
-  quels et rien ne change côté serveur.
-- Mise en place sans l'interface (qui arrive ensuite) : `liberty-admin create-role <r> --scope '{dd =
+  motif expert) se trouvent sous l'arbre. Les chaînes écrites sont celles de l'éditeur précédent :
+  les rôles existants s'ouvrent tels quels et rien ne change côté serveur.
+- **Le périmètre de données dans l'éditeur de rôle, les attributs sur l'utilisateur.** Le panneau du
+  rôle gagne un onglet Périmètre de données : une ligne par règle (« Société (CO) in 00001, 00050 »,
+  « SY not in 00 », « CO = user.company »), avec un formulaire qui choisit l'élément dans le
+  dictionnaire, ou un simple nom de colonne pour une colonne sans élément (proposé d'après les
+  écrans du connecteur), les valeurs dans l'énumération ou la recherche de
+  l'élément quand il en a une, l'attribut utilisateur à lire à la place, l'exclusion, ce que renvoie
+  une requête sans l'élément, et un connecteur facultatif. Le formulaire utilisateur reçoit une
+  liste « Attributs de périmètre » (`company = 00001, 00050`, une virgule fait une liste ; les clés
+  sont proposées d'après les règles des rôles), et le profil affiche les attributs de l'utilisateur
+  et son périmètre calculé, en clair.
+- Mise en place sans l'interface : `liberty-admin create-role <r> --scope '{dd =
   "CO", source = "#USER.company#", mode = "deny"}'`, `set-scope <r> --rule … | --clear`,
   `list-roles`, `create-user --attribute company=00001,00050`, `set-attributes <u> CLÉ=VALEUR…
   [--replace]` (`CLÉ=` supprime) ; la même chose par `PUT /admin/access/roles/{name}` (`scope`) et

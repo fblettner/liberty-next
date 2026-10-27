@@ -13,6 +13,7 @@ import { useAuth } from '../auth/AuthContext'
 import { api, ApiError } from '../api/client'
 import { Overlay, Modal, ModalBody, ModalFooter, Button, Tag, FieldLabel, Input, PasswordInput, Banner } from '../common'
 import { colors, fontSize, fonts, radius } from '../theme'
+import { attributeToText, describeScope, type ScopeRule } from '../pages/Settings/Access/scopeRules'
 
 interface Profile {
   username: string
@@ -22,6 +23,9 @@ interface Profile {
   is_superuser: boolean
   settings_access: boolean
   provider: string
+  attributes?: Record<string, string | string[]> | null
+  /** The resolved data scope: groups OR together, rules AND within; null = every row. */
+  scope?: ScopeRule[][] | null
 }
 
 const Box = styled(Modal)`
@@ -183,6 +187,12 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
               </Field>
               <ReadRow><span className="k">{t('profile.role')}</span><span className="v">{(profile?.roles ?? []).join(', ') || '—'}</span></ReadRow>
               <ReadRow><span className="k">{t('profile.settingsAccess')}</span><span className="v">{profile?.settings_access ? t('profile.yes') : t('profile.no')}</span></ReadRow>
+              {Object.keys(profile?.attributes ?? {}).length > 0 && (
+                <ReadRow><span className="k">{t('profile.attributes')}</span><span className="v" style={{ fontFamily: fonts.mono }}>{Object.entries(profile?.attributes ?? {}).map(([k, v]) => `${k} = ${attributeToText(v)}`).join(' · ')}</span></ReadRow>
+              )}
+              <ReadRow><span className="k">{t('profile.dataScope')}</span><span className="v" style={{ fontFamily: fonts.mono }}>
+                {profile?.is_superuser || !profile?.scope?.length ? t('profile.unrestricted') : describeScope(profile.scope).join(`  ${t('profile.or')}  `)}
+              </span></ReadRow>
               {!isLocal && <Note>{t('profile.passwordOidc')}</Note>}
             </>
           ) : (

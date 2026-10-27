@@ -218,7 +218,8 @@ pages/TableView/       the data screen: index (params, streaming run), ResultTab
 pages/Settings/        one *Builder per config section + the Visual Designer (ScreenVisualBuilder,
                        ScreenEditor, ActionListEditor…), ApiConnectorEditor, wizards, ConfigVersions,
                        AccessBuilder (+ Access/: RoleEditor panel, MenuTree inherit|allow|deny, OtherAccess,
-                       permissions.ts = strings ⇄ tree model + the backend's glob matcher, tested),
+                       permissions.ts = strings ⇄ tree model + the backend's glob matcher, ScopeRulesEditor +
+                       scopeRules.ts = data-scope rules / attributes helpers, both tested),
                        AppBuilder, ReportsBuilder, ThemeBuilder, TechnicalDashboard,
                        Package / ChangePackages / IntegrityBuilder (reached from nomaflow pages)
 pages/Nomaflow/        JobsList, JobEditor, StepEditor, RunDetail, Schedule, RetentionPanel

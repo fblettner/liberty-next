@@ -116,6 +116,10 @@ const en = {
     passwordOidc: 'Your password is managed by your identity provider.',
     save: 'Update password',
     saving: 'Updating…',
+    attributes: 'Attributes',
+    dataScope: 'Data scope',
+    unrestricted: 'Every row',
+    or: 'or',
   },
   license: {
     licensed: 'Licensed',

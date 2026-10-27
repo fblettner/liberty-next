@@ -4,15 +4,18 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Ban, Check, ChevronDown, ChevronRight, Shield } from 'lucide-react'
+import { Ban, Check, Database, KeyRound, Shield } from 'lucide-react'
 import { api, ApiError } from '../../../api/client'
 import { Banner, Button, Field, Input, SpinnerRing } from '../../../common'
 import { colors, fontSize, fonts, radius } from '../../../theme'
+import type { DictionaryDoc } from '../../../types/config'
 import MenuTree from './MenuTree'
 import OtherAccess from './OtherAccess'
+import ScopeRulesEditor from './ScopeRulesEditor'
 import { buildPermissions, nodeEffects, parsePermissions, type MenuForest, type NodeState, type RoleModel } from './permissions'
+import { cleanRule, type ScopeRule } from './scopeRules'
 
-export interface AppRole { name: string; permissions: string[]; description: string | null; scope?: unknown[] }
+export interface AppRole { name: string; permissions: string[]; description: string | null; scope?: ScopeRule[] | null }
 
 const Panel = styled.div`
   flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;
@@ -24,6 +27,15 @@ const Head = styled.div`
   & .dirty { font-size: ${fontSize.micro}; color: ${colors.orange.main}; font-weight: 600; }
 `
 const Body = styled.div`flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px;`
+const Tabs = styled.div`display: flex; gap: 14px; padding: 0 16px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0;`
+const TabBtn = styled.button<{ $active?: boolean }>`
+  display: inline-flex; align-items: center; gap: 6px; padding: 9px 2px; margin-bottom: -1px; border: none; background: transparent; cursor: pointer;
+  font-size: ${fontSize.sm}; font-weight: 600; font-family: ${fonts.sans};
+  color: ${({ $active }) => ($active ? colors.text.primary : colors.text.muted)};
+  border-bottom: 2px solid ${({ $active }) => ($active ? colors.blue.main : 'transparent')};
+  &:hover { color: ${colors.text.primary}; }
+  & .n { font-weight: 500; color: ${colors.text.muted}; }
+`
 const Foot = styled.div`display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid ${colors.border}; flex-shrink: 0;`
 const Section = styled.div`
   & > .h { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: ${fontSize.sm}; font-weight: 700; color: ${colors.text.primary}; }
@@ -36,36 +48,34 @@ const SegBtn = styled.button<{ $active?: boolean; $tone?: 'allow' | 'deny' }>`
   color: ${({ $active, $tone }) => (!$active ? colors.text.muted : $tone === 'deny' ? colors.red.main : colors.green.main)};
   & + & { border-left: 1px solid ${colors.border}; }
 `
-const Raw = styled.div`
-  & summary { cursor: pointer; font-size: ${fontSize.sm}; font-weight: 700; color: ${colors.text.primary}; display: inline-flex; align-items: center; gap: 6px; list-style: none; }
-  & summary::-webkit-details-marker { display: none; }
-  & pre { margin: 8px 0 0; padding: 8px 10px; border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
-    font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.primary}; white-space: pre-wrap; word-break: break-all; }
-  & pre .deny { color: ${colors.red.main}; }
-`
-
 interface Props {
   initial: AppRole | null
   takenNames: string[]
   forest: MenuForest
   dashboardIds: string[]
+  dictionary: DictionaryDoc | null
+  attributeNames: string[]
+  /** connector → result column names seen on its screens (for rules on columns without a dictionary item). */
+  columnNames: Record<string, string[]>
   onSaved: (name: string) => void
   onCancel: () => void
 }
 
-export default function RoleEditor({ initial, takenNames, forest, dashboardIds, onSaved, onCancel }: Props) {
+export default function RoleEditor({ initial, takenNames, forest, dashboardIds, dictionary, attributeNames, columnNames, onSaved, onCancel }: Props) {
   const { t } = useTranslation()
   const isNew = initial == null
   const [name, setName] = useState(initial?.name ?? '')
   const [description, setDescription] = useState(initial?.description ?? '')
   const [model, setModel] = useState<RoleModel>(() => parsePermissions(initial?.permissions ?? [], forest))
-  const [rawOpen, setRawOpen] = useState(false)
+  const [scope, setScope] = useState<ScopeRule[]>(() => (initial?.scope ?? []).map(cleanRule))
+  const [tab, setTab] = useState<'access' | 'scope'>('access')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const permissions = useMemo(() => buildPermissions(model, forest), [model, forest])
   const effects = useMemo(() => nodeEffects(model, forest), [model, forest])
-  const dirty = isNew || description !== (initial?.description ?? '') || JSON.stringify(permissions) !== JSON.stringify(initial?.permissions ?? [])
+  const scopeDirty = JSON.stringify(scope) !== JSON.stringify((initial?.scope ?? []).map(cleanRule))
+  const dirty = isNew || description !== (initial?.description ?? '') || JSON.stringify(permissions) !== JSON.stringify(initial?.permissions ?? []) || scopeDirty
 
   const setState = (key: string, state: NodeState | null) => setModel((m) => {
     const states = { ...m.states }
@@ -79,8 +89,7 @@ export default function RoleEditor({ initial, takenNames, forest, dashboardIds, 
     if (isNew && takenNames.includes(n)) { setError(t('settings.access.errNameTaken', 'That role name is taken.')); return }
     setBusy(true); setError(null)
     try {
-      // `scope` omitted: the role's data-scope rules are kept as they are.
-      await api.put(`/admin/access/roles/${encodeURIComponent(n)}`, { permissions, description: description.trim() || null })
+      await api.put(`/admin/access/roles/${encodeURIComponent(n)}`, { permissions, description: description.trim() || null, scope })
       onSaved(n)
     } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) } finally { setBusy(false) }
   }
@@ -92,8 +101,21 @@ export default function RoleEditor({ initial, takenNames, forest, dashboardIds, 
         <span className="title">{isNew ? t('settings.access.addRole', 'Add role') : `[roles.${initial?.name}]`}</span>
         {dirty && !isNew && <span className="dirty">{t('settings.access.unsaved', 'unsaved changes')}</span>}
       </Head>
+      <Tabs>
+        <TabBtn $active={tab === 'access'} onClick={() => setTab('access')}><KeyRound size={13} /> {t('settings.access.tabAccess', 'Access')}</TabBtn>
+        <TabBtn $active={tab === 'scope'} onClick={() => setTab('scope')}><Database size={13} /> {t('settings.access.tabScope', 'Data scope')} <span className="n">{scope.length ? `· ${scope.length}` : ''}</span></TabBtn>
+      </Tabs>
       <Body>
         {error && <Banner $tone="error">{error}</Banner>}
+        {tab === 'scope' ? (
+          <>
+            <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>
+              {t('settings.access.scopeIntro', 'Which rows the role\'s holders see, on every query that returns the item. Rules combine with AND; a user with several roles sees the union. Superusers and roles without rules see everything.')}
+            </span>
+            <ScopeRulesEditor value={scope} onChange={setScope} dictionary={dictionary} attributeNames={attributeNames} columnNames={columnNames} />
+          </>
+        ) : (
+        <>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 1fr) 2fr', gap: 12 }}>
           <Field label={t('settings.access.roleName', 'Role name')}>
             <Input value={name} disabled={!isNew} onChange={(e) => setName(e.target.value)} placeholder="reader" />
@@ -124,12 +146,8 @@ export default function RoleEditor({ initial, takenNames, forest, dashboardIds, 
           <OtherAccess value={model.other} onChange={(other) => setModel((m) => ({ ...m, other }))} dashboardIds={dashboardIds} />
         </Section>
 
-        <Raw>
-          <details open={rawOpen} onToggle={(e) => setRawOpen((e.currentTarget as HTMLDetailsElement).open)}>
-            <summary>{rawOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />} {t('settings.access.raw', 'Resulting permissions')} <span style={{ fontWeight: 500, color: colors.text.muted }}>({permissions.length})</span></summary>
-            <pre>{permissions.length === 0 ? t('settings.access.noRules', 'No rules yet.') : permissions.map((p) => <span key={p} className={p.startsWith('!') ? 'deny' : undefined}>{p}{'\n'}</span>)}</pre>
-          </details>
-        </Raw>
+        </>
+        )}
       </Body>
       <Foot>
         <Button $size="sm" $variant="ghost" onClick={onCancel}>{t('common.cancel', 'Cancel')}</Button>
