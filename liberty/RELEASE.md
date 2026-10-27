@@ -1,6 +1,6 @@
 # Liberty Next — Release notes
 
-## 7.0.58 — unreleased
+## 7.0.58 — 2026-10-27
 
 **Install / upgrade**
 - **Fixed: the image could not open its own default database.** `aiosqlite`, the driver behind the

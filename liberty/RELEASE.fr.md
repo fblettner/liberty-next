@@ -1,6 +1,6 @@
 # Liberty Next — Notes de version
 
-## 7.0.58 — non publiée
+## 7.0.58 — 2026-10-27
 
 **Installation / mise à jour**
 - **Corrigé : l'image Docker ne pouvait pas ouvrir sa base par défaut.** Le pilote `aiosqlite`, celui
