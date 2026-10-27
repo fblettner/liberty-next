@@ -25,8 +25,19 @@
   body and link take `{placeholders}` from the event's values. A channel that fails is logged and
   reported, never blocks the others. Routes: `GET /api/notifications` (`?unread=1`),
   `GET /api/notifications/unread_count`, `POST /api/notifications/read`, and for a superuser
-  `POST /admin/notify/test` to try the channels. The rules (screen and job events), the bell and
-  the inbox page come next.
+  `POST /admin/notify/test` to try the channels.
+- **Rules** in `notifications.toml` (`[notifications.<id>]`, hot-reloaded): a trigger, the
+  channels, the recipients, a subject, a body and a link with `{placeholders}`. Three triggers.
+  A **screen** event: an insert, update or delete through a screen, with an optional `when` on
+  the written row in the `field = value` shape ("STATUS = closed"); the placeholders are the
+  row's columns plus `USER`, `APP`, `SCREEN`, `EVENT`. A **job** event: `failure`, `succeeded`,
+  `canceled`, or `long_run` with `long_run_minutes`, for every job or a list; placeholders `JOB`,
+  `RUN_ID`, `STATE`, `ERROR`, `DURATION_MINUTES`, `ROWS`. A job's own `alerts.recipients` get a
+  failure message even without a rule. An **action**: a new `send_notification` step in a
+  screen's chains fires the rule server-side with the row's values; only a rule declared with
+  `kind = "action"` can be fired that way, and the rule keeps the channels and recipients.
+  Dispatch runs on its own task, so a write or a run never waits on a mail server. The bell, the
+  inbox page and the rules editor come next.
 
 **Screens: `editable_when`, a row-level read-only rule**
 - A screen can say when an existing row may be changed: `editable_when = [{ field = "PERIOD_STATUS",

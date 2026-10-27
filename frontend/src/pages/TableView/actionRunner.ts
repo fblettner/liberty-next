@@ -580,6 +580,17 @@ async function runOneAction(
         result.warnings.push(a.message)
         break
       }
+      case 'send_notification': {
+        // The rule owns channels + recipients; we send the values: the firing row / form (the
+        // chain's current context) plus the explicit binds. 404 when the rule is not an action rule.
+        const bound = resolveBinds(a.param_binds, ctx, formCtx)
+        const resp = await api.post<{ portal_users: string[]; emails: string[]; action_ran: boolean; errors: Record<string, string> }>(
+          '/api/notify/fire', { rule: a.rule, payload: { ...withUpper(formCtx), ...withUpper(bound) } },
+        )
+        ctx[a.id] = { rows: [], first_row: resp as unknown as Row, success: Object.keys(resp.errors ?? {}).length === 0 }
+        if (Object.keys(resp.errors ?? {}).length) result.warnings.push(`${a.label || a.id}: ${Object.values(resp.errors).join('; ')}`)
+        break
+      }
       case 'refresh': {
         result.refresh = true
         break

@@ -28,8 +28,21 @@
   prennent des `{marqueurs}` dans les valeurs de l'événement. Un canal qui échoue est journalisé
   et signalé, sans bloquer les autres. Routes : `GET /api/notifications` (`?unread=1`),
   `GET /api/notifications/unread_count`, `POST /api/notifications/read`, et pour un
-  superutilisateur `POST /admin/notify/test` pour essayer les canaux. Les règles (événements
-  d'écran et de tâche), la cloche et la page de réception arrivent ensuite.
+  superutilisateur `POST /admin/notify/test` pour essayer les canaux.
+- **Des règles** dans `notifications.toml` (`[notifications.<id>]`, rechargées à chaud) : un
+  déclencheur, les canaux, les destinataires, un sujet, un corps et un lien avec des
+  `{marqueurs}`. Trois déclencheurs. Un **événement d'écran** : une insertion, une mise à jour ou
+  une suppression passée par un écran, avec un `when` facultatif sur la ligne écrite, dans la forme
+  `field = value` (« STATUS = closed ») ; les marqueurs sont les colonnes de la ligne plus `USER`,
+  `APP`, `SCREEN`, `EVENT`. Un **événement de tâche** : `failure`, `succeeded`, `canceled`, ou
+  `long_run` avec `long_run_minutes`, pour toutes les tâches ou une liste ; marqueurs `JOB`,
+  `RUN_ID`, `STATE`, `ERROR`, `DURATION_MINUTES`, `ROWS`. Les `alerts.recipients` propres à une
+  tâche reçoivent un message d'échec même sans règle. Une **action** : une nouvelle étape
+  `send_notification` dans les chaînes d'un écran déclenche la règle côté serveur avec les valeurs
+  de la ligne ; seule une règle déclarée `kind = "action"` peut l'être ainsi, et la règle garde ses
+  canaux et ses destinataires. L'envoi tourne sur sa propre tâche : une écriture ou une exécution
+  n'attend jamais un serveur de messagerie. La cloche, la page de réception et l'éditeur de règles
+  arrivent ensuite.
 
 **Écrans : `editable_when`, une règle de lecture seule par ligne**
 - Un écran peut dire quand une ligne existante peut être modifiée : `editable_when = [{ field =

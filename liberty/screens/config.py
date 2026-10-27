@@ -537,6 +537,17 @@ class NotifyAction(_ActionBase):
     tone: Literal["info", "ok", "warn", "error"] = Field(default="info")
 
 
+class SendNotificationAction(_ActionBase):
+    """Fire a notification rule from a screen (``notifications.toml``, a rule whose trigger is
+    ``kind = "action"``): the rule owns the channels and the recipients, the action supplies the
+    values — the form / row by default, plus ``param_binds``. Runs server-side through
+    ``POST /api/notify/fire``; the result (who was reached) lands in the chain context."""
+
+    type: Literal["send_notification"] = "send_notification"
+    rule: str = Field(description="The notification rule id (trigger kind = action).")
+    param_binds: list[ParamBind] = Field(default_factory=list, description="Extra values for the rule's placeholders.")
+
+
 class RefreshAction(_ActionBase):
     """Re-run the screen's read query so the table picks up changes. Common closer for an
     on_save chain that wrote to several tables."""
@@ -671,7 +682,7 @@ class ReturnAction(_ActionBase):
 Action = Annotated[
     Union[
         RunQueryAction, CallApiAction, CallPluginAction, CallActionAction, NavigateAction, SetFieldAction,
-        ConfirmAction, NotifyAction, RefreshAction,
+        ConfirmAction, NotifyAction, SendNotificationAction, RefreshAction,
         ChainAction, IfAction, LoopAction, ReturnAction,
     ],
     Field(discriminator="type"),

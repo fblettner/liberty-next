@@ -69,6 +69,24 @@ class TestBody(BaseModel):
     action: dict[str, Any] | None = Field(default=None, description="{connector, query | endpoint, params} for the action channel")
 
 
+class FireBody(BaseModel):
+    rule: str = Field(min_length=1)
+    payload: dict[str, Any] = Field(default_factory=dict, description="The values for the rule's placeholders (the row).")
+
+
+@router.post("/api/notify/fire", summary="Fire an action rule")
+async def fire_rule(body: FireBody, request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
+    """A screen's ``send_notification`` action. Only a rule whose trigger is ``kind = "action"``
+    can be fired this way — the operator opted it in; channels and recipients stay the rule's."""
+    from liberty.notify.events import fire_action_rule
+
+    rules = getattr(request.app.state, "notification_rules", None)
+    report = await fire_action_rule(rules, getattr(request.app.state, "notify", None), rule_id=body.rule, payload=body.payload, user=principal.username)
+    if report is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no action rule {body.rule!r} (an enabled rule with trigger kind = action)")
+    return report.to_dict()
+
+
 @router.post("/admin/notify/test", summary="Send a test notification")
 async def send_test(body: TestBody, request: Request, principal: Superuser) -> dict[str, Any]:
     recipients = body.recipients or [f"user:{principal.username}"]

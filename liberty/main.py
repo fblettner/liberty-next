@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import logging
 import os
 import secrets
@@ -164,6 +166,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.charts = load_charts(settings.charts.config_path)
         app.state.actions = load_actions(settings.actions.config_path)
         app.state.dashboards = load_dashboards(settings.dashboards.config_path)
+        from liberty.notify import load_notification_rules
+        app.state.notification_rules = load_notification_rules(settings.notify.config_path)
         # Config file versioning — filesystem snapshot history (.versions/ next to the TOMLs) so the
         # config editors can list / diff / restore prior saves. Best-effort: a store init failure must
         # never block startup. Base dir = where the colocated config files live.
@@ -216,9 +220,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # in for cron). app.state.jobs = NomaflowComponents (registry/runner/
         # scheduler/db). Lifespan shutdown stops the scheduler cleanly.
         from liberty.jobs.wiring import build_nomaflow, shutdown_nomaflow
+        from liberty.notify.events import fire_job_event
+
+        async def _on_run_finished(job: Any, run: Any, state: str, error: str | None, duration_minutes: float | None) -> None:
+            # A finished run → the job rules (failure / succeeded / canceled / long_run) + the
+            # job's own alerts.recipients on failure. The holders are read now, not at wiring
+            # time, so a reload that swaps them is seen.
+            alerts = getattr(job, "alerts", None)
+            extra = list(alerts.recipients) if (alerts is not None and alerts.on_failure and alerts.recipients) else None
+            fire_job_event(
+                getattr(app.state, "notification_rules", None), getattr(app.state, "notify", None),
+                job_id=job.id, run_id=run.id, state=state, error=error, duration_minutes=duration_minutes,
+                rows=getattr(run, "rows_affected", None), extra_recipients=extra,
+            )
+
         app.state.jobs = await build_nomaflow(
             settings, app.state.connectors, sio_layer=sio_layer,
-            changesets=app.state.changesets_db,
+            changesets=app.state.changesets_db, on_finished=_on_run_finished,
         )
         # Optional filesystem watcher — when ``[app] hot_reload = true``, edits to the
         # config TOMLs reload the matching subsystem without an explicit Settings →

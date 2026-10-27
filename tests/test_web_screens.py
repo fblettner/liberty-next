@@ -14,6 +14,7 @@ from liberty.auth.db import AuthDatabase
 from liberty.auth.service import AuthService
 from liberty.config import (
     AISettings,
+    NotifySettings,
     AppSettings,
     AuthSettings,
     ConnectorSettings,
@@ -124,16 +125,32 @@ def _seed(db_url: str) -> None:
     asyncio.run(go())
 
 
+_NOTIFICATIONS_TOML = """
+[notifications.period_closed]
+trigger = { kind = "screen", app = "app1", screen = "periods", events = ["update"], when = [{ field = "STATUS", value = "closed" }] }
+recipients = ["user:admin"]
+subject = "Period {ID} closed by {USER}"
+link = "/screen/app1/periods"
+
+[notifications.ask]
+trigger = { kind = "action" }
+recipients = ["user:admin"]
+subject = "Look at {ID}"
+"""
+
+
 @pytest.fixture
 def app(tmp_path):
     db_url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
     (tmp_path / "connectors.toml").write_text(_connectors_toml(db_url))
     (tmp_path / "screens.toml").write_text(_screens_toml())
+    (tmp_path / "notifications.toml").write_text(_NOTIFICATIONS_TOML)
     _seed(db_url)
     settings = Settings(
         app=AppSettings(static_dir=""),
         connectors=ConnectorSettings(config_path=Path(tmp_path / "connectors.toml")),
         screens=ScreenSettings(config_path=Path(tmp_path / "screens.toml")),
+        notify=NotifySettings(config_path=Path(tmp_path / "notifications.toml")),
         auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
         ai=AISettings(enabled=False),
     )
@@ -517,3 +534,27 @@ def test_editable_when_on_the_wire_and_enforced_on_writes(app) -> None:
         assert client.post("/api/sql/app1/periods_put", json={"params": {"ID": 1, "STATUS": "closed"}}, headers=h).status_code == 409
         # the read query is not concerned
         assert client.get("/api/sql/app1/periods_get", headers=h).status_code == 200
+
+
+def test_screen_write_fires_notification_rules(app) -> None:
+    """A committed update through the screen whose row matches a rule lands in the recipients'
+    inbox (dispatched on a task — a following request lets it finish); a non-matching row and a
+    refused write do not; an action rule fires on demand, a screen rule cannot."""
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post("/api/sql/app1/periods_put", json={"params": {"ID": 7, "STATUS": "closed", "STATUS_ORIGINAL": "open"}}, headers=h)
+        assert r.status_code == 200
+        client.get("/api/notifications/unread_count", headers=h)
+        rows = client.get("/api/notifications", headers=h).json()["notifications"]
+        assert [n["subject"] for n in rows] == ["Period 7 closed by admin"] and rows[0]["rule"] == "period_closed" and rows[0]["link"] == "/screen/app1/periods"
+        assert rows[0]["payload"]["STATUS_ORIGINAL"] == "open" and rows[0]["payload"]["EVENT"] == "update"
+        client.post("/api/sql/app1/periods_put", json={"params": {"ID": 8, "STATUS": "validated", "STATUS_ORIGINAL": "open"}}, headers=h)
+        client.get("/api/notifications/unread_count", headers=h)
+        assert len(client.get("/api/notifications", headers=h).json()["notifications"]) == 1
+        assert client.post("/api/sql/app1/periods_put", json={"params": {"ID": 9, "STATUS": "closed", "STATUS_ORIGINAL": "closed"}}, headers=h).status_code == 409
+        client.get("/api/notifications/unread_count", headers=h)
+        assert len(client.get("/api/notifications", headers=h).json()["notifications"]) == 1
+        r = client.post("/api/notify/fire", json={"rule": "ask", "payload": {"ID": 3}}, headers=h)
+        assert r.status_code == 200 and r.json()["portal_users"] == ["admin"]
+        assert client.post("/api/notify/fire", json={"rule": "period_closed", "payload": {}}, headers=h).status_code == 404
+        assert client.get("/api/notifications", headers=h).json()["notifications"][0]["subject"] == "Look at 3"

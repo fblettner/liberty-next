@@ -238,6 +238,7 @@ async def _run_sql(
     pool: str | None = None,
     scope: DataScope | None = None,
     verbose_errors: bool = False,
+    notify_ctx: tuple[Any, Any] | None = None,
 ) -> dict[str, Any]:
     """Run *query* on *connector* with *params*. When a matching :class:`Screen` is found,
     thread its per-screen behaviour (column hints, ``audit_table``, ``max_rows``, dictionary
@@ -386,6 +387,20 @@ async def _run_sql(
                 "change capture failed for %s.%s (write committed but NOT packaged): %s",
                 connector, query, exc,
             )
+    # Notification rules — a committed insert / update / delete through the screen (not a column
+    # group's related row) is an event; matching rules dispatch on their own tasks, so the write's
+    # response never waits on a mail server. The row is the submitted binds (``_ORIGINAL`` keys
+    # stripped into their plain names only where no plain value was sent — the rule sees the NEW
+    # values, with the old ones under ``<COL>_ORIGINAL``).
+    if (notify_ctx is not None and screen is not None and not is_group and slot in ("insert", "update", "delete")
+            and result.rowcount != 0):     # -1 = not a counted statement; 0 = a write that touched nothing
+        from liberty.notify.events import fire_screen_event
+        rules, dispatcher = notify_ctx
+        row = dict(params or {})
+        for k, v in list(row.items()):
+            if str(k).upper().endswith("_ORIGINAL"):
+                row.setdefault(str(k)[:-9], v)
+        fire_screen_event(rules, dispatcher, app=screen_app or "", screen=screen.id, event=slot, row=row, user=user)
     return result.to_dict()
 
 
@@ -923,6 +938,7 @@ async def sql_query_post(
         screens=screens, changesets=getattr(request.app.state, "changesets_db", None),
         action_context=action_context if isinstance(action_context, dict) else None,
         pool=_request_pool(request),
+        notify_ctx=(getattr(request.app.state, "notification_rules", None), getattr(request.app.state, "notify", None)),
     )
 
 

@@ -166,6 +166,7 @@ async def build_nomaflow(
     *,
     sio_layer: Any | None = None,
     changesets: Any | None = None,
+    on_finished: Any | None = None,
 ) -> NomaflowComponents | None:
     """Build the nomaflow stack from a (settings, connectors) pair, or return
     None if the deployment isn't carrying enough to start it.
@@ -258,7 +259,7 @@ async def build_nomaflow(
     # the call_job executor needs the runner to spawn children. The
     # post-construction attach_runner is the bridge.
     executors = build_executors(connectors, settings=settings, registry=registry, changesets=changesets)
-    runner = JobRunner(db, executors, broadcaster=broadcaster)
+    runner = JobRunner(db, executors, broadcaster=broadcaster, on_finished=on_finished)
     call_job_exec = executors.get(StepType.CALL_JOB)
     if isinstance(call_job_exec, CallJobExecutor):
         call_job_exec.attach_runner(runner)

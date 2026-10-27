@@ -121,11 +121,15 @@ class JobRunner:
         *,
         broadcaster: Broadcaster | None = None,
         sleep: SleepFn = asyncio.sleep,
+        on_finished: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
         self._db = db
         self._executors = dict(executors)
         self._broadcaster = broadcaster
         self._sleep = sleep
+        # ``await on_finished(job, run, state, error, duration_minutes)`` after every terminal
+        # state — the notification rules hang here. Best-effort: an exception is logged.
+        self._on_finished = on_finished
         # run_id → the asyncio.Task currently running it. Populated at the top of
         # run() and cleared in its finally block. Drives :meth:`cancel`: the admin
         # endpoint looks up the task and calls .cancel() on it, which raises
@@ -396,7 +400,20 @@ class JobRunner:
             "nomaflow.runner job=%s run=%s steps=%d state=%s",
             job.id, run.id, executed_step_count, terminal.value,
         )
-        return await self._reload(run.id)
+        final = await self._reload(run.id)
+        await self._notify_finished(job, final, terminal, failed_step_error)
+        return final
+
+    async def _notify_finished(self, job: Job, run: JobRun, state: RunState, error: str | None) -> None:
+        if self._on_finished is None:
+            return
+        duration = None
+        if run.started_at is not None and run.finished_at is not None:
+            duration = (run.finished_at - run.started_at).total_seconds() / 60.0
+        try:
+            await self._on_finished(job, run, state.value, error, duration)
+        except Exception as exc:  # noqa: BLE001 — a notification must never change a run's outcome
+            _log.warning("nomaflow.runner on_finished hook failed for run %s: %s", run.id, exc)
 
     async def run(
         self,

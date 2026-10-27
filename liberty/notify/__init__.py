@@ -5,6 +5,7 @@ events come on top (``notifications.toml``); this package is the delivery layer.
 from __future__ import annotations
 
 from liberty.notify.dispatcher import CHANNELS, ActionTarget, DispatchReport, Dispatcher, Message, Recipient, render
+from liberty.notify.rules import NotificationRule, NotificationsFile, load_notification_rules, parse_notification_rules
 from liberty.notify.store import Notification, NotificationStore
 
 __all__ = [
@@ -14,7 +15,11 @@ __all__ = [
     "Dispatcher",
     "Message",
     "Notification",
+    "NotificationRule",
     "NotificationStore",
+    "NotificationsFile",
+    "load_notification_rules",
+    "parse_notification_rules",
     "Recipient",
     "render",
 ]

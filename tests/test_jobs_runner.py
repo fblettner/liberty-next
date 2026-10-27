@@ -597,3 +597,32 @@ enabled = false
     assert run.state == RunState.SUCCEEDED.value
     assert executor.calls == [("normally-off", 1)]
     assert run.rows_affected == 99
+
+
+@pytest.mark.asyncio
+async def test_on_finished_hook_sees_the_terminal_state(tmp_path, jobs_db) -> None:
+    """The runner awaits ``on_finished(job, run, state, error, duration)`` after every terminal
+    state (the notification rules hang here); a hook that raises never changes the outcome."""
+    job = _make_job(tmp_path, """
+[[jobs]]
+id = "hooked"
+
+[[jobs.steps]]
+type = "sql_query"
+name = "only"
+connector = "c"
+query = "q1"
+""")
+    seen: list[tuple] = []
+
+    async def hook(job_obj, run, state, error, duration):
+        seen.append((job_obj.id, run.id, state, error, duration))
+        raise RuntimeError("the hook is broken")
+
+    runner = JobRunner(jobs_db, {StepType.SQL_QUERY: RecordingExecutor([StepResult(rows_affected=1)])}, sleep=_noop_sleep, on_finished=hook)
+    run = await runner.run(job, ManualTrigger(triggered_by="alice"))
+    assert run.state == RunState.SUCCEEDED.value
+    assert seen and seen[0][0] == "hooked" and seen[0][1] == run.id and seen[0][2] == "SUCCEEDED" and seen[0][3] is None and seen[0][4] is not None
+    runner = JobRunner(jobs_db, {StepType.SQL_QUERY: RecordingExecutor([StepFailed("nope")])}, sleep=_noop_sleep, on_finished=hook)
+    run = await runner.run(job, ManualTrigger(triggered_by="alice"))
+    assert run.state == RunState.FAILED.value and seen[-1][2] == "FAILED" and "nope" in (seen[-1][3] or "")

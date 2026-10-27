@@ -75,6 +75,7 @@ async def start_watcher(app: FastAPI) -> asyncio.Task[None]:
         (settings.screens.config_path, _reload_screens),
         (settings.charts.config_path, _reload_charts),
         (settings.dashboards.config_path, _reload_dashboards),
+        (getattr(getattr(settings, "notify", None), "config_path", None), _reload_notifications),
         (settings.connectors.config_path, _reload_connectors),
     ):
         if path_attr:
@@ -157,6 +158,13 @@ async def _reload_screens(app: FastAPI, _path: Path) -> None:
 async def _reload_charts(app: FastAPI, _path: Path) -> None:
     from liberty.runtime import rebuild_runtime
     await rebuild_runtime(app, sections={"charts"})
+
+
+async def _reload_notifications(app: FastAPI, _path: Path) -> None:
+    from liberty.runtime import rebuild_runtime
+
+    _log.info("hot_reload: notifications.toml changed — reloading the rules")
+    await rebuild_runtime(app, sections={"notifications"})
 
 
 async def _reload_dashboards(app: FastAPI, _path: Path) -> None:

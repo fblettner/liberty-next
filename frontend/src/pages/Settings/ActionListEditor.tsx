@@ -44,7 +44,7 @@ type Row = Record<string, unknown>
 // minimum-viable shape when the operator switches types so SchemaForm doesn't render a sea of
 // validation red on first paint.
 export const ACTION_TYPES = [
-  'run_query', 'call_api', 'call_plugin', 'call_action', 'navigate', 'set_field', 'confirm', 'notify', 'refresh',
+  'run_query', 'call_api', 'call_plugin', 'call_action', 'navigate', 'set_field', 'confirm', 'notify', 'send_notification', 'refresh',
   // Slice 4d step variants (Phase 6) — workflow control flow.
   'chain', 'if', 'loop', 'return',
 ] as const
@@ -54,6 +54,7 @@ export const ACTION_DEF_NAME: Record<ActionType, string> = {
   call_api: 'CallApiAction',
   call_plugin: 'CallPluginAction',
   call_action: 'CallActionAction',
+  send_notification: 'SendNotificationAction',
   navigate: 'NavigateAction',
   set_field: 'SetFieldAction',
   confirm: 'ConfirmAction',
@@ -74,6 +75,7 @@ export function blankActionOfType(t: ActionType, id: string): Row {
   if (t === 'set_field') base.target = ''
   if (t === 'confirm') base.message = ''
   if (t === 'notify') { base.message = ''; base.tone = 'info' }
+  if (t === 'send_notification') base.rule = ''
   if (t === 'chain') base.steps = []
   if (t === 'if') {
     base.condition = { source: '', operator: 'truthy' }
@@ -94,6 +96,7 @@ export const ACTION_OVERRIDE_KEYS: Record<ActionType, ReadonlyArray<string>> = {
   call_api: ['connector', 'endpoint', 'param_binds'],
   call_plugin: ['callable', 'param_binds'],
   call_action: ['ref', 'param_binds'],
+  send_notification: ['rule', 'param_binds'],
   navigate: ['connector', 'to', 'screen', 'param_binds'],
   set_field: [],
   confirm: [],

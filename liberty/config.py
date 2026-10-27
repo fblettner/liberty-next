@@ -406,6 +406,8 @@ class NotifySettings(BaseModel):
 
     enabled: bool = True
     pool: str = "default"
+    # The rules — ``[notifications.<id>]`` (liberty.notify.rules); next to the other config files.
+    config_path: Path = Field(default_factory=lambda: _default_config_path("notifications"))
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""

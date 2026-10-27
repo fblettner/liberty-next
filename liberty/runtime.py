@@ -51,7 +51,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 _log = logging.getLogger("liberty.runtime")
 
 ALL_SECTIONS: frozenset[str] = frozenset(
-    {"license", "connectors", "menus", "screens", "charts", "actions", "dashboards", "jobs"}
+    {"license", "connectors", "menus", "screens", "charts", "actions", "dashboards", "jobs", "notifications"}
 )
 
 
@@ -243,6 +243,10 @@ async def rebuild_runtime(
             from liberty.dashboards import load_dashboards
 
             app.state.dashboards = load_dashboards(settings.dashboards.config_path)
+        if "notifications" in wanted and getattr(settings, "notify", None) is not None:
+            from liberty.notify import load_notification_rules
+
+            app.state.notification_rules = load_notification_rules(settings.notify.config_path)
 
         # ── nomaflow: jobs.toml reconcile (the executors were rebound above) ──────
         jobs = getattr(app.state, "jobs", None)

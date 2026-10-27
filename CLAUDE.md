@@ -113,7 +113,10 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
   userviews/              DB-backed saved grid / chart views (shared + per user)
   notify/                 notifications: store.py (ly2_notification inbox, schema_sync), dispatcher.py
                           (Message → portal rows + Socket.IO push / SMTP email / a connector query or
-                          endpoint; recipients user: role: email:; channels isolated); rules come next
+                          endpoint; recipients user: role: email:; channels isolated), rules.py
+                          (notifications.toml: screen | job | action triggers, `when` on the row),
+                          events.py (fire_screen_event from the write route, fire_job_event from the
+                          runner's on_finished hook, fire_action_rule from `send_notification`)
   plugins/invoke.py       module:function resolution for the apps' Python (allow-listed)
   config_merge.py         per-entity additive merge of a shipped config into the live one (the apps
                           installer + Package & Deploy): override / untouched-vs-.bundled snapshot /
@@ -183,7 +186,7 @@ hot-reloadable (`[app] hot_reload = true`, `web/hot_reload.py`) or reloaded via
 | `theme.toml` | `[theme]` | `theme.py::ThemeFile` | Theme |
 | `reports.toml` | `[reports] templates_config_path` | `reports/schema.py` | Reports |
 | `jobs.toml` | `[jobs]` (default `${LIBERTY_APPS_DIR}/../plugins/nomaflow/jobs.toml`) | `jobs/schema.py` | nomaflow → Jobs |
-| (none) | `[notify]` — the inbox pool + SMTP for the email channel | `config.py::NotifySettings` | App (next) |
+| `notifications.toml` | `[notify] config_path` (+ the inbox pool and SMTP) | `notify/rules.py::NotificationsFile` | Notifications (next) |
 | `auth.toml` | `[auth] backend = "toml"` | `auth/authstore.py::AuthFile` | Access |
 
 Secrets: `${ENV_VAR}` / `${VAR:-default}` substitution in every TOML; `ENC:` values decrypted

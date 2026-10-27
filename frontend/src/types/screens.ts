@@ -294,6 +294,12 @@ export type Action =
       message: string
       tone?: 'info' | 'ok' | 'warn' | 'error'
     })
+  | (ActionCommon & {
+      /** Fire a notification rule (trigger kind = action) server-side with the form / row values + param_binds. */
+      type: 'send_notification'
+      rule: string
+      param_binds?: ParamBind[]
+    })
   | (ActionCommon & { type: 'refresh' })
   | (ActionCommon & PromptableAction & {
       /** One button → N inner steps run sequentially with a shared chain context. Each
