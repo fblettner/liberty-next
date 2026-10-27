@@ -86,6 +86,11 @@
   digest. Les KPI deviennent des cartes ; les nombres suivent la langue du lecteur (`1 234,5` /
   `1,234.5`), les mots du gabarit (libellés de couverture, mentions de confidentialité) aussi.
   Excel garde les données seules.
+- **Un lien de menu ouvre l'Explorateur sur un modèle.** Un élément de menu `page` peut cibler
+  `/explorer/<app>/<modèle>` : l'onglet ouvre l'Explorateur de données sur ce modèle (le
+  sélecteur permet toujours d'en changer). Le bundle des applications s'en sert pour placer une
+  entrée « Explorateur de données » dans chaque dossier métier (nomasx1 : Sécurité, Conflits,
+  Licences ; nomajde : Sécurité, UDC, Développement).
 - **Filtres et période d'un tableau de bord sur une requête sans écran.** Un filtre de tableau
   de bord (et la colonne de date de la période donnée comme élément du dictionnaire) ne se
   liait qu'à travers la carte `dd` de l'écran du widget ; un widget sur une requête nue

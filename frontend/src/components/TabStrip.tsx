@@ -179,7 +179,7 @@ export default function TabStrip() {
             tab.kind === 'nomaflow_run' ? Workflow :
             tab.kind === 'settings' ? SlidersHorizontal :
             tab.kind === 'monitoring' ? Activity :
-            tab.kind === 'page' ? (PAGE_ICONS[tab.target] ?? FileText) :
+            tab.kind === 'page' ? (PAGE_ICONS[tab.target] ?? (tab.target.startsWith('/explorer/') ? Compass : FileText)) :
             TableIcon
           // Resolve label + owning app via the menu tree so duplicates like "Users" under
           // nomasx1 vs ldap stay distinguishable (app name shown as a small line above).

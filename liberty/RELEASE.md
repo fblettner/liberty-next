@@ -76,6 +76,10 @@
   become cards; the numbers follow the reader's language (`1 234,5` / `1,234.5`); the
   template's own words (cover labels, confidential lines) follow it too. Excel keeps the data
   only.
+- **A menu link opens the Explorer on one model.** A `page` menu item may target
+  `/explorer/<app>/<model>`: the tab opens the Data Explorer on that model (the picker still
+  lets the user switch). The apps bundle uses it to put a "Data Explorer" entry in each domain
+  folder (nomasx1: Security, Conflicts, Licenses; nomajde: Security, UDC, Development).
 - **Dashboard filters and period on a query without a screen.** A dashboard filter (and the
   period's date column given as a dictionary item) used to bind only through a widget screen's
   `dd` map; a widget on a plain query ignored it. The page now sends the pick as a *dictionary

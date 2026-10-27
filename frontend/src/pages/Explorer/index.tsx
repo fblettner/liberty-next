@@ -51,7 +51,9 @@ const PAGE_SIZE = 50
 const AGG_VIEWS: AnalysisView[] = ['table', 'pivot', 'bar', 'line', 'pie', 'kpi']
 type Mode = 'analyses' | 'dashboards'
 
-export default function ExplorerPage() {
+/** *initial*: the model a menu link opens (``/explorer/<app>/<model>``); without it the page
+ *  starts on the current app's first model. */
+export default function ExplorerPage({ initial }: { initial?: { app: string; model: string } } = {}) {
   const { t, i18n } = useTranslation()
   const lang = i18n.language || 'en'
   const { user } = useAuth()
@@ -90,13 +92,17 @@ export default function ExplorerPage() {
     if (!explorerModels) return
     const list: ExplorerModelSummary[] = explorerModels.map((m) => ({ ...m, hub: '', entities: 0 }))
     setModels(list)
-    if (list[0] && !list.some((m) => m.app === app && m.model === modelId)) { setApp(list[0].app); setModelId(list[0].model) }
+    const wanted = initial && list.find((m) => m.app === initial.app && m.model === initial.model)
+    if (wanted && !app) { setApp(wanted.app); setModelId(wanted.model) }
+    else if (list[0] && !list.some((m) => m.app === app && m.model === modelId)) { setApp(list[0].app); setModelId(list[0].model) }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- app / modelId are read, not followed
   }, [explorerModels])
   // The app picked in the left navigation drives the model, whenever that app has one.
   useEffect(() => {
+    if (initial) return                                     // a model link: the link decides, not the navigation
     const first = currentApp ? models?.find((m) => m.app === currentApp) : undefined
     if (first) { setApp(first.app); setModelId((cur) => (models?.some((m) => m.app === first.app && m.model === cur) ? cur : first.model)) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial is fixed for the tab's life
   }, [currentApp, models])
   const loadSaved = useCallback(async (a: string, m: string) => {
     try {
