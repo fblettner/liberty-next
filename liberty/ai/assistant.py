@@ -15,6 +15,7 @@ layer serialises those as SSE.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Any, AsyncIterator, Callable
 
 import json
@@ -221,8 +222,12 @@ class AiAssistant:
         # The stable prompt is the cached block; the page context (changes with every screen the
         # user opens) comes AFTER it, without cache_control, so it never breaks the cached prefix.
         system: list[dict[str, Any]] = [{"type": "text", "text": self.system_prompt, "cache_control": {"type": "ephemeral"}}]
+        # Today's date (the model has no clock: "last month" needs it) and the page context, in one
+        # uncached block after the cached prompt.
+        volatile = f"Today is {date.today().isoformat()} (the server's date)."
         if context and context.strip():
-            system.append({"type": "text", "text": _context_block(context)})
+            volatile += "\n\n" + _context_block(context)
+        system.append({"type": "text", "text": volatile})
         kwargs: dict[str, Any] = {
             "model": model or self.settings.model,
             "max_tokens": self.settings.max_tokens,

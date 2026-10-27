@@ -66,6 +66,10 @@
   `integrity_checks` (the configuration cross-reference checks). The assistant reads the running
   server instead of guessing when something failed, is late or is missing. Off by default because
   the log can carry what the server logged.
+- The chat drawer's top line keeps only what is actionable (the model picker when there is a
+  choice, "new conversation"); a table in a reply scrolls sideways in a smaller font with each
+  figure on one line. The assistant knows today's date (an uncached line with the page context),
+  so "last month" no longer needs a guess.
 - **Follow-up chips.** The assistant ends each reply with two or three questions the user is
   likely to ask next; the chat shows them as chips under the reply (a click sends one) and never
   shows the marker line the model wrote.

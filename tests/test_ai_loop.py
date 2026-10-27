@@ -258,11 +258,13 @@ def test_effort_skipped_for_haiku() -> None:
 
 def test_page_context_is_a_second_uncached_system_block() -> None:
     a = _assistant([])
-    assert len(a._request_kwargs(model=None)["system"]) == 1
-    assert len(a._request_kwargs(model=None, context="   ")["system"]) == 1      # blank → nothing added
+    # always two blocks: the cached prompt, then an uncached one with today's date (+ the page context)
+    plain = a._request_kwargs(model=None)["system"]
+    assert len(plain) == 2 and "cache_control" in plain[0] and "cache_control" not in plain[1]
+    assert plain[1]["text"].startswith("Today is 20") and "<page_context>" not in plain[1]["text"]
+    assert "<page_context>" not in a._request_kwargs(model=None, context="   ")["system"][1]["text"]   # blank → date only
     system = a._request_kwargs(model=None, context="app: shop\nscreen: orders")["system"]
-    assert len(system) == 2 and "cache_control" in system[0] and "cache_control" not in system[1]
-    assert system[1]["text"].startswith("<page_context>\napp: shop\nscreen: orders\n</page_context>")
+    assert len(system) == 2 and "<page_context>\napp: shop\nscreen: orders\n</page_context>" in system[1]["text"]
     # capped: the browser's text never grows the block past CONTEXT_MAX_CHARS
     from liberty.ai.assistant import CONTEXT_MAX_CHARS
     big = a._request_kwargs(model=None, context="x" * (CONTEXT_MAX_CHARS * 3))["system"][1]["text"]

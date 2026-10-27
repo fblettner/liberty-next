@@ -75,6 +75,10 @@
   la configuration). L'assistant lit le serveur au lieu de deviner quand quelque chose a échoué,
   est en retard ou manque. Désactivés par défaut car le journal peut contenir ce que le serveur
   a consigné.
+- La ligne de tête du volet de chat ne garde que l'utile (le choix du modèle s'il y en a un,
+  « nouvelle conversation ») ; un tableau dans une réponse défile latéralement en police réduite,
+  chaque nombre sur une ligne. L'assistant connaît la date du jour (une ligne non mise en cache
+  avec le contexte de page) : « le mois dernier » n'est plus deviné.
 - **Puces de relance.** L'assistant termine chaque réponse par deux ou trois questions que
   l'utilisateur posera probablement ensuite ; le chat les affiche en puces sous la réponse (un
   clic en envoie une) et ne montre jamais la ligne repère écrite par le modèle.

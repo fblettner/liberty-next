@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
-import { Sparkles, Send, ArrowRight, Check, X, FileEdit, AlertTriangle, Square, MapPin, ChevronRight, ChevronDown } from 'lucide-react'
+import { Send, ArrowRight, Check, X, FileEdit, AlertTriangle, Square, MapPin, ChevronRight, ChevronDown } from 'lucide-react'
 import { ApiError, api, streamSSE } from '../../api/client'
 import type { AiInfo, AiModel, ChatEvent, ChatMessage, Proposal } from '../../types/ai'
 import { getPageContext, renderPageContext, subscribePageContext, summarizePageContext, type PageContext } from '../../services/aiContext'
 import { loadHistory, loadModel, pickStarters, saveHistory, saveModel, trimHistory } from '../../services/aiChat'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
-import { PageLayout, Button, Banner, LinkButton, SearchSelect, SpinnerRing, Mono, Tag } from '../../common'
+import { Button, Banner, LinkButton, SearchSelect, SpinnerRing, Mono, Tag } from '../../common'
 import { Markdown } from '../../common/Markdown'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -23,12 +23,12 @@ type Entry =
   | { kind: 'tool'; ok: boolean | null; name: string; callSummary: string; error?: string }
   | { kind: 'proposal'; toolName: string; proposal: Proposal; state: ProposalState; error?: string }
 
-const HeaderRight = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: ${fontSize.sm};
-  color: ${colors.text.muted};
+// The drawer already carries the title; the chat's own top line holds only what is actionable:
+// the model picker (when the operator allowed a choice) and "new conversation".
+const Shell = styled.div`display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 8px 0 10px;`
+const TopBar = styled.div`
+  display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-shrink: 0;
+  padding: 0 2px 8px; font-size: ${fontSize.sm}; color: ${colors.text.muted};
 `
 
 const ChatArea = styled.div`
@@ -62,7 +62,11 @@ const Bubble = styled.div<{ $role: 'user' | 'assistant' }>`
   ${({ $role }) =>
     $role === 'user'
       ? `align-self: flex-end; background: ${colors.blue.bg}; border: 1px solid ${colors.blue.border}; color: ${colors.text.primary};`
-      : `align-self: flex-start; background: var(--ghost-bg, ${colors.bg.card}); border: 1px solid ${colors.border}; color: ${colors.text.secondary};`}
+      : `align-self: stretch; max-width: 100%; background: var(--ghost-bg, ${colors.bg.card}); border: 1px solid ${colors.border}; color: ${colors.text.secondary};`}
+  /* A table in a reply: the drawer is narrow, so the table scrolls sideways in a smaller font
+     with cells kept on one line (a figure split over two lines reads as two figures). */
+  & table { display: block; max-width: 100%; overflow-x: auto; font-size: ${fontSize.sm}; white-space: nowrap; }
+  & th, & td { padding: 3px 8px; font-variant-numeric: tabular-nums; }
 `
 
 const ToolLine = styled.div<{ $ok: boolean | null }>`
@@ -249,7 +253,6 @@ export default function Chat() {
   const [defaultModel, setDefaultModel] = useState('')
   const [models, setModels] = useState<AiModel[]>([])
   const [starters, setStarters] = useState<Record<string, string[]>>({})
-  const [toolNames, setToolNames] = useState<string[]>([])
   // The conversation survives the drawer's close and a reload (services/aiChat, last 40 messages).
   const historyRef = useRef<ChatMessage[]>(loadHistory())
   const [entries, setEntries] = useState<Entry[]>(() => entriesOf(historyRef.current))
@@ -287,7 +290,6 @@ export default function Chat() {
         setDefaultModel(r.model)
         setModels(r.models ?? [])
         setStarters(r.starters ?? {})
-        setToolNames(r.tools.map((x) => x.name))
       })
       .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
   }, [])
@@ -418,33 +420,17 @@ export default function Chat() {
 
   const pickModel = (id: string) => { setPickedModel(id); saveModel(id === defaultModel ? null : id) }
 
-  const description =
-    available === null ? (
-      '…'
-    ) : available ? (
-      <>
-        {t('chat.model')}: <Mono>{model || defaultModel}</Mono> · {t('chat.tools')}: {toolNames.join(', ') || t('common.none')}
-      </>
-    ) : (
-      <span style={{ color: colors.red.main }}>{t('chat.unavailable')}</span>
-    )
-
   return (
-    <PageLayout
-      icon={<Sparkles size={18} />}
-      title={t('chat.title')}
-      description={description}
-      headerRight={
-        <HeaderRight>
-          {models.length > 1 && (
-            <div style={{ minWidth: 150 }} title={t('chat.pickModel')}>
-              <SearchSelect value={model} options={models.map((m) => ({ value: m.id, label: m.label, mono: m.id }))} onChange={(v) => { if (v) pickModel(v) }} disabled={busy} />
-            </div>
-          )}
-          {entries.length > 0 && <LinkButton onClick={reset}>{t('chat.newConversation')}</LinkButton>}
-        </HeaderRight>
-      }
-    >
+    <Shell>
+      <TopBar>
+        {available === false && <span style={{ color: colors.red.main, flex: 1, textAlign: 'left' }}>{t('chat.unavailable')}</span>}
+        {models.length > 1 && (
+          <div style={{ minWidth: 150 }} title={t('chat.pickModel')}>
+            <SearchSelect value={model} options={models.map((m) => ({ value: m.id, label: m.label, mono: m.id }))} onChange={(v) => { if (v) pickModel(v) }} disabled={busy} />
+          </div>
+        )}
+        {entries.length > 0 && <LinkButton onClick={reset}>{t('chat.newConversation')}</LinkButton>}
+      </TopBar>
       <ChatArea>
         <Messages ref={scrollRef}>
           {entries.length === 0 && (
@@ -531,7 +517,7 @@ export default function Chat() {
           )}
         </Composer>
       </ChatArea>
-    </PageLayout>
+    </Shell>
   )
 }
 
