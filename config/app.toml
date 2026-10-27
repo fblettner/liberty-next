@@ -104,3 +104,5 @@ scaffold_tools = true
 # config_path = "config/jobs.toml"
 pool = "default"                 # the shared framework pool (auth + nomaflow + future notifications)
 enabled = true                   # false → catalogue loads, scheduler doesn't start (maintenance mode)
+# files_dir = "/data/liberty/files"   # file work area: uploads for a run, file_load rejects reports (default: <config dir>/.nomaflow/files)
+# max_upload_mb = 200

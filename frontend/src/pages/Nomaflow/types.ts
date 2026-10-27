@@ -165,6 +165,13 @@ export interface StepRunInfo {
   extras?: {
     child_run_id?: string
     child_job_id?: string
+    /** file_load: the files loaded, the counts, and the rejects report's name (downloadable). */
+    files?: string[]
+    read?: number
+    inserted?: number
+    rejected?: number
+    deleted?: number
+    rejects_file?: string
   } | null
 }
 

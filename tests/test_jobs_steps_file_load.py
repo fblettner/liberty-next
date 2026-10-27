@@ -174,7 +174,7 @@ async def test_bad_cell_fails_or_skips_and_the_transaction_holds(registry, tmp_p
         await ex.execute(step(path=str(bad), load_mode="replace_partition", partition_by=["period", "company"]), ctx())
     assert [r[3] for r in await rows(registry)] == [1, 2]          # nothing deleted, nothing inserted
     res = await ex.execute(step(path=str(bad), load_mode="replace_partition", partition_by=["period", "company"], on_error="skip"), ctx())
-    assert res.rows_affected == 1 and res.extras["rejected"] == 1 and res.extras["rejects"] == ["row 3: qty: not a whole number: 'two'"]
+    assert res.rows_affected == 1 and res.extras["rejected"] == 1 and res.extras["rejects"] == ["b.csv row 3: qty: not a whole number: 'two'"]
     assert [r[3] for r in await rows(registry)] == [9]
 
 
@@ -203,10 +203,61 @@ async def test_failures_name_the_cause(registry, tmp_path) -> None:
         await ex.execute(step(path=str(f), target=SqlEndpoint(connector="ghost", table="t")), ctx())
     with pytest.raises(StepFailed, match="has no columns"):
         await ex.execute(step(path=str(f), target=SqlEndpoint(connector="sales", table="missing")), ctx())
+    with pytest.raises(StepFailed, match="no file — set `path` or `watch_dir`"):
+        await ex.execute(step(), ctx())
+    with pytest.raises(StepFailed, match="watched folder not found"):
+        await ex.execute(step(watch_dir=str(tmp_path / "nowhere")), ctx())
     with pytest.raises(StepFailed, match="no file column matches"):
         await ex.execute(step(path=str(csvfile(tmp_path / "h.csv", ["x", "y"], [["1", "2"]]))), ctx())
     # schema-level checks
     with pytest.raises(ValueError, match="missing required field"):
-        Step(type="file_load", name="s", path="/x.csv")
+        Step(type="file_load", name="s", path="/x.csv")   # no target
     with pytest.raises(ValueError, match="needs `partition_by`"):
         step(path="/x.csv", load_mode="replace_partition")
+
+
+@pytest.mark.asyncio
+async def test_upload_override_and_rejects_report(registry, tmp_path) -> None:
+    """The Run-with-parameters modal uploads a file and fires with op_kwargs[step] = {file: path}:
+    that file wins over the step's path; every reject lands in a CSV under the work area."""
+    from liberty.config import ConnectorSettings, JobsSettings, Settings
+    settings = Settings(connectors=ConnectorSettings(config_path=tmp_path / "cfg" / "connectors.toml"), jobs=JobsSettings(files_dir=tmp_path / "work"))
+    ex = FileLoadExecutor(registry, settings=settings)
+    configured = csvfile(tmp_path / "configured.csv", ["period", "company", "article", "qty"], [["2026-01", "00001", "A", "1"]])
+    uploaded = csvfile(tmp_path / "uploaded.csv", ["period", "company", "article", "qty"], [["2026-02", "00001", "B", "x"], ["2026-02", "00001", "C", "3"]])
+    s = step(path=str(configured), on_error="skip")
+    res = await ex.execute(with_params(s, file=str(uploaded)), ctx())
+    assert res.extras["files"] == [str(uploaded)] and res.rows_affected == 1 and res.extras["rejected"] == 1
+    report = tmp_path / "work" / "sales-load" / res.extras["rejects_file"]
+    assert res.extras["rejects_file"] == "run-1-load-rejects.csv" and report.is_file()
+    assert report.read_text().splitlines() == ["file,row,reason", "uploaded.csv,2,qty: not a whole number: 'x'"]
+    assert [r[0] for r in await rows(registry)] == ["2026-02"]
+    # a blank per-fire file falls back to the step's path; no settings → no report, no crash
+    res = await FileLoadExecutor(registry).execute(with_params(s, file="  "), ctx())
+    assert res.extras["files"] == [str(configured)] and "rejects_file" not in res.extras
+
+
+@pytest.mark.asyncio
+async def test_watched_folder_loads_every_file_and_moves_it(registry, tmp_path) -> None:
+    ex = FileLoadExecutor(registry)
+    inbox = tmp_path / "inbox"; inbox.mkdir()
+    csvfile(inbox / "b-2026-04.csv", ["period", "company", "article", "qty"], [["2026-04", "00001", "A", "1"]])
+    csvfile(inbox / "a-2026-03.csv", ["period", "company", "article", "qty"], [["2026-03", "00001", "A", "1"], ["2026-03", "00002", "B", "2"]])
+    (inbox / "notes.txt").write_text("not a csv for us")
+    (inbox / ".hidden.csv").write_text("period\n2026")
+    s = step(watch_dir=str(inbox), watch_pattern="*.csv", load_mode="replace_partition", partition_by=["period", "company"])
+    res = await ex.execute(s, ctx())
+    assert [Path(f).name for f in res.extras["files"]] == ["a-2026-03.csv", "b-2026-04.csv"]   # name order
+    assert res.rows_affected == 3 and res.extras["partitions"] == [["2026-03", "00001"], ["2026-03", "00002"], ["2026-04", "00001"]]
+    assert "a-2026-03.csv, b-2026-04.csv: 3 row(s) read" in (res.log_excerpt or "")
+    done = sorted(p.name for p in (inbox / "done").iterdir())
+    assert len(done) == 2 and done[0].endswith("-a-2026-03.csv") and not (inbox / "a-2026-03.csv").exists()
+    assert (inbox / "notes.txt").exists() and (inbox / ".hidden.csv").exists()
+    # the folder is empty now: nothing to do, not a failure
+    res = await ex.execute(s, ctx())
+    assert res.rows_affected == 0 and res.extras["files"] == [] and "empty" in (res.log_excerpt or "")
+    # a bad file goes to failed/ and the step fails; a good one before it was already loaded and moved
+    csvfile(inbox / "c.csv", ["period", "company", "article", "qty"], [["2026-05", "00001", "A", "oops"]])
+    with pytest.raises(StepFailed, match="c.csv row 2"):
+        await ex.execute(s, ctx())
+    assert [p.name for p in (inbox / "failed").iterdir()][0].endswith("-c.csv")

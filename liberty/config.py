@@ -365,6 +365,10 @@ class JobsSettings(BaseModel):
     # run log. Default 5000; raise it for jobs that legitimately emit tens of thousands
     # of lines (e.g. a per-table ETL over thousands of tables) so the run's head isn't lost.
     run_log_max_lines: int = 5000
+    # The file work area (uploads for a run, file_load rejects reports). Default: next to the
+    # config, ``<config dir>/.nomaflow/files`` — a mounted volume on Docker.
+    files_dir: Path | None = None
+    max_upload_mb: int = Field(200, ge=1)
 
 
 class PostApplyStep(BaseModel):

@@ -968,3 +968,36 @@ def test_admin_reload_removes_dropped_jobs_from_scheduler(env, tmp_path) -> None
         after = client.post("/admin/reload", headers=h).json()
         assert after["nomaflow"]["scheduled_jobs"] == []  # nothing scheduled now
         assert "ping" not in after["nomaflow"]["jobs"]
+
+
+# --------------------------------------------------------------------------- #
+# POST /admin/jobs/<id>/upload + GET /admin/jobs/runs/<id>/files/<name>
+# --------------------------------------------------------------------------- #
+
+
+def test_upload_and_download_run_file(env, tmp_path) -> None:
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        assert client.post("/admin/jobs/ping/upload", headers=_h(client, "reader"), files={"file": ("a.csv", b"x\n")}).status_code == 403
+        assert client.post("/admin/jobs/no-such-job/upload", headers=h, files={"file": ("a.csv", b"x\n")}).status_code == 404
+        r = client.post("/admin/jobs/ping/upload", headers=h, files={"file": ("../evil name.CSV", b"period;qty\n2026-03;1\n")})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["job_id"] == "ping" and body["name"].endswith("-evil_name.CSV") and body["size"] == 21
+        saved = Path(body["path"])
+        assert saved.is_file() and saved.parent.name == "uploads" and saved.parent.parent.name == "ping"
+        assert saved.parent.parent.parent == tmp_path / ".nomaflow" / "files"   # next to connectors.toml
+        assert client.post("/admin/jobs/ping/upload", headers=h, files={"file": ("a.json", b"{}")}).status_code == 400
+        assert client.post("/admin/jobs/ping/upload", headers=h, data={"x": "1"}).status_code == 400
+        # a run's file: only a plain name starting with the run id, under the run's job folder
+        run_id = client.post("/admin/jobs/ping/run", headers=h).json()["run_id"]
+        _wait_for_terminal(app, run_id)
+        report = tmp_path / ".nomaflow" / "files" / "ping" / f"{run_id}-answer-rejects.csv"
+        report.write_text("file,row,reason\na.csv,2,qty: bad\n")
+        r = client.get(f"/admin/jobs/runs/{run_id}/files/{report.name}", headers=h)
+        assert r.status_code == 200 and r.text.startswith("file,row,reason") and "text/csv" in r.headers["content-type"]
+        assert client.get(f"/admin/jobs/runs/{run_id}/files/other-{report.name}", headers=h).status_code == 404
+        assert client.get(f"/admin/jobs/runs/{run_id}/files/..%2F{report.name}", headers=h).status_code == 404
+        assert client.get(f"/admin/jobs/runs/no-such-run/files/{report.name}", headers=h).status_code == 404
+        assert client.get(f"/admin/jobs/runs/{run_id}/files/{report.name}", headers=_h(client, "reader")).status_code == 403

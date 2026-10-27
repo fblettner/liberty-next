@@ -15,7 +15,7 @@ import { api, ApiError } from '../../api/client'
 import { PageLayout, Button, Banner, Centered, Card, Tag, Mono } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { RunDetailResponse, RunState } from './types'
-import { STATE_TONE } from './util'
+import { STATE_TONE, downloadRunFile } from './util'
 
 const POLL_MS = 2000
 const ACTIVE: RunState[] = ['RUNNING', 'QUEUED']
@@ -274,6 +274,10 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
                 // type or for call_job steps whose child wasn't tracked.
                 const childRunId = s.extras?.child_run_id
                 const childJobId = s.extras?.child_job_id
+                const rejectsFile = s.extras?.rejects_file
+                const loadCounts = s.step_type === 'file_load' && s.extras && typeof s.extras.read === 'number'
+                  ? t('nomaflow.run.loadCounts', '{{read}} read · {{inserted}} inserted · {{rejected}} rejected', { read: s.extras.read, inserted: s.extras.inserted ?? 0, rejected: s.extras.rejected ?? 0 })
+                  : null
                 return (
                   <StepRow key={key}>
                     <StepCell>{s.step_index}</StepCell>
@@ -289,6 +293,14 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
                             → {childJobId ?? 'child'}
                           </ChildRunLink>
                         </>
+                      )}
+                      {loadCounts && <div style={{ fontSize: fontSize.micro, color: colors.text.muted }}>{loadCounts}</div>}
+                      {rejectsFile && (
+                        <div>
+                          <ChildRunLink onClick={() => { if (runId) void downloadRunFile(runId, rejectsFile).catch(() => undefined) }} title={rejectsFile}>
+                            <Download size={11} /> {t('nomaflow.run.rejects', 'Rejected rows (csv)')}
+                          </ChildRunLink>
+                        </div>
                       )}
                     </StepCell>
                     <StepCell>{s.step_type}</StepCell>

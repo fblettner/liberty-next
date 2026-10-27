@@ -19,13 +19,18 @@ The step (``jobs.toml``)::
     partition_by = ["period", "company"]
     on_error = "fail"                                   # or "skip" (the row is counted as rejected)
 
+* Three ways to name the file: ``path`` (templated), a file uploaded from the Run-with-parameters
+  modal (the per-fire ``file`` parameter wins over ``path``), or ``watch_dir`` + ``watch_pattern``
+  — every matching file is loaded in name order, each in its own transaction, then moved to
+  ``<watch_dir>/done/`` or ``failed/`` under a time-stamped name.
 * The file is streamed (openpyxl read-only for ``.xlsx`` / ``.xlsm``, the csv module for
   ``.csv`` / ``.txt``), never loaded whole.
 * Target columns not in ``columns`` match a header of the same name (case, spaces and
   underscores ignored); ``constants`` fill the rest; whatever is left stays NULL.
 * Values are coerced to the target column's type (introspected): integers, decimals, dates
   (ISO, ``dd/mm/yyyy``, Excel dates), booleans, text. A bad cell fails the step, or skips the
-  row with ``on_error = "skip"``; the first ten rejects are quoted in the run log.
+  row with ``on_error = "skip"``; the first ten rejects are quoted in the run log and the whole
+  list lands in ``<files_dir>/<job>/<run>-<step>-rejects.csv`` (downloadable from the run).
 * ``replace_partition``: the partitions present in the load (from the constants, else the
   distinct values found in the file) are deleted and the rows inserted **in one transaction**,
   so a failed load leaves the previous data in place and a replay of a month replaces that
@@ -338,21 +343,37 @@ def _adapt(row: dict[str, Any], dialect: str) -> dict[str, Any]:
 class FileLoadExecutor:
     """Executes one ``file_load`` step. Stateless."""
 
-    def __init__(self, connectors: ConnectorRegistry) -> None:
+    def __init__(self, connectors: ConnectorRegistry, *, settings: Any | None = None) -> None:
         self._connectors = connectors
+        self._settings = settings   # liberty.config.Settings — for the work area (rejects reports)
 
     async def execute(self, step: Step, ctx: RunContext) -> StepResult:
         if step.type is not StepType.FILE_LOAD:
             raise StepFailed(f"FileLoadExecutor received a step of type {step.type.value!r}")
-        assert step.target is not None and step.path is not None
+        assert step.target is not None
         params = dict(step.op_kwargs)   # the runner merged job.params + the per-fire override here
         render = lambda s: render_template(s, params=params, run_id=ctx.run_id, job_id=ctx.job_id)  # noqa: E731
-        path = Path(render(step.path)).expanduser()
-        if not path.is_file():
-            raise StepFailed(f"file_load: file not found: {path}")
         constants = {k: (render(v) if isinstance(v, str) else v) for k, v in step.constants.items()}
         mode = step.load_mode or LoadMode.APPEND
-        partition_by = [p for p in step.partition_by]
+
+        # Which file(s): an upload from the Run-with-parameters modal (per-fire ``file`` kwarg),
+        # else the step's ``path``, else whatever a watched folder holds right now.
+        watched = False
+        if isinstance(params.get("file"), str) and params["file"].strip():
+            files = [Path(params["file"]).expanduser()]
+        elif step.path:
+            files = [Path(render(step.path)).expanduser()]
+        elif step.watch_dir:
+            folder = Path(render(step.watch_dir)).expanduser()
+            if not folder.is_dir():
+                raise StepFailed(f"file_load: watched folder not found: {folder}")
+            files = sorted(p for p in folder.glob(step.watch_pattern or "*") if p.is_file() and not p.name.startswith("."))
+            watched = True
+        else:
+            raise StepFailed("file_load: no file — set `path` or `watch_dir`, or upload one when running the job")
+        for f in files:
+            if not f.is_file():
+                raise StepFailed(f"file_load: file not found: {f}")
 
         try:
             tgt = self._connectors.get(step.target.connector)
@@ -367,16 +388,59 @@ class FileLoadExecutor:
             raise StepFailed(f"file_load: target table {step.target.schema_ or ''}.{step.target.table} has no columns (missing?)")
         table_sql = _qualified(step.target.schema_, step.target.table)
         by_name = {c.name.lower(): c.name for c in columns}
-        for p in partition_by:
+        for p in step.partition_by:
             if p.lower() not in by_name:
                 raise StepFailed(f"file_load: partition column {p!r} is not in the target table")
-        partition_by = [by_name[p.lower()] for p in partition_by]
+        partition_by = [by_name[p.lower()] for p in step.partition_by]
 
-        _log.info(
-            "nomaflow.file_load start run=%s step=%r file=%s → %s.%s mode=%s partition_by=%s",
-            ctx.run_id, step.name, path, tgt.name, step.target.table, mode.value, partition_by or None,
-        )
+        if watched and not files:
+            _log.info("nomaflow.file_load run=%s step=%r watched folder empty: nothing to do", ctx.run_id, step.name)
+            return StepResult(rows_affected=0, log_excerpt="watched folder empty: nothing to load", extras={"files": []})
 
+        totals = {"read": 0, "inserted": 0, "rejected": 0, "deleted": 0}
+        partitions_all: list[list[Any]] = []
+        rejects_all: list[tuple[str, int, str]] = []
+        loaded: list[str] = []
+        for f in files:
+            _log.info(
+                "nomaflow.file_load start run=%s step=%r file=%s → %s.%s mode=%s partition_by=%s",
+                ctx.run_id, step.name, f, tgt.name, step.target.table, mode.value, partition_by or None,
+            )
+            try:
+                r = await self._load_file(
+                    f, step, engine=engine, table_sql=table_sql, columns=columns, constants=constants,
+                    mode=mode, partition_by=partition_by, run_id=ctx.run_id,
+                )
+            except StepFailed:
+                if watched:
+                    self._move(f, "failed")
+                raise
+            for k in totals:
+                totals[k] += r[k]
+            partitions_all.extend(r["partitions"])
+            rejects_all.extend((f.name, n, why) for n, why in r["rejects"])
+            loaded.append(str(f))
+            if watched:
+                self._move(f, "done")
+
+        extras: dict[str, Any] = {**totals, "files": loaded, "partitions": partitions_all,
+                                  "rejects": [f"{name} row {n}: {why}" for name, n, why in rejects_all[:_MAX_QUOTED_REJECTS]]}
+        if rejects_all and self._settings is not None:
+            report = self._write_rejects(ctx, step, rejects_all)
+            if report is not None:
+                extras["rejects_file"] = report.name
+        names = ", ".join(f.name for f in files)
+        excerpt = f"{names}: {totals['read']} row(s) read, {totals['inserted']} inserted, {totals['rejected']} rejected"
+        if mode is LoadMode.REPLACE_PARTITION:
+            excerpt += f", {len(partitions_all)} partition(s) replaced ({totals['deleted']} row(s) deleted)"
+        _log.info("nomaflow.file_load done run=%s step=%r %s", ctx.run_id, step.name, excerpt)
+        return StepResult(rows_affected=totals["inserted"], log_excerpt=excerpt, extras=extras)
+
+    async def _load_file(
+        self, path: Path, step: Step, *, engine: AsyncEngine, table_sql: str, columns: list[ColumnInfo],
+        constants: dict[str, Any], mode: LoadMode, partition_by: list[str], run_id: str,
+    ) -> dict[str, Any]:
+        """One file, one transaction. Returns the counts, the partitions replaced and the rejects."""
         # pass 1 — header + plan (+ the partitions present, when a key isn't a constant)
         reader = open_reader(path, sheet=step.sheet, delimiter=step.delimiter, encoding=step.encoding)
         header = self._header(reader, step.header_row, path.name)
@@ -401,13 +465,12 @@ class FileLoadExecutor:
         # pass 2 — one transaction: delete the partitions, insert every batch
         names = plan.loaded
         insert_sql = text(f"INSERT INTO {table_sql} ({', '.join(_q(n) for n in names)}) VALUES ({', '.join(':' + n for n in names)})")
-        read = inserted = rejected = 0
-        rejects: list[str] = []
+        read = inserted = rejected = deleted = 0
+        rejects: list[tuple[int, str]] = []
         reader = open_reader(path, sheet=step.sheet, delimiter=step.delimiter, encoding=step.encoding)
         self._header(reader, step.header_row, path.name)
         async with engine.connect() as conn:
             async with conn.begin():
-                deleted = 0
                 for key in sorted(partitions, key=lambda k: tuple(str(x) for x in k)):
                     where = " AND ".join(f"{_q(p)} = :p{i}" for i, p in enumerate(partition_by))
                     res = await conn.execute(text(f"DELETE FROM {table_sql} WHERE {where}"), _adapt({f"p{i}": v for i, v in enumerate(key)}, engine.dialect.name))
@@ -421,8 +484,7 @@ class FileLoadExecutor:
                         batch.append(_adapt(_row_values(plan, cells), engine.dialect.name))
                     except CellError as exc:
                         rejected += 1
-                        if len(rejects) < _MAX_QUOTED_REJECTS:
-                            rejects.append(f"row {n}: {exc}")
+                        rejects.append((n, str(exc)))
                         if step.on_error == "fail":
                             raise StepFailed(f"file_load: {path.name} row {n}: {exc}") from exc
                         continue
@@ -433,22 +495,42 @@ class FileLoadExecutor:
                 if batch:
                     await conn.execute(insert_sql, batch)
                     inserted += len(batch)
-        for line in rejects:
-            _log.warning("nomaflow.file_load run=%s step=%r rejected %s", ctx.run_id, step.name, line)
-        _log.info(
-            "nomaflow.file_load done run=%s step=%r read=%d inserted=%d rejected=%d partitions=%d deleted=%d",
-            ctx.run_id, step.name, read, inserted, rejected, len(partitions), deleted,
-        )
-        return StepResult(
-            rows_affected=inserted,
-            log_excerpt=f"{path.name}: {read} row(s) read, {inserted} inserted, {rejected} rejected"
-            + (f", {len(partitions)} partition(s) replaced ({deleted} row(s) deleted)" if mode is LoadMode.REPLACE_PARTITION else ""),
-            extras={
-                "file": str(path), "read": read, "inserted": inserted, "rejected": rejected, "deleted": deleted,
-                "partitions": [list(k) for k in sorted(partitions, key=lambda k: tuple(str(x) for x in k))],
-                "rejects": rejects,
-            },
-        )
+        for n, why in rejects[:_MAX_QUOTED_REJECTS]:
+            _log.warning("nomaflow.file_load run=%s step=%r rejected %s row %d: %s", run_id, step.name, path.name, n, why)
+        return {
+            "read": read, "inserted": inserted, "rejected": rejected, "deleted": deleted,
+            "partitions": [list(k) for k in sorted(partitions, key=lambda k: tuple(str(x) for x in k))],
+            "rejects": rejects,
+        }
+
+    def _write_rejects(self, ctx: RunContext, step: Step, rejects: list[tuple[str, int, str]]) -> Path | None:
+        """The full rejects list as a CSV under the job's work area (the run detail offers it)."""
+        from liberty.jobs.files import job_dir, safe_name
+        assert self._settings is not None
+        try:
+            d = job_dir(self._settings, ctx.job_id)
+            d.mkdir(parents=True, exist_ok=True)
+            out = d / f"{ctx.run_id}-{safe_name(step.name)}-rejects.csv"
+            with out.open("w", newline="", encoding="utf-8") as fh:
+                w = csv.writer(fh)
+                w.writerow(["file", "row", "reason"])
+                w.writerows(rejects)
+            return out
+        except OSError as exc:  # pragma: no cover — a read-only work area must not fail the load
+            _log.warning("nomaflow.file_load run=%s could not write the rejects report: %s", ctx.run_id, exc)
+            return None
+
+    @staticmethod
+    def _move(path: Path, bucket: str) -> None:
+        """A watched file goes to ``<folder>/<bucket>/<stamp>-<name>`` once handled, so the next
+        fire does not load it again and the operator can see what happened to it."""
+        from liberty.jobs.files import safe_name
+        target = path.parent / bucket
+        try:
+            target.mkdir(exist_ok=True)
+            path.replace(target / f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{safe_name(path.name)}")
+        except OSError as exc:  # pragma: no cover
+            _log.warning("nomaflow.file_load could not move %s to %s: %s", path, bucket, exc)
 
     @staticmethod
     def _header(reader: Iterator[tuple[int, list[Any]]], header_row: int, name: str) -> list[Any]:

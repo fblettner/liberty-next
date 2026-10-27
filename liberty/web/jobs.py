@@ -334,6 +334,74 @@ async def run_job_now(
     }
 
 
+@router.post(
+    "/{job_id}/upload",
+    summary="Upload a file for a run",
+    responses={400: {"description": "No file part, or a type the loader does not read."}, 413: {"description": "Too large."}},
+)
+async def upload_job_file(job_id: str, request: Request, principal: Superuser) -> dict[str, Any]:
+    """Store a spreadsheet / CSV in the job's work area (``[jobs] files_dir``) for a
+    ``file_load`` step to read on the next fire: the Run-with-parameters modal uploads first,
+    then fires with ``op_kwargs[<step>] = {"file": <path>}``. Superuser only; the name is
+    sanitised and time-stamped, the size capped by ``[jobs] max_upload_mb``."""
+    from starlette.datastructures import UploadFile
+
+    from liberty.jobs.files import UPLOAD_SUFFIXES, upload_target
+
+    comps = _components(request)
+    try:
+        comps.registry.get(job_id)
+    except UnknownJobError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"unknown job {job_id!r}") from None
+    settings = request.app.state.settings
+    limit = settings.jobs.max_upload_mb * 1024 * 1024
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > limit + 4096:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, detail=f"upload exceeds {settings.jobs.max_upload_mb} MB")
+    form = await request.form()
+    upload = form.get("file")
+    if not isinstance(upload, UploadFile) or not upload.filename:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="missing 'file' part")
+    from pathlib import Path
+    suffix = Path(upload.filename).suffix.lower()
+    if suffix not in UPLOAD_SUFFIXES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"unsupported file type {suffix or '(none)'}: {', '.join(sorted(UPLOAD_SUFFIXES))}")
+    target = upload_target(settings, job_id, upload.filename)
+    size = 0
+    with target.open("wb") as fh:
+        while chunk := await upload.read(1024 * 1024):
+            size += len(chunk)
+            if size > limit:
+                fh.close()
+                target.unlink(missing_ok=True)
+                raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, detail=f"upload exceeds {settings.jobs.max_upload_mb} MB")
+            fh.write(chunk)
+    _log.info("nomaflow.admin upload job=%s by=%s file=%s size=%d", job_id, principal.username, target, size)
+    return {"job_id": job_id, "name": target.name, "path": str(target), "size": size}
+
+
+@router.get("/runs/{run_id}/files/{name}", summary="Download a run's file")
+async def download_run_file(run_id: str, name: str, request: Request, _: Superuser):
+    """A file a step left in the job's work area for this run — today the ``file_load``
+    rejects report (``<run>-<step>-rejects.csv``). The name must be a plain file name of that
+    run; anything else is a 404."""
+    from fastapi.responses import FileResponse
+    from sqlalchemy import select
+
+    from liberty.jobs.files import run_file
+    from liberty.jobs.models import JobRun
+
+    comps = _components(request)
+    async with comps.db.session() as s:
+        row = (await s.execute(select(JobRun).where(JobRun.id == run_id))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"unknown run {run_id!r}")
+    path = run_file(request.app.state.settings, row.job_id, name) if name.startswith(run_id) else None
+    if path is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no file {name!r} for run {run_id!r}")
+    return FileResponse(path, filename=name, media_type="text/csv" if path.suffix == ".csv" else "application/octet-stream")
+
+
 @router.post("/runs/{run_id}/cancel", summary="Cancel job run")
 async def cancel_run(run_id: str, request: Request, principal: Superuser) -> dict[str, Any]:
     """Request cancellation of an in-flight run.

@@ -36,6 +36,14 @@
   remplace ce mois seulement. Le journal d'exécution et le résultat de l'étape donnent les lignes
   lues, insérées, rejetées, les partitions remplacées et les lignes supprimées, avec les premiers
   rejets cités. L'éditeur d'étapes a son formulaire.
+- Trois façons de nommer le fichier. Le `path` de l'étape ; un fichier choisi dans la fenêtre
+  « Lancer avec des paramètres », envoyé dans l'espace de travail de la tâche et remis à l'étape
+  pour ce lancement (il l'emporte sur le chemin) ; ou un `watch_dir` + `watch_pattern`, où chaque
+  fichier correspondant est chargé dans l'ordre des noms, chacun dans sa transaction, puis déplacé
+  dans `done/` ou `failed/` sous un nom horodaté : le cas planifié « déposer le fichier sur le
+  partage ». Les lignes rejetées vont dans un CSV (fichier, ligne, motif) que le détail de
+  l'exécution propose au téléchargement. `[jobs] files_dir` nomme l'espace de travail (par défaut
+  `<dossier de config>/.nomaflow/files`), `max_upload_mb` plafonne un envoi.
 
 **Périmètre de données par ligne (première partie)**
 - Un rôle peut maintenant restreindre **les lignes** que ses titulaires voient, en plus des

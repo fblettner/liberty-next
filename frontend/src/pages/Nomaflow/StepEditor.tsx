@@ -803,9 +803,17 @@ function FileLoadForm({ step, patch, sqlConnectors }: FormProps) {
     <>
       <SubHead>{t('nomaflow.steps.file')}</SubHead>
       <Grid>
-        <Field $span={2}>
+        <Field $span={3}>
           <FieldLabel>{t('nomaflow.steps.path')}</FieldLabel>
           <Input value={String(f.path ?? '')} onChange={(e) => patch({ path: e.target.value } as Partial<StepConfig>)} placeholder="/data/in/sales-${params.period}.xlsx" />
+        </Field>
+        <Field $span={2}>
+          <FieldLabel>{t('nomaflow.steps.watchDir')}</FieldLabel>
+          <Input value={String(f.watch_dir ?? '')} onChange={(e) => patch({ watch_dir: e.target.value || null } as Partial<StepConfig>)} placeholder="/data/in/sales" />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.watchPattern')}</FieldLabel>
+          <Input value={String(f.watch_pattern ?? '*')} onChange={(e) => patch({ watch_pattern: e.target.value || '*' } as Partial<StepConfig>)} placeholder="*.xlsx" />
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.sheet')}</FieldLabel>

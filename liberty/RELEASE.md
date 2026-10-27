@@ -31,6 +31,13 @@
   rows in **one transaction**: a failed load leaves the previous data in place, a corrected month
   replaces that month only. The run log and the step result say rows read, inserted, rejected,
   partitions replaced and rows deleted, with the first rejects quoted. The step editor has its form.
+- Three ways to name the file. The step's `path`; a file picked in the Run-with-parameters modal,
+  uploaded to the job's work area and handed to the step for that fire (it wins over the path); or
+  a `watch_dir` + `watch_pattern`, where every matching file is loaded in name order, each in its
+  own transaction, then moved to `done/` or `failed/` under a time-stamped name — the scheduled
+  "drop the file on the share" case. Rejected rows land in a CSV (file, row, reason) the run detail
+  offers for download. `[jobs] files_dir` names the work area (default `<config dir>/.nomaflow/files`),
+  `max_upload_mb` caps an upload.
 
 **Row-level data scope (first part)**
 - A role can now restrict **which rows** its holders see, on top of which queries they may run:

@@ -213,6 +213,8 @@ class Step(BaseModel):
     # match by name. ``partition_by`` names the target columns a ``replace_partition`` load
     # deletes by (their values from ``constants`` or the file).
     path: str | None = None
+    watch_dir: str | None = None
+    watch_pattern: str = "*"
     sheet: str | int | None = None
     header_row: int = Field(1, ge=1)
     delimiter: str | None = None
@@ -253,7 +255,7 @@ class Step(BaseModel):
         elif self.type is StepType.CALL_JOB:
             self._require("target_job_id")
         elif self.type is StepType.FILE_LOAD:
-            self._require("path", "target")
+            self._require("target")   # the file comes from `path`, `watch_dir`, or an upload at run time
             if self.load_mode is LoadMode.REPLACE_PARTITION and not self.partition_by:
                 raise ValueError(f"step {self.name!r}: load_mode = replace_partition needs `partition_by`")
         return self

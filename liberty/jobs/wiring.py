@@ -122,7 +122,7 @@ def build_executors(
         StepType.PYTHON: PythonStepExecutor(connectors, settings=settings, changesets=changesets),
         StepType.LDAP_SYNC: LdapSyncExecutor(connectors),
         StepType.HTTP: HttpStepExecutor(),
-        StepType.FILE_LOAD: FileLoadExecutor(connectors),
+        StepType.FILE_LOAD: FileLoadExecutor(connectors, settings=settings),
     }
     if registry is not None:
         # The runner reference is back-filled by build_nomaflow after the

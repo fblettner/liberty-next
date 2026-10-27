@@ -11,11 +11,11 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock, ChevronDown, ChevronRight, Copy, Download, Trash2 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { PageLayout, Button, Banner, Centered, Card, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, Input, Select, SearchSelect, type SearchSelectOption, useModals } from '../../common'
+import { PageLayout, Button, Banner, Centered, Card, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, FileInput, Input, Select, SearchSelect, type SearchSelectOption, useModals } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { JobSummary, JobsListResponse, JobsParsedResponse, StepConfig } from './types'
-import { STATE_TONE, relative } from './util'
+import { STATE_TONE, relative, uploadJobFile } from './util'
 import { RetentionPanel } from './RetentionPanel'
 
 const Toolbar = styled.div`
@@ -233,9 +233,10 @@ export default function JobsList() {
           && Object.keys(s.op_kwargs as object).length > 0,
       )
       const hasMultipleSteps = allSteps.length > 1
+      const hasFileLoad = allSteps.some((s) => s.type === 'file_load')
       const jobLogLevel: 'WARNING' | 'INFO' | 'DEBUG' =
         def?.log_level === 'DEBUG' ? 'DEBUG' : def?.log_level === 'WARNING' ? 'WARNING' : 'INFO'
-      if (!hasParams && !hasPythonKwargs && !hasMultipleSteps) {
+      if (!hasParams && !hasPythonKwargs && !hasMultipleSteps && !hasFileLoad) {
         // No params + single no-kwargs step — quick-fire at the job's saved
         // log_level. Nothing the modal could usefully show (no kwargs to
         // edit, no step to selectively disable).
@@ -683,6 +684,10 @@ function RunWithParamsModal({
   }, [steps])
   const [stepValues, setStepValues] = useState<Record<string, Record<string, unknown>>>(initialStepKwargs)
   const [stepEnabled, setStepEnabled] = useState<Record<string, boolean>>(initialStepEnabled)
+  // file_load steps: a file picked here is uploaded on Run and handed to the step as its
+  // per-fire `file` kwarg (it wins over the step's configured path / watched folder).
+  const [stepFiles, setStepFiles] = useState<Record<string, File | null>>({})
+  const [uploadError, setUploadError] = useState<string | null>(null)
   // Which steps are expanded to show their kwargs panel. Default: collapsed
   // (the kwargs are second-order — the toggle is the primary action). The
   // first python step with non-empty kwargs auto-expands so an operator who
@@ -787,6 +792,7 @@ function RunWithParamsModal({
   }
 
   const submit = async () => {
+    setUploadError(null)
     // Per-step kwargs diff: only the kwargs that changed end up in the payload.
     const stepOverrides: Record<string, Record<string, unknown>> = {}
     for (const s of steps) {
@@ -826,7 +832,16 @@ function RunWithParamsModal({
     if (logLevel !== jobLogLevel) body.log_level = logLevel
     setBusy(true)
     try {
+      // Uploads first: a failed upload leaves the run unfired.
+      for (const [stepName, file] of Object.entries(stepFiles)) {
+        if (!file) continue
+        const up = await uploadJobFile(job.id, file)
+        body.op_kwargs = { ...(body.op_kwargs ?? {}), [stepName]: { ...(body.op_kwargs?.[stepName] ?? {}), file: up.path } }
+      }
       await onSubmit(body)
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : String(e))
+      return
     } finally {
       setBusy(false)
     }
@@ -992,7 +1007,11 @@ function RunWithParamsModal({
             <StepsList>
               {steps.map((s) => {
                 const isPython = s.type === 'python'
+                const isFileLoad = s.type === 'file_load'
                 const callable = String((s as { callable?: unknown }).callable ?? '')
+                const configuredSource = isFileLoad
+                  ? String((s as { path?: unknown }).path || (s as { watch_dir?: unknown }).watch_dir || '')
+                  : ''
                 const subtitle = isPython ? callable : s.type
                 const kwargs = stepValues[s.name] ?? {}
                 const hasKwargs = Object.keys(kwargs).length > 0
@@ -1028,6 +1047,22 @@ function RunWithParamsModal({
                         )}
                       </StepKwargsPanel>
                     )}
+                    {isFileLoad && enabled && (
+                      <StepKwargsPanel>
+                        <ParamRow>
+                          <ParamKey>{t('nomaflow.runParams.file', 'file')}</ParamKey>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+                            <FileInput value={stepFiles[s.name] ?? null} accept=".xlsx,.xlsm,.csv,.txt,.tsv"
+                              onChange={(file) => setStepFiles((prev) => ({ ...prev, [s.name]: file }))} />
+                            <span style={{ fontSize: fontSize.micro, color: colors.text.muted }}>
+                              {configuredSource
+                                ? t('nomaflow.runParams.fileHint', 'Leave empty to load {{source}}', { source: configuredSource })
+                                : t('nomaflow.runParams.fileRequired', 'This step has no path or watched folder: pick a file.')}
+                            </span>
+                          </div>
+                        </ParamRow>
+                      </StepKwargsPanel>
+                    )}
                   </div>
                 )
               })}
@@ -1035,6 +1070,7 @@ function RunWithParamsModal({
           </div>
         </ModalBody>
         <ModalFooter>
+          {uploadError && <Banner $tone="error" style={{ flex: 1 }}>{uploadError}</Banner>}
           <Button $variant="ghost" onClick={onCancel} disabled={busy}>
             {t('common.cancel', 'Cancel')}
           </Button>
