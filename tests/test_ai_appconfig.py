@@ -16,7 +16,11 @@ def test_parse_and_starters_keys() -> None:
     f = parse_ai_config(DATA)
     assert f.starters() == {"nomajde": ["Who has no role?"], "nomajde/f0092": ["Users never logged in"]}
     with pytest.raises(ValueError):
-        parse_ai_config({"ai": {"nomajde": {"playbook": "not yet"}}})
+        parse_ai_config({"ai": {"nomajde": {"playbook": "not a field"}}})
+    with pytest.raises(ValueError):
+        parse_ai_config({"ai": {"nomajde": {"playbooks": {"x": {"title": "no body"}}}}})
+    f = parse_ai_config({"ai": {"nomajde": {"playbooks": {"x": {"title": "T", "body": "B"}}}, "nomasx1": {"playbooks": {"y": {"title": "U", "body": "C", "description": "d"}}}}})
+    assert [(a, i, p.title) for a, i, p in f.playbooks()] == [("nomajde", "x", "T"), ("nomasx1", "y", "U")]
 
 
 def test_load_missing_file_is_empty(tmp_path) -> None:

@@ -332,7 +332,7 @@ async def _rebind_pool_holders(app: Any, settings: Settings, new: ConnectorRegis
         from liberty.ai import build_assistant
 
         old_ai = state.ai
-        state.ai = build_assistant(settings.ai, new, master_key=settings.crypto.master_key)
+        state.ai = build_assistant(settings.ai, new, master_key=settings.crypto.master_key, state=lambda: state)
         if old_ai is not None and old_ai is not state.ai:
             await old_ai.aclose()
 

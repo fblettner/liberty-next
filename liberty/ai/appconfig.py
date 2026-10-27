@@ -7,7 +7,13 @@ like the other per-app files, edited under Settings → AI)::
     [ai.nomajde.screens.f0092]
     starters = ["Users never logged in", "Who has an expired password?"]
 
-Starter questions are the first use; playbooks (`[ai.<app>.playbooks.<id>]`) are the next.
+    [ai.nomajde.playbooks.create_user]
+    title = "Create a JDE user"
+    description = "User, role, environments"
+    body = "1. Open Security → Users and click Add…\n2. …"   # Markdown (a multi-line TOML string)
+
+Playbooks are step-by-step procedures (Markdown) the assistant loads with ``load_playbook``
+when the user asks how to do something in the application.
 The operator's own ``[ai] starters`` in app.toml (keys ``*`` / app / ``app/screen``) are
 merged on top by :func:`merged_starters`, so a customer can override what the app ships."""
 
@@ -26,11 +32,20 @@ class ScreenAi(BaseModel):
     starters: list[str] = Field(default_factory=list, description="Starter questions shown on this screen.")
 
 
+class Playbook(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, description="What the procedure achieves — the assistant picks a playbook by it.")
+    description: str | None = Field(default=None, description="One line on when it applies.")
+    body: str = Field(min_length=1, description="The procedure, Markdown; the assistant follows it step by step.")
+
+
 class AppAi(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     starters: list[str] = Field(default_factory=list, description="Starter questions shown anywhere in this app.")
     screens: dict[str, ScreenAi] = Field(default_factory=dict, description="Per-screen starters, keyed by screen id.")
+    playbooks: dict[str, Playbook] = Field(default_factory=dict, description="Procedures the assistant can load, keyed by id.")
 
 
 class AiFile(BaseModel):
@@ -48,6 +63,10 @@ class AiFile(BaseModel):
                 if scr.starters:
                     out[f"{app}/{sid}"] = list(scr.starters)
         return out
+
+    def playbooks(self) -> list[tuple[str, str, Playbook]]:
+        """``(app, id, playbook)`` for every playbook, apps and ids in file order."""
+        return [(app, pid, pb) for app, block in self.ai.items() for pid, pb in block.playbooks.items()]
 
 
 def parse_ai_config(data: dict[str, Any]) -> AiFile:

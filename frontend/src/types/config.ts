@@ -262,7 +262,8 @@ export interface ExplorerDoc {
 
 /** `GET /admin/config/ai/parsed` — the apps' assistant material (ai.toml). */
 export interface ScreenAiBody { starters?: string[] }
-export interface AppAiBody { starters?: string[]; screens?: Record<string, ScreenAiBody> }
+export interface PlaybookBody { title: string; description?: string | null; body: string }
+export interface AppAiBody { starters?: string[]; screens?: Record<string, ScreenAiBody>; playbooks?: Record<string, PlaybookBody> }
 export interface AiDoc { path: string; ai: Record<string, AppAiBody> }
 
 export interface DashboardsDoc {

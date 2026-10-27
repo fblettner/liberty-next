@@ -1338,6 +1338,8 @@ async def put_ai_parsed(body: AiBody, request: Request, _: Superuser) -> dict[st
         screens = {sid: {"starters": list(s.starters)} for sid, s in block.screens.items() if s.starters}
         if screens:
             d["screens"] = screens
+        if block.playbooks:
+            d["playbooks"] = {pid: pb.model_dump(exclude_none=True) for pid, pb in block.playbooks.items()}
         normalized["ai"][app] = d
     import tomli_w
     new_text = tomli_w.dumps(normalized)

@@ -60,6 +60,16 @@
   le lot d'applications comme les autres fichiers par application (fusionné à l'installation,
   rechargé à chaud, versionné) et s'édite sous Configuration → IA. Les questions de l'opérateur
   sous App → Assistant IA l'emportent, clé par clé.
+- **Des procédures, et un assistant qui connaît l'installation.** `ai.toml` porte aussi
+  `[ai.<app>.playbooks.<id>]` (un titre, une description facultative, la procédure en Markdown),
+  édité sous Configuration → IA. Quand un utilisateur demande comment faire quelque chose dans une
+  application, l'assistant liste les procédures, charge celle qui convient et en suit les étapes,
+  en disant laquelle. Un nouvel outil `describe_instance` résume ce que contient l'installation
+  (applications, menus, écrans, tableaux de bord, modèles de l'explorateur, tâches, procédures) :
+  « où trouver… » se répond d'après la configuration réelle. Un résultat d'outil au-delà de
+  60 000 caractères est coupé, avec une note demandant à l'assistant de restreindre l'appel.
+- Le chat replie les appels d'outils d'un tour en une ligne discrète (« 3 appels d'outil », à
+  ouvrir pour les voir) ; un appel en échec garde son message visible.
 - Listes déroulantes : un code long (un identifiant de modèle) n'est plus tronqué dans la liste.
 - Explorateur de données : les champs d'une entité table portent maintenant leurs libellés du
   dictionnaire. Les éléments étaient cherchés sous le connecteur de données (`jdedwards`) alors que

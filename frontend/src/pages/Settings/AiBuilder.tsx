@@ -4,12 +4,13 @@
 // + reload). The operator's own questions live in App → AI Assistant and win over these.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, Sparkles, LayoutList, Trash2 } from 'lucide-react'
+import { Save, Sparkles, LayoutList, Trash2, BookOpen, Plus, Edit3 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Centered, SearchSelect, SpinnerRing, type SearchSelectOption } from '../../common'
-import type { AiDoc, AppAiBody, ScreensDoc } from '../../types/config'
+import { Banner, Button, Card, Centered, SearchSelect, SpinnerRing, useModals, type SearchSelectOption } from '../../common'
+import type { AiDoc, AppAiBody, PlaybookBody, ScreensDoc } from '../../types/config'
 import { QuestionsList } from './AiStartersEditor'
+import { AiPlaybookModal } from './AiPlaybookModal'
 import { ScopeBar, type ScopeOption } from './ScopeBar'
 import { AddScopeModal } from './AddScopeModal'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -27,11 +28,23 @@ const ScreenHead = styled.div`
   & .spacer { flex: 1; }
 `
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 12px 4px; text-align: center;`
+const Item = styled.div`
+  display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 10px;
+  border: 1px solid ${colors.border}; background: ${colors.bg.input}; cursor: pointer; min-width: 0;
+  & > .icon { flex-shrink: 0; color: ${colors.blue.main}; }
+  & .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  & .name { font-family: ${fonts.mono}; font-size: ${fontSize.base}; color: ${colors.text.primary}; }
+  & .meta { font-family: ${fonts.sans}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .actions { flex-shrink: 0; display: flex; gap: 4px; }
+  &:hover { border-color: ${colors.blue.border}; background: ${colors.blue.bg}; }
+`
 
 export default function AiBuilder() {
   const { t } = useTranslation()
+  const modals = useModals()
   const { currentApp, connectors } = useWorkspace()
   const [scope, setScope] = useState('')
+  const [editing, setEditing] = useState<(PlaybookBody & { id: string }) | null | undefined>(undefined)
   const [doc, setDoc] = useState<Record<string, AppAiBody> | null>(null)
   const [saved, setSaved] = useState<Record<string, AppAiBody> | null>(null)
   const [screens, setScreens] = useState<ScreensDoc['screens']>({})
@@ -73,6 +86,12 @@ export default function AiBuilder() {
     .sort((a, b) => a.value.localeCompare(b.value))
   const setScreen = (id: string, starters: string[]) => update({ screens: { ...(block.screens ?? {}), [id]: { starters } } })
   const dropScreen = (id: string) => { const next = { ...(block.screens ?? {}) }; delete next[id]; update({ screens: next }) }
+  const playbookIds = Object.keys(block.playbooks ?? {})
+  const savePlaybook = (id: string, body: PlaybookBody) => { update({ playbooks: { ...(block.playbooks ?? {}), [id]: body } }); setEditing(undefined) }
+  const dropPlaybook = async (id: string) => {
+    if (!(await modals.confirm({ title: t('common.delete'), message: t('settings.ai.deletePlaybook', { id }), variant: 'danger' }))) return
+    const next = { ...(block.playbooks ?? {}) }; delete next[id]; update({ playbooks: next })
+  }
 
   const persist = async () => {
     if (!doc) return
@@ -129,7 +148,33 @@ export default function AiBuilder() {
               </Section>
             ))}
           </Section>
+          <Section>
+            <SectionHead><BookOpen size={14} /> {t('settings.ai.playbooks')} <span className="spacer" />
+              <Button $variant="ghost" $size="sm" onClick={() => setEditing(null)} disabled={busy}><Plus size={13} /> {t('settings.ai.addPlaybook')}</Button>
+            </SectionHead>
+            <Hint>{t('settings.ai.playbooksHint')}</Hint>
+            {playbookIds.length === 0 && <Empty>{t('settings.ai.noPlaybooks')}</Empty>}
+            {playbookIds.map((id) => {
+              const pb = block.playbooks![id]
+              return (
+                <Item key={id} onClick={() => setEditing({ ...pb, id })}>
+                  <BookOpen className="icon" size={16} />
+                  <span className="text">
+                    <span className="name">{id}<span style={{ color: colors.text.secondary, fontFamily: fonts.sans }}> — {pb.title}</span></span>
+                    {pb.description && <span className="meta">{pb.description}</span>}
+                  </span>
+                  <span className="actions" onClick={(ev) => ev.stopPropagation()}>
+                    <Button $variant="ghost" $size="sm" onClick={() => setEditing({ ...pb, id })} disabled={busy}><Edit3 size={13} /> {t('common.edit', 'Edit')}</Button>
+                    <Button $variant="ghost" $size="sm" onClick={() => void dropPlaybook(id)} disabled={busy} style={{ color: colors.red.main }}><Trash2 size={13} /> {t('common.delete')}</Button>
+                  </span>
+                </Item>
+              )
+            })}
+          </Section>
         </Body>
+      )}
+      {editing !== undefined && (
+        <AiPlaybookModal initial={editing} takenIds={playbookIds} onSave={savePlaybook} onClose={() => setEditing(undefined)} />
       )}
       {addScopeOpen && (
         <AddScopeModal candidates={addCandidates} title={t('settings.ai.addScope')} emptyHint={t('settings.ai.addScopeEmpty')}

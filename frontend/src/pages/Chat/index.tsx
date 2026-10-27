@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
-import { Sparkles, Send, ArrowRight, Check, X, FileEdit, AlertTriangle, Square, MapPin } from 'lucide-react'
+import { Sparkles, Send, ArrowRight, Check, X, FileEdit, AlertTriangle, Square, MapPin, ChevronRight, ChevronDown } from 'lucide-react'
 import { ApiError, api, streamSSE } from '../../api/client'
 import type { AiInfo, AiModel, ChatEvent, ChatMessage, Proposal } from '../../types/ai'
 import { getPageContext, renderPageContext, subscribePageContext, summarizePageContext, type PageContext } from '../../services/aiContext'
@@ -73,6 +73,16 @@ const ToolLine = styled.div<{ $ok: boolean | null }>`
   font-size: ${fontSize.sm};
   font-family: ${fonts.mono};
   color: ${({ $ok }) => ($ok === false ? colors.red.main : $ok === true ? colors.green.main : colors.text.muted)};
+`
+// The tool calls of one assistant turn, folded into a single muted line ("3 tool calls") the
+// operator can open; a failure keeps its message visible since that one is actionable.
+const ToolFold = styled.div`
+  align-self: flex-start; display: flex; flex-direction: column; gap: 4px; max-width: 88%;
+  & > button {
+    display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; cursor: pointer;
+    font-size: ${fontSize.sm}; font-family: ${fonts.sans}; color: ${colors.text.muted};
+    &:hover { color: ${colors.text.primary}; }
+  }
 `
 
 // Proposal card — surfaces a write the assistant wants the operator to apply. The chat
@@ -180,6 +190,42 @@ const InputBox = styled.textarea`
   &:focus { border-color: ${colors.blue.main}; }
   &::placeholder { color: ${colors.text.muted}; }
 `
+
+/** One fold of consecutive tool entries. */
+function ToolGroup({ items, t }: { items: Extract<Entry, { kind: 'tool' }>[]; t: (k: string, o?: Record<string, unknown>) => string }) {
+  const [open, setOpen] = useState(false)
+  const pending = items.some((e) => e.ok === null)
+  const failed = items.filter((e) => e.ok === false)
+  return (
+    <ToolFold>
+      <button type="button" onClick={() => setOpen((v) => !v)}>
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {pending ? <SpinnerRing size={11} thickness={2} /> : null}
+        <span>{t('chat.toolCalls', { count: items.length })}</span>
+        {failed.length > 0 && <span style={{ color: colors.red.main }}>· {t('chat.toolFailed', { count: failed.length })}</span>}
+      </button>
+      {(open ? items : failed).map((e, i) => (
+        <ToolLine key={i} $ok={e.ok}>
+          {e.ok === null ? <ArrowRight size={12} /> : e.ok ? <Check size={12} /> : <X size={12} />}
+          <span>{e.name}{e.callSummary ? ` · ${e.callSummary}` : ''}{e.error ? ` — ${e.error}` : ''}</span>
+        </ToolLine>
+      ))}
+    </ToolFold>
+  )
+}
+
+/** Consecutive tool entries fold into one group; everything else stays a single row. */
+function foldTools(entries: Entry[]): (Entry | { kind: 'tools'; items: Extract<Entry, { kind: 'tool' }>[] })[] {
+  const out: (Entry | { kind: 'tools'; items: Extract<Entry, { kind: 'tool' }>[] })[] = []
+  for (const e of entries) {
+    const last = out[out.length - 1]
+    if (e.kind === 'tool') {
+      if (last && last.kind === 'tools') last.items.push(e)
+      else out.push({ kind: 'tools', items: [e] })
+    } else out.push(e)
+  }
+  return out
+}
 
 /** The transcript rebuilt from a persisted history: the message bubbles only (tool lines and
  *  proposal cards are not kept — the model's view of them lives in the assistant text). */
@@ -400,12 +446,9 @@ export default function Chat() {
               )}
             </Intro>
           )}
-          {entries.map((e, i) =>
-            e.kind === 'tool' ? (
-              <ToolLine key={i} $ok={e.ok}>
-                {e.ok === null ? <ArrowRight size={12} /> : e.ok ? <Check size={12} /> : <X size={12} />}
-                <span>{e.name}{e.callSummary ? ` · ${e.callSummary}` : ''}{e.error ? ` — ${e.error}` : ''}</span>
-              </ToolLine>
+          {foldTools(entries).map((e, i) =>
+            e.kind === 'tools' ? (
+              <ToolGroup key={i} items={e.items} t={t} />
             ) : e.kind === 'proposal' ? (
               <ProposalEntry
                 key={i}
@@ -413,7 +456,7 @@ export default function Chat() {
                 onApply={() => void applyProposal(e.toolName, e.proposal)}
                 onSkip={() => skipProposal(e.toolName, e.proposal)}
               />
-            ) : (
+            ) : e.kind === 'msg' ? (
               <Bubble key={i} $role={e.role}>
                 {e.text ? (
                   e.role === 'assistant' ? (
@@ -425,7 +468,7 @@ export default function Chat() {
                   <span style={{ color: colors.text.muted }}>…</span>
                 )}
               </Bubble>
-            ),
+            ) : null,
           )}
         </Messages>
         {error && <Banner $tone="error">{error}</Banner>}

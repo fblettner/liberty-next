@@ -218,7 +218,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             max_failures=settings.auth.login_max_failures, window_seconds=settings.auth.login_window_seconds,
         )
         app.state.oidc = build_oidc(settings.oidc, master_key=settings.crypto.master_key)
-        app.state.ai = build_assistant(settings.ai, app.state.connectors, master_key=settings.crypto.master_key)
+        app.state.ai = build_assistant(settings.ai, app.state.connectors, master_key=settings.crypto.master_key, state=lambda: app.state)
         from liberty.ai.appconfig import load_ai_config
         app.state.ai_config = load_ai_config(settings.ai.config_path)   # the apps' starters (ai.toml)
         from liberty.reports.wiring import build_reports

@@ -52,6 +52,16 @@
   (`[ai.<app>] starters`, `[ai.<app>.screens.<id>] starters`), travels with the apps bundle like
   the other per-app files (merged on install, hot-reloaded, versioned) and is edited under
   Settings → AI. The operator's questions under App → AI Assistant win over it, key by key.
+- **Playbooks, and an assistant that knows the installation.** `ai.toml` also carries
+  `[ai.<app>.playbooks.<id>]` (a title, an optional description, the procedure in Markdown),
+  edited under Settings → AI. When a user asks how to do something in an application, the
+  assistant lists the playbooks, loads the one that fits and follows its steps, saying which one.
+  A new `describe_instance` tool summarises what this installation holds (applications, menus,
+  screens, dashboards, explorer models, jobs, playbooks), so "where do I find…" is answered from
+  the real configuration. A tool result above 60 000 characters is cut with a note asking the
+  assistant to narrow the call.
+- The chat folds a turn's tool calls into one muted line ("3 tool calls", open to see them); a
+  failed call keeps its message visible.
 - Dropdowns: a long code (a model id) is no longer cut short in the list.
 - Data Explorer: a table entity's fields now carry their dictionary labels. The items were looked
   up under the data connector (`jdedwards`) while the dictionary files them under the app

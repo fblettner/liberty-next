@@ -15,11 +15,12 @@ layer serialises those as SSE.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 import json
 
 from liberty.ai.connector_tools import build_connector_tools
+from liberty.ai.instance_tools import build_instance_tools
 from liberty.ai.scaffold_tools import build_scaffold_tools
 from liberty.ai.tools import ToolRegistry
 from liberty.config import AISettings
@@ -38,7 +39,14 @@ DEFAULT_SYSTEM_PROMPT = (
     "change something, explain that you can only read.\n"
     "3. If a tool fails, tell the user the tool name, the input you tried, and the error "
     "message that came back so they can debug.\n"
-    "4. Be concise and reply in the user's language.\n\n"
+    "4. Be concise and reply in the user's language.\n"
+    "5. describe_instance tells you what THIS installation holds (applications, menus, screens, "
+    "dashboards, explorer models, jobs, playbooks) — call it when the user asks what exists, where "
+    "to find something, or which application handles a subject.\n"
+    "6. Playbooks are the procedures the applications ship. When the user asks HOW to do something "
+    "in an application, call list_playbooks; if one fits, load_playbook it and follow its steps in "
+    "order, telling the user which playbook you follow. If none fits, say so and answer from what "
+    "describe_instance shows.\n\n"
     "Scaffolding tools (introspect_table / scaffold_*): when enabled they let you propose "
     "new connector queries, dictionary entries, screens, and menu items. These tools never "
     "write to disk — they return a Proposal envelope that the user reviews and applies via "
@@ -61,6 +69,10 @@ DEFAULT_SYSTEM_PROMPT = (
 # filters, the clicked row) is capped here as well as in the SPA — it is a volatile, UNCACHED
 # second system block, so its size is paid on every request.
 CONTEXT_MAX_CHARS = 4000
+
+# A tool result above this many characters is cut, with a note asking the model to narrow the
+# call (filters, limits, fewer columns): one runaway SELECT must not flood the context.
+TOOL_RESULT_MAX_CHARS = 60_000
 
 # Server-side web_fetch (Anthropic-hosted). GA tool version — no beta header.
 # Restricted to the operator-configured domains; never offered when the list is empty.
@@ -232,6 +244,12 @@ class AiAssistant:
                 summary = tdef.summarize(arguments) if tdef else block.name
                 yield ChatEvent("tool_call", name=block.name, input=arguments, summary=summary)
                 content, is_error = await self.tools.execute(block.name, arguments)
+                if len(content) > TOOL_RESULT_MAX_CHARS:
+                    content = (
+                        content[:TOOL_RESULT_MAX_CHARS]
+                        + f"\n…[cut: the result was {len(content)} characters, above the {TOOL_RESULT_MAX_CHARS} limit. "
+                        "Narrow the call — filters, a limit, fewer columns — and call again.]"
+                    )
                 # Sniff for a Proposal in the tool result — write-capable tools (the
                 # scaffold_* set) return ``{"proposal": {...}, "message": ...}``. When
                 # we find one, emit an extra ``proposal`` event so the chat UI can
@@ -292,6 +310,7 @@ def build_assistant(
     connectors: ConnectorRegistry,
     *,
     master_key: str = "",
+    state: Callable[[], Any] | None = None,
 ) -> AiAssistant | None:
     """Build an :class:`AiAssistant` from settings + the connector registry.
 
@@ -301,6 +320,8 @@ def build_assistant(
 
     *master_key*: when settings.api_key is ENC:-encrypted (Settings UI save encrypts
     with the install's master key), decrypt before instantiating AsyncAnthropic.
+    *state*: ``() -> app.state`` — adds the instance tools (describe_instance, the
+    playbooks), which read the live state at call time.
     """
     if not settings.enabled:
         return None
@@ -337,4 +358,6 @@ def build_assistant(
             connectors,
             allowed=settings.allowed_connectors or None,
         ))
+    if state is not None:
+        registry.add(*build_instance_tools(state, allowed=settings.allowed_connectors or None))
     return AiAssistant(settings, client=client, tools=registry)
