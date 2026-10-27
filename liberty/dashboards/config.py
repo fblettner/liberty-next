@@ -218,7 +218,7 @@ class DashboardPeriod(BaseModel):
 
     column: str | None = Field(default=None, description="Result column holding the date every widget filters on.")
     dd: str | None = Field(default=None, description="Dictionary item holding the date (matched through the screens' column hints).")
-    default: _PRESETS = Field(default="thisMonth", description="The preset the dashboard opens on.")
+    default: _PRESETS | None = Field(default=None, description="The preset the dashboard opens on. Blank: the app's ``default_period``.")
     basis: list[PeriodBasis] = Field(default_factory=list, description="Alternative dates to compare against; the first is the default. Empty: ``column`` / ``dd`` is the only axis.")
 
 

@@ -285,6 +285,8 @@ const en = {
   },
   dashboard: {
     empty: 'No widgets you can read on this dashboard yet.',
+    refresh: 'Refresh',
+    updatedAt: 'Updated at {{time}}',
     kpi: {
       previous: 'previous: {{value}}',
       previousTitle: 'Change from the previous period',

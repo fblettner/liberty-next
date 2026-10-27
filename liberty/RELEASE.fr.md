@@ -33,6 +33,13 @@
   `<COL>_to` sur toute colonne connue. L'éditeur de tableau de bord a un bloc Période. Le sélecteur
   de plage et le panneau flottant sont des composants partagés, pour les listes et l'explorateur
   à venir.
+- Des valeurs par défaut au niveau de l'application dans Paramètres → App : `default_period` (le
+  raccourci sur lequel s'ouvre un tableau de bord qui n'en nomme pas ; un choix dure
+  tant que l'onglet du tableau de bord reste ouvert),
+  `default_page_size` (la taille de page initiale de la grille ; le plafond de lignes d'un SELECT
+  reste sur le pool, le connecteur et l'écran) et `dashboard_cache_seconds`. Un tableau de bord
+  rouvert réutilise le résultat de chaque widget pendant cette durée ; le bouton Actualiser de la
+  barre passe outre et indique l'heure des données.
 - Un widget KPI avec `compare_previous = true` lance aussi sa requête sur la période précédente et
   affiche l'évolution (en pourcentage, ou en points pour un KPI en pourcentage, en vert ou en
   rouge) et la valeur précédente sous le nombre. L'éditeur de widget a la case à cocher.

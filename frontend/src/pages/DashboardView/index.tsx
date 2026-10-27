@@ -10,6 +10,8 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { LayoutDashboard } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
+import { useBranding } from '../../branding/BrandingContext'
+import { lastFetchedAt } from '../../services/widgetCache'
 import { Banner, Centered, Mono, PageLayout, Stack } from '../../common'
 import type { Dashboard, DashboardFilterWire, DashboardWidget } from '../../types/dashboards'
 import { isPreset, rangeForPreset, type DatePreset, type DateRange } from '../../services/period'
@@ -54,6 +56,7 @@ const EmptyState = styled.div`
 
 export default function DashboardView({ dashboardId }: { dashboardId: string }) {
   const { t } = useTranslation()
+  const { ui } = useBranding()
   const [dashboard, setDashboard] = useState<Dashboard | null>(null)
   const [error, setError] = useState<string | null>(null)
   // Filter state: `{[filter.id]: pickedValue}`. Empty string === "all" (no filter). Seeded from
@@ -63,6 +66,10 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
   const [preset, setPreset] = useState<DatePreset>('thisMonth')
   const [range, setRange] = useState<DateRange>({ dateFrom: '', dateTo: '' })
   const [basis, setBasis] = useState('')
+  // Refresh: bumping the key makes every widget refetch past the cache; the bar shows when the
+  // newest widget result was fetched.
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -81,13 +88,28 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
           setFilterValues(seeded)
         }
         if (d.period) {
-          const p: DatePreset = isPreset(d.period.default) ? d.period.default : 'thisMonth'
-          setPreset(p); setRange(rangeForPreset(p)); setBasis(d.period.basis?.[0]?.value ?? '')
+          // the dashboard's own default, else the app's; the pick then lives as long as this tab
+          // is open (every open tab stays mounted) and resets when it is closed
+          const fallback = d.period.default ?? ui.default_period
+          const p: DatePreset = isPreset(fallback) ? fallback : 'thisMonth'
+          setPreset(p)
+          setRange(rangeForPreset(p))
+          setBasis(d.period.basis?.[0]?.value ?? '')
         }
       })
       .catch((e) => { if (!cancelled) setError(e instanceof ApiError ? e.message : String(e)) })
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ui.default_period is read once per dashboard load
   }, [dashboardId])
+
+  // After each round of widget fetches, show when the newest result arrived.
+  useEffect(() => {
+    if (!dashboard) return
+    const tick = () => setUpdatedAt(lastFetchedAt('/api/sql/'))
+    tick()
+    const h = window.setInterval(tick, 2000)
+    return () => window.clearInterval(h)
+  }, [dashboard, refreshKey, range, basis, filterValues])
 
   const filters = dashboard?.filters ?? []
   const period = dashboard?.period
@@ -103,25 +125,26 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
       description={dashboard.description ? <span>{dashboard.description}</span> : <Mono>{dashboardId}</Mono>}
     >
       <Stack gap={14} style={{ flex: 1, minHeight: 0 }}>
-        {(filters.length > 0 || period) && (
-          <FilterBar
-            filters={filters}
-            values={filterValues}
-            onChange={(id, value) => setFilterValues((cur) => ({ ...cur, [id]: value }))}
-            period={period ? {
-              preset, range, onChange: (p, r) => { setPreset(p); setRange(r) },
-              basis: period.basis && period.basis.length > 1
-                ? { value: basis, options: period.basis.map((b) => ({ value: b.value, label: b.label })), onChange: setBasis }
-                : undefined,
-            } : undefined}
-          />
-        )}
+        <FilterBar
+          filters={filters}
+          values={filterValues}
+          onChange={(id, value) => setFilterValues((cur) => ({ ...cur, [id]: value }))}
+          period={period ? {
+            preset, range,
+            onChange: (p, r) => { setPreset(p); setRange(r) },
+            basis: period.basis && period.basis.length > 1
+              ? { value: basis, options: period.basis.map((b) => ({ value: b.value, label: b.label })), onChange: setBasis }
+              : undefined,
+          } : undefined}
+          updatedAt={updatedAt}
+          onRefresh={() => setRefreshKey((k) => k + 1)}
+        />
         {dashboard.widgets.length === 0 ? (
           <EmptyState>{t('dashboard.empty')}</EmptyState>
         ) : (
           <Grid>
             {dashboard.widgets.map((w, i) => (
-              <WidgetCell key={i} widget={w} filters={filters} filterValues={filterValues} period={period} selection={selection} />
+              <WidgetCell key={i} widget={w} filters={filters} filterValues={filterValues} period={period} selection={selection} refreshKey={refreshKey} />
             ))}
           </Grid>
         )}
@@ -134,15 +157,16 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
  *  `filters` + `filterValues` thread down so each widget can resolve its own column-by-`dd` and
  *  append URL params on the data fetch. */
 function WidgetCell({
-  widget, filters, filterValues, period, selection,
+  widget, filters, filterValues, period, selection, refreshKey,
 }: {
   widget: DashboardWidget
   filters: DashboardFilterWire[]
   filterValues: Record<string, string>
   period?: Dashboard['period']
   selection?: PeriodSelection
+  refreshKey: number
 }) {
-  const common = { filters, filterValues, period, selection }
+  const common = { filters, filterValues, period, selection, refreshKey }
   return (
     <WidgetFrame $cs={widget.col_span} $rs={widget.row_span}>
       {widget.label && <WidgetTitle>{widget.label}</WidgetTitle>}

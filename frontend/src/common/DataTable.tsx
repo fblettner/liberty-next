@@ -39,6 +39,7 @@ import {
 } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import styled from '@emotion/styled'
+import { useBranding } from '../branding/BrandingContext'
 import { useTranslation } from 'react-i18next'
 import {
   ArrowUp, ArrowDown, ChevronsUpDown, Search, Filter, FilterX, Columns3, Group, Download, FileText,
@@ -378,7 +379,7 @@ const colHeaderText = (col: { id: string; columnDef: { header?: unknown } }): st
 
 // ── component ───────────────────────────────────────────────────────────────
 export function DataTable<T extends object>({
-  columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize = 50, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, onPasteRows, renderDetail, chromeless, getSubRows, onRowExpand, subRowCount,
+  columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize: initialPageSizeProp, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, onPasteRows, renderDetail, chromeless, getSubRows, onRowExpand, subRowCount,
 }: DataTableProps<T>) {
   const { t } = useTranslation()
 
@@ -417,6 +418,10 @@ export function DataTable<T extends object>({
   const [expanded, setExpanded] = useState<ExpandedState>(
     resolvedInitialGrouping.length > 0 ? true : {},
   )
+  // The grid's initial page size: the prop when the page passes one, else the app's default
+  // ([app] default_page_size, through /api/theme); a saved view's own page size still wins.
+  const { ui } = useBranding()
+  const initialPageSize = initialPageSizeProp ?? ui.default_page_size
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: initialPageSize })
 
   const [colOpen, setColOpen] = useState(false)

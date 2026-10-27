@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
-  Banner, Button, Card, Checkbox, Field, Input, PasswordInput, SpinnerRing, Tag, Textarea,
+  Banner, Button, Card, Checkbox, Field, Input, PasswordInput, SearchSelect, SpinnerRing, Tag, Textarea,
 } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -26,6 +26,9 @@ interface AppSection {
   hot_reload: boolean
   default_language: string
   oracle_thick: boolean
+  default_period: string
+  default_page_size: number
+  dashboard_cache_seconds: number
 }
 interface AiSection {
   enabled: boolean
@@ -133,10 +136,12 @@ const ColorSwatch = styled.span<{ $color: string }>`
 `
 const InlineActions = styled.div`display: flex; align-items: center; gap: 6px;`
 
+const PERIOD_PRESETS = ['thisMonth', 'lastMonth', 'thisQuarter', 'thisYear', 'lastYear', 'last12', 'last30', 'last7', 'today', 'yesterday', 'all']
+
 const DEFAULTS: {
   app: AppSection; ai: AiSection; license: LicenseSection; oidc: OidcSection; branding: BrandingFields;
 } = {
-  app: { name: 'Liberty Next', host: '0.0.0.0', port: 8000, log_level: 'info', hot_reload: false, default_language: 'en', oracle_thick: false },
+  app: { name: 'Liberty Next', host: '0.0.0.0', port: 8000, log_level: 'info', hot_reload: false, default_language: 'en', oracle_thick: false, default_period: 'thisMonth', default_page_size: 50, dashboard_cache_seconds: 60 },
   ai: {
     enabled: true, model: 'claude-opus-4-8', max_tokens: 8192, max_iterations: 8, system_prompt: '',
     thinking: false, effort: '', request_timeout: 120,
@@ -358,6 +363,22 @@ export default function AppBuilder() {
               <Field label={t('settings.app.defaultLanguage', 'Default language')}>
                 <Input value={app.default_language}
                   onChange={(e) => setApp({ ...app, default_language: e.target.value })} style={{ width: 110 }} />
+              </Field>
+            </RowFlex>
+            <RowFlex>
+              <Field label={t('settings.app.defaultPeriod', 'Default period (dashboards)')}>
+                <div style={{ width: 200 }}>
+                  <SearchSelect value={app.default_period} onChange={(v) => setApp({ ...app, default_period: v })}
+                    options={PERIOD_PRESETS.map((k) => ({ value: k, label: t(`period.${k}`) }))} />
+                </div>
+              </Field>
+              <Field label={t('settings.app.defaultPageSize', 'Grid page size')}>
+                <Input type="number" min={10} max={10000} value={app.default_page_size}
+                  onChange={(e) => setApp({ ...app, default_page_size: Number(e.target.value) || 50 })} style={{ width: 110 }} />
+              </Field>
+              <Field label={t('settings.app.dashboardCache', 'Dashboard cache (seconds, 0 = none)')}>
+                <Input type="number" min={0} max={3600} value={app.dashboard_cache_seconds}
+                  onChange={(e) => setApp({ ...app, dashboard_cache_seconds: Math.max(0, Number(e.target.value) || 0) })} style={{ width: 110 }} />
               </Field>
             </RowFlex>
             <Checkbox label={t('settings.app.hotReload', 'Hot-reload config TOML files on change')}

@@ -45,4 +45,11 @@ async def get_theme(request: Request) -> dict[str, Any]:
     resolved = resolve_theme(cfg)
     resolved["presets"] = preset_choices()
     resolved["fonts"] = font_choices()
+    # UI defaults ([app] in app.toml) — public like the rest: a period preset and two sizes.
+    s = request.app.state.settings
+    resolved["ui"] = {
+        "default_period": s.app.default_period,
+        "default_page_size": s.app.default_page_size,
+        "dashboard_cache_seconds": s.app.dashboard_cache_seconds,
+    }
     return resolved

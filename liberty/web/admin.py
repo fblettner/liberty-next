@@ -1531,7 +1531,10 @@ from liberty.config import AISettings, AppSettings, LicenseSettings, OIDCSetting
 
 # Keys safe to expose: secrets, path fields, and backend toggles that require a coordinated
 # DB/auth migration stay out. Everything else round-trips through the editor.
-_APP_SAFE_KEYS = {"name", "host", "port", "log_level", "hot_reload", "default_language", "oracle_thick"}
+_APP_SAFE_KEYS = {
+    "name", "host", "port", "log_level", "hot_reload", "default_language", "oracle_thick",
+    "default_period", "default_page_size", "dashboard_cache_seconds",
+}
 _AI_SAFE_KEYS = {
     "enabled", "model", "max_tokens", "max_iterations", "system_prompt", "thinking",
     "effort", "request_timeout", "connector_tools", "api_tool", "scaffold_tools",

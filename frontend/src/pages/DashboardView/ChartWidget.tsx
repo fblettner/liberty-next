@@ -6,9 +6,11 @@
 // chrome allowance for the title + the canvas's own border/padding). Passing a fixed height
 // keeps Recharts' ResponsiveContainer happy even when the widget's parent briefly measures 0 ×
 // 0 during the loading → loaded transition or when sitting in a hidden tab.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { api, ApiError } from '../../api/client'
+import { useBranding } from '../../branding/BrandingContext'
+import { cached } from '../../services/widgetCache'
 import { Banner, SpinnerRing } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { ChartCanvas } from '../TableView/ChartCanvas'
@@ -41,12 +43,16 @@ export interface ChartWidgetProps {
   filterValues: Record<string, string>
   period?: DashboardPeriodWire
   selection?: PeriodSelection
+  /** Bumped by the bar's Refresh: refetch past the cache. */
+  refreshKey?: number
 }
 
-export function ChartWidget({ widget, filters, filterValues, period, selection }: ChartWidgetProps) {
+export function ChartWidget({ widget, filters, filterValues, period, selection, refreshKey = 0 }: ChartWidgetProps) {
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const { findScreen } = useWorkspace()
+  const { ui } = useBranding()
+  const lastRefresh = useRef(0)
 
   // Resolve dashboard filters → URL params for this widget's specific query. Memoized so we
   // don't refetch on every render — only when the actual bound params change. The screen
@@ -69,14 +75,14 @@ export function ChartWidget({ widget, filters, filterValues, period, selection }
     setError(null)
     const qs = new URLSearchParams(filterParams).toString()
     const url = `/api/sql/${encodeURIComponent(widget.connector)}/${encodeURIComponent(widget.query)}${qs ? `?${qs}` : ''}`
-    api
-      .get<QueryResult>(url)
+    cached(url, ui.dashboard_cache_seconds, () => api.get<QueryResult>(url), refreshKey > 0 && refreshKey !== lastRefresh.current)
+      .finally(() => { lastRefresh.current = refreshKey })
       .then((r) => { if (!cancelled) setResult(r) })
       .catch((e) => { if (!cancelled) setError(e instanceof ApiError ? e.message : String(e)) })
     return () => { cancelled = true }
     // filterParamsKey covers filterParams; eslint can't follow that, hence the disable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [widget.connector, widget.query, filterParamsKey])
+  }, [widget.connector, widget.query, filterParamsKey, refreshKey])
 
   const chartHeight = Math.max(180, widget.row_span * ROW_PX - FRAME_CHROME)
 

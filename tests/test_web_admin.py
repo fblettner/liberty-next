@@ -1730,3 +1730,16 @@ def test_assistant_scaffold_validation_and_gating(env) -> None:
         assert client.post("/admin/assistant/scaffold", json=bad_screen, headers=h).status_code == 422
         # Reader is forbidden.
         assert client.post("/admin/assistant/scaffold", json=_scaffold_payload(), headers=_h(client, "reader")).status_code == 403
+
+
+def test_app_parsed_round_trips_the_ui_defaults(env, tmp_path, monkeypatch) -> None:
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        got = client.get("/admin/config/app/parsed", headers=h).json()["app"]
+        assert got["default_period"] == "thisMonth" and got["default_page_size"] == 50 and got["dashboard_cache_seconds"] == 60
+        r = client.put("/admin/config/app/parsed", json={"app": {**got, "default_period": "lastMonth", "default_page_size": 100, "dashboard_cache_seconds": 0}}, headers=h)
+        assert r.status_code == 200, r.text
+        got = client.get("/admin/config/app/parsed", headers=h).json()["app"]
+        assert got["default_period"] == "lastMonth" and got["default_page_size"] == 100 and got["dashboard_cache_seconds"] == 0

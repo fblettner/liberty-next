@@ -168,7 +168,8 @@ export function DashboardEditorModal({
     const cleanFilters = filters.filter((f) => sstr(f.id) && sstr(f.label))
     if (cleanFilters.length) rec.filters = cleanFilters
     if (period) {
-      const p: Raw = { default: sstr(period.default) || 'thisMonth' }
+      const p: Raw = {}
+      if (sstr(period.default)) p.default = sstr(period.default)     // empty: the app's default_period
       if (sstr(period.column)) p.column = sstr(period.column)
       if (sstr(period.dd)) p.dd = sstr(period.dd)
       const basis = ((period.basis as Raw[]) ?? []).filter((b) => sstr(b.value) && sstr(b.label)).map((b) => {
@@ -285,14 +286,15 @@ export function DashboardEditorModal({
               <span style={{ fontSize: fontSize.sm, color: colors.text.muted, fontWeight: 600 }}>{t('settings.dash.period', 'Period')}</span>
               {period
                 ? <Button $size="sm" $variant="ghost" onClick={() => setPeriod(null)}><Trash2 size={13} /> {t('settings.dash.removePeriod', 'Remove the period')}</Button>
-                : <Button $size="sm" $variant="ghost" onClick={() => setPeriod({ default: 'thisMonth', basis: [] })}><Plus size={13} /> {t('settings.dash.addPeriod', 'Add a period')}</Button>}
+                : <Button $size="sm" $variant="ghost" onClick={() => setPeriod({ default: '', basis: [] })}><Plus size={13} /> {t('settings.dash.addPeriod', 'Add a period')}</Button>}
             </AddBar>
             {period && (
               <>
                 <FilterRow>
                   <Field label={t('settings.dash.periodDefault', 'Opens on')}>
-                    <SearchSelect value={sstr(period.default) || 'thisMonth'} onChange={(v) => setPeriod({ ...period, default: v })}
-                      options={PRESET_KEYS.map((k) => ({ value: k, label: t(`period.${k}`) }))} />
+                    <SearchSelect value={sstr(period.default)} onChange={(v) => setPeriod({ ...period, default: v })}
+                      options={PRESET_KEYS.map((k) => ({ value: k, label: t(`period.${k}`) }))}
+                      anyLabel={t('settings.dash.periodAppDefault', 'App default (Settings → App)')} />
                   </Field>
                   <Field label={t('settings.dash.periodColumn', 'Date column')}>
                     <Input value={sstr(period.column)} onChange={(e) => setPeriod({ ...period, column: e.target.value })} placeholder="SOLD_ON" />

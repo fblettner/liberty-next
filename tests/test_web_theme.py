@@ -120,3 +120,9 @@ def test_admin_put_requires_superuser(app) -> None:
             headers=_h(client, "user"),
         )
         assert r.status_code == 403
+
+
+def test_theme_carries_the_ui_defaults(app) -> None:
+    with TestClient(app) as client:
+        ui = client.get("/api/theme").json()["ui"]
+        assert ui == {"default_period": "thisMonth", "default_page_size": 50, "dashboard_cache_seconds": 60}

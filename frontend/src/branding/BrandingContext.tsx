@@ -31,16 +31,29 @@ export function derivePrimaryVars(primaryHex: string): Record<string, string> {
     'shadow-focus': `0 0 0 3px ${rgba(0.18)}`,
   }
 }
+export interface UiDefaults {
+  /** The period preset a dashboard opens on when it names none (a user's remembered pick wins). */
+  default_period: string
+  /** The grid's initial page size. */
+  default_page_size: number
+  /** How long a dashboard widget's result is reused when the dashboard is reopened; 0 = always refetch. */
+  dashboard_cache_seconds: number
+}
+export const UI_DEFAULTS: UiDefaults = { default_period: 'thisMonth', default_page_size: 50, dashboard_cache_seconds: 60 }
+
 export interface ResolvedTheme {
   preset: string
   app_name: string | null
   vars: Record<string, string>
   presets?: PresetChoice[]
+  ui?: Partial<UiDefaults>
 }
 
 interface BrandingState {
   appName: string | null
   presets: PresetChoice[]
+  /** App-level UI defaults ([app] in app.toml), with built-in fallbacks before the first fetch. */
+  ui: UiDefaults
   /** Apply a flat var map to <html> immediately (live preview while editing). */
   applyVars: (vars: Record<string, string>) => void
   /** Re-fetch GET /api/theme and apply it (call after a save, or to discard a preview). */
@@ -67,12 +80,14 @@ function setVars(vars: Record<string, string>): void {
 export function BrandingProvider({ children }: { children: ReactNode }) {
   const [appName, setAppName] = useState<string | null>(null)
   const [presets, setPresets] = useState<PresetChoice[]>([])
+  const [ui, setUi] = useState<UiDefaults>(UI_DEFAULTS)
   const baseTitle = useRef<string>(document.title)
 
   const apply = useCallback((t: ResolvedTheme) => {
     setVars(t.vars || {})
     setAppName(t.app_name ?? null)
     if (t.presets) setPresets(t.presets)
+    if (t.ui) setUi({ ...UI_DEFAULTS, ...t.ui })
     // Browser tab title — operator name if set, else whatever index.html shipped.
     document.title = t.app_name || baseTitle.current
   }, [])
@@ -90,8 +105,8 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
   useEffect(() => { void refresh() }, [refresh])
 
   const value = useMemo<BrandingState>(
-    () => ({ appName, presets, applyVars, refresh }),
-    [appName, presets, applyVars, refresh],
+    () => ({ appName, presets, ui, applyVars, refresh }),
+    [appName, presets, ui, applyVars, refresh],
   )
   return <BrandingContext.Provider value={value}>{children}</BrandingContext.Provider>
 }

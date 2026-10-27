@@ -287,6 +287,8 @@ const fr: Resources = {
   },
   dashboard: {
     empty: 'Aucun widget lisible sur ce tableau de bord pour le moment.',
+    refresh: 'Actualiser',
+    updatedAt: 'Mis à jour à {{time}}',
     kpi: {
       previous: 'précédent : {{value}}',
       previousTitle: 'Évolution par rapport à la période précédente',

@@ -29,6 +29,11 @@
   change to its SQL — the same wrap the filters use, now with `<COL>_from` / `<COL>_to` bounds on
   any hinted column. The dashboard editor has a Period block. The date range control and the
   floating panel are shared components for the lists and the explorer to come.
+- App-level defaults in Settings → App: `default_period` (the preset a dashboard opens on when it
+  names none; a pick lasts as long as the dashboard tab is open),
+  `default_page_size` (the grid's initial page size; the SELECT row cap stays on the pool,
+  connector and screen) and `dashboard_cache_seconds`. A reopened dashboard reuses each widget's
+  result for that long; the bar's Refresh button bypasses it and says when the data was fetched.
 - A KPI widget with `compare_previous = true` also runs its query on the period before and shows
   the change (in percent, or in points for a percent KPI, in green or red) and the previous value
   under the number. The widget editor has the checkbox.

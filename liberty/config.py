@@ -146,6 +146,13 @@ class AppSettings(BaseModel):
     # (a sync engine driven from a thread pool). Postgres / other pools are unaffected either way.
     # Needs the Instant Client on the box — ``LIBERTY_ORACLE_CLIENT_LIB`` (set in the Docker image).
     oracle_thick: bool = False
+    # UI defaults the SPA reads from GET /api/theme (public). A dashboard's own ``period.default``
+    # wins over ``default_period``; a pick lasts while the dashboard tab is open. ``default_page_size`` is the grid's initial page size (the SELECT row cap stays on
+    # the pool / connector / screen). ``dashboard_cache_seconds``: a widget's result is reused for
+    # that long when the dashboard is reopened; Refresh bypasses it; 0 disables the cache.
+    default_period: str = "thisMonth"
+    default_page_size: int = 50
+    dashboard_cache_seconds: int = 60
 
 
 class ConnectorSettings(BaseModel):

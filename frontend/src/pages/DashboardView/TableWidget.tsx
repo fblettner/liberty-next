@@ -4,9 +4,11 @@
 // filter's `dictionary_key` is bound on the fetch). Cells reuse the result's resolved column
 // labels + the shared ruleCell formatter (boolean ●, enum labels); lookups show their raw code
 // (a dashboard table stays lightweight — no per-cell lookup fetch).
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { api, ApiError } from '../../api/client'
+import { useBranding } from '../../branding/BrandingContext'
+import { cached } from '../../services/widgetCache'
 import { Banner, SpinnerRing } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { enumMap, ruleCell } from '../../services/cells'
@@ -52,12 +54,16 @@ export interface TableWidgetProps {
   filterValues: Record<string, string>
   period?: DashboardPeriodWire
   selection?: PeriodSelection
+  /** Bumped by the bar's Refresh: refetch past the cache. */
+  refreshKey?: number
 }
 
-export function TableWidget({ widget, filters, filterValues, period, selection }: TableWidgetProps) {
+export function TableWidget({ widget, filters, filterValues, period, selection, refreshKey = 0 }: TableWidgetProps) {
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const { findScreen } = useWorkspace()
+  const { ui } = useBranding()
+  const lastRefresh = useRef(0)
 
   const filterParams = useMemo(
     () => ({
@@ -74,13 +80,13 @@ export function TableWidget({ widget, filters, filterValues, period, selection }
     setError(null)
     const qs = new URLSearchParams(filterParams).toString()
     const url = `/api/sql/${encodeURIComponent(widget.connector)}/${encodeURIComponent(widget.query)}${qs ? `?${qs}` : ''}`
-    api
-      .get<QueryResult>(url)
+    cached(url, ui.dashboard_cache_seconds, () => api.get<QueryResult>(url), refreshKey > 0 && refreshKey !== lastRefresh.current)
+      .finally(() => { lastRefresh.current = refreshKey })
       .then((r) => { if (!cancelled) setResult(r) })
       .catch((e) => { if (!cancelled) setError(e instanceof ApiError ? e.message : String(e)) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [widget.connector, widget.query, filterParamsKey])
+  }, [widget.connector, widget.query, filterParamsKey, refreshKey])
 
   // Columns to show: the operator's explicit subset/order (matched case-insensitively against the
   // result), else every non-hidden result column. Pre-build the enum value→label maps once.

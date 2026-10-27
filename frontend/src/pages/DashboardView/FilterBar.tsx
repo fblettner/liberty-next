@@ -8,7 +8,8 @@ import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { DateRangeFilter, SearchSelect, type DateBasis, type DatePreset, type DateRange, type SearchSelectOption } from '../../common'
+import { RefreshCw } from 'lucide-react'
+import { Button, DateRangeFilter, SearchSelect, type DateBasis, type DatePreset, type DateRange, type SearchSelectOption } from '../../common'
 import type { QueryResult } from '../../types/connectors'
 import type { DashboardFilterWire } from '../../types/dashboards'
 import { colors, fontSize, fonts, glass, radius, shadow } from '../../theme'
@@ -74,9 +75,12 @@ export interface FilterBarProps {
   onChange: (id: string, value: string) => void
   /** The dashboard's period control, when it declares one. */
   period?: { preset: DatePreset; range: DateRange; onChange: (preset: DatePreset, range: DateRange) => void; basis?: DateBasis }
+  /** When the newest widget result was fetched (epoch ms), shown next to the Refresh button. */
+  updatedAt?: number | null
+  onRefresh?: () => void
 }
 
-export function FilterBar({ filters, values, onChange, period }: FilterBarProps) {
+export function FilterBar({ filters, values, onChange, period, updatedAt, onRefresh }: FilterBarProps) {
   const { t } = useTranslation()
   // One options-map per filter. Each filter loads its own options once; the cache above keeps
   // the same `(connector, query)` pair from refetching across filters / dashboards.
@@ -93,6 +97,7 @@ export function FilterBar({ filters, values, onChange, period }: FilterBarProps)
   }, [filters])
   // "All" sentinel — value `""` clears the filter (the runtime treats blank == no filter).
   const allLabel = useMemo(() => t('dashboard.filter.all'), [t])
+  const updatedLabel = updatedAt ? new Date(updatedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : null
 
   return (
     <Bar>
@@ -118,6 +123,12 @@ export function FilterBar({ filters, values, onChange, period }: FilterBarProps)
           </Cell>
         )
       })}
+      {onRefresh && (
+        <Cell style={{ minWidth: 0, marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Button $size="sm" $variant="ghost" onClick={onRefresh} title={t('dashboard.refresh')}><RefreshCw size={13} /></Button>
+          {updatedLabel && <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('dashboard.updatedAt', { time: updatedLabel })}</span>}
+        </Cell>
+      )}
     </Bar>
   )
 }

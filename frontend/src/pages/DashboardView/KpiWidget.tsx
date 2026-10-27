@@ -2,11 +2,13 @@
 // aggregation to one column, displays the result as a big number. Suitable for "Active
 // users · 686" style displays. For `count`, the row count is used regardless of the
 // column's values; for `sum`/`avg`/`min`/`max`, non-numeric cells are skipped.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ArrowDownRight, ArrowUpRight, Minus } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
+import { useBranding } from '../../branding/BrandingContext'
+import { cached } from '../../services/widgetCache'
 import { Banner, SpinnerRing } from '../../common'
 import { resolveColumnName, toNumber } from '../../services/chartData'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -57,14 +59,18 @@ export interface KpiWidgetProps {
   filterValues: Record<string, string>
   period?: DashboardPeriodWire
   selection?: PeriodSelection
+  /** Bumped by the bar's Refresh: refetch past the cache. */
+  refreshKey?: number
 }
 
-export function KpiWidget({ widget, filters, filterValues, period, selection }: KpiWidgetProps) {
+export function KpiWidget({ widget, filters, filterValues, period, selection, refreshKey = 0 }: KpiWidgetProps) {
   const { t } = useTranslation()
   const [result, setResult] = useState<QueryResult | null>(null)
   const [previous, setPrevious] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const { findScreen } = useWorkspace()
+  const { ui } = useBranding()
+  const lastRefresh = useRef(0)
   const { i18n } = useTranslation()
   const lang = i18n.language || undefined
 
@@ -98,13 +104,13 @@ export function KpiWidget({ widget, filters, filterValues, period, selection }: 
     setError(null)
     const qs = new URLSearchParams(filterParams).toString()
     const url = `/api/sql/${encodeURIComponent(widget.connector)}/${encodeURIComponent(widget.query)}${qs ? `?${qs}` : ''}`
-    api
-      .get<QueryResult>(url)
+    cached(url, ui.dashboard_cache_seconds, () => api.get<QueryResult>(url), refreshKey > 0 && refreshKey !== lastRefresh.current)
+      .finally(() => { lastRefresh.current = refreshKey })
       .then((r) => { if (!cancelled) setResult(r) })
       .catch((e) => { if (!cancelled) setError(e instanceof ApiError ? e.message : String(e)) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- filterParamsKey covers filterParams
-  }, [widget.connector, widget.query, filterParamsKey])
+  }, [widget.connector, widget.query, filterParamsKey, refreshKey])
 
   useEffect(() => {
     let cancelled = false

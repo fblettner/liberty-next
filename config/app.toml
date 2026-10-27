@@ -5,6 +5,9 @@ port = 8000
 log_level = "info"
 hot_reload = true
 default_language = "en"
+# default_period = "thisMonth"     # the period preset a dashboard opens on when it names none (a user's last pick wins)
+# default_page_size = 50           # the grid's initial page size
+# dashboard_cache_seconds = 60     # a widget's result is reused this long when a dashboard is reopened; Refresh bypasses it
 
 [connectors]
 # Default resolves to ${LIBERTY_APPS_DIR}/connectors.toml when the env var is set
