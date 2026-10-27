@@ -1,6 +1,6 @@
 // Saved analyses and dashboards of analyses — the /api/explorer/{app}/saved/{kind} routes and
 // the dashboard definition shape. No React.
-import { api } from '../api/client'
+import { api, authHeaders } from '../api/client'
 import type { AnalysisDefinition } from '../types/explorer'
 import type { DatePreset, DateRange } from './period'
 
@@ -54,4 +54,19 @@ export function savedOptions<D>(items: SavedItem<D>[], mineLabel: string): { val
 export function withDashboardPeriod(def: AnalysisDefinition, period: DashboardDefinition['period']): AnalysisDefinition {
   if (!period || !def.period?.field) return def
   return { ...def, period: { field: def.period.field, preset: period.preset, range: period.range } }
+}
+
+/** Download an export: an inline definition, a saved analysis or a saved dashboard, as xlsx or pdf. */
+export async function downloadExport(app: string, body: { format: 'xlsx' | 'pdf'; definition?: AnalysisDefinition; analysis?: string; dashboard?: string; title?: string }): Promise<void> {
+  const res = await fetch(`/api/explorer/${encodeURIComponent(app)}/export`, { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  if (!res.ok) {
+    let detail = `${res.status}`
+    try { detail = (await res.json()).detail ?? detail } catch { /* keep the status */ }
+    throw new Error(detail)
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? `export.${body.format}`
+  const url = URL.createObjectURL(await res.blob())
+  const a = document.createElement('a')
+  a.href = url; a.download = name; a.click()
+  URL.revokeObjectURL(url)
 }

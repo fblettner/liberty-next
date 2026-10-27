@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import * as XLSX from 'xlsx'
-import { Compass, Play, Table2, List, ArrowLeft, Code2, X, Grid3x3, BarChart3, LineChart, PieChart, Gauge, FileSpreadsheet, Save, Copy, Trash2, LayoutDashboard, FlaskConical, Pencil } from 'lucide-react'
+import { Compass, Play, Table2, List, ArrowLeft, Code2, X, Grid3x3, BarChart3, LineChart, PieChart, Gauge, FileSpreadsheet, Save, Copy, Trash2, LayoutDashboard, FlaskConical, Pencil, FileDown } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { Banner, Button, Centered, Checkbox, Input, PageLayout, SearchSelect, SpinnerRing, useModals, type SearchSelectOption } from '../../common'
@@ -16,7 +16,7 @@ import { useWorkspace } from '../../workspace/WorkspaceContext'
 import {
   addField, addFilter, buildAggregateRequest, buildDetailRequest, dateFields, drillCellsOf, emptyDefinition, fieldIndex, measureKey, usedKeys, withCalculated,
 } from '../../services/explorer'
-import { deleteSaved, listSaved, saveSaved, savedOptions, type DashboardDefinition, type SavedAnalysis, type SavedDashboard } from '../../services/explorerSaved'
+import { deleteSaved, downloadExport, listSaved, saveSaved, savedOptions, type DashboardDefinition, type SavedAnalysis, type SavedDashboard } from '../../services/explorerSaved'
 import type { AggregateResult, AnalysisDefinition, AnalysisView, CalcDef, DetailResult, DrillCell, ExplorerModel, ExplorerModelSummary, FieldType } from '../../types/explorer'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { FieldsPane } from './FieldsPane'
@@ -212,6 +212,17 @@ export default function ExplorerPage() {
     if (!(await modals.confirm({ title: t('common.delete'), message: t('explorer.deleteSaved', { name: currentAnalysis.name }), variant: 'danger' }))) return
     try { await deleteSaved(app, 'analyses', currentAnalysis.id); setCurrentAnalysis(null); await loadSaved(app) } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) }
   }
+  const exportFile = async (format: 'xlsx' | 'pdf') => {
+    setError(null)
+    try {
+      if (mode === 'dashboards') {
+        if (!currentDashboard) return
+        await downloadExport(app, { format, dashboard: currentDashboard.id })
+      } else if (def) {
+        await downloadExport(app, { format, definition: def, title: currentAnalysis?.name ?? t('explorer.title') })
+      }
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+  }
   // ── dashboards ──────────────────────────────────────────────────────────────
   const loadDashboard = (d: SavedDashboard | null) => {
     setCurrentDashboard(d); setDashEditing(false)
@@ -257,6 +268,8 @@ export default function ExplorerPage() {
           <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'analyses', asNew: false })} disabled={def.rows.length === 0 && def.measures.length === 0}><Save size={13} /> {t('common.save')}</Button>
           {currentAnalysis && <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'analyses', asNew: true })}><Copy size={13} /> {t('explorer.saveAs')}</Button>}
           {canDeleteAnalysis && <Button $size="sm" $variant="ghost" onClick={() => void removeAnalysis()} style={{ color: colors.red.main }}><Trash2 size={13} /> {t('common.delete')}</Button>}
+          <Button $size="sm" $variant="ghost" onClick={() => void exportFile('xlsx')} disabled={def.rows.length === 0 && def.measures.length === 0} title={t('explorer.exportExcel')}><FileDown size={13} /> Excel</Button>
+          <Button $size="sm" $variant="ghost" onClick={() => void exportFile('pdf')} disabled={def.rows.length === 0 && def.measures.length === 0} title={t('explorer.exportPdf')}><FileDown size={13} /> PDF</Button>
         </>
       ) : (
         <>
@@ -268,6 +281,8 @@ export default function ExplorerPage() {
           <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'dashboards', asNew: false })} disabled={dashDef.tiles.length === 0}><Save size={13} /> {t('common.save')}</Button>
           {currentDashboard && <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'dashboards', asNew: true })}><Copy size={13} /> {t('explorer.saveAs')}</Button>}
           {canDeleteDashboard && <Button $size="sm" $variant="ghost" onClick={() => void removeDashboard()} style={{ color: colors.red.main }}><Trash2 size={13} /> {t('common.delete')}</Button>}
+          {currentDashboard && <Button $size="sm" $variant="ghost" onClick={() => void exportFile('xlsx')} title={t('explorer.exportExcel')}><FileDown size={13} /> Excel</Button>}
+          {currentDashboard && <Button $size="sm" $variant="ghost" onClick={() => void exportFile('pdf')} title={t('explorer.exportPdf')}><FileDown size={13} /> PDF</Button>}
         </>
       )}
     </ModeBar>

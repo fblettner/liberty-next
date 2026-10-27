@@ -153,8 +153,17 @@
   `version`, installed once as shared objects at boot and on reload, refreshed on a version bump
   only while nobody edited the copy (a user save drops the marker), and never reinstalled once a
   user deleted it (an installed-ids marker row remembers). Routes `GET / PUT
-  /api/explorer/<app>/saved/<analyses|dashboards>`, `DELETE …/<id>`. The export to PDF and the
-  digest hook follow.
+  /api/explorer/<app>/saved/<analyses|dashboards>`, `DELETE …/<id>`.
+- **Export and the headless run.** `POST /api/explorer/<app>/export` renders an analysis (saved,
+  or the one on the page) or a dashboard (one section per tile) to **xlsx** (one sheet per
+  section, bold headers and subtotals, the period and filters as a note) or **pdf** (through the
+  reports pipeline, with the install's branding: a title, one chapter per section, GFM tables,
+  bold group rows; needs the `reports` extra). A pivot exports flattened with its subtotals, a
+  chart as its data table, a KPI as a row of totals, a detail as its rows; 3 000 rows at most per
+  section. The buttons sit in the mode bar. Underneath, `liberty.explorer.report` holds the one
+  server-side reading of a saved definition — the period presets resolved like the page does, an
+  optional forced window (`from` / `to`) — and `build_sections`, which the C5 digest will call
+  headlessly.
 
 **Screens: `editable_when`, a row-level read-only rule**
 - A screen can say when an existing row may be changed: `editable_when = [{ field = "PERIOD_STATUS",

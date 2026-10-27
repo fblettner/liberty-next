@@ -174,7 +174,18 @@
   tant que personne n'a modifié la copie (un enregistrement utilisateur retire le marqueur), et
   jamais réinstallés une fois qu'un utilisateur les a supprimés (une ligne marqueur des ids
   installés s'en souvient). Routes `GET / PUT /api/explorer/<app>/saved/<analyses|dashboards>`,
-  `DELETE …/<id>`. L'export PDF et le raccordement au digest suivent.
+  `DELETE …/<id>`.
+- **Export et exécution sans écran.** `POST /api/explorer/<app>/export` rend une analyse
+  (enregistrée, ou celle de la page) ou un tableau de bord (une section par tuile) en **xlsx**
+  (une feuille par section, en-têtes et sous-totaux en gras, la période et les filtres en note) ou
+  en **pdf** (par le pipeline des rapports, avec l'habillage de l'installation : un titre, un
+  chapitre par section, des tableaux GFM, les lignes de groupe en gras ; demande l'extra
+  `reports`). Un croisé s'exporte aplati avec ses sous-totaux, un graphique comme sa table de
+  données, un KPI comme une ligne de totaux, un détail comme ses lignes ; 3 000 lignes au plus par
+  section. Les boutons sont dans la barre de mode. En dessous, `liberty.explorer.report` porte la
+  seule lecture côté serveur d'une définition enregistrée — les préréglages de période résolus
+  comme sur la page, une fenêtre forcée facultative (`from` / `to`) — et `build_sections`, que le
+  digest C5 appellera sans écran.
 
 **Écrans : `editable_when`, une règle de lecture seule par ligne**
 - Un écran peut dire quand une ligne existante peut être modifiée : `editable_when = [{ field =

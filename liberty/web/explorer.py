@@ -8,6 +8,7 @@
 | ``POST /api/explorer/{app}/detail`` | ``explorer:{app}`` | detail rows, paged; ``drill`` turns an aggregate cell into filters |
 | ``POST /api/explorer/{app}/calc/test`` | ``explorer:{app}`` | compile a calculated field and sample eight values |
 | ``GET/PUT /api/explorer/{app}/saved/{kind}``, ``DELETE …/{id}`` | ``explorer:{app}`` | saved analyses (``analyses``) and dashboards of analyses (``dashboards``): shared + mine |
+| ``POST /api/explorer/{app}/export`` | ``explorer:{app}`` | an analysis (saved or inline) or a dashboard as ``xlsx`` / ``pdf`` (:mod:`liberty.explorer.report`) |
 
 The permission is checked before the model lookup (no name enumeration). The fields come
 from :mod:`liberty.explorer.model`, under the caller's row-level scope and language.
@@ -15,9 +16,11 @@ from :mod:`liberty.explorer.model`, under the caller's row-level scope and langu
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from datetime import date
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 import logging
@@ -31,6 +34,7 @@ from liberty.connectors.registry import ConnectorRegistry
 from liberty.explorer import ExplorerFile
 from liberty.explorer.engine import AggregateRequest, CalcTestRequest, DetailRequest, ExplorerError, run_aggregate, run_calc_test, run_detail
 from liberty.explorer.model import ModelCache
+from liberty.explorer.report import build_sections, sections_to_pdf, sections_to_xlsx
 from liberty.explorer.store import KIND_ANALYSIS, KIND_DASHBOARD, AnalysisStore
 from liberty.web.errors import db_error_detail, http_for_connector_error
 
@@ -205,3 +209,76 @@ async def delete_saved(app: str, kind: str, obj_id: str, request: Request, princ
     except PermissionError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     return {"deleted": deleted}
+
+
+# ── export ────────────────────────────────────────────────────────────────────
+
+
+class ExportBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    format: Literal["xlsx", "pdf"] = "xlsx"
+    analysis: str | None = Field(default=None, description="A saved analysis id…")
+    dashboard: str | None = Field(default=None, description="…or a saved dashboard id (one section per tile)…")
+    definition: dict[str, Any] | None = Field(default=None, description="…or an inline AnalysisDefinition.")
+    title: str | None = None
+    from_: date | None = Field(default=None, alias="from", description="A forced window (overrides the definitions' periods).")
+    to: date | None = None
+
+
+@router.post("/explorer/{app}/export", summary="Export an analysis or a dashboard")
+async def export_model(
+    app: str, body: ExportBody, request: Request, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
+    screens: Screens, language: Language,
+) -> StreamingResponse:
+    """The file (``Content-Disposition: attachment``). A PDF needs the ``reports`` extra (503
+    otherwise). The caller's row-level scope applies, as on the page."""
+    require_permission(principal, permission_for(app))
+    model = explorer.explorer.get(app)
+    if model is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no explorer model for {app!r}")
+    view = await cache.get(connectors, screens, app, model, language=language)
+    items: list[tuple[str, dict[str, Any]]] = []
+    title = body.title or ""
+    if body.definition is not None:
+        items.append((title or "Analysis", body.definition))
+    elif body.analysis:
+        a = await _saved_store(request).get(app, KIND_ANALYSIS, principal.username, body.analysis)
+        if a is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no analysis {body.analysis!r}")
+        title = title or a["name"]
+        items.append((a["name"], a["definition"]))
+    elif body.dashboard:
+        store = _saved_store(request)
+        d = await store.get(app, KIND_DASHBOARD, principal.username, body.dashboard)
+        if d is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no dashboard {body.dashboard!r}")
+        title = title or d["name"]
+        analyses = {a["id"]: a for a in await store.list(app, KIND_ANALYSIS, principal.username)}
+        period = (d["definition"] or {}).get("period")
+        for tile in (d["definition"] or {}).get("tiles") or []:
+            a = analyses.get(tile.get("analysis"))
+            if a is None:
+                continue
+            definition = dict(a["definition"])
+            if period and definition.get("period", {}) and (definition.get("period") or {}).get("field"):
+                definition["period"] = {**definition["period"], "preset": period.get("preset"), "range": period.get("range") or {}}
+            items.append((tile.get("title") or a["name"], definition))
+    else:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="give an analysis, a dashboard or a definition")
+    window = (body.from_, body.to) if (body.from_ and body.to) else None
+    try:
+        sections = await build_sections(connectors, screens, view, items, window=window, scope=current_scope.get())
+    except SQLAlchemyError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=db_error_detail(exc, context=f"explorer {app} export failed", verbose=principal.is_superuser, log=_log)) from exc
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in (title or "explorer")).strip("_") or "explorer"
+    if body.format == "pdf":
+        from liberty.reports.render import ReportsUnavailableError
+        settings = request.app.state.settings
+        branding = getattr(getattr(settings, "reports", None), "branding", None)
+        try:
+            data = sections_to_pdf(sections, title or "Explorer", app_name=getattr(settings.app, "name", ""), branding=branding.model_dump() if branding is not None else None)
+        except ReportsUnavailableError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+        return StreamingResponse(iter([data]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{safe}.pdf"'})
+    data = sections_to_xlsx(sections)
+    return StreamingResponse(iter([data]), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{safe}.xlsx"'})

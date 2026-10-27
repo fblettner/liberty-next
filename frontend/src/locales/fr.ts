@@ -461,6 +461,7 @@ const fr: Resources = {
     expandAll: 'Tout déplier',
     collapseAll: 'Tout replier',
     exportExcel: 'Exporter vers Excel',
+    exportPdf: 'Exporter en PDF',
     others: 'Autres',
     othersNote: 'Les 10 premiers sont affichés ; le reste est replié dans « Autres ».',
     chartNeedsMeasure: 'Ajoutez une mesure pour tracer.',

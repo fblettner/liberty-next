@@ -267,3 +267,30 @@ def test_saved_analyses_routes(env) -> None:
         assert client.delete("/api/explorer/shop/saved/dashboards/home", headers=ha).status_code == 403   # shared by the admin
         assert client.delete("/api/explorer/shop/saved/dashboards/home", headers=hb).json()["deleted"] is True
         assert client.delete("/api/explorer/shop/saved/analyses/revenue-by-company", headers=ha).json()["deleted"] is True
+
+
+def test_export_routes(env) -> None:
+    import io
+    from openpyxl import load_workbook
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "analyst")
+        definition = {"entity": "sales", "view": "table", "rows": [{"field": "company.NAME"}], "measures": [{"field": "sales.REVENUE", "agg": "sum"}], "filterRows": [], "sort": [], "limit": 100, "calculated": []}
+        r = client.post("/api/explorer/shop/export", json={"format": "xlsx", "definition": definition, "title": "Revenue by company"}, headers=h)
+        assert r.status_code == 200, r.text
+        assert r.headers["content-disposition"] == 'attachment; filename="Revenue_by_company.xlsx"'
+        wb = load_workbook(io.BytesIO(r.content))
+        assert wb.sheetnames == ["Revenue by company"] and wb.active["A3"].value == "Corp one" and wb.active["B3"].value == 30.5   # row 1 = the note
+        # a saved analysis + a dashboard of it, by id
+        client.put("/api/explorer/shop/saved/analyses", json={"name": "Rev", "definition": definition, "shared": True}, headers=h)
+        client.put("/api/explorer/shop/saved/dashboards", json={"name": "Board", "definition": {"tiles": [{"analysis": "rev", "w": 2, "h": "m"}, {"analysis": "ghost", "w": 1, "h": "s"}]}, "shared": True}, headers=h)
+        r = client.post("/api/explorer/shop/export", json={"format": "xlsx", "dashboard": "board"}, headers=h)
+        assert r.status_code == 200 and load_workbook(io.BytesIO(r.content)).sheetnames == ["Rev"]
+        assert client.post("/api/explorer/shop/export", json={"format": "xlsx", "analysis": "nope"}, headers=h).status_code == 404
+        assert client.post("/api/explorer/shop/export", json={"format": "xlsx"}, headers=h).status_code == 422
+        assert client.post("/api/explorer/shop/export", json={"format": "xlsx", "analysis": "rev"}, headers=_h(client, "nobody")).status_code == 403
+        # pdf: the reports extra may be missing on this machine
+        r = client.post("/api/explorer/shop/export", json={"format": "pdf", "analysis": "rev", "from": "2026-01-01", "to": "2026-12-31"}, headers=h)
+        assert r.status_code in (200, 503)
+        if r.status_code == 200:
+            assert r.content[:4] == b"%PDF"

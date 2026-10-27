@@ -459,6 +459,7 @@ const en = {
     expandAll: 'Expand all',
     collapseAll: 'Collapse all',
     exportExcel: 'Export to Excel',
+    exportPdf: 'Export to PDF',
     others: 'Others',
     othersNote: 'The top 10 are shown; the rest is folded into "Others".',
     chartNeedsMeasure: 'Add a measure to chart.',
