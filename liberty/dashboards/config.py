@@ -121,6 +121,10 @@ class KpiWidget(WidgetBase):
         default=None,
         description="Optional format hint — passed through to the frontend (e.g. ``currency``, ``percent``); unused for now.",
     )
+    compare_previous: bool = Field(
+        default=False,
+        description="With a dashboard period: also run the query on the period before and show the delta and the previous value.",
+    )
 
 
 class TableWidget(WidgetBase):

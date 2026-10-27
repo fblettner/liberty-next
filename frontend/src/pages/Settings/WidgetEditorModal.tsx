@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { X, BarChart3, Hash, Table as TableIcon } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Field, Input, SearchSelect, SpinnerRing, Tag, useModals, type SearchSelectOption } from '../../common'
+import { Banner, Checkbox, Field, Input, SearchSelect, SpinnerRing, Tag, useModals, type SearchSelectOption } from '../../common'
 import { EditorModalShell } from '../../common/EditorModalShell'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { ChartSpecEditor } from '../TableView/ChartSpecEditor'
@@ -76,6 +76,7 @@ export function WidgetEditorModal({
   // kpi
   const [column, setColumn] = useState(str(initial.column))
   const [aggregation, setAggregation] = useState(str(initial.aggregation) || 'count')
+  const [comparePrevious, setComparePrevious] = useState(initial.compare_previous === true)
   // table
   const [columns, setColumns] = useState<string[]>(Array.isArray(initial.columns) ? (initial.columns as string[]) : [])
   const [maxRows, setMaxRows] = useState<string>(initial.max_rows != null ? String(initial.max_rows) : '')
@@ -124,6 +125,7 @@ export function WidgetEditorModal({
       if (!connector || !query) return setError(t('settings.dash.errConnQuery', 'Pick a connector and a query.'))
       if (!column) return setError(t('settings.dash.errColumn', 'Pick the column to aggregate.'))
       base.connector = connector; base.query = query; base.column = column; base.aggregation = aggregation
+      if (comparePrevious) base.compare_previous = true
     } else {
       if (!connector || !query) return setError(t('settings.dash.errConnQuery', 'Pick a connector and a query.'))
       base.connector = connector; base.query = query
@@ -135,7 +137,7 @@ export function WidgetEditorModal({
   }
 
   // Unsaved-changes guard (Save / Discard / Keep editing) — matches the chart + dashboard editors.
-  const draftKey = JSON.stringify({ kind, label, colSpan, rowSpan, chartMode, savedChartId, spec, connector, query, column, aggregation, columns, maxRows })
+  const draftKey = JSON.stringify({ kind, label, colSpan, rowSpan, chartMode, savedChartId, spec, connector, query, column, aggregation, comparePrevious, columns, maxRows })
   const initialKey = useRef<string | null>(null)
   if (initialKey.current === null) initialKey.current = draftKey
   const dirty = draftKey !== initialKey.current
@@ -239,6 +241,7 @@ export function WidgetEditorModal({
                   <SearchSelect value={aggregation} onChange={setAggregation} options={aggOpts} />
                 </Field>
               </Grid2>
+              <Checkbox checked={comparePrevious} onChange={setComparePrevious} label={t('settings.dash.comparePrevious', 'Compare with the previous period (needs a period on the dashboard)')} />
               <PreviewWrap>
                 {kpiPreview ? <div style={{ flex: 1, minHeight: 0, display: 'flex' }}><KpiWidget widget={kpiPreview} filters={[]} filterValues={{}} /></div>
                   : <Msg>{t('settings.dash.kpiNeed', 'Pick connector, query and column to preview.')}</Msg>}

@@ -25,8 +25,9 @@ describe('buildWidgetPeriodParams', () => {
     expect(buildWidgetPeriodParams('sales', 'facts_get', period, { range, basis: 'paid' }, findScreen)).toMatchObject({ PERIOD_BASIS: 'paid', PAID_ON_from: '2026-10-01' })
     expect(buildWidgetPeriodParams('sales', 'facts_get', period, { range, basis: '' }, findScreen)).toMatchObject({ PERIOD_BASIS: 'doc', sold_on_from: '2026-10-01' })
   })
-  it('an empty range (all dates) sends nothing', () => {
-    expect(buildWidgetPeriodParams('sales', 'facts_get', { default: 'all' }, { range: { dateFrom: '', dateTo: '' }, basis: '' }, findScreen)).toEqual({})
+  it('all dates binds the widest range and no column bounds', () => {
+    const out = buildWidgetPeriodParams('sales', 'facts_get', { default: 'all', column: 'SOLD_ON' }, { range: { dateFrom: '', dateTo: '' }, basis: '' }, findScreen)
+    expect(out).toEqual({ PERIOD_FROM: '0001-01-01', PERIOD_TO: '9999-12-31', PREV_FROM: '0001-01-01', PREV_TO: '9999-12-31' })
     expect(buildWidgetPeriodParams('sales', 'facts_get', undefined, { range, basis: '' }, findScreen)).toEqual({})
   })
 })

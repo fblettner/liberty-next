@@ -94,6 +94,7 @@ def _resolve_kpi_widget(w: KpiWidget) -> dict[str, Any]:
         "column": w.column,
         "aggregation": w.aggregation,
         **({"format": w.format} if w.format else {}),
+        **({"compare_previous": True} if w.compare_previous else {}),
     }
 
 

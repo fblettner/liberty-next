@@ -27,12 +27,15 @@
   / `:PERIOD_TO` (liées comme des dates), plus `:PREV_FROM` / `:PREV_TO` pour la période précédente (une année à date se
   compare à l'année précédente à date, un mois au mois précédent à date, un trimestre entier au
   trimestre précédent, le reste à la même durée juste avant) et `:PERIOD_BASIS` ; une requête qui
-  ne les mentionne pas reste telle quelle. Quand la période nomme la colonne de date (`column`, ou
+  ne les mentionne pas reste telle quelle (« Toutes les dates » lie 0001-01-01 à 9999-12-31). Quand la période nomme la colonne de date (`column`, ou
   `dd` retrouvé par les écrans), un widget dont l'écran la porte est filtré côté serveur sans
   toucher à son SQL : l'enveloppe des filtres, avec maintenant des bornes `<COL>_from` /
   `<COL>_to` sur toute colonne connue. L'éditeur de tableau de bord a un bloc Période. Le sélecteur
   de plage et le panneau flottant sont des composants partagés, pour les listes et l'explorateur
   à venir.
+- Un widget KPI avec `compare_previous = true` lance aussi sa requête sur la période précédente et
+  affiche l'évolution (en pourcentage, ou en points pour un KPI en pourcentage, en vert ou en
+  rouge) et la valeur précédente sous le nombre. L'éditeur de widget a la case à cocher.
 
 **nomaflow : étape `file_load`, un classeur ou un CSV dans une table, rejouable par partition**
 - Ce que l'import Excel de la grille n'est pas : un chargement qui tourne sans personne au clavier

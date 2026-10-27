@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
+import { ArrowDownRight, ArrowUpRight, Minus } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, SpinnerRing } from '../../common'
 import { resolveColumnName, toNumber } from '../../services/chartData'
@@ -13,6 +14,8 @@ import type { QueryResult } from '../../types/connectors'
 import type { DashboardFilterWire, DashboardPeriodWire, KpiWidgetWire } from '../../types/dashboards'
 import type { Aggregation } from '../../types/charts'
 import { buildWidgetFilterParams, buildWidgetPeriodParams, type PeriodSelection } from './widgetFilters'
+import { formatKpi, kpiDelta } from '../../services/kpi'
+import { previousPeriod } from '../../services/period'
 import { colors, fontSize, fonts, glass, radius, shadow } from '../../theme'
 
 // Liquid-glass KPI card — backdrop blur over a slightly-translucent base, soft drop shadow, a
@@ -41,6 +44,12 @@ const Sub = styled.div`
   text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; text-align: center;
 `
 const Pending = styled.div`color: ${colors.text.muted};`
+const Delta = styled.div<{ $dir: 'up' | 'down' | 'flat' }>`
+  display: inline-flex; align-items: center; gap: 6px; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  font-variant-numeric: tabular-nums;
+  color: ${({ $dir }) => ($dir === 'up' ? colors.green.main : $dir === 'down' ? colors.red.main : colors.text.muted)};
+  & .prev { color: ${colors.text.muted}; }
+`
 
 export interface KpiWidgetProps {
   widget: KpiWidgetWire
@@ -53,8 +62,11 @@ export interface KpiWidgetProps {
 export function KpiWidget({ widget, filters, filterValues, period, selection }: KpiWidgetProps) {
   const { t } = useTranslation()
   const [result, setResult] = useState<QueryResult | null>(null)
+  const [previous, setPrevious] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const { findScreen } = useWorkspace()
+  const { i18n } = useTranslation()
+  const lang = i18n.language || undefined
 
   // Resolve dashboard filters → URL params via the screen's dd_map (Phase 3 — column dd hints
   // live on the Screen layer now, not the connector describe()).
@@ -66,6 +78,19 @@ export function KpiWidget({ widget, filters, filterValues, period, selection }: 
     [widget.connector, widget.query, filters, filterValues, period, selection, findScreen],
   )
   const filterParamsKey = JSON.stringify(filterParams)
+  // The previous period's params: the same filters, the period shifted back (nomaubl's rule).
+  const prevSelection = useMemo<PeriodSelection | undefined>(
+    () => (selection && selection.range.dateFrom ? { range: previousPeriod(selection.range), basis: selection.basis } : undefined),
+    [selection],
+  )
+  const prevParams = useMemo(
+    () => (widget.compare_previous && prevSelection ? {
+      ...buildWidgetFilterParams(widget.connector, widget.query, filters, filterValues, findScreen),
+      ...buildWidgetPeriodParams(widget.connector, widget.query, period, prevSelection, findScreen),
+    } : null),
+    [widget.compare_previous, widget.connector, widget.query, filters, filterValues, period, prevSelection, findScreen],
+  )
+  const prevParamsKey = JSON.stringify(prevParams)
 
   useEffect(() => {
     let cancelled = false
@@ -81,10 +106,25 @@ export function KpiWidget({ widget, filters, filterValues, period, selection }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps -- filterParamsKey covers filterParams
   }, [widget.connector, widget.query, filterParamsKey])
 
+  useEffect(() => {
+    let cancelled = false
+    setPrevious(null)
+    if (!prevParams) return
+    const qs = new URLSearchParams(prevParams).toString()
+    api
+      .get<QueryResult>(`/api/sql/${encodeURIComponent(widget.connector)}/${encodeURIComponent(widget.query)}${qs ? `?${qs}` : ''}`)
+      .then((r) => { if (!cancelled) setPrevious(r) })
+      .catch(() => { /* the comparison is optional: the card shows the value alone */ })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- prevParamsKey covers prevParams
+  }, [widget.connector, widget.query, prevParamsKey])
+
   const value: number | null = useMemo(() => {
     if (!result) return null
     return computeKpi(result, widget.column, widget.aggregation)
   }, [result, widget.column, widget.aggregation])
+  const prevValue: number | null = useMemo(() => (previous ? computeKpi(previous, widget.column, widget.aggregation) : null), [previous, widget.column, widget.aggregation])
+  const delta = useMemo(() => kpiDelta(value, prevValue, widget.format, lang), [value, prevValue, widget.format, lang])
 
   // Display label for the column in the subtitle — the resolved `label` from `result.columns`
   // (came from the dictionary entry in the request's language), with the raw column name as the
@@ -100,8 +140,15 @@ export function KpiWidget({ widget, filters, filterValues, period, selection }: 
   if (!result) return <Frame><Pending><SpinnerRing size={18} thickness={2} /></Pending></Frame>
   return (
     <Frame>
-      <Value>{value === null ? '∅' : formatValue(value, widget.format)}</Value>
+      <Value>{value === null ? '∅' : formatKpi(value, widget.format, lang)}</Value>
       <Sub>{t(`chart.agg.${widget.aggregation}`)} · {columnLabel}</Sub>
+      {delta && prevValue !== null && (
+        <Delta $dir={delta.direction} title={t('dashboard.kpi.previousTitle')}>
+          {delta.direction === 'up' ? <ArrowUpRight size={14} /> : delta.direction === 'down' ? <ArrowDownRight size={14} /> : <Minus size={14} />}
+          <span>{delta.text}</span>
+          <span className="prev">{t('dashboard.kpi.previous', { value: formatKpi(prevValue, widget.format, lang) })}</span>
+        </Delta>
+      )}
     </Frame>
   )
 }
@@ -126,11 +173,4 @@ function computeKpi(result: QueryResult, column: string, agg: Aggregation): numb
     case 'max': return Math.max(...values)
     case 'none': return values[0]
   }
-}
-
-function formatValue(v: number, fmt?: string): string {
-  if (fmt === 'percent') return `${(v * 100).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`
-  if (fmt === 'currency') return v.toLocaleString(undefined, { style: 'currency', currency: 'EUR' })
-  if (Number.isInteger(v)) return v.toLocaleString()
-  return v.toLocaleString(undefined, { maximumFractionDigits: 3 })
 }

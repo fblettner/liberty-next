@@ -28,6 +28,8 @@ export interface KpiWidgetWire {
   column: string
   aggregation: Aggregation
   format?: string
+  /** With a dashboard period: the query also runs on the period before; the card shows the delta and the previous value. */
+  compare_previous?: boolean
 }
 
 export interface TableWidgetWire {

@@ -19,10 +19,14 @@ export interface PeriodSelection {
   basis: string
 }
 
+/** The widest range: what "All dates" binds, so a query written with BETWEEN :PERIOD_FROM AND
+ *  :PERIOD_TO keeps every row instead of comparing with NULL. */
+export const ALL_DATES = { dateFrom: '0001-01-01', dateTo: '9999-12-31' }
+
 /** The period's URL params for one widget: the four range binds every query may use, the basis,
  *  and — when the dashboard names the date column (directly or by dd, resolved through the
- *  widget's screen) — the `<COL>_from` / `<COL>_to` pair the server range-wraps on. An empty
- *  range (all dates) sends nothing. */
+ *  widget's screen) — the `<COL>_from` / `<COL>_to` pair the server range-wraps on. "All dates"
+ *  (an empty range) binds the widest range and no column bounds. */
 export function buildWidgetPeriodParams(
   connector: string,
   query: string,
@@ -30,12 +34,14 @@ export function buildWidgetPeriodParams(
   selection: PeriodSelection | undefined,
   findScreen: (connector: string, readQuery: string) => ScreenListItem | null,
 ): Record<string, string> {
-  if (!period || !selection || !selection.range.dateFrom || !selection.range.dateTo) return {}
-  const { dateFrom, dateTo } = selection.range
-  const prev = previousPeriod(selection.range)
+  if (!period || !selection) return {}
+  const all = !selection.range.dateFrom || !selection.range.dateTo
+  const { dateFrom, dateTo } = all ? ALL_DATES : selection.range
+  const prev = all ? ALL_DATES : previousPeriod(selection.range)
   const out: Record<string, string> = { PERIOD_FROM: dateFrom, PERIOD_TO: dateTo, PREV_FROM: prev.dateFrom, PREV_TO: prev.dateTo }
   const basis = (period.basis ?? []).find((b) => b.value === selection.basis) ?? (period.basis ?? [])[0]
   if (basis) out.PERIOD_BASIS = basis.value
+  if (all) return out
   // The date column: the chosen basis' own column / dd when it names one, else the period's.
   const column = basis && (basis.column || basis.dd) ? basis.column : period.column
   const dd = basis && (basis.column || basis.dd) ? basis.dd : period.dd

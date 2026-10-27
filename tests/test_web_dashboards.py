@@ -104,6 +104,7 @@ def _dashboards_toml() -> str:
           query = "secret_get"
           column = "USR_ID"
           aggregation = "count"
+          compare_previous = true
           col_span = 3
 
         # A second dashboard that references a chart that DOESN'T exist — should drop the widget
@@ -205,6 +206,9 @@ def test_list_dashboards_admin_resolves_chart_refs(app) -> None:
         # The KPI is there for admin (admin has *)
         kpi = sec["widgets"][2]
         assert kpi["type"] == "kpi" and kpi["aggregation"] == "count" and kpi["column"] == "USR_ID"
+        assert kpi["compare_previous"] is True          # echoed only when set (the default is left out)
+        ops_kpis = [w for w in next(d for d in dashboards if d["id"] == "app1.ops")["widgets"] if w["type"] == "kpi"]
+        assert all("compare_previous" not in w for w in ops_kpis)
         # `orphan` has the unresolved reference dropped — the dashboard surfaces with no widgets
         orphan = next(d for d in dashboards if d["id"] == "app1.orphan")
         assert orphan["widgets"] == []

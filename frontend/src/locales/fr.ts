@@ -287,6 +287,10 @@ const fr: Resources = {
   },
   dashboard: {
     empty: 'Aucun widget lisible sur ce tableau de bord pour le moment.',
+    kpi: {
+      previous: 'précédent : {{value}}',
+      previousTitle: 'Évolution par rapport à la période précédente',
+    },
     filter: {
       all: 'Tous',
       loading: 'Chargement…',

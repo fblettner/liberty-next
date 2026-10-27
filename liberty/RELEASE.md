@@ -24,11 +24,14 @@
   binds (bound as dates), plus `:PREV_FROM` / `:PREV_TO` for the period before (year to date compares with last year
   to date, a month with the previous month to date, a whole quarter with the previous quarter,
   anything else with the same length just before) and `:PERIOD_BASIS`; a query that does not
-  mention them is left alone. When the period names the date column (`column`, or `dd` matched
+  mention them is left alone ("All dates" binds 0001-01-01 to 9999-12-31). When the period names the date column (`column`, or `dd` matched
   through the screens), a widget whose screen carries it is range-filtered server-side without a
   change to its SQL — the same wrap the filters use, now with `<COL>_from` / `<COL>_to` bounds on
   any hinted column. The dashboard editor has a Period block. The date range control and the
   floating panel are shared components for the lists and the explorer to come.
+- A KPI widget with `compare_previous = true` also runs its query on the period before and shows
+  the change (in percent, or in points for a percent KPI, in green or red) and the previous value
+  under the number. The widget editor has the checkbox.
 
 **nomaflow: `file_load` step — a spreadsheet or CSV into a table, replayable by partition**
 - What the grid's Excel import is not: a load that runs without a person at the keyboard (a
