@@ -8,7 +8,7 @@
 http:
   middlewares:
     # ─── Basic-auth for the Traefik dashboard ─────────────────────────────────────
-    # Default users: admin / admin.
+    # Users: admin / the random password install.sh generates (TRAEFIK_DASHBOARD_USERS in .env).
     # CHANGE THE PASSWORD for anything real:
     #   1. Generate a new hash (bcrypt; works without escaping anywhere):
     #        docker run --rm httpd:alpine htpasswd -nbB admin "<your-password>"

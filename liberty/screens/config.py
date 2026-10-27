@@ -1298,8 +1298,9 @@ class Screen(BaseModel):
         default_factory=list,
         description=(
             "Toolbar buttons on the screen (above the table) — each fires its action list when "
-            "clicked. ParamBinds resolve against the currently-selected row (or empty when none). "
-            "Common pattern: a ``run_query`` to run a report, then ``refresh`` to reload the grid."
+            "clicked, with NO row context (a toolbar button is not tied to a row; a prompt step "
+            "collects its inputs). For an action on a row, use ``row_menu``. Common pattern: a "
+            "``run_query`` to run a report, then ``refresh`` to reload the grid."
         ),
     )
     row_menu: list[Action] = Field(

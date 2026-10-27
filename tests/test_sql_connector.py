@@ -2478,3 +2478,18 @@ async def test_period_binds_are_bound_as_dates(pools: PoolRegistry) -> None:
     assert bound["PERIOD_FROM"] == _date(2026, 10, 1) and bound["PERIOD_TO"] == _date(2026, 10, 27)
     assert bound["PREV_FROM"] == "not-a-date" and bound["PERIOD_BASIS"] == "doc" and bound["OTHER"] == "2026-01-01"
     assert bound["PREV_TO"] is None if "PREV_TO" in bound else True
+
+
+@pytest.mark.asyncio
+async def test_build_params_matches_binds_without_case(pools: PoolRegistry) -> None:
+    """A declared default or a supplied value reaches its bind whatever the case: ``status``
+    declared, ``:STATUS`` in the SQL (the editor and the migration differ)."""
+    cfg = SqlConnectorConfig(type="sql", pool="test", queries=[
+        QueryDef(name="q", sql="SELECT 1 WHERE :STATUS = :STATUS AND :Other = :Other", params=[ParamDef(name="status", default="open")]),
+    ])
+    conn = SQLConnector("db", cfg, pools)
+    q = cfg.queries[0]
+    assert conn._build_params(q.default_sql, q, None)["STATUS"] == "open"          # the declared default
+    assert conn._build_params(q.default_sql, q, {"status": "closed"})["STATUS"] == "closed"
+    assert conn._build_params(q.default_sql, q, {"STATUS": "x", "status": "y"})["STATUS"] == "x"   # exact wins
+    assert conn._build_params(q.default_sql, q, {"other": 5})["Other"] == 5

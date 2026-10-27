@@ -128,7 +128,7 @@ URL routing (everything on port 80):
 | `/` (catchall) | liberty-next (SPA + API + admin + docs) |
 | `/pgadmin` | pgAdmin (Postgres GUI) |
 | `/portainer` | Portainer (Docker UI) |
-| `/traefik` | Traefik dashboard (basic-auth — `admin`/`admin` by default; **change it in `traefik/dynamic/dynamic.yml`**) |
+| `/traefik` | Traefik dashboard (basic-auth — `admin` / the random password `install.sh` prints once; `./liberty dashboard-password` regenerates it) |
 
 Volumes:
 
@@ -355,7 +355,7 @@ above; just stop the stack first with `./deploy-swarm.sh --rm` (volumes survive)
 
 | Need | Compose | Swarm |
 |---|---|---|
-| Reset the admin password | `docker compose exec liberty-next liberty-admin set-password admin <new>` | `docker exec $(docker ps -qf name=liberty_liberty-next) liberty-admin set-password admin <new>` |
+| Reset the admin password | `docker compose exec -u liberty liberty-next liberty-admin set-password admin --password <new>` | `docker exec -u liberty $(docker ps -qf name=liberty_liberty-next) liberty-admin set-password admin --password <new>` |
 | Add another superuser | `docker compose exec liberty-next liberty-admin create-user <name> --superuser` | `docker exec $(docker ps -qf name=liberty_liberty-next) liberty-admin create-user <name> --superuser` |
 | Inspect the license key | `docker compose exec liberty-next liberty-license verify` | `docker exec $(docker ps -qf name=liberty_liberty-next) liberty-license verify` |
 | Health, versions, pending migrations | `./liberty status` (`./liberty doctor` for the fix-it list) | — |
@@ -381,7 +381,6 @@ by a license key (`LIBERTY_LICENSE_KEY`).
 ```bash
 ./install.sh full \
     --apps ./liberty_apps-7.0.1-py3-none-any.whl \
-    --license-key <your-rs256-jwt>
 ```
 
 That's everything — base stack + licensed apps + license key in one go.
@@ -390,7 +389,7 @@ That's everything — base stack + licensed apps + license key in one go.
 
 ```bash
 ./install.sh full                                                          # base stack
-./install-apps.sh ./liberty_apps-7.0.1-py3-none-any.whl --license-key <jwt>   # add the apps
+./install-apps.sh ./liberty_apps-7.0.1-py3-none-any.whl   # add the apps; paste the license key in Settings → App
 ```
 
 ### What `install-apps.sh` does
@@ -412,13 +411,13 @@ The merge runs inside a throwaway container from the liberty-next image you alre
    a `liberty-apps install --target DIR` CLI that copies `config/` + `plugins/` into
    the destination, preserving operator-edited TOMLs.
 2. **Updates `.env`**: `APPS_HOST_PATH=<absolute path>` + appends the apps overlay
-   to `COMPOSE_FILE` + `LIBERTY_LICENSE_KEY=<jwt>` (if you passed `--license-key`).
+   to `COMPOSE_FILE`. The license key is pasted in Settings → App (stored in `app.toml`).
 3. **Restarts the stack** — `docker compose up -d` picks up the apps overlay
    automatically via `COMPOSE_FILE` (no `-f` juggling).
 
 The apps land at `./apps/config/` + `./apps/plugins/` on the host. The
 [`docker-compose.apps.yml`](docker-compose.apps.yml) overlay bind-mounts `./apps`
-into the container at `/apps:ro` and sets `LIBERTY_APPS_DIR=/apps/config`.
+into the container at `/apps` (read-write: the config builders write there) and sets `LIBERTY_APPS_DIR=/apps/config`.
 
 ### Common variations
 
@@ -486,7 +485,7 @@ the next container recreate.
 services:
   liberty-next:
     volumes:
-      - ${APPS_HOST_PATH}:/apps:ro     # bind-mount the apps clone
+      - ${APPS_HOST_PATH}:/apps        # bind-mount the apps clone (read-write)
     environment:
       LIBERTY_APPS_DIR: /apps/config   # redirect TOML reads to the mount
 ```
@@ -502,7 +501,7 @@ docker compose -f docker-compose.full.yml -f docker-compose.apps.yml up -d
 
 The framework still starts — it just runs in **restricted mode** (connectors flagged
 `licensed = true` in the apps' `connectors.toml` aren't loaded). Useful for testing
-the apps' open parts. Add the key later with `./install-apps.sh --license-key <jwt>`
+the apps' open parts. Add the key later in Settings → App
 (idempotent — only touches the .env line, doesn't re-clone).
 
 ---

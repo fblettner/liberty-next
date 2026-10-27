@@ -178,3 +178,13 @@ async def test_dispatch_isolates_channel_failures(store: NotificationStore) -> N
     # an email-only recipient gets no portal row
     report = await d.dispatch(Message(subject="s"), channels=["portal"], recipients=["email:x@y.test"])
     assert report.portal_users == []
+
+
+@pytest.mark.asyncio
+async def test_resolve_recipient_without_prefix(store: NotificationStore) -> None:
+    """An address with no prefix is an address (as a job's alerts.recipients read it); another bare
+    word is ignored with a warning, not silently."""
+    from liberty.notify.dispatcher import Dispatcher
+    d = Dispatcher(store, None, auth_backend=lambda: None, connectors=lambda: None)
+    out = await d.resolve(["ops@corp.test", "email:cfo@corp.test", "bogus", "user:"])
+    assert [(r.username, r.email) for r in out] == [(None, "ops@corp.test"), (None, "cfo@corp.test")]

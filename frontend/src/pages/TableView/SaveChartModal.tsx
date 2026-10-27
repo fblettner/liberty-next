@@ -17,6 +17,7 @@ import styled from '@emotion/styled'
 import { Save, AlertTriangle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
+import { ID_PATTERNS } from '../../services/idValidator'
 import { Banner } from '../../common/Banner'
 import { Button } from '../../common/Button'
 import { Field, Input, Textarea } from '../../common/Input'
@@ -32,7 +33,7 @@ const FieldError = styled.div`color: ${colors.red.main}; font-size: ${fontSize.m
 // Nested shape: scope (connector) → id → chart body (id + connector are path-derived, not in body).
 interface ChartsParsedResponse { path: string; charts: Record<string, Record<string, Omit<ChartConfig, 'id' | 'connector'>>> }
 
-const ID_RE = /^[a-z][a-z0-9_]*$/  // slug-style — same shape the other config sections use
+const ID_RE = ID_PATTERNS.chart  // the one chart id rule (services/idValidator)
 
 export interface SaveChartModalProps {
   connector: string

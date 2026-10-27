@@ -1398,8 +1398,11 @@ class SQLConnector:
         merged: dict[str, Any] = {p.name: p.default for p in qdef.params if p.default is not None}
         if params:
             merged.update(params)
-        # Bind every :name token the caller didn't supply to SQL NULL.
-        bound = {name: merged.get(name) for name in find_bind_params(sql_text)}
+        # Bind every :name token the caller didn't supply to SQL NULL. A supplied value or a declared
+        # default matches its bind exactly first, else without case (``status`` declared, ``:STATUS``
+        # in the SQL — the migration upper-cases binds, the editor may not).
+        by_upper = {k.upper(): v for k, v in merged.items()}
+        bound = {name: (merged[name] if name in merged else by_upper.get(name.upper())) for name in find_bind_params(sql_text)}
         # The dashboard period binds are dates by contract: asyncpg infers the parameter type from
         # the column it is compared with and refuses a string for a DATE, so the ISO text the
         # browser sends becomes a ``date`` here. A query on a text or JDE Julian column converts
@@ -1904,10 +1907,12 @@ class SQLConnector:
                     # SYSDATE / CURRENT_DATE is a DATA value (an audit timestamp OR a defaulted
                     # business date) — fill ONLY when the caller didn't pass one, so a passed value
                     # always wins (an editable date the operator set, e.g. F95921.RLEFFDATE in a
-                    # date picker). Audit columns aren't dialog fields, so the form never sends them
-                    # (the bind is absent) — they still re-stamp on every write. Same "fill-if-absent"
-                    # contract as BOOLEAN / DEFAULT below. (LOGIN above stays forced — identity, not
-                    # data.) A passed value falls through to type coercion.
+                    # date picker). NB: the dialog sends back EVERY loaded column on an update (for the
+                    # ``_ORIGINAL`` rebinds), so an audit column bound as ``:COL`` keeps its old value
+                    # here — an audit stamp that must refresh on every update belongs in the SQL as a
+                    # ``{{SYSDATE}}`` / ``{{JDEDATE}}`` token (the convention of the shipped queries;
+                    # the Screen Assistant emits them). Same "fill-if-absent" contract as BOOLEAN /
+                    # DEFAULT below. (LOGIN above stays forced — identity, not data.)
                     #
                     # One ``now()`` per call, so every audit column in the same write lands on the
                     # same instant. Coerce to the matching Python type for the column's format (date /

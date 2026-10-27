@@ -141,6 +141,7 @@ const en = {
   table: {
     rowReadOnly: 'Read-only row',
     writable: 'writable',
+    run: 'Run',
     runWritableConfirm: 'Run the writable query "{{q}}"? This may modify data.',
     rows_one: '{{count}} row',
     rows_other: '{{count}} rows',
@@ -337,6 +338,7 @@ const en = {
     },
   },
   dialog: {
+    requiredMissing: 'Please fill the required fields: {{fields}}',
     editTitle: 'Edit · {{title}}',
     addTitle: 'New · {{title}}',
     addTooltip: 'Open the form to add a new row',

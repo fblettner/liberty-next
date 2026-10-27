@@ -324,6 +324,8 @@ export default function JobsList() {
       // Deep-clone via JSON round-trip — JobConfig is a pure JSON shape (no Dates /
       // functions / regex), so JSON.parse(JSON.stringify(...)) is safe + cheap.
       const cloned = { ...JSON.parse(JSON.stringify(src)), id: newId, enabled: false, schedule: undefined }
+      // a preset's own cron fires even on a disabled job: the clone's presets must not run twice
+      if (Array.isArray(cloned.presets)) cloned.presets = cloned.presets.map((p: { schedule?: string | null; enabled?: boolean }) => ({ ...p, schedule: undefined, enabled: false }))
       await api.put('/admin/config/jobs/parsed', { jobs: [...parsed.jobs, cloned] })
       await api.post('/admin/reload')
       navigate(`/nomaflow/jobs/${encodeURIComponent(newId)}`)

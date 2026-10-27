@@ -218,8 +218,8 @@ if [ "$RESET" = "yes" ]; then
   rm -f "$ENV_FILE"
   ok "Reset complete (traefik-acme preserved — LE cert survives the reset)."
   # --reset is a destructive one-shot: stop here. The operator then re-runs install.sh
-  # with the full set of flags they actually want (SSL mode, --apps wheel, --license-key,
-  # etc.). Don't auto-continue with a "default" install — that swallowed flags before
+  # with the full set of flags they actually want (SSL mode, --apps wheel, etc.; the
+  # license key is pasted in Settings → App once the stack runs). Don't auto-continue with a "default" install — that swallowed flags before
   # and ended up with a half-configured stack.
   echo
   echo "  Next: re-run install.sh with the flags you want, e.g.:"
@@ -539,7 +539,7 @@ case "$LAYOUT" in
       echo "    password:  ${LIBERTY_ADMIN_PASSWORD}"
     else
       echo "  Sign in as 'admin' — password unchanged from the original install."
-      echo "    (Lost it? docker exec liberty-next liberty-admin reset-admin-password)"
+      echo "    (Lost it? docker exec -u liberty liberty-next liberty-admin set-password admin --password <new>)"
     fi
     ;;
   full)
@@ -559,7 +559,7 @@ case "$LAYOUT" in
     echo "  ReDoc:      ${BASE}/redoc"
     echo "  pgAdmin:    ${BASE}/pgadmin"
     echo "  Portainer:  ${BASE}/portainer"
-    echo "  Traefik:    ${BASE}/traefik     (basic-auth: admin / admin — change in traefik/dynamic/dynamic.yml)"
+    echo "  Traefik:    ${BASE}/traefik     (basic-auth: admin / the password shown at install — ./liberty dashboard-password regenerates it)"
     echo
     if [ -n "${LIBERTY_ADMIN_PASSWORD:-}" ]; then
       echo "  Sign in to Liberty as:"
@@ -567,7 +567,7 @@ case "$LAYOUT" in
       echo "    password:  ${LIBERTY_ADMIN_PASSWORD}"
     else
       echo "  Sign in to Liberty as 'admin' — password unchanged from the original install."
-      echo "    (Lost it? docker exec liberty-next liberty-admin reset-admin-password)"
+      echo "    (Lost it? docker exec -u liberty liberty-next liberty-admin set-password admin --password <new>)"
     fi
     echo
     echo "  pgAdmin:        admin@liberty.fr / ${PGADMIN_PASSWORD}"

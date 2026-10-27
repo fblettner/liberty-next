@@ -248,6 +248,16 @@ def test_create_role(env, capsys) -> None:
     assert out["role"]["description"] == "ops"
 
 
+def test_create_role_again_keeps_permissions_and_set_scope_needs_an_argument(env, capsys) -> None:
+    base, _ = env
+    _run(base, "init-db", capsys=capsys)
+    _run(base, "create-role", "ops", "--permission", "a:b:c", capsys=capsys)
+    rc, out = _run(base, "create-role", "ops", "--description", "renamed", capsys=capsys)
+    assert rc == 0 and out["role"]["permissions"] == ["a:b:c"] and out["role"]["description"] == "renamed"
+    rc, _out = _run(base, "set-scope", "ops", capsys=capsys)
+    assert rc == 2
+
+
 def test_attributes_and_scope_commands(env, capsys) -> None:
     base, db_url = env
     _run(base, "init-db", capsys=capsys)

@@ -117,6 +117,16 @@ async def test_events_dispatch_matching_rules() -> None:
     assert len(tasks) == 1
     await drain()
     assert d.calls[-1]["rule"] == "slow_sales" and d.calls[-1]["payload"]["STATE"] == "SUCCEEDED"
+    # the job's own long-run threshold, to its own recipients, whatever the outcome; no failure
+    # message when on_failure is off
+    tasks = fire_job_event(rules, d, job_id="other", run_id="r4", state="SUCCEEDED", error=None, duration_minutes=75, rows=1, extra_recipients=["ops@corp.test"], long_run_minutes=60, on_failure=False)
+    assert len(tasks) == 1
+    await drain()
+    assert d.calls[-1]["rule"] == "job:other:long_run" and "75 min" in d.calls[-1]["subject"] and d.calls[-1]["recipients"] == ["email:ops@corp.test"]
+    tasks = fire_job_event(rules, d, job_id="other", run_id="r5", state="FAILED", error="x", duration_minutes=5, rows=1, extra_recipients=["ops@corp.test"], long_run_minutes=60, on_failure=False)
+    assert len(tasks) == 1            # the job_failed rule only — no message to the job's own recipients
+    await drain()
+    assert d.calls[-1]["rule"] == "job_failed"
     # a missed fire: the MISSED state is the "missed" event, with the expected instant
     tasks = fire_job_event(rules, d, job_id="sales-load", run_id="r3", state="MISSED", error="missed: …", duration_minutes=None, rows=None, expected_at="2026-10-27T02:00+00:00")
     assert len(tasks) == 1

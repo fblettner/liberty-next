@@ -235,9 +235,9 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
     if (!meta) return
     if (meta.writable) {
       const ok = await modals.confirm({
-        title: t('table.run'),
+        title: t('table.run', 'Run'),
         message: t('table.runWritableConfirm', { q: `${connector}.${query}` }),
-        confirmLabel: t('table.run'),
+        confirmLabel: t('table.run', 'Run'),
       })
       if (!ok) return
     }

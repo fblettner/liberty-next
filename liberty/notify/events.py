@@ -68,7 +68,7 @@ def fire_screen_event(
 def fire_job_event(
     rules: NotificationsFile | None, dispatcher: Dispatcher | None, *, job_id: str, run_id: str, state: str,
     error: str | None, duration_minutes: float | None, rows: int | None, extra_recipients: list[str] | None = None,
-    expected_at: str | None = None,
+    expected_at: str | None = None, long_run_minutes: int | None = None, on_failure: bool = True,
 ) -> list[asyncio.Task]:
     """A finished run: ``failure`` / ``succeeded`` / ``canceled`` from the state, plus ``long_run``
     when a rule's threshold is met; a ``MISSED`` row (a scheduled fire that never ran) is the
@@ -88,10 +88,18 @@ def fire_job_event(
             tasks.append(_spawn(dispatch_rule(dispatcher, rid, r, payload)))
         for rid, r in rules.for_job(job_id, "long_run", duration_minutes=duration_minutes):
             tasks.append(_spawn(dispatch_rule(dispatcher, rid, r, payload)))
-    if event == "failure" and extra_recipients:
+    if extra_recipients:
         recipients = [x if ":" in x else f"email:{x}" for x in extra_recipients]
-        msg = Message(subject=f"Job {job_id} failed", body=error or "", link=f"/nomaflow/runs/{run_id}", rule=f"job:{job_id}", payload=payload)
-        tasks.append(_spawn(dispatcher.dispatch(msg, channels=["portal", "email"], recipients=recipients)))
+        if event == "failure" and on_failure:
+            msg = Message(subject=f"Job {job_id} failed", body=error or "", link=f"/nomaflow/runs/{run_id}", rule=f"job:{job_id}", payload=payload)
+            tasks.append(_spawn(dispatcher.dispatch(msg, channels=["portal", "email"], recipients=recipients)))
+        # the job's own long-run threshold (``alerts.on_long_run_minutes``), whatever the outcome
+        if long_run_minutes is not None and duration_minutes is not None and duration_minutes >= long_run_minutes:
+            msg = Message(
+                subject=f"Job {job_id} ran {round(duration_minutes)} min (threshold {long_run_minutes})", body=error or "",
+                link=f"/nomaflow/runs/{run_id}", rule=f"job:{job_id}:long_run", payload=payload,
+            )
+            tasks.append(_spawn(dispatcher.dispatch(msg, channels=["portal", "email"], recipients=recipients)))
     return tasks
 
 

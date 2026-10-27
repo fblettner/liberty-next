@@ -17,6 +17,9 @@ import {
   type PickedTable, type JoinTable, type JoinType, type JoinCond,
 } from '../../common/SqlWizardModal'
 import { buildCrudSql } from '../../common/sqlBuild'
+
+/** JDE audit data items → the write-time token (see liberty.connectors.sql `_resolve_query_tokens`). */
+const AUDIT_TOKENS: Record<string, string> = { UPMJ: '{{JDEDATE}}', UPMT: '{{JDETIME}}', USER: '{{LOGIN}}', MUSE: '{{LOGIN}}', PID: '{{PID}}', JOBN: '{{JOBN}}' }
 import { SqlEditor } from '../../common/SqlEditor'
 import { MENU_ICON_NAMES, iconFor } from '../../components/SidebarMenu'
 import { ScanProposalsTable, summarizeProposals, type ScanProposal } from '../Settings/DictionaryScanTable'
@@ -586,8 +589,17 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
     // CRUD is over the EDITABLE (dialog) columns — grid-only display columns aren't inserted/updated.
     const assignedBase = dialogOrder.map(colName).filter((n) => baseColNames.has(n))
     const keyBase = dialogOrder.filter((id) => keys.has(id)).map(colName).filter((n) => baseColNames.has(n))
+    // JDE audit items stamp through server-resolved tokens (the convention of the shipped queries):
+    // a bound audit column would keep the value the dialog sends back on an update.
+    const tokens: Record<string, string> = {}
+    for (const n of assignedBase) {
+      if (keyBase.includes(n)) continue
+      const item = (ddByCol.get(n)?.dd_id ?? '').toUpperCase()
+      const tok = AUDIT_TOKENS[item]
+      if (tok) tokens[n] = tok
+    }
     const crud = (kind: 'put' | 'post' | 'delete') =>
-      buildCrudSql({ crud: kind, schema: base.schema, table: base.name, selectCols: assignedBase, keyCols: keyBase }) || undefined
+      buildCrudSql({ crud: kind, schema: base.schema, table: base.name, selectCols: assignedBase, keyCols: keyBase, tokens }) || undefined
     const kept = (ddItems ?? []).filter((d) => d.keep && !d.exists)
     // The dialog is OPTIONAL — a screen with no populated tab is a read-only grid (no dialog block,
     // no CRUD queries). Build the tabs once and only attach a ``dialog`` when there's something in it.

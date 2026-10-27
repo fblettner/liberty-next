@@ -126,7 +126,11 @@ class Dispatcher:
         for raw in recipients:
             kind, _, name = str(raw).partition(":")
             kind, name = kind.strip().lower(), name.strip()
+            if not name and "@" in kind:
+                # no prefix, an address: the same reading as a job's alerts.recipients
+                kind, name = "email", kind
             if not name:
+                _log.warning("notify: recipient %r ignored (use user:<name> / role:<name> / email:<address>)", raw)
                 continue
             if kind == "email":
                 push(None, name)
@@ -174,7 +178,7 @@ class Dispatcher:
             addresses = [r.email for r in targets if r.email]
             if addresses:
                 try:
-                    await asyncio.to_thread(self._send_email, addresses, subject, body)
+                    await asyncio.to_thread(self._send_email, addresses, subject, body, link)
                     report.emails = addresses
                 except Exception as exc:  # noqa: BLE001
                     _log.warning("notify: email channel failed: %s", exc)
@@ -193,7 +197,7 @@ class Dispatcher:
     def _cfg(self) -> Any:
         return self._settings() if callable(self._settings) else self._settings
 
-    def _send_email(self, addresses: list[str], subject: str, body: str) -> None:
+    def _send_email(self, addresses: list[str], subject: str, body: str, link: str | None = None) -> None:
         n = self._cfg().notify
         if not n.smtp_host:
             raise RuntimeError("[notify] smtp_host is not set")
@@ -205,7 +209,10 @@ class Dispatcher:
         msg["Subject"] = subject
         msg["From"] = n.smtp_from or n.smtp_user or "liberty@localhost"
         msg["To"] = ", ".join(addresses)
-        msg.set_content(body or subject)
+        text = body or subject
+        if link:
+            text = f"{text}\n\n{link}"
+        msg.set_content(text)
         smtp_cls = smtplib.SMTP_SSL if n.smtp_ssl else smtplib.SMTP
         try:
             with smtp_cls(n.smtp_host, n.smtp_port, timeout=n.smtp_timeout) as smtp:

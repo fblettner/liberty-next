@@ -13,6 +13,9 @@ export function buildCrudSql(opts: {
   table: string
   selectCols: string[]   // columns visible to SELECT / INSERT (the "include" set)
   keyCols: string[]      // columns identifying a row (drive UPDATE / DELETE WHERE)
+  /** Server-resolved tokens for audit columns (``{ FSUPMJ: '{{JDEDATE}}' }``): written in place of
+   *  the bind on INSERT / UPDATE so the stamp refreshes on every write, whatever the dialog sends. */
+  tokens?: Record<string, string>
 }): string {
   const fqTable = opts.schema ? `${opts.schema}.${opts.table}` : opts.table
   if (!opts.table) return ''
@@ -21,20 +24,22 @@ export function buildCrudSql(opts: {
   // a generated statement reads uniformly. Unquoted, so Postgres folds it back to lowercase anyway.
   const sel = opts.selectCols.map((c) => c.toUpperCase())
   const keys = opts.keyCols.map((c) => c.toUpperCase())
+  const tokens = Object.fromEntries(Object.entries(opts.tokens ?? {}).map(([k, v]) => [k.toUpperCase(), v]))
+  const bind = (c: string) => tokens[c] ?? `:${c}`
   if (opts.crud === 'get') {
     if (sel.length === 0) return ''
     return `SELECT\n  ${sel.join(',\n  ')}\nFROM ${fqTable}`
   }
   if (opts.crud === 'post') {
     if (sel.length === 0) return ''
-    const placeholders = sel.map((c) => `:${c}`).join(',\n  ')
+    const placeholders = sel.map((c) => bind(c)).join(',\n  ')
     return `INSERT INTO ${fqTable} (\n  ${sel.join(',\n  ')}\n) VALUES (\n  ${placeholders}\n)`
   }
   if (opts.crud === 'put') {
     if (keys.length === 0) return ''
     const nonKey = sel.filter((c) => !keys.includes(c))
     if (nonKey.length === 0) return ''
-    const sets = nonKey.map((c) => `${c} = :${c}`).join(',\n  ')
+    const sets = nonKey.map((c) => `${c} = ${bind(c)}`).join(',\n  ')
     const where = keys.map((c) => `${c} = :${c}_ORIGINAL`).join('\n  AND ')
     return `UPDATE ${fqTable}\nSET\n  ${sets}\nWHERE\n  ${where}`
   }

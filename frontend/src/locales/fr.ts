@@ -143,6 +143,7 @@ const fr: Resources = {
   table: {
     rowReadOnly: 'Ligne en lecture seule',
     writable: 'modifiable',
+    run: 'Exécuter',
     runWritableConfirm: 'Exécuter la requête modifiable « {{q}} » ? Cela peut modifier des données.',
     rows_one: '{{count}} ligne',
     rows_other: '{{count}} lignes',
@@ -339,6 +340,7 @@ const fr: Resources = {
     },
   },
   dialog: {
+    requiredMissing: 'Renseignez les champs obligatoires : {{fields}}',
     editTitle: 'Modifier · {{title}}',
     addTitle: 'Nouveau · {{title}}',
     addTooltip: 'Ouvrir le formulaire pour ajouter une ligne',

@@ -719,6 +719,22 @@ export function ScreenDialog({
         sent[f.name] = v
       }
     }
+    // Required fields (static ``required`` or a ``required_when`` that holds) block the save when
+    // empty — the asterisk is a promise, not a hint. Only visible fields count: a field hidden by
+    // ``visible_when`` is not written, so it cannot be demanded either.
+    const missing: string[] = []
+    for (const tab of tabs.filter(isFormTab)) {
+      for (const f of tab.fields ?? []) {
+        const st = fieldStateOf(f)
+        if (!st.visible || !st.required) continue
+        const v = formValues[f.name]
+        if (v == null || v === '') missing.push(f.label || f.name)
+      }
+    }
+    if (missing.length > 0) {
+      setError(t('dialog.requiredMissing', { fields: missing.join(', ') }))
+      return
+    }
     setSaving(true); setError(null)
     try {
       // For password fields we never had the original ciphertext in the form (seeded blank), so

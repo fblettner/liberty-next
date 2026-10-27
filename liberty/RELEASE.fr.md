@@ -2,6 +2,33 @@
 
 ## 7.0.59 — non publiée
 
+**Corrections issues de la revue de documentation (27/10/2026)**
+- Dialogue : un champ `required`, ou un `required_when` vérifié, bloque désormais l'enregistrement
+  quand il est vide (l'astérisque n'était que décoratif).
+- Paramètres : une valeur par défaut déclarée ou une valeur fournie atteint son bind quelle que
+  soit la casse (`status` déclaré, `:STATUS` dans le SQL).
+- nomaflow : les préréglages d'une tâche clonée perdent leur planification (ils tournaient deux
+  fois : le planificateur lance le cron d'un préréglage même sur une tâche désactivée) ;
+  `alerts.on_long_run_minutes` d'une tâche envoie le message de durée excessive à ses
+  `alerts.recipients`.
+- Notifications : `[notify] retention_days` purge les notifications lues (au démarrage et toutes
+  les six heures) ; l'e-mail porte le lien de la règle ; un destinataire de règle sans préfixe qui
+  est une adresse est envoyé à cette adresse, un autre mot nu est journalisé au lieu d'être ignoré.
+- Assistant écran : les `_post` / `_put` générés écrivent les éléments d'audit JDE (UPMJ, UPMT,
+  USER, MUSE, PID, JOBN ; jamais une colonne clé) sous forme de jetons `{{JDEDATE}}` /
+  `{{JDETIME}}` / `{{LOGIN}}` / `{{PID}}` / `{{JOBN}}`, la convention des requêtes livrées : une
+  colonne d'audit liée gardait la valeur renvoyée par le dialogue à la mise à jour.
+- `liberty-admin create-role` sur un rôle existant garde ses permissions sans `--permission` ;
+  `set-scope` refuse de s'exécuter sans `--rule` ni `--clear` (il vidait le périmètre).
+- Configuration → App : changer `oracle_thick` signale qu'un redémarrage est nécessaire (le mode
+  épais se fixe une fois par processus). Le « Enregistrer… » de la vue Graphique applique la
+  règle d'id unique des graphiques.
+- La confirmation de requête modifiable affichait le texte « table.run ». Les descriptions de
+  `ColumnHint.key` et `Screen.actions`, le commentaire SYSDATE du connecteur et la docstring de
+  `liberty-admin` disent ce que fait le code. `release/README.md`, `install.sh` et la configuration
+  Traefik ne mentionnent plus `--license-key`, un montage des apps en lecture seule, `admin/admin`
+  ni `reset-admin-password`.
+
 **Installation / mise à jour**
 - **Corrigé : la version du lot d'applications apparaissait comme « non installée » sous Docker.**
   Le wheel est déposé dans le montage `/apps`, pas installé comme paquet dans le conteneur en

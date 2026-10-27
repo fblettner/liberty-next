@@ -1879,6 +1879,8 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
         new_settings.app.host != old_settings.app.host
         or new_settings.app.port != old_settings.app.port
         or new_settings.app.log_level != old_settings.app.log_level
+        # thick mode is process-global, set once at the first Oracle connection
+        or getattr(new_settings.app, "oracle_thick", None) != getattr(old_settings.app, "oracle_thick", None)
     )
     license_changed = new_settings.license.key != old_settings.license.key
     request.app.state.settings = new_settings

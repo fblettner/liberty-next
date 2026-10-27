@@ -1,13 +1,17 @@
 """``liberty-admin`` — manage the internal users / roles (the TOML store or the DB tables).
 
     liberty-admin init-db [--admin-username admin] [--password … | --password-env VAR]
-    liberty-admin create-user <username> [--email …] [--full-name …]
+    liberty-admin create-user <username> [--email …] [--full-name …] [--attribute k=v ...]
                               [--password … | --password-env VAR] [--role R ...] [--superuser]
     liberty-admin set-password <username> [--password … | --password-env VAR]
     liberty-admin set-active <username> {--active | --inactive}
+    liberty-admin set-attributes <username> [--attribute k=v ...]
     liberty-admin list-users
-    liberty-admin create-role <name> [--permission P ...] [--description …]
-    liberty-admin migrate [--app X ...] [--dry-run] [--target-connector C] [--revision R]
+    liberty-admin create-role <name> [--permission P ...] [--description …] [--scope RULE ...]
+    liberty-admin set-scope <name> {--rule RULE ... | --clear}
+    liberty-admin list-roles
+    liberty-admin run-install-jobs [--app X ...] [--force]
+    liberty-admin migrate [--app X ...] [--dry-run] [--target-connector C] [--revision R] [--plugins-dir D] [--stamp]
     liberty-admin record-upgrade --kind upgrade|rollback [--fw-from V --fw-to V …] [--step name=status[:detail] …]
 
 Operates on whatever ``[auth] backend`` is configured in ``config/app.toml``: ``"toml"`` (the
@@ -309,6 +313,9 @@ async def _cmd_set_scope(ctx: _Context, args: argparse.Namespace) -> int:
     if args.name not in {t[0] for t in await ctx.backend.list_roles()}:
         print(f"error: unknown role {args.name!r} (create-role first)", file=sys.stderr)
         return 2
+    if not args.clear and not args.rule:
+        print("error: give at least one --rule, or --clear to remove every rule", file=sys.stderr)
+        return 2
     rules = [] if args.clear else [parse_scope_rule(r) for r in args.rule or []]
     t = await ctx.backend.get_or_create_role(args.name, scope=rules)
     _print({"role": _role_out(t)})
@@ -392,8 +399,9 @@ async def _cmd_run_install_jobs(ctx: _Context, args: argparse.Namespace) -> int:
 
 async def _cmd_create_role(ctx: _Context, args: argparse.Namespace) -> int:
     scope = [parse_scope_rule(r) for r in args.scope] if args.scope else None
+    # No --permission: a new role starts empty, an existing one keeps its permissions (None = untouched).
     t = await ctx.backend.get_or_create_role(
-        args.name, permissions=args.permission or [], description=args.description, scope=scope,
+        args.name, permissions=args.permission if args.permission else None, description=args.description, scope=scope,
     )
     _print({"role": _role_out(t)})
     return 0

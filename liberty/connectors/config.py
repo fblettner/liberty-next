@@ -381,7 +381,8 @@ class ColumnHint(BaseModel):
         json_schema_extra={"x_group": "General"},
         description=(
             "Mark this column as part of the row's primary key. Drives Excel-import "
-            "update-vs-insert matching and locks the column on edit dialogs."
+            "update-vs-insert matching, record locking and the add dialog's lookup suppression; "
+            "to make it read-only in the edit dialog, set ``disable_on_edit``."
         ),
     )
     # ── Display — how the column renders in the grid / header ─────────────────────────────

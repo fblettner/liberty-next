@@ -238,11 +238,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # job's own alerts.recipients on failure. The holders are read now, not at wiring
             # time, so a reload that swaps them is seen.
             alerts = getattr(job, "alerts", None)
-            extra = list(alerts.recipients) if (alerts is not None and alerts.on_failure and alerts.recipients) else None
+            long_run = getattr(alerts, "on_long_run_minutes", None) if alerts is not None else None
+            wants = alerts is not None and alerts.recipients and (alerts.on_failure or long_run)
+            extra = list(alerts.recipients) if wants else None
             fire_job_event(
                 getattr(app.state, "notification_rules", None), getattr(app.state, "notify", None),
                 job_id=job.id, run_id=run.id, state=state, error=error, duration_minutes=duration_minutes,
                 rows=getattr(run, "rows_affected", None), extra_recipients=extra,
+                long_run_minutes=long_run if (alerts is not None and alerts.recipients) else None,
+                on_failure=bool(alerts is not None and alerts.on_failure),
             )
 
         async def _on_run_missed(job: Any, run: Any, reason: str) -> None:
@@ -264,9 +268,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # imports see the live app.state. No-op task when the setting is off.
         from liberty.web.hot_reload import start_watcher
         app.state.hot_reload_task = await start_watcher(app)
+
+        async def _notify_retention_loop() -> None:
+            # [notify] retention_days: read notifications older than that are dropped — once now,
+            # then every six hours. Best-effort: a failure is logged and retried next round.
+            while True:
+                try:
+                    store = getattr(app.state, "notifications", None)
+                    days = int(getattr(app.state.settings.notify, "retention_days", 0) or 0)
+                    if store is not None and days > 0:
+                        n = await store.delete_older_than(days)
+                        if n:
+                            _log.info("notifications: %d read notification(s) older than %d days dropped", n, days)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    _log.warning("notifications: retention purge failed: %s", exc)
+                await asyncio.sleep(6 * 3600)
+
+        app.state.notify_retention_task = asyncio.create_task(_notify_retention_loop())
         try:
             yield
         finally:
+            app.state.notify_retention_task.cancel()
+            try:
+                await app.state.notify_retention_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
             app.state.hot_reload_task.cancel()
             try:
                 await app.state.hot_reload_task

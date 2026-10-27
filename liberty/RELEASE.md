@@ -2,6 +2,30 @@
 
 ## 7.0.59 — unreleased
 
+**Fixes from the documentation review (2026-10-27)**
+- Dialog: a `required` field, or a `required_when` that holds, now blocks Save when empty (the
+  asterisk was only decorative).
+- Parameters: a declared default or a supplied value reaches its bind whatever the case
+  (`status` declared, `:STATUS` in the SQL).
+- nomaflow: a cloned job's presets lose their schedules (they fired twice: the scheduler runs a
+  preset's cron even on a disabled job); a job's `alerts.on_long_run_minutes` now sends the long-run
+  message to its `alerts.recipients`.
+- Notifications: `[notify] retention_days` purges read notifications (at boot and every six hours);
+  the e-mail carries the rule's link; a rule recipient without prefix that is an address is sent to
+  that address, another bare word is logged instead of silently dropped.
+- Screen Assistant: the generated `_post` / `_put` write the JDE audit items (UPMJ, UPMT, USER,
+  MUSE, PID, JOBN; never a key column) as `{{JDEDATE}}` / `{{JDETIME}}` / `{{LOGIN}}` / `{{PID}}` /
+  `{{JOBN}}` tokens, the convention of the shipped queries — a bound audit column kept the value the
+  dialog sent back on an update.
+- `liberty-admin create-role` on an existing role keeps its permissions when `--permission` is not
+  given; `set-scope` refuses to run without `--rule` or `--clear` (it silently cleared the scope).
+- Settings → App: changing `oracle_thick` reports that a restart is needed (thick mode is set once
+  per process). The Chart view's "Save…" uses the one chart id rule.
+- The writable-query confirm showed the literal "table.run". The `ColumnHint.key` and
+  `Screen.actions` descriptions, the connector's SYSDATE comment and the `liberty-admin` docstring
+  say what the code does. `release/README.md`, `install.sh` and the Traefik config no longer
+  mention `--license-key`, a read-only apps mount, `admin/admin` or `reset-admin-password`.
+
 **Install / upgrade**
 - **Fixed: the apps bundle version read as "not installed" on Docker.** The wheel is materialised
   into the `/apps` mount, not installed as a package in the running container, so `liberty status`,
