@@ -14,7 +14,7 @@
 # Point LIBERTY_DB_URL at Postgres for a real deployment (see docker-compose.yml).
 
 # ── Stage 1 — build the frontend (Vite → frontend/dist) ──────────────────────────────
-FROM node:20.20.2-slim AS frontend
+FROM node:26.12.1-slim AS frontend
 WORKDIR /build/frontend
 # Copy only the manifest + lockfile first so the install layer is cached across source-only
 # edits. `npm ci` installs exactly the committed lockfile and FAILS if package.json and
@@ -28,7 +28,7 @@ COPY frontend/ ./
 RUN npm run build   # emits /build/frontend/dist (vite.config.ts: outDir "dist")
 
 # ── Stage 2 — Python runtime (FastAPI + Socket.IO, serving the built SPA) ─────────────
-FROM python:3.12.15-slim AS runtime
+FROM python:3.15.0-slim AS runtime
 
 # Runtime system libs:
 #   curl                         — container HEALTHCHECK hits /info
