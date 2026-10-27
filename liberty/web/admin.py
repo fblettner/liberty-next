@@ -1453,6 +1453,16 @@ class JobsBody(BaseModel):
     meta: dict[str, Any] | None = None
 
 
+
+def _drop_none(value: Any) -> Any:
+    """*value* without ``None`` leaves: dict keys holding None are removed, lists keep their
+    order (a None list element becomes an empty string — TOML arrays cannot hold a hole)."""
+    if isinstance(value, dict):
+        return {k: _drop_none(v) for k, v in value.items() if v is not None}
+    if isinstance(value, list):
+        return [_drop_none(v) if v is not None else "" for v in value]
+    return value
+
 @router.put("/config/jobs/parsed", summary="Update jobs config")
 async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dict[str, object]:
     """Validate the submitted jobs (+ optional meta) against :class:`liberty.jobs.JobsFile`,
@@ -1481,7 +1491,9 @@ async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dic
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
     if body.jobs:
-        doc["jobs"] = body.jobs
+        # TOML has no null: a builder clearing a field sends ``null`` — drop such keys (the
+        # model's default takes over on reload) instead of letting tomlkit refuse the save.
+        doc["jobs"] = _drop_none(body.jobs)
     elif "jobs" in doc:
         del doc["jobs"]
     # Replace the [meta] block when one was submitted. Assigning a plain dict lets

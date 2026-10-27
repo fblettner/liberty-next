@@ -31,6 +31,11 @@ The step (``jobs.toml``)::
   (ISO, ``dd/mm/yyyy``, Excel dates), booleans, text. A bad cell fails the step, or skips the
   row with ``on_error = "skip"``; the first ten rejects are quoted in the run log and the whole
   list lands in ``<files_dir>/<job>/<run>-<step>-rejects.csv`` (downloadable from the run).
+* Guards: ``refuse_query`` runs first on the target connector (or ``refuse_connector``) with the
+  run parameters and constants as binds; a row back refuses the load, its first column being the
+  reason. ``control_column`` + ``control_total`` (a value, ``${params.total}`` or ``@B2``, a cell
+  of the file) compare the sum of what was inserted with the expected total, within
+  ``control_tolerance``; a mismatch rolls the file's load back.
 * ``replace_partition``: the partitions present in the load (from the constants, else the
   distinct values found in the file) are deleted and the rows inserted **in one transaction**,
   so a failed load leaves the previous data in place and a replay of a month replaces that
@@ -135,13 +140,24 @@ def _read_delimited(path: Path, *, delimiter: str | None, encoding: str) -> Iter
         else:
             sample = fh.read(8192)
             fh.seek(0)
-            try:
-                sniffed = csv.Sniffer().sniff(sample, delimiters=",;\t|")
-            except csv.Error:
-                sniffed = csv.excel  # type: ignore[assignment]
-            reader = csv.reader(fh, dialect=sniffed)
+            reader = csv.reader(fh, delimiter=detect_delimiter(sample))
         for i, row in enumerate(reader, start=1):
             yield i, list(row)
+
+
+def detect_delimiter(sample: str) -> str:
+    """The delimiter a CSV uses, from its header line: the candidate that occurs most there
+    (a header carries no decimal commas, so ``;`` wins over ``,`` in a French file); the csv
+    sniffer only when the header shows none."""
+    header = sample.split("\n", 1)[0]
+    counts = {d: header.count(d) for d in (";", ",", "\t", "|")}
+    best = max(counts, key=lambda d: counts[d])
+    if counts[best] > 0:
+        return best
+    try:
+        return csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
+    except csv.Error:
+        return ","
 
 
 def open_reader(path: Path, *, sheet: str | int | None, delimiter: str | None, encoding: str) -> Iterator[tuple[int, list[Any]]]:
@@ -151,6 +167,30 @@ def open_reader(path: Path, *, sheet: str | int | None, delimiter: str | None, e
     if ext in _DELIMITED:
         return _read_delimited(path, delimiter=delimiter, encoding=encoding)
     raise StepFailed(f"file_load: {path.name}: unsupported file type {ext or '(none)'} (xlsx, xlsm, csv, txt, tsv)")
+
+
+_CELL = re.compile(r"^@(?:(?P<sheet>[^!]+)!)?(?P<col>[A-Za-z]{1,3})(?P<row>\d+)$")
+
+
+def read_cell(path: Path, ref: str, *, sheet: str | int | None, delimiter: str | None, encoding: str) -> Any:
+    """The value of a cell named ``@B2`` / ``@Totals!B2`` in the file (the step's sheet when
+    none is named; a CSV has one). The control total of a file often sits in such a cell."""
+    m = _CELL.match(ref.strip())
+    if not m:
+        raise StepFailed(f"file_load: {ref!r} is not a cell reference (expected @B2 or @Sheet!B2)")
+    col = 0
+    for ch in m.group("col").upper():
+        col = col * 26 + (ord(ch) - ord("A") + 1)
+    row = int(m.group("row"))
+    target_sheet = m.group("sheet") or sheet
+    if path.suffix.lower() in _SPREADSHEET and target_sheet is not None and target_sheet != sheet:
+        reader = _read_spreadsheet(path, sheet=target_sheet)
+    else:
+        reader = open_reader(path, sheet=sheet, delimiter=delimiter, encoding=encoding)
+    for n, cells in reader:
+        if n == row:
+            return cells[col - 1] if col - 1 < len(cells) else None
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -397,7 +437,11 @@ class FileLoadExecutor:
             _log.info("nomaflow.file_load run=%s step=%r watched folder empty: nothing to do", ctx.run_id, step.name)
             return StepResult(rows_affected=0, log_excerpt="watched folder empty: nothing to load", extras={"files": []})
 
+        if step.refuse_query:
+            await self._refuse_check(step, params=params, constants=constants, default_connector=tgt.name)
+
         totals = {"read": 0, "inserted": 0, "rejected": 0, "deleted": 0}
+        totals_control: Decimal | None = Decimal(0) if step.control_column else None
         partitions_all: list[list[Any]] = []
         rejects_all: list[tuple[str, int, str]] = []
         loaded: list[str] = []
@@ -406,10 +450,11 @@ class FileLoadExecutor:
                 "nomaflow.file_load start run=%s step=%r file=%s → %s.%s mode=%s partition_by=%s",
                 ctx.run_id, step.name, f, tgt.name, step.target.table, mode.value, partition_by or None,
             )
+            expected = self._expected_total(step, f, render)
             try:
                 r = await self._load_file(
                     f, step, engine=engine, table_sql=table_sql, columns=columns, constants=constants,
-                    mode=mode, partition_by=partition_by, run_id=ctx.run_id,
+                    mode=mode, partition_by=partition_by, run_id=ctx.run_id, expected_total=expected,
                 )
             except StepFailed:
                 if watched:
@@ -417,6 +462,8 @@ class FileLoadExecutor:
                 raise
             for k in totals:
                 totals[k] += r[k]
+            if totals_control is not None:
+                totals_control += r["control_sum"]
             partitions_all.extend(r["partitions"])
             rejects_all.extend((f.name, n, why) for n, why in r["rejects"])
             loaded.append(str(f))
@@ -424,6 +471,7 @@ class FileLoadExecutor:
                 self._move(f, "done")
 
         extras: dict[str, Any] = {**totals, "files": loaded, "partitions": partitions_all,
+                                  **({"control_total": str(totals_control)} if totals_control is not None else {}),
                                   "rejects": [f"{name} row {n}: {why}" for name, n, why in rejects_all[:_MAX_QUOTED_REJECTS]]}
         if rejects_all and self._settings is not None:
             report = self._write_rejects(ctx, step, rejects_all)
@@ -439,8 +487,11 @@ class FileLoadExecutor:
     async def _load_file(
         self, path: Path, step: Step, *, engine: AsyncEngine, table_sql: str, columns: list[ColumnInfo],
         constants: dict[str, Any], mode: LoadMode, partition_by: list[str], run_id: str,
+        expected_total: Decimal | None = None,
     ) -> dict[str, Any]:
-        """One file, one transaction. Returns the counts, the partitions replaced and the rejects."""
+        """One file, one transaction. Returns the counts, the partitions replaced and the rejects.
+        With a control column, its sum over the inserted rows must match *expected_total* before
+        the commit — a mismatch raises inside the transaction, which rolls it back."""
         # pass 1 — header + plan (+ the partitions present, when a key isn't a constant)
         reader = open_reader(path, sheet=step.sheet, delimiter=step.delimiter, encoding=step.encoding)
         header = self._header(reader, step.header_row, path.name)
@@ -448,6 +499,12 @@ class FileLoadExecutor:
         missing_keys = [p for p in partition_by if p not in plan.loaded]
         if missing_keys:
             raise StepFailed(f"file_load: partition column(s) {', '.join(missing_keys)} come neither from the file nor from `constants`")
+        control = None
+        if step.control_column:
+            control = next((c.name for c in columns if c.name.lower() == step.control_column.lower()), None)
+            if control is None or control not in plan.loaded:
+                raise StepFailed(f"file_load: control column {step.control_column!r} is not loaded from the file")
+        control_sum = Decimal(0)
         partitions: set[tuple[Any, ...]] = set()
         if mode is LoadMode.REPLACE_PARTITION:
             if all(p in plan.constants for p in partition_by):
@@ -481,7 +538,10 @@ class FileLoadExecutor:
                         continue
                     read += 1
                     try:
-                        batch.append(_adapt(_row_values(plan, cells), engine.dialect.name))
+                        values = _row_values(plan, cells)
+                        if control is not None and values.get(control) is not None:
+                            control_sum += Decimal(str(values[control]))
+                        batch.append(_adapt(values, engine.dialect.name))
                     except CellError as exc:
                         rejected += 1
                         rejects.append((n, str(exc)))
@@ -495,13 +555,56 @@ class FileLoadExecutor:
                 if batch:
                     await conn.execute(insert_sql, batch)
                     inserted += len(batch)
+                if expected_total is not None and abs(control_sum - expected_total) > Decimal(str(step.control_tolerance)):
+                    raise StepFailed(
+                        f"file_load: {path.name}: control total mismatch on {control}: loaded {control_sum}, expected {expected_total}"
+                        f" — the load was rolled back"
+                    )
         for n, why in rejects[:_MAX_QUOTED_REJECTS]:
             _log.warning("nomaflow.file_load run=%s step=%r rejected %s row %d: %s", run_id, step.name, path.name, n, why)
         return {
             "read": read, "inserted": inserted, "rejected": rejected, "deleted": deleted,
             "partitions": [list(k) for k in sorted(partitions, key=lambda k: tuple(str(x) for x in k))],
             "rejects": rejects,
+            "control_sum": control_sum,
         }
+
+    async def _refuse_check(self, step: Step, *, params: dict[str, Any], constants: dict[str, Any], default_connector: str) -> None:
+        """Run ``refuse_query`` with the run parameters + constants as binds (in their own case
+        and upper-cased, the framework's bind convention); any row back refuses the load."""
+        name = step.refuse_connector or default_connector
+        try:
+            conn = self._connectors.get(name)
+        except UnknownConnectorError as exc:
+            raise StepFailed(f"file_load: unknown refuse connector {name!r}") from exc
+        if not isinstance(conn, SQLConnector):
+            raise StepFailed(f"file_load: refuse connector {name!r} is not a SQL connector")
+        binds: dict[str, Any] = {}
+        for k, v in {**params, **constants}.items():
+            binds[k] = v
+            binds[k.upper()] = v
+        try:
+            res = await conn.execute(step.refuse_query, params=binds)
+        except Exception as exc:
+            raise StepFailed(f"file_load: refuse query {step.refuse_query!r} failed: {exc}") from exc
+        rows = getattr(res, "rows", None) or []
+        if rows:
+            first = rows[0]
+            reason = next(iter(first.values()), None) if isinstance(first, dict) else first
+            raise StepFailed(f"file_load: refused by {step.refuse_query}: {reason if reason not in (None, '') else 'a row came back'}")
+
+    @staticmethod
+    def _expected_total(step: Step, path: Path, render: Any) -> Decimal | None:
+        """The expected control total for *path*: a cell of the file (``@B2``), else the
+        templated value."""
+        if not step.control_column or step.control_total is None:
+            return None
+        raw = step.control_total.strip()
+        value: Any = read_cell(path, raw, sheet=step.sheet, delimiter=step.delimiter, encoding=step.encoding) if raw.startswith("@") else render(raw)
+        try:
+            return Decimal(str(coerce_cell(value, Numeric())))
+        except (CellError, InvalidOperation, TypeError) as exc:
+            raise StepFailed(f"file_load: {path.name}: control total {raw!r} is not a number ({value!r})") from exc
 
     def _write_rejects(self, ctx: RunContext, step: Step, rejects: list[tuple[str, int, str]]) -> Path | None:
         """The full rejects list as a CSV under the job's work area (the run detail offers it)."""

@@ -13,7 +13,7 @@ import pytest_asyncio
 from openpyxl import Workbook
 from sqlalchemy import text
 
-from liberty.connectors.config import ConnectorsFile, PoolConfig, SqlConnectorConfig
+from liberty.connectors.config import ConnectorsFile, PoolConfig, QueryDef, SqlConnectorConfig
 from liberty.connectors.registry import ConnectorRegistry
 from liberty.jobs import FileLoadExecutor, ManualTrigger, RunContext, Step, StepFailed
 from liberty.jobs.schema import SqlEndpoint
@@ -29,11 +29,16 @@ DDL = """CREATE TABLE fact_sales (
 async def registry(tmp_path):
     cfg = ConnectorsFile(
         pools={"target": PoolConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'target.db'}")},
-        connectors={"sales": SqlConnectorConfig(type="sql", pool="target", queries=[])},
+        connectors={"sales": SqlConnectorConfig(type="sql", pool="target", queries=[
+            QueryDef(name="period_closed_get", sql="SELECT 'period ' || :PERIOD || ' is closed' AS reason FROM period_status WHERE period = :PERIOD AND status = 'closed'"),
+            QueryDef(name="broken_get", sql="SELECT * FROM no_such_table"),
+        ])},
     )
     reg = ConnectorRegistry(cfg)
     async with reg.pools.engine("target").begin() as conn:
         await conn.execute(text(DDL))
+        await conn.execute(text("CREATE TABLE period_status (period TEXT, status TEXT)"))
+        await conn.execute(text("INSERT INTO period_status VALUES ('2026-02', 'closed'), ('2026-03', 'open')"))
     try:
         yield reg
     finally:
@@ -87,6 +92,9 @@ def with_params(s: Step, **params) -> Step:
 
 def test_helpers() -> None:
     from sqlalchemy import Boolean, Date, DateTime, Integer, Numeric, String
+    from liberty.jobs.steps.file_load import detect_delimiter
+    assert detect_delimiter("article;qty;revenue\nA;1;2,5\n") == ";" and detect_delimiter("a,b\n1,2\n") == "," and detect_delimiter("a\tb\n") == "\t"
+    assert detect_delimiter("single\n1\n2\n") == ","
     assert normalize_header(" Sold On ") == "soldon" and normalize_header("sold_on") == "soldon"
     assert render_template("/in/${params.period}-${run.id}-${job.id}.xlsx", params={"period": "2026-03"}, run_id="r1", job_id="j") == "/in/2026-03-r1-j.xlsx"
     # a plain ${run_id} is NOT a placeholder (the config loader would have env-substituted it)
@@ -261,3 +269,56 @@ async def test_watched_folder_loads_every_file_and_moves_it(registry, tmp_path) 
     with pytest.raises(StepFailed, match="c.csv row 2"):
         await ex.execute(s, ctx())
     assert [p.name for p in (inbox / "failed").iterdir()][0].endswith("-c.csv")
+
+
+@pytest.mark.asyncio
+async def test_refuse_query_guards_the_load(registry, tmp_path) -> None:
+    ex = FileLoadExecutor(registry)
+    f = csvfile(tmp_path / "m.csv", ["article", "qty"], [["A", "1"]])
+    s = step(path=str(f), constants={"period": "${params.period}", "company": "00001"}, refuse_query="period_closed_get")
+    # the open period loads; the closed one is refused with the row's first column as the reason
+    assert (await ex.execute(with_params(s, period="2026-03"), ctx())).rows_affected == 1
+    with pytest.raises(StepFailed, match="refused by period_closed_get: period 2026-02 is closed"):
+        await ex.execute(with_params(s, period="2026-02"), ctx())
+    assert [r[0] for r in await rows(registry)] == ["2026-03"]
+    with pytest.raises(StepFailed, match="refuse query 'broken_get' failed"):
+        await ex.execute(with_params(step(path=str(f), refuse_query="broken_get"), period="x"), ctx())
+    with pytest.raises(StepFailed, match="unknown refuse connector 'ghost'"):
+        await ex.execute(step(path=str(f), refuse_query="period_closed_get", refuse_connector="ghost"), ctx())
+
+
+@pytest.mark.asyncio
+async def test_control_total_from_a_parameter_or_a_cell(registry, tmp_path) -> None:
+    from liberty.jobs.steps.file_load import read_cell
+    ex = FileLoadExecutor(registry)
+    f = xlsx(tmp_path / "t.xlsx", ["Item", "Quantity", "Revenue"], [["A", 2, 10.5], ["B", 3, "20,25"], [None, None, None], ["Total", None, 30.75]])
+    # the workbook's own total cell: C5 (header row 1, three data rows, a blank, then the total)
+    assert read_cell(f, "@C5", sheet=None, delimiter=None, encoding="utf-8") == 30.75
+    assert read_cell(f, "@Sales!A1", sheet=None, delimiter=None, encoding="utf-8") == "Item"
+    assert read_cell(f, "@Z99", sheet=None, delimiter=None, encoding="utf-8") is None
+    with pytest.raises(StepFailed, match="not a cell reference"):
+        read_cell(f, "@total", sheet=None, delimiter=None, encoding="utf-8")
+    base = dict(path=str(f), columns={"article": "Item", "qty": "Quantity", "revenue": "Revenue"}, constants={"period": "2026-03", "company": "00001"},
+                load_mode="replace_partition", partition_by=["period", "company"], control_column="revenue")
+    # the "Total" row is a bad article row? no — article "Total" with a blank qty loads as a row; exclude it by failing on it:
+    # keep the fixture honest: the Total row carries revenue 30.75 and would double the sum, so skip it with on_error? It has
+    # no bad cell. Instead the expected total counts it: 10.5 + 20.25 + 30.75 = 61.5.
+    res = await ex.execute(with_params(step(**base, control_total="${params.total}"), total="61.5"), ctx())
+    assert res.rows_affected == 3 and res.extras["control_total"] == "61.50"
+    # a cell of the file as the expected value — the Total row says 30.75, the rows sum to 61.5: mismatch, rolled back
+    with pytest.raises(StepFailed, match="control total mismatch on revenue: loaded 61.50, expected 30.75 — the load was rolled back"):
+        await ex.execute(step(**base, control_total="@C5"), ctx())
+    assert len(await rows(registry)) == 3          # the previous load is still there, untouched
+    # tolerance
+    assert (await ex.execute(step(**base, control_total="61.49", control_tolerance=0.02), ctx())).rows_affected == 3
+    with pytest.raises(StepFailed, match="control total mismatch"):
+        await ex.execute(step(**base, control_total="61.40", control_tolerance=0.02), ctx())
+    # a CSV cell, and the usual failures
+    c = csvfile(tmp_path / "c.csv", ["article", "qty", "revenue"], [["A", "1", "2,5"], ["", "", ""], ["total", "", "2,5"]])
+    assert read_cell(c, "@C4", sheet=None, delimiter=None, encoding="utf-8") == "2,5"   # header, A, a blank line, then the total row
+    with pytest.raises(StepFailed, match="control total '\\$\\{params.total\\}' is not a number"):
+        await ex.execute(with_params(step(path=str(c), control_column="revenue", control_total="${params.total}"), total="abc"), ctx())
+    with pytest.raises(StepFailed, match="control column 'nope' is not loaded"):
+        await ex.execute(step(path=str(c), control_column="nope", control_total="1"), ctx())
+    with pytest.raises(ValueError, match="go together"):
+        step(path=str(c), control_column="revenue")

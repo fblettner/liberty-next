@@ -44,6 +44,12 @@
   partage ». Les lignes rejetées vont dans un CSV (fichier, ligne, motif) que le détail de
   l'exécution propose au téléchargement. `[jobs] files_dir` nomme l'espace de travail (par défaut
   `<dossier de config>/.nomaflow/files`), `max_upload_mb` plafonne un envoi.
+- Deux garde-fous. `refuse_query`, une requête nommée lancée avant de toucher à quoi que ce soit,
+  avec les paramètres d'exécution et les constantes comme liaisons : une ligne en retour refuse le
+  chargement et sa première colonne donne le motif (« period 2026-02 is closed »).
+  `control_column` + `control_total` : la colonne est sommée sur les lignes chargées et comparée,
+  à `control_tolerance` près, à une valeur, un paramètre ou une cellule du fichier
+  (`@Totals!B2`) ; un écart annule le chargement de ce fichier et cite les deux nombres.
 
 **Périmètre de données par ligne (première partie)**
 - Un rôle peut maintenant restreindre **les lignes** que ses titulaires voient, en plus des

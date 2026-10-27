@@ -38,6 +38,11 @@
   "drop the file on the share" case. Rejected rows land in a CSV (file, row, reason) the run detail
   offers for download. `[jobs] files_dir` names the work area (default `<config dir>/.nomaflow/files`),
   `max_upload_mb` caps an upload.
+- Two guards. `refuse_query`, a named query run before anything is touched, with the run
+  parameters and the constants as binds: a row back refuses the load and its first column is the
+  reason ("period 2026-02 is closed"). `control_column` + `control_total`: the column is summed
+  over the loaded rows and compared, within `control_tolerance`, with a value, a parameter, or a
+  cell of the file (`@Totals!B2`); a mismatch rolls that file's load back and names both numbers.
 
 **Row-level data scope (first part)**
 - A role can now restrict **which rows** its holders see, on top of which queries they may run:

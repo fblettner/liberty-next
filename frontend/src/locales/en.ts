@@ -489,6 +489,13 @@ const en = {
       onError: 'Bad cell',
       onErrorFail: 'Fail the step',
       onErrorSkip: 'Skip the row (counted as rejected)',
+      guards: 'Guards',
+      refuseQuery: 'Refuse when this query returns a row (binds: the run parameters and constants; the first column is the reason)',
+      refuseConnector: 'Connector of the refuse query',
+      refuseConnectorTarget: 'The target connector',
+      controlColumn: 'Control column (summed over the loaded rows)',
+      controlTotal: 'Expected total (a value, ${params.x}, or a cell of the file: @B2 / @Sheet!B2)',
+      controlTolerance: 'Tolerance',
     },
     schedule: {
       manual: 'Manual',

@@ -491,6 +491,13 @@ const fr: Resources = {
       onError: 'Cellule invalide',
       onErrorFail: 'Échec de l\'étape',
       onErrorSkip: 'Ignorer la ligne (comptée comme rejetée)',
+      guards: 'Garde-fous',
+      refuseQuery: 'Refuser quand cette requête renvoie une ligne (paramètres : ceux de l\'exécution et les constantes ; la première colonne donne le motif)',
+      refuseConnector: 'Connecteur de la requête de refus',
+      refuseConnectorTarget: 'Le connecteur cible',
+      controlColumn: 'Colonne de contrôle (sommée sur les lignes chargées)',
+      controlTotal: 'Total attendu (une valeur, ${params.x}, ou une cellule du fichier : @B2 / @Feuille!B2)',
+      controlTolerance: 'Tolérance',
     },
     schedule: {
       manual: 'Manuelle',

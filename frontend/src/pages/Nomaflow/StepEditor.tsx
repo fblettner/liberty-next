@@ -809,7 +809,7 @@ function FileLoadForm({ step, patch, sqlConnectors }: FormProps) {
         </Field>
         <Field $span={2}>
           <FieldLabel>{t('nomaflow.steps.watchDir')}</FieldLabel>
-          <Input value={String(f.watch_dir ?? '')} onChange={(e) => patch({ watch_dir: e.target.value || null } as Partial<StepConfig>)} placeholder="/data/in/sales" />
+          <Input value={String(f.watch_dir ?? '')} onChange={(e) => patch({ watch_dir: e.target.value || undefined } as Partial<StepConfig>)} placeholder="/data/in/sales" />
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.watchPattern')}</FieldLabel>
@@ -817,7 +817,7 @@ function FileLoadForm({ step, patch, sqlConnectors }: FormProps) {
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.sheet')}</FieldLabel>
-          <Input value={String(f.sheet ?? '')} onChange={(e) => patch({ sheet: e.target.value || null } as Partial<StepConfig>)} placeholder={t('nomaflow.steps.sheetPlaceholder')} />
+          <Input value={String(f.sheet ?? '')} onChange={(e) => patch({ sheet: e.target.value || undefined } as Partial<StepConfig>)} placeholder={t('nomaflow.steps.sheetPlaceholder')} />
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.headerRow')}</FieldLabel>
@@ -825,7 +825,7 @@ function FileLoadForm({ step, patch, sqlConnectors }: FormProps) {
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.delimiter')}</FieldLabel>
-          <Input value={String(f.delimiter ?? '')} onChange={(e) => patch({ delimiter: e.target.value || null } as Partial<StepConfig>)} placeholder={t('nomaflow.steps.delimiterPlaceholder')} />
+          <Input value={String(f.delimiter ?? '')} onChange={(e) => patch({ delimiter: e.target.value || undefined } as Partial<StepConfig>)} placeholder={t('nomaflow.steps.delimiterPlaceholder')} />
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.encoding')}</FieldLabel>
@@ -874,6 +874,29 @@ function FileLoadForm({ step, patch, sqlConnectors }: FormProps) {
         <Field>
           <FieldLabel>{t('nomaflow.steps.batchSize')}</FieldLabel>
           <Input type="number" min={1} value={String(f.batch_size ?? 10000)} onChange={(e) => patch({ batch_size: Number(e.target.value) || 10000 } as Partial<StepConfig>)} />
+        </Field>
+      </Grid>
+      <SubHead>{t('nomaflow.steps.guards')}</SubHead>
+      <Grid>
+        <Field $span={2}>
+          <FieldLabel>{t('nomaflow.steps.refuseQuery')}</FieldLabel>
+          <Input value={String(f.refuse_query ?? '')} onChange={(e) => patch({ refuse_query: e.target.value || undefined } as Partial<StepConfig>)} placeholder="period_closed_get" />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.refuseConnector')}</FieldLabel>
+          <SearchSelect value={String(f.refuse_connector ?? '')} onChange={(v) => patch({ refuse_connector: v || undefined } as Partial<StepConfig>)} options={connOpts} anyLabel={t('nomaflow.steps.refuseConnectorTarget')} />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.controlColumn')}</FieldLabel>
+          <Input value={String(f.control_column ?? '')} onChange={(e) => patch({ control_column: e.target.value || undefined } as Partial<StepConfig>)} placeholder="revenue" />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.controlTotal')}</FieldLabel>
+          <Input value={String(f.control_total ?? '')} onChange={(e) => patch({ control_total: e.target.value || undefined } as Partial<StepConfig>)} placeholder="${params.total}  |  @Totals!B2" />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.controlTolerance')}</FieldLabel>
+          <Input type="number" min={0} step="0.01" value={String(f.control_tolerance ?? 0)} onChange={(e) => patch({ control_tolerance: Number(e.target.value) || 0 } as Partial<StepConfig>)} />
         </Field>
       </Grid>
     </>

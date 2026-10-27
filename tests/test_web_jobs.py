@@ -398,6 +398,25 @@ def test_put_jobs_parsed_round_trip(env) -> None:
         assert "added-via-put" in jobs_toml.read_text()
 
 
+def test_put_jobs_parsed_drops_null_fields(env) -> None:
+    """A builder clearing an optional field sends null; TOML has no null, so the key is dropped
+    and the model default applies on reload (tomlkit used to refuse the whole save)."""
+    app, jobs_toml = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        jobs = [{
+            "id": "loader", "description": None,
+            "steps": [{"type": "file_load", "name": "load", "path": None, "watch_dir": None, "sheet": None,
+                       "target": {"connector": "db", "table": "t"}, "constants": {"period": "2026-03", "nothing": None}}],
+        }]
+        r = client.put("/admin/config/jobs/parsed", json={"jobs": jobs}, headers=h)
+        assert r.status_code == 200, r.text
+        text = jobs_toml.read_text()
+        assert "loader" in text and "null" not in text.lower().replace("nullable", "")
+        back = client.get("/admin/config/jobs/parsed", headers=h).json()["jobs"][0]
+        assert back["steps"][0]["constants"] == {"period": "2026-03"} and "watch_dir" not in back["steps"][0] or back["steps"][0].get("watch_dir") is None
+
+
 def test_put_jobs_parsed_rejects_invalid(env) -> None:
     """A job with an unknown step type → 422, file untouched."""
     app, jobs_toml = env

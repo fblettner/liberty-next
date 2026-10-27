@@ -224,6 +224,16 @@ class Step(BaseModel):
     load_mode: LoadMode | None = None
     partition_by: list[str] = Field(default_factory=list)
     on_error: Literal["fail", "skip"] = "fail"
+    # Guards. ``refuse_query`` (a named query on ``refuse_connector``, default the target's) runs
+    # first with the run parameters + constants as binds: any row back refuses the load, the row's
+    # first column being the reason ("period 2026-03 is closed"). ``control_column`` is summed over
+    # the inserted rows and compared with ``control_total`` — a value, ``${params.x}``, or ``@B2``
+    # (a cell of the file) — within ``control_tolerance``; a mismatch rolls the load back.
+    refuse_query: str | None = None
+    refuse_connector: str | None = None
+    control_column: str | None = None
+    control_total: str | None = None
+    control_tolerance: float = Field(0.0, ge=0)
 
     # universal
     timeout_seconds: int = Field(3600, ge=1)
@@ -256,6 +266,8 @@ class Step(BaseModel):
             self._require("target_job_id")
         elif self.type is StepType.FILE_LOAD:
             self._require("target")   # the file comes from `path`, `watch_dir`, or an upload at run time
+            if (self.control_column is None) != (self.control_total is None):
+                raise ValueError(f"step {self.name!r}: `control_column` and `control_total` go together")
             if self.load_mode is LoadMode.REPLACE_PARTITION and not self.partition_by:
                 raise ValueError(f"step {self.name!r}: load_mode = replace_partition needs `partition_by`")
         return self
