@@ -477,6 +477,19 @@ def _from_jde_julian(v: Any) -> str | int | None:
         return v
 
 
+_ORDER_ALIAS = re.compile(r"(?<![\w.\"])([A-Za-z_][\w]*)\.(?=[A-Za-z_\"])")
+
+
+def _hoisted_order_by(order_clause: str) -> str:
+    """The ORDER BY re-attached OUTSIDE a wrap (``SELECT * FROM (…) lib_flt WHERE …``) can only
+    name the derived table's output columns: an author's ``ORDER BY s.company_name`` would fail
+    with "missing FROM-clause entry for table s" once a filter or a scope wraps the query. Strip
+    the ``alias.`` qualifiers (a qualified name is an output column of the inner SELECT unless the
+    author aliased it — then the clause was wrong under a wrap anyway). Expressions such as
+    ``SUM(f.quantity)`` stay the author's problem: order by the output alias instead."""
+    return _ORDER_ALIAS.sub("", order_clause)
+
+
 def _split_order_by(sql_text: str) -> tuple[str, str]:
     """Split *sql_text* at the **last top-level** ``ORDER BY`` (depth 0 in parens). Returns
     ``(body, order_clause)`` — the clause does *not* include the ``ORDER BY`` keyword.
@@ -1428,10 +1441,19 @@ class SQLConnector:
                     return h.format
                 if h.dd == "":
                     return None
-                entry = self._dict.find_entry(h.dd or h.name, connector=dict_scope or self.name)
+                entry = self._find_entry_any_case(h.dd or h.name, dict_scope)
                 return entry.format if (entry is not None and entry.format) else None
-        entry = self._dict.find_entry(name, connector=dict_scope or self.name)
+        entry = self._find_entry_any_case(name, dict_scope)
         return entry.format if (entry is not None and entry.format) else None
+
+    def _find_entry_any_case(self, key: str, dict_scope: str | None) -> Any:
+        """The dictionary entry for *key* as given, else upper-cased: a result column comes back
+        lower-cased on Postgres (``company_code``) while the dictionary files items upper-cased
+        (``COMPANY_CODE``) — without this a scope value on an integer column was bound as text."""
+        entry = self._dict.find_entry(key, connector=dict_scope or self.name)
+        if entry is None and key != key.upper():
+            entry = self._dict.find_entry(key.upper(), connector=dict_scope or self.name)
+        return entry
 
     async def _discover_columns(self, query_name: str, sql_text: str, qdef: QueryDef, params: dict[str, Any] | None) -> dict[str, str]:
         """``{lower_name: actual_name}`` of the query's result columns, found once per query
@@ -1511,7 +1533,7 @@ class SQLConnector:
         body, order_clause = _split_order_by(sql_text)
         out = f"SELECT * FROM (\n{body}\n) lib_rls\nWHERE {where}"
         if order_clause:
-            out += f"\nORDER BY {order_clause}"
+            out += f"\nORDER BY {_hoisted_order_by(order_clause)}"
         return out, {**(params or {}), **typed}
 
     def _check_write_scope(
@@ -1643,7 +1665,7 @@ class SQLConnector:
         where_clause = " AND ".join(f"({p})" for p in preds)
         out = f"SELECT * FROM (\n{body}\n) lib_flt\nWHERE 1=1 AND {where_clause}"
         if order_clause:
-            out += f"\nORDER BY {order_clause}"
+            out += f"\nORDER BY {_hoisted_order_by(order_clause)}"
         # Merge the coerced active-filter values into a fresh params dict so the
         # downstream ``_build_params`` picks them up (it reads the dict by bind name).
         new_params: dict[str, Any] = dict(params or {})

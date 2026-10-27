@@ -156,3 +156,51 @@ async def test_writes_are_checked(conn) -> None:
     # ignore mode lets a delete-by-id through (the operator's choice)
     res = await conn.execute("sales_delete", {"ID": 4}, scope=_scope([[{"column": "company", "values": ["A"]}]]))
     assert res.rowcount == 1
+
+
+@pytest.mark.asyncio
+async def test_scope_value_typed_by_the_dictionary_whatever_the_column_case(tmp_path) -> None:
+    """A result column comes back lower-cased (Postgres) while the dictionary files the item
+    upper-cased: the scope value must still be bound as the item's type (an integer column
+    compared with a text bind is a Postgres error)."""
+    from liberty.connectors.dictionary import DictionaryEntry, DictionaryFile, DictionarySection
+    url = f"sqlite+aiosqlite:///{tmp_path / 'typed.db'}"
+    eng = create_async_engine(url)
+    async with eng.begin() as c:
+        await c.execute(text("CREATE TABLE t (company_code INTEGER, qty INTEGER)"))
+        await c.execute(text("INSERT INTO t VALUES (212, 1), (25, 2)"))
+    await eng.dispose()
+    pools = PoolRegistry({"default": PoolConfig(url=url)})
+    d = DictionaryFile(default_language="en", connectors={"nomademo": DictionarySection(entries={"COMPANY_CODE": DictionaryEntry(format="integer")})})
+    cfg = SqlConnectorConfig(type="sql", pool="default", queries=[QueryDef(name="t_get", sql="SELECT company_code, qty FROM t ORDER BY company_code")])
+    c = SQLConnector("nomademo", cfg, pools, dictionary=d)
+    try:
+        sc = _scope([[{"column": "COMPANY_CODE", "values": ["212"]}]])     # the user attribute: strings
+        _sql, binds = await c.scoped_select("t_get", scope=sc, dictionary_scope="nomademo")
+        assert 212 in binds.values() and "212" not in binds.values()        # bound as the integer the dictionary says
+        assert [r["qty"] for r in (await c.execute("t_get", scope=sc, dictionary_scope="nomademo")).rows] == [1]
+    finally:
+        await pools.dispose()
+
+
+@pytest.mark.asyncio
+async def test_wrapped_query_keeps_an_alias_qualified_order_by(tmp_path) -> None:
+    """``ORDER BY s.company`` in the query: once a scope (or a filter) wraps it, the ORDER BY is
+    re-attached outside, where the alias no longer exists — the qualifier is dropped."""
+    from liberty.connectors.sql import _hoisted_order_by
+    assert _hoisted_order_by("s.company_name, f.period DESC, \"q\".x") == "company_name, period DESC, \"q\".x"
+    assert _hoisted_order_by("company") == "company"
+    url = f"sqlite+aiosqlite:///{tmp_path / 'ob.db'}"
+    eng = create_async_engine(url)
+    async with eng.begin() as c:
+        await c.execute(text("CREATE TABLE s (company TEXT, amount INTEGER)"))
+        await c.execute(text("INSERT INTO s VALUES ('B', 1), ('A', 2), ('A', 3)"))
+    await eng.dispose()
+    pools = PoolRegistry({"default": PoolConfig(url=url)})
+    cfg = SqlConnectorConfig(type="sql", pool="default", queries=[QueryDef(name="s_get", sql="SELECT s.company, s.amount FROM s ORDER BY s.company, s.amount DESC")])
+    c = SQLConnector("db", cfg, pools)
+    try:
+        res = await c.execute("s_get", scope=_scope([[{"column": "COMPANY", "values": ["A"]}]]))
+        assert [r["amount"] for r in res.rows] == [3, 2]
+    finally:
+        await pools.dispose()

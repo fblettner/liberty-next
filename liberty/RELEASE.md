@@ -72,6 +72,12 @@
 - The chat folds a turn's tool calls into one muted line ("3 tool calls", open to see them); a
   failed call keeps its message visible.
 - Dropdowns: a long code (a model id) is no longer cut short in the list.
+- A query ordered by an alias-qualified column (`ORDER BY s.company_name`) failed with "missing
+  FROM-clause entry" as soon as a filter or a data scope wrapped it: the hoisted ORDER BY now
+  drops the qualifiers.
+- Data scope: a rule's values are bound as the dictionary item's type even when the result
+  column comes back lower-cased (Postgres), so a company code scoped from a user attribute no
+  longer fails with "integer = character varying" on a screen or in the Explorer.
 - nomaflow `file_load`: with `partition_by`, the refuse query runs once per partition the file
   carries, with the partition columns as binds (`:YEAR`, `:MONTH`…), so a closed-period guard
   follows the file rather than a typed parameter.

@@ -81,6 +81,13 @@
 - Le chat replie les appels d'outils d'un tour en une ligne discrète (« 3 appels d'outil », à
   ouvrir pour les voir) ; un appel en échec garde son message visible.
 - Listes déroulantes : un code long (un identifiant de modèle) n'est plus tronqué dans la liste.
+- Une requête triée sur une colonne qualifiée par un alias (`ORDER BY s.company_name`) échouait
+  avec « missing FROM-clause entry » dès qu'un filtre ou un périmètre l'enveloppait : le ORDER BY
+  remonté perd maintenant les qualificatifs.
+- Périmètre de données : les valeurs d'une règle sont liées avec le type de l'élément du
+  dictionnaire même quand la colonne revient en minuscules (Postgres) ; un code société issu d'un
+  attribut utilisateur n'échoue plus avec « integer = character varying » sur un écran ou dans
+  l'Explorateur.
 - nomaflow `file_load` : avec `partition_by`, la requête de refus s'exécute une fois par partition
   présente dans le fichier, les colonnes de partition en binds (`:YEAR`, `:MONTH`…) : une garde de
   période clôturée suit le fichier plutôt qu'un paramètre saisi.
