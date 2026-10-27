@@ -249,6 +249,9 @@ pages/Settings/        one *Builder per config section + the Visual Designer (Sc
                        AppBuilder, ReportsBuilder, ThemeBuilder, TechnicalDashboard,
                        Package / ChangePackages / IntegrityBuilder (reached from nomaflow pages)
 pages/Nomaflow/        JobsList, JobEditor, StepEditor, RunDetail, Schedule, RetentionPanel
+pages/Explorer/        the Data Explorer page: index (model, the AnalysisDefinition, runs, drill), FieldsPane,
+                       Shelves (rows / measures / filters chips), PeriodBar, ResultTable; logic in services/explorer.ts
+                       (definition ⇄ requests, filter bag, click-to-add — tested), shapes in types/explorer.ts
 pages/DashboardView/ Chat/ (AiDrawer) Reports/ Notifications/ (the inbox; components/NotificationBell
                        in the header, live via SioContext.subscribeNotifications) ScreenAssistant/ HttpRunner/ Monitoring/ Login/
 services/ types/       no-React helpers (lookups, cells, gridViews, poolSchema, sqlCompletion…) and

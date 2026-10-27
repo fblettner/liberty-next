@@ -28,6 +28,7 @@ const PAGE_COMPONENTS: Record<string, LazyExoticComponent<ComponentType>> = {
   '/nomaflow/integrity': lazy(() => import('../pages/Nomaflow/IntegrityPage')),
   '/reports': lazy(() => import('../pages/Reports')),
   '/notifications': lazy(() => import('../pages/Notifications')),
+  '/explorer': lazy(() => import('../pages/Explorer')),
 }
 
 // A ``screen`` tab opens a designed screen by id (``/screen/<app>/<id>``). We resolve the screen

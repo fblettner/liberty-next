@@ -105,7 +105,21 @@
   `NULLIF`, a boolean renders `Y` / `N`, a JDE Julian date is converted before a date function. A
   numeric result is a measure, any other a dimension; a type error names the position.
   `POST /api/explorer/<app>/calc/test` compiles one and samples eight values — the editor's
-  "Test" before "Save". The UI, saved analyses and the export follow in the next parts.
+  "Test" before "Save".
+- **The page (first part).** A Data Explorer page (`/explorer`, the compass in the header when the
+  caller has a model; a `page` menu item can point at it too) with the model's **fields pane**
+  (entities with their 1..1 / 1..n badge, dimensions then Σ measures, a search; a click adds the
+  field, the funnel adds it as a filter, a drag drops it on a shelf; double-click makes an entity
+  the analysed one), the **shelves** — Rows (a date with its bucket), Measures (an aggregate each,
+  "+" for a row count, a dimension dropped there counts its distinct values) and Filters (an
+  operator by type, an enum or lookup field picks from its values, a date gets from → to; chips
+  reorder by drag) — a **period bar** (the date field, the shared presets and calendar), Top N,
+  and the result as a table: measures as numbers, dimensions through their enum / lookup rule,
+  sortable by header. The analysis re-runs on its own when its definition changes. **Detail**
+  view lists the rows with the Rows shelf as columns, paged; a click on an aggregate row
+  **drills** to the rows behind it (the primary's keys, the dimensions, the measures' fields),
+  with the cell's values shown and a way back. A superuser can show the SQL. Pivot, charts,
+  calculated-field editing, saved analyses and the export follow in the next parts.
 
 **Screens: `editable_when`, a row-level read-only rule**
 - A screen can say when an existing row may be changed: `editable_when = [{ field = "PERIOD_STATUS",

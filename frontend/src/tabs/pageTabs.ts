@@ -12,6 +12,7 @@ export const PAGE_TAB_PATHS = [
   '/nomaflow/integrity',
   '/reports',
   '/notifications',
+  '/explorer',
 ] as const
 
 export function isPageTabPath(pathname: string): boolean {

@@ -118,8 +118,24 @@
   s'affiche `Y` / `N`, une date julienne JDE est convertie avant une fonction de date. Un résultat
   numérique est une mesure, tout autre une dimension ; une erreur de type nomme la position.
   `POST /api/explorer/<app>/calc/test` en compile un et prélève huit valeurs : le « Tester »
-  de l'éditeur avant « Enregistrer ». L'interface, les analyses enregistrées et l'export suivent
-  dans les parties suivantes.
+  de l'éditeur avant « Enregistrer ».
+- **La page (première partie).** Une page Explorateur de données (`/explorer`, la boussole dans
+  l'en-tête quand l'appelant a un modèle ; un élément de menu `page` peut aussi y mener) avec le
+  **volet des champs** du modèle (les entités avec leur badge 1..1 / 1..n, les dimensions puis les
+  mesures Σ, une recherche ; un clic ajoute le champ, l'entonnoir l'ajoute en filtre, un
+  glisser le dépose sur une étagère ; un double-clic fait d'une entité l'entité analysée), les
+  **étagères** — Lignes (une date avec son regroupement), Mesures (un agrégat chacune, « + » pour
+  un nombre de lignes, une dimension déposée là compte ses valeurs distinctes) et Filtres (un
+  opérateur selon le type, un champ énuméré ou à liste de référence choisit parmi ses valeurs, une
+  date reçoit de → à ; les puces se réordonnent en glissant) — une **barre de période** (le champ
+  date, les préréglages et le calendrier partagés), un Top N, et le résultat en tableau : les
+  mesures en nombres, les dimensions à travers leur règle enum / liste, triable par en-tête.
+  L'analyse se relance d'elle-même quand sa définition change. La vue **Détail** liste les lignes
+  avec l'étagère Lignes en colonnes, paginée ; un clic sur une ligne agrégée **descend** vers les
+  lignes derrière elle (les clés de l'entité, les dimensions, les champs des mesures), avec les
+  valeurs de la cellule affichées et un retour. Un superutilisateur peut afficher le SQL. Le
+  tableau croisé, les graphiques, l'édition des champs calculés, les analyses enregistrées et
+  l'export suivent dans les parties suivantes.
 
 **Écrans : `editable_when`, une règle de lecture seule par ligne**
 - Un écran peut dire quand une ligne existante peut être modifiée : `editable_when = [{ field =

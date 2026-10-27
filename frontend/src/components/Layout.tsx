@@ -6,7 +6,7 @@ import { Outlet, useMatch, useNavigate, useLocation } from 'react-router-dom'
 import { isPageTabPath } from '../tabs/pageTabs'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Sun, Moon, LogOut, User, Sparkles, X, Bell } from 'lucide-react'
+import { Sun, Moon, LogOut, User, Sparkles, X, Bell, Compass } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { useTabs } from '../tabs/TabsContext'
 import { LANGUAGE_KEY, type Language } from '../i18n'
@@ -129,7 +129,7 @@ function readDark(): boolean {
 export default function Layout() {
   const { t, i18n } = useTranslation()
   const { user, logout } = useAuth()
-  const { license, refresh: refreshWorkspace } = useWorkspace()
+  const { license, refresh: refreshWorkspace , explorerModels } = useWorkspace()
   const { tabs, closeAll } = useTabs()
   const navigate = useNavigate()
   // a configured-but-broken key (expired / bad signature) is worth flagging; "no key" isn't (the open framework)
@@ -272,6 +272,12 @@ export default function Layout() {
         {user && (
           <>
             <Sep />
+            {explorerModels && explorerModels.length > 0 && (
+              <>
+                <UtilBtn type="button" title={t('explorer.title')} onClick={() => navigate('/explorer')} $active={pathname === '/explorer'}><Compass size={14} /></UtilBtn>
+                <Sep />
+              </>
+            )}
             <NotificationBell>
               {(open) => <UtilBtn type="button" title={t('notifications.title')} style={open ? { color: colors.text.primary } : undefined}><Bell size={14} /></UtilBtn>}
             </NotificationBell>
