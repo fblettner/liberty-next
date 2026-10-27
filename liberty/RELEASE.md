@@ -76,6 +76,13 @@
   become cards; the numbers follow the reader's language (`1 234,5` / `1,234.5`); the
   template's own words (cover labels, confidential lines) follow it too. Excel keeps the data
   only.
+- **Charts pivot on a column.** A chart spec takes a `series` column: one series per distinct
+  value of it (a process, a status…), each the aggregate of the first `y` column — conflicts
+  per refresh stacked by process from a three-column query, no pivot in SQL. In the chart
+  editors as "Pivot by"; the dashboard export draws the same pivot. The widget editor dialog
+  edits the three synthesis kinds (figure, list, bars) with their columns, formats and a live
+  preview, and every widget's subtitle; a PDF card shows its sub line in small type under the
+  figure.
 - **Synthesis widgets for the dashboards.** Three widget kinds for a synthesis page like
   nomaubl's billing overview, all configuration: `stat` (a figure card from the query's first
   row: the value formatted with a unit, a sub line templated over the row — `"{ENABLED:integer}

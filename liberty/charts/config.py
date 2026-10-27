@@ -74,6 +74,14 @@ class ChartSpec(BaseModel):
         description="Result column(s) for the Y axis. Empty → nothing to render. Pie collapses to the first entry.",
         json_schema_extra={"x_enum_ref": "CHART_COLUMNS", "x_case": "upper"},
     )
+    series: str | None = Field(
+        default=None,
+        description=(
+            "Pivot column: one series per distinct value of this column (a process, a status…), each the "
+            "aggregate of the first ``y`` column. Blank → one series per ``y`` column."
+        ),
+        json_schema_extra={"x_enum_ref": "CHART_COLUMNS", "x_case": "upper"},
+    )
     aggregation: Aggregation = Field(
         default="sum",
         description=(

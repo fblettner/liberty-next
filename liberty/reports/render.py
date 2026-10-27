@@ -688,6 +688,7 @@ html, body {{
 }}
 .content table.kpi-grid tbody tr td.kpi .kpi-label {{ font-size: 8pt; color: #6b7280; text-transform: uppercase; letter-spacing: 1pt; margin-bottom: 1.5mm; }}
 .content table.kpi-grid tbody tr td.kpi .kpi-value {{ font-size: 16pt; font-weight: 700; color: {primary}; }}
+.content table.kpi-grid tbody tr td.kpi .kpi-sub {{ font-size: 8.5pt; color: #4b5563; margin-top: 1.5mm; }}
 
 /* ============ LINKS ============ */
 a {{ color: #1d4ed8; text-decoration: none; }}

@@ -165,6 +165,7 @@ class Section:
     note: str | None = None
     truncated: bool = False
     chart: str | None = None        # a chart section: bar | line | pie, drawn in the PDF
+    subs: list[str | None] = field(default_factory=list)   # a KPI section: the line under each card's figure
     stacked: bool = False
     horizontal: bool = False
     donut: bool = False
@@ -456,9 +457,11 @@ KPI_PER_ROW = 4
 def _kpi_cards(s: Section, lang: str | None) -> list[str]:
     """The KPI section as cards: a table (the renderer lays tables out reliably), up to
     :data:`KPI_PER_ROW` per row."""
+    values = s.rows[0] if s.rows else []
     cards = [
-        f'<td class="kpi"><div class="kpi-label">{_md_cell(h, False)}</div><div class="kpi-value">{_md_cell(v, False, lang) or "—"}</div></td>'
-        for h, v in zip(s.headers, s.rows[0] if s.rows else [], strict=False)
+        f'<td class="kpi"><div class="kpi-label">{_md_cell(h, False)}</div><div class="kpi-value">{_md_cell(v, False, lang) or "—"}</div>'
+        + (f'<div class="kpi-sub">{_md_cell(s.subs[i], False)}</div>' if i < len(s.subs) and s.subs[i] else "") + "</td>"
+        for i, (h, v) in enumerate(zip(s.headers, values, strict=False))
     ]
     # the last row padded with empty cells so every card keeps the same width
     rows = ["<tr>" + "".join(cards[i:i + KPI_PER_ROW]) + '<td class="kpi-empty"></td>' * (KPI_PER_ROW - len(cards[i:i + KPI_PER_ROW])) + "</tr>" for i in range(0, len(cards), KPI_PER_ROW)]

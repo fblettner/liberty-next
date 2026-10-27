@@ -19,6 +19,8 @@ export interface ChartSpec {
   /** Column names for the series — the y-axis (or slice value for pie). Empty → no chart. */
   y: string[]
   aggregation: Aggregation
+  /** Pivot column: one series per distinct value of this column, each the aggregate of `y[0]`. */
+  series?: string
   /** Bar / area only — stack the series rather than place side-by-side. */
   stacked?: boolean
   /** Show the legend (default true when >1 series, false for a single one). */
@@ -65,6 +67,8 @@ export interface SavedChartSpec {
   x: string
   y: string[]
   aggregation: Aggregation
+  /** Pivot column (one series per distinct value), backend's `series`. */
+  series?: string | null
   stacked?: boolean | null
   show_legend?: boolean | null
   show_grid?: boolean | null
@@ -79,6 +83,7 @@ export interface SavedChartSpec {
  *  (snake_case, defaults stripped so the file stays diff-friendly). Used by SaveChartModal. */
 export function toSavedSpec(spec: ChartSpec): SavedChartSpec {
   const out: SavedChartSpec = { type: spec.type, x: spec.x, y: spec.y, aggregation: spec.aggregation }
+  if (spec.series) out.series = spec.series
   if (spec.stacked != null) out.stacked = spec.stacked
   if (spec.showLegend != null) out.show_legend = spec.showLegend
   if (spec.showGrid != null) out.show_grid = spec.showGrid
@@ -108,6 +113,7 @@ export function fromSavedSpec(saved: SavedChartSpec): ChartSpec {
     sortByX: saved.sort_by_x ?? undefined,
     colors: saved.colors ?? undefined,
     yAxis: saved.y_axis ?? undefined,
+    ...(saved.series ? { series: saved.series } : {}),
   }
 }
 

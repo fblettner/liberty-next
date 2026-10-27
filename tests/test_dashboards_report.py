@@ -107,8 +107,16 @@ def test_synthesis_widgets_shape_and_format() -> None:
            "rows": [{"title": "Dormant", "hint": "No login for 90 days", "amount": 1500, "n": 7, "tone": "warn", "status": "to review", "users": 120, "enabled": 110},
                     {"title": "Generic", "hint": None, "amount": 0, "n": 2, "tone": "error", "status": "", "users": 120, "enabled": 110}]}
     assert fill_template("{USERS:integer} users · {ENABLED} on · {NOPE}", res["rows"][0], res, "en") == "120 users · 110 on · {NOPE}"
-    assert stat_card({"label": "Users", "value_column": "USERS", "format": "integer", "sub": "{ENABLED:integer} enabled"}, res, "en") == ("Users", "120 — 110 enabled")
+    assert stat_card({"label": "Users", "value_column": "USERS", "format": "integer", "sub": "{ENABLED:integer} enabled"}, res, "en") == ("Users", "120", "110 enabled")
     s = list_section("Decisions", {"title_column": "TITLE", "subtitle_column": "HINT", "value_column": "AMOUNT", "format": "currency", "count_column": "N", "count_label": "{n} users", "tag_column": "STATUS", "max_rows": 1}, res, "en")
     assert s.headers == ["Decision", "hint", "Amount", "n", "status"] and s.rows == [["Dormant", "No login for 90 days", "1,500 €", "7 users", "to review"]]
     b = bars_section("Per component", {"label_column": "TITLE", "value_column": "AMOUNT", "share": "total", "note": "n"}, res, "en")
     assert b.headers == ["Decision", "Amount", "%"] and b.rows[0] == ["Dormant", "1,500", "100.0 %"] and b.note == "n"
+
+
+def test_chart_section_pivots_a_series_column() -> None:
+    res = {"columns": [{"name": "refresh", "label": "Refresh"}, {"name": "process"}, {"name": "lines"}],
+           "rows": [{"refresh": "2026-05", "process": "P2P", "lines": 10}, {"refresh": "2026-05", "process": "O2C", "lines": 4},
+                    {"refresh": "2026-05", "process": "P2P", "lines": 2}, {"refresh": "2026-04", "process": "O2C", "lines": 7}]}
+    s = chart_section("Trend", {"spec": {"type": "bar", "x": "REFRESH", "series": "PROCESS", "y": ["LINES"], "aggregation": "sum", "stacked": True, "sort_by_x": True}}, res)
+    assert s.headers == ["Refresh", "P2P", "O2C"] and s.rows == [["2026-04", None, 7.0], ["2026-05", 12.0, 4.0]] and s.stacked

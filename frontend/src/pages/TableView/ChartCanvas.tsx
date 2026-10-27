@@ -19,7 +19,7 @@ import {
   XAxis, YAxis,
 } from 'recharts'
 import type { TooltipContentProps, TooltipPayloadEntry, TooltipValueType } from 'recharts'
-import { buildChartData, resolveColumnName } from '../../services/chartData'
+import { buildChartData, resolveColumnName, seriesKeys } from '../../services/chartData'
 import { cellText, enumMap, ruleCell } from '../../services/cells'
 import { useLookupBatch, type LookupSpec } from '../../services/lookups'
 import type { Column, QueryResult } from '../../types/connectors'
@@ -91,7 +91,7 @@ export interface ChartCanvasProps {
 export function ChartCanvas({ result, spec, connector, emptyMessage, noDataMessage, height = '100%' }: ChartCanvasProps) {
   const allCols = useMemo(() => result.columns.filter((c) => !c.hidden), [result])
   const data = useMemo(() => buildChartData(result, spec), [result, spec])
-  const showLegend = spec.showLegend ?? spec.y.length > 1
+  const showLegend = spec.showLegend ?? (spec.series ? true : spec.y.length > 1)
 
   // LOOKUP fetch for the X column (one round-trip per connector/query, shared via the session
   // cache). The spec's `x` may be authored in a different case than the result returned
@@ -214,8 +214,10 @@ export function renderChart(
   const yAxisSide = (i: number): 'left' | 'right' => spec.yAxis?.[i] === 'right' ? 'right' : 'left'
   const hasRight = (spec.yAxis ?? []).some((s) => s === 'right')
   const grid = spec.showGrid !== false
-  const yLabels = spec.y.map((y) => {
-    const col = allCols.find((c) => c.name === y)
+  // the series: the y columns, or the pivot column's values (then the key IS the label)
+  const keys = seriesKeys(spec, data)
+  const yLabels = keys.map((y) => {
+    const col = spec.series ? undefined : allCols.find((c) => c.name === y)
     return col ? opts.seriesName(col) : y
   })
   const tooltip = (
@@ -284,7 +286,7 @@ export function renderChart(
         {yAxes}
         {tooltip}
         {legend}
-        {spec.y.map((y, i) => (
+        {keys.map((y, i) => (
           <Line key={y} dataKey={y} name={yLabels[i]} stroke={seriesColor(i)} strokeWidth={2}
             {...axisProps(i)}
             dot={data.length <= 50 ? { r: 3, strokeWidth: 0, fill: seriesColor(i) } : false}
@@ -297,13 +299,13 @@ export function renderChart(
   if (spec.type === 'area') {
     return (
       <AreaChart data={data} margin={CHART_MARGIN}>
-        <GradientDefs count={spec.y.length} gradId={opts.gradId} seriesColor={seriesColor} />
+        <GradientDefs count={keys.length} gradId={opts.gradId} seriesColor={seriesColor} />
         {cartesianGrid}
         <XAxis dataKey="x" tickFormatter={opts.formatX} tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} />
         {yAxes}
         {tooltip}
         {legend}
-        {spec.y.map((y, i) => (
+        {keys.map((y, i) => (
           <Area key={y} dataKey={y} name={yLabels[i]} type="monotone"
             {...axisProps(i)}
             stroke={seriesColor(i)} strokeWidth={2}
@@ -316,13 +318,13 @@ export function renderChart(
   }
   return (
     <BarChart data={data} margin={CHART_MARGIN} barCategoryGap="22%">
-      <GradientDefs count={spec.y.length} gradId={opts.gradId} seriesColor={seriesColor} />
+      <GradientDefs count={keys.length} gradId={opts.gradId} seriesColor={seriesColor} />
       {cartesianGrid}
       <XAxis dataKey="x" tickFormatter={opts.formatX} tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} />
       {yAxes}
       {tooltip}
       {legend}
-      {spec.y.map((y, i) => (
+      {keys.map((y, i) => (
         <Bar key={y} dataKey={y} name={yLabels[i]} fill={`url(#${opts.gradId}-${i})`}
           {...axisProps(i)}
           radius={[6, 6, 0, 0]}                 // rounded top corners — modern bar look

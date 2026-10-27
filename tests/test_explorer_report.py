@@ -135,6 +135,9 @@ async def test_pdf_markdown_draws_the_charts_and_localises(env) -> None:  # noqa
     md = sections_to_markdown(sections, "Report", lang="fr", heading=False, figures=True)
     assert not md.startswith("# ") and md.count("<svg") == 1 and '<div class="chart-figure">' in md and "| NAME |" in md
     assert '<table class="kpi-grid">' in md and "<b>Total" not in md and "259" in md
+    from liberty.explorer.report import Section
+    card = sections_to_markdown([Section("K", "kpi", ["Users"], [[44]], subs=["23 enabled"])], "R", figures=True)
+    assert '<div class="kpi-value">44</div><div class="kpi-sub">23 enabled</div>' in card
     plain = sections_to_markdown(sections, "Report")
     assert plain.startswith("# Report") and "<svg" not in plain and "| 259 |" in plain
     assert load_workbook(io.BytesIO(sections_to_xlsx(sections))).sheetnames == ["Table", "Chart", "KPI"]

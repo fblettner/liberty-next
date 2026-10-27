@@ -86,6 +86,14 @@
   digest. Les KPI deviennent des cartes ; les nombres suivent la langue du lecteur (`1 234,5` /
   `1,234.5`), les mots du gabarit (libellés de couverture, mentions de confidentialité) aussi.
   Excel garde les données seules.
+- **Les graphiques pivotent sur une colonne.** Une spec de graphique prend une colonne
+  `series` : une série par valeur distincte (un processus, un statut…), chacune l'agrégat de
+  la première colonne `y` — les conflits par rafraîchissement empilés par processus depuis une
+  requête à trois colonnes, sans pivot SQL. Dans les éditeurs de graphiques sous « Pivoter
+  par » ; l'export du tableau de bord dessine le même pivot. La boîte d'édition d'un widget
+  édite les trois sortes de synthèse (chiffre, liste, barres) avec leurs colonnes, formats et
+  un aperçu, et le sous-titre de chaque widget ; une carte du PDF montre sa ligne secondaire
+  en petit sous le chiffre.
 - **Des widgets de synthèse pour les tableaux de bord.** Trois sortes de widgets pour une page
   de synthèse comme celle de la facturation de nomaubl, en configuration : `stat` (une carte
   chiffre depuis la première ligne de la requête : la valeur formatée avec une unité, une ligne

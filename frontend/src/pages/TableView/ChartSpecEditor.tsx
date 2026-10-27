@@ -81,6 +81,14 @@ export function ChartSpecEditor({ result, spec, onChange, trailing }: ChartSpecE
           <SearchSelect value={spec.x} onChange={(v) => onChange({ ...spec, x: v })} options={colOpts} placeholder={t('chart.spec.pick')} />
         </Field>
       </SpecCell>
+      {spec.type !== 'pie' && (
+        <SpecCell>
+          <Field label={t('chart.spec.pivot', 'Pivot by')}>
+            <SearchSelect value={spec.series ?? ''} onChange={(v) => onChange({ ...spec, series: v || undefined })} options={colOpts}
+              anyLabel={t('common.none', 'None')} placeholder={t('chart.spec.pivotHint', 'One series per value')} />
+          </Field>
+        </SpecCell>
+      )}
       <Field label={t('chart.spec.series', 'Series')}>
         <SeriesList>
           {spec.y.map((yName, i) => (

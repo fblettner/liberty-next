@@ -203,6 +203,19 @@ def chart_section(title: str, widget: dict[str, Any], result: dict[str, Any], no
     headers = [_label(result, xk), *[_label(result, yk) for yk in yks]]
     rows_in = result.get("rows") or []
     agg = spec.get("aggregation") or "sum"
+    if spec.get("series"):
+        # one series per distinct value of the series column, each the aggregate of y[0]
+        sk, yk = resolve_column(result, spec["series"]), yks[0]
+        groups: dict[str, dict[str, list[float | None]]] = {}
+        names: list[str] = []
+        for r in rows_in:
+            x, sname = _category(r.get(xk)), _category(r.get(sk))
+            if sname not in names:
+                names.append(sname)
+            groups.setdefault(x, {}).setdefault(sname, []).append(_num(r.get(yk)))
+        keys = sorted(groups) if spec.get("sort_by_x") else list(groups)
+        rows = [[k, *[(_agg(groups[k][n], agg) if n in groups[k] else None) for n in names]] for k in keys]
+        return Section(title, "chart", [_label(result, xk), *names], rows[:MAX_ROWS], note=note, truncated=len(rows) > MAX_ROWS, chart=kind, stacked=bool(spec.get("stacked")))
     if agg == "none":
         rows = [[_category(r.get(xk)), *[_num(r.get(yk)) for yk in yks]] for r in rows_in]
     else:
@@ -263,16 +276,14 @@ def fill_template(template: str, row: dict[str, Any], result: dict[str, Any], la
     return _TEMPLATE.sub(sub, template)
 
 
-def stat_card(widget: dict[str, Any], result: dict[str, Any], lang: str | None) -> tuple[str, Any]:
-    """The figure of a stat widget (its first row): ``(label, text)``, the sub line after an
-    em dash when the widget has one."""
+def stat_card(widget: dict[str, Any], result: dict[str, Any], lang: str | None) -> tuple[str, Any, str | None]:
+    """The figure of a stat widget (its first row): ``(label, figure text, sub line)``."""
     rows = result.get("rows") or []
     row = rows[0] if rows else {}
     col = resolve_column(result, widget.get("value_column") or "")
     text = format_value(row.get(col), widget.get("format"), widget.get("unit"), lang) if row else ""
-    if widget.get("sub") and row:
-        text = f"{text} — {fill_template(widget['sub'], row, result, lang)}" if text else fill_template(widget["sub"], row, result, lang)
-    return widget.get("label") or widget.get("query") or "", text or None
+    sub = fill_template(widget["sub"], row, result, lang) if (widget.get("sub") and row) else None
+    return widget.get("label") or widget.get("query") or "", text or None, sub
 
 
 def list_section(title: str, widget: dict[str, Any], result: dict[str, Any], lang: str | None) -> Section:
@@ -311,8 +322,9 @@ def bars_section(title: str, widget: dict[str, Any], result: dict[str, Any], lan
     return Section(title, "table", headers, out, note=widget.get("note"))
 
 
-def kpi_section(title: str, cards: list[tuple[str, Any]]) -> Section:
-    return Section(title, "kpi", [h for h, _v in cards], [[v for _h, v in cards]])
+def kpi_section(title: str, cards: list[tuple[str, Any, str | None]]) -> Section:
+    """One card row: ``(label, value, sub line)`` per card."""
+    return Section(title, "kpi", [h for h, _v, _s in cards], [[v for _h, v, _s in cards]], subs=[sb for _h, _v, sb in cards])
 
 
 async def dashboard_sections(
@@ -327,7 +339,7 @@ async def dashboard_sections(
     filters = dashboard.get("filters") or []
     period = dashboard.get("period")
     out: list[Section] = []
-    cards: list[tuple[str, Any]] = []
+    cards: list[tuple[str, Any, str | None]] = []
 
     def flush() -> None:
         if cards:
@@ -348,7 +360,7 @@ async def dashboard_sections(
             out.append(Section(title, "error", ["error"], [[str(exc)]]))
             continue
         if w.get("type") == "kpi":
-            cards.append((title, kpi_display(kpi_value(res, w.get("column") or "", w.get("aggregation") or "count"), w.get("format"), lang)))
+            cards.append((title, kpi_display(kpi_value(res, w.get("column") or "", w.get("aggregation") or "count"), w.get("format"), lang), None))
             continue
         if w.get("type") == "stat":
             cards.append(stat_card(w, res, lang))

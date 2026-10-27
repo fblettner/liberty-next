@@ -78,8 +78,42 @@ function applyAggregation(values: (number | null)[], agg: Aggregation): number |
   }
 }
 
+/** The series keys of the chart data: the pivot column's distinct values (first seen) when the
+ *  spec has one, else the y columns. */
+export function seriesKeys(spec: ChartSpec, data: ChartDatum[]): string[] {
+  if (!spec.series) return spec.y
+  const keys: string[] = []
+  for (const d of data) for (const k of Object.keys(d)) if (k !== 'x' && !keys.includes(k)) keys.push(k)
+  return keys
+}
+
 export function buildChartData(result: QueryResult, spec: ChartSpec): ChartDatum[] {
   if (!spec.x || spec.y.length === 0) return []
+  if (spec.series) {
+    // pivot: one series per distinct value of the series column, each the aggregate of y[0]
+    const xKey = resolveColumnName(result, spec.x), sKey = resolveColumnName(result, spec.series), yKey = resolveColumnName(result, spec.y[0])
+    const groups = new Map<string, Map<string, (number | null)[]>>()
+    const names: string[] = []
+    for (const r of result.rows) {
+      const x = formatCategory(r[xKey]), name = formatCategory(r[sKey])
+      if (!names.includes(name)) names.push(name)
+      let g = groups.get(x)
+      if (!g) { g = new Map(); groups.set(x, g) }
+      let list = g.get(name)
+      if (!list) { list = []; g.set(name, list) }
+      list.push(toNumber(r[yKey]))
+    }
+    const xs = spec.sortByX ? [...groups.keys()].sort() : [...groups.keys()]
+    return xs.map((x) => {
+      const datum: ChartDatum = { x }
+      const g = groups.get(x)
+      for (const name of names) {
+        const values = g?.get(name)
+        datum[name] = values ? (spec.aggregation === 'none' ? values[0] : applyAggregation(values, spec.aggregation)) : null
+      }
+      return datum
+    })
+  }
   // Resolve spec column names to the actual case used in result rows once, here. Postgres
   // returns lowercase keys for unquoted identifiers; if the operator authored the spec with
   // uppercase column names (matching v1's conventions), a direct `r[spec.x]` lookup would miss.
