@@ -37,7 +37,7 @@ def test_load_returns_empty_when_path_is_none() -> None:
 
 
 def test_load_parses_one_template(tmp_path: Path) -> None:
-    toml_text = dedent(
+    _toml_text = dedent(
         '''
         [reports.audit-summary]
         title = "Audit licences — synthèse"

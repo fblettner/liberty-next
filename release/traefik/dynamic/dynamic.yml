@@ -20,7 +20,9 @@ http:
     traefik-auth:
       basicAuth:
         users:
-          - "admin:$2y$05$LQILPh4NZXEx.ck6BhYbaec/ra38THfFtQ5Rlq2Tw4bMpyEzpGFJq"
+          # From the traefik service's environment (install.sh writes TRAEFIK_DASHBOARD_USERS to
+          # .env with a per-install random password). Go template: the file provider renders it.
+          - '{{ env "TRAEFIK_DASHBOARD_USERS" }}'
           # admin / admin — REGENERATE before exposing to the internet.
 
     # ─── Sensible default security headers ────────────────────────────────────────

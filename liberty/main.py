@@ -533,6 +533,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url="/docs",      # Swagger UI — interactive
         redoc_url="/redoc",    # ReDoc — print-friendly + better description rendering
     )
+    from liberty.observability import RequestIdMiddleware
+
+    # Outermost: every response carries X-Request-ID (the caller's, or a fresh one) and every log
+    # line emitted while handling the request carries the same id.
+    app.add_middleware(RequestIdMiddleware)
     # Finish wiring the Socket.IO layer now that the FastAPI app exists. This
     # runs at create_app time (before the lifespan), so `LibertySio.__init__`
     # registers the event handlers on a real ``AsyncServer`` that's about to be
@@ -685,7 +690,7 @@ app = create_app()
 asgi_app = app.asgi_app   # type: ignore[attr-defined]
 
 
-def _setup_app_logging(level: str) -> None:
+def _setup_app_logging(level: str, fmt: str = "text") -> None:
     """Give the ``liberty`` logger tree its own stdout handler.
 
     uvicorn's logging config only wires up the ``uvicorn`` loggers — it never
@@ -700,6 +705,8 @@ def _setup_app_logging(level: str) -> None:
     so a deployment that sets ``log_level = "warning"`` still gets a quiet
     console while the run-log buffer keeps capturing INFO. ``propagate = False``
     avoids a double emit via root."""
+    from liberty.observability import RequestIdFilter, make_formatter
+
     lg = logging.getLogger("liberty")
     if lg.level == logging.NOTSET or lg.level > logging.INFO:
         lg.setLevel(logging.INFO)
@@ -710,9 +717,8 @@ def _setup_app_logging(level: str) -> None:
         return
     handler = logging.StreamHandler()
     handler.setLevel(level.upper())
-    handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname)-7s %(name)s — %(message)s", datefmt="%H:%M:%S",
-    ))
+    handler.addFilter(RequestIdFilter())
+    handler.setFormatter(make_formatter(fmt))
     lg.addHandler(handler)
 
 
@@ -720,7 +726,7 @@ def run() -> None:
     import uvicorn
 
     settings = load_settings()
-    _setup_app_logging(settings.app.log_level)
+    _setup_app_logging(settings.app.log_level, settings.app.log_format)
     uvicorn.run(
         "liberty.main:asgi_app",
         host=settings.app.host,

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from liberty.connectors.db import PoolRegistry
 from liberty.jobs.models import Base
+from liberty.schema_sync import SchemaChange, sync_tables
 
 
 class JobDatabase:
@@ -56,11 +57,12 @@ class JobDatabase:
                 await session.rollback()
                 raise
 
-    async def create_schema(self) -> None:
-        """Create the ``nomaflow_*`` tables on the configured pool if absent (idempotent)."""
+    async def create_schema(self) -> list[SchemaChange]:
+        """Create the ``nomaflow_*`` tables on the configured pool if absent and forward-add
+        missing columns (idempotent). Returns what was added."""
         engine = self._pools.engine(self._pool_name)
         async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+            return await conn.run_sync(sync_tables, Base.metadata)
 
     async def drop_schema(self) -> None:  # pragma: no cover - destructive helper
         engine = self._pools.engine(self._pool_name)

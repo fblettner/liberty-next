@@ -44,7 +44,7 @@ def _worker(conn: Any, connect_params: dict[str, str], sql: str, params: dict[st
             cur = db.cursor()
             cur.execute(sql, params or {})
             cols = [d[0] for d in cur.description]
-            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            rows = [dict(zip(cols, r, strict=False)) for r in cur.fetchall()]
         finally:
             db.close()
         conn.send({"rows": rows})

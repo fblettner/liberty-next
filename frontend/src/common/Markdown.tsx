@@ -68,6 +68,7 @@ export function Markdown({ children, compact }: { children: string; compact?: bo
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
+          // eslint-disable-next-line jsx-a11y/anchor-has-content -- children arrive via ...props
           a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
         }}
       >

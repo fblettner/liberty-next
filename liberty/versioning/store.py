@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS upgrade_history (
   kind         TEXT    NOT NULL,      /* install | upgrade */
   summary      TEXT,
   who          TEXT,
-  created_at   TEXT    NOT NULL
+  created_at   TEXT    NOT NULL,
+  report       TEXT                   /* upgrade report file (under .versions/upgrades/), 7.0.58 */
 );
 CREATE INDEX IF NOT EXISTS ix_upgrade_history_created ON upgrade_history(component, created_at DESC, id DESC);
 """
@@ -93,6 +94,12 @@ class ConfigVersionStore:
                 c.execute("ALTER TABLE upgrade_history ADD COLUMN component TEXT NOT NULL DEFAULT 'framework'")
             except sqlite3.OperationalError:
                 pass  # column already exists
+            # 7.0.58: `report` — the file name (under .versions/upgrades/) of the upgrade report
+            # `liberty upgrade` / `liberty rollback` hand in; NULL for the version-bump rows.
+            try:
+                c.execute("ALTER TABLE upgrade_history ADD COLUMN report TEXT")
+            except sqlite3.OperationalError:
+                pass
 
     # ── internals ──────────────────────────────────────────────────────────────────────────
     def _conn(self) -> sqlite3.Connection:
@@ -296,29 +303,71 @@ class ConfigVersionStore:
     def record_upgrade(
         self, *, to_version: str, kind: str, component: str = "framework",
         from_version: str | None = None, summary: str | None = None, who: str | None = None,
+        report: str | None = None, created_at: str | None = None,
     ) -> dict[str, Any]:
-        """Append an upgrade-history row for *component* (``kind`` = ``install`` | ``upgrade``)."""
-        created = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        """Append an upgrade-history row for *component* (``kind`` = ``install`` | ``upgrade`` |
+        ``rollback``). *report* names a file written by :meth:`write_upgrade_report`; *created_at*
+        keeps the original timestamp when a report is re-journaled after a volume restore."""
+        created = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
         with self._conn() as c:
             cur = c.execute(
-                "INSERT INTO upgrade_history(component, from_version, to_version, kind, summary, who, created_at) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (component, from_version, to_version, kind, summary, who, created),
+                "INSERT INTO upgrade_history(component, from_version, to_version, kind, summary, who, created_at, report) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (component, from_version, to_version, kind, summary, who, created, report),
             )
             rid = int(cur.lastrowid)
         return {
             "id": rid, "component": component, "from_version": from_version, "to_version": to_version,
-            "kind": kind, "summary": summary, "who": who, "created_at": created,
+            "kind": kind, "summary": summary, "who": who, "created_at": created, "report": report,
         }
 
     def list_upgrades(self) -> list[dict[str, Any]]:
         """All upgrade-history rows (every component), newest first."""
         with self._conn() as c:
             rows = c.execute(
-                "SELECT id, component, from_version, to_version, kind, summary, who, created_at "
+                "SELECT id, component, from_version, to_version, kind, summary, who, created_at, report "
                 "FROM upgrade_history ORDER BY created_at DESC, id DESC",
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_upgrade(self, upgrade_id: int) -> dict[str, Any] | None:
+        with self._conn() as c:
+            r = c.execute(
+                "SELECT id, component, from_version, to_version, kind, summary, who, created_at, report "
+                "FROM upgrade_history WHERE id=?", (upgrade_id,),
+            ).fetchone()
+        return dict(r) if r is not None else None
+
+    # ── upgrade reports (.versions/upgrades/<name>.json + .md) ──────────────────────────────
+    @property
+    def reports_dir(self) -> Path:
+        return self.vdir / "upgrades"
+
+    def write_upgrade_report(self, name: str, data: dict[str, Any], markdown: str) -> tuple[Path, Path]:
+        """Store one upgrade / rollback report as ``<name>.json`` (the structured record) and
+        ``<name>.md`` (what Settings → History → Upgrades renders). *name* must be a plain file stem."""
+        if not name or any(ch in name for ch in "/\\") or name.startswith("."):
+            raise ValueError(f"bad report name {name!r}")
+        self.reports_dir.mkdir(parents=True, exist_ok=True)
+        import json
+
+        jp = self.reports_dir / f"{name}.json"
+        mp = self.reports_dir / f"{name}.md"
+        jp.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+        mp.write_text(markdown, encoding="utf-8")
+        return jp, mp
+
+    def read_upgrade_report(self, name: str) -> tuple[dict[str, Any] | None, str | None]:
+        """``(data, markdown)`` for a stored report; ``(None, None)`` when it isn't there."""
+        if not name or any(ch in name for ch in "/\\") or name.startswith("."):
+            return None, None
+        import json
+
+        jp = self.reports_dir / f"{name}.json"
+        mp = self.reports_dir / f"{name}.md"
+        data = json.loads(jp.read_text(encoding="utf-8")) if jp.is_file() else None
+        md = mp.read_text(encoding="utf-8") if mp.is_file() else None
+        return data, md
 
 
 def record_upgrade_if_changed(

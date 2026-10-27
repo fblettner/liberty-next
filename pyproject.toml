@@ -42,6 +42,8 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.36",
     "asyncpg>=0.30",       # PostgreSQL async driver  (postgresql+asyncpg://)
     "oracledb>=2.5",       # Oracle async driver (thin mode)  (oracle+oracledb://) — for migrated JDE pools
+    "aiosqlite>=0.20",     # SQLite async driver — the shipped [pools.default] URL and the Light layout use it;
+                           # was dev-only until 7.0.58, so the image could not open its own default pool
     "httpx>=0.27",
     "anthropic>=0.40",
     "authlib>=1.3.2",
@@ -75,9 +77,9 @@ all = ["liberty-next[reports,ldap,alembic]"]
 dev = [
     "liberty-next[all]",       # the test suite renders PDFs and exercises the ldap step
     "pytest>=8.3",
+    "ruff>=0.17",              # lint — `ruff check liberty tests` (config: [tool.ruff] below); CI runs it
     "pytest-asyncio>=0.24",
     "pytest-html>=4.1",        # `pytest --html=test-report.html --self-contained-html` → browsable HTML report
-    "aiosqlite>=0.20",
     "aiohttp>=3.10",     # required by python-socketio's AsyncClient (test_sio.py)
 ]
 
@@ -88,6 +90,7 @@ liberty-admin = "liberty.admin_cli:main"
 liberty-migrate = "liberty.migrate_cli:main"
 liberty-crypto = "liberty.crypto_cli:main"
 liberty-license = "liberty.license_cli:main"
+liberty-ops = "liberty.ops_cli:main"            # Python-install operations (the Docker twin is release/liberty)
 
 # [project.urls] populates the sidebar links on the PyPI project page. Order matters —
 # PyPI renders them top-to-bottom; put the things people will click most at the top.
@@ -110,6 +113,31 @@ include = ["liberty*"]
 [tool.setuptools.package-data]
 "liberty.licensing" = ["public.pem"]
 "liberty" = ["RELEASE.md", "RELEASE.fr.md"]   # release notes shipped with the wheel (served at /admin/release-notes)
+
+# ── ruff: the lint baseline (A5, 2026-10-26). Chosen from a measurement, not aspiration:
+# pyflakes + pycodestyle + bugbear pass clean after the fixes in this commit; import sorting
+# (I), pyupgrade (UP) and the async blocking-call rules (ASYNC240, the ~100 ms config
+# writes) are deliberately NOT enabled yet — they'd be a 300-line mechanical diff for no
+# behaviour change. Line length: 120 is where the code sits; E501 stays off until the long
+# docstring tails are wrapped. ``ruff format`` is not adopted (the code has its own style).
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "B"]
+ignore = [
+    "E501",  # line length — measured 418 lines over 120; wrap them before turning this on
+    "E701", "E702",  # one-line `if x: y` / `a; b` — used deliberately in dense config helpers
+    "E741",  # `l` is the per-language translations map in the TOML schemas (ColumnHint.l, MenuItem.l, …)
+    "B008",  # FastAPI `Depends()` / `Body()` in defaults is the framework idiom
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B017"]  # `pytest.raises(Exception)` is fine in a test
+# Mid-file imports placed next to the section they serve (big, sectioned modules).
+"liberty/connectors/sql.py" = ["E402"]
+"liberty/web/admin.py" = ["E402"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -411,7 +411,7 @@ def _full_view(
     with the same widget set used for read-result columns. The screen's effective connector
     drives the dictionary lookup (matches how :class:`SQLConnector` resolves read-result hints)."""
     body = screen.model_dump(mode="json", exclude_none=True)
-    connector = _screen_connector(screen, app=app)
+    _connector = _screen_connector(screen, app=app)
     # **Dictionary scope** for resolving column dd/label/format/rule. The operator's metadata
     # (entries / enums / lookups) lives under the app's scope in dictionary.toml (one
     # ``[connectors.<app>]`` per migrated app). For a cross-pool screen (its ``connector`` is

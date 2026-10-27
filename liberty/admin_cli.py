@@ -7,6 +7,8 @@
     liberty-admin set-active <username> {--active | --inactive}
     liberty-admin list-users
     liberty-admin create-role <name> [--permission P ...] [--description …]
+    liberty-admin migrate [--app X ...] [--dry-run] [--target-connector C] [--revision R]
+    liberty-admin record-upgrade --kind upgrade|rollback [--fw-from V --fw-to V …] [--step name=status[:detail] …]
 
 Operates on whatever ``[auth] backend`` is configured in ``config/app.toml``: ``"toml"`` (the
 default) edits ``[auth] toml_path`` (``config/auth.toml``) — no database; ``"db"`` uses the
@@ -24,12 +26,14 @@ import json
 import os
 import secrets
 import sys
+from pathlib import Path
 from typing import Awaitable, Callable
 
 from liberty.auth.authstore import ADMIN_ROLE, build_auth_backend
 from liberty.auth.service import AuthError
 from liberty.config import load_settings
 from liberty.connectors import load_connectors
+from liberty.licensing import verify_license
 from liberty.main import ensure_plugins_on_sys_path
 
 
@@ -48,11 +52,17 @@ class _Context:
         # ``nomajde`` / etc. on sys.path. No-op when LIBERTY_APPS_DIR is unset.
         ensure_plugins_on_sys_path()
         connectors_path = args.config_connectors or settings.connectors.config_path
+        self.connectors_path = Path(connectors_path)
         # Pass master_key so the registry can decrypt ENC: password fields on pool
         # configs (e.g. the [pools.default] block init-db writes — encrypted with
         # this same key). Without it, the registry silently uses ENC:... as the
-        # literal password and pg auth fails.
-        self.registry = load_connectors(connectors_path, master_key=settings.crypto.master_key)
+        # literal password and pg auth fails. The license is verified like the web
+        # lifespan does, else the licensed connectors (nomasx1 / nomajde) are dropped and
+        # `migrate` / `run-install-jobs` can't see them.
+        self.license = verify_license(settings.license.key, master_key=settings.crypto.master_key)
+        self.registry = load_connectors(
+            connectors_path, master_key=settings.crypto.master_key, license=self.license,
+        )
         self.backend = build_auth_backend(settings, self.registry.pools)
 
     async def aclose(self) -> None:
@@ -183,14 +193,16 @@ async def _cmd_init_db(ctx: _Context, args: argparse.Namespace) -> int:
     seeded = await _seed_default_pool(ctx)
     if seeded:
         print(f"[init-db] seeded [pools.default] in {ctx.settings.connectors.config_path}")
-    await ctx.backend.ready()
+    from liberty.runtime import journal_schema
+
+    journal_schema(ctx.settings, await ctx.backend.ready() or [])
     await ctx.backend.get_or_create_role(ADMIN_ROLE, permissions=["*"], description="Full access (wildcard).")
     # Create the nomaflow run-history tables on the same pool (idempotent — create_all
     # is a no-op if they exist). Done unconditionally because the tables are tiny and
     # creating them up-front avoids a "first job run errors because the table is missing"
     # foot-gun. `jobs.enabled = false` only gates the scheduler/runner, not the schema.
     from liberty.jobs.db import JobDatabase
-    await JobDatabase(ctx.registry.pools, ctx.settings.jobs.pool).create_schema()
+    journal_schema(ctx.settings, await JobDatabase(ctx.registry.pools, ctx.settings.jobs.pool).create_schema())
     base = {"backend": ctx.settings.auth.backend, "ready": True, "nomaflow_schema": "ready"}
     if await ctx.backend.count_users() > 0:
         _print({**base, "admin_created": False})
@@ -327,6 +339,290 @@ async def _cmd_create_role(ctx: _Context, args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 
 
+
+# --------------------------------------------------------------------------- #
+# migrate — app schema migrations (plugins/<app>/db)
+# --------------------------------------------------------------------------- #
+
+MIGRATE_MODULE = "db"
+"""Submodule each app plugin exposes its schema entry points from: ``plugins/<app>/db/__init__.py``."""
+
+
+def _plugins_dir(explicit: str | None) -> Path:
+    """Same resolution as :func:`liberty.main.ensure_plugins_on_sys_path`: an explicit
+    ``--plugins-dir``, else ``${LIBERTY_APPS_DIR}/../plugins``, else ``./plugins``."""
+    if explicit:
+        return Path(explicit).resolve()
+    apps = os.environ.get("LIBERTY_APPS_DIR", "").strip()
+    return (Path(apps).parent / "plugins" if apps else Path("plugins")).resolve()
+
+
+def discover_migratable_apps(plugins_dir: Path | None) -> list[str]:
+    """The app packages under *plugins_dir* that ship a ``db`` module — the only ones
+    ``migrate`` knows how to drive. Sorted so the run order is stable."""
+    if plugins_dir is None or not plugins_dir.is_dir():
+        return []
+    return sorted(
+        d.name for d in plugins_dir.iterdir()
+        if d.is_dir() and (d / "__init__.py").is_file() and (d / MIGRATE_MODULE / "__init__.py").is_file()
+    )
+
+
+async def _migrate_one(ctx: _Context, app: str, *, target: str, revision: str, dry_run: bool) -> dict:
+    """Drive one app's ``db`` module. Contract (duck-typed, what nomasx1.db already exposes):
+
+    * ``upgrade_schema(*, connectors, target_connector, revision="head")`` — async, applies.
+    * ``pending_revisions(*, connectors, target_connector)`` — optional (sync or async),
+      returns the revision ids not yet applied; without it a dry run can only say "unknown".
+    * ``DEFAULT_TARGET_CONNECTOR`` — optional; the connector the schema lives on when the
+      operator doesn't pass ``--target-connector`` (defaults to the app's own name).
+    """
+    import importlib
+    import inspect
+
+    mod = importlib.import_module(f"{app}.{MIGRATE_MODULE}")
+    upgrade = getattr(mod, "upgrade_schema", None)
+    if upgrade is None:
+        return {"app": app, "status": "skipped", "reason": f"{app}.{MIGRATE_MODULE} has no upgrade_schema()"}
+    target = target or getattr(mod, "DEFAULT_TARGET_CONNECTOR", None) or app
+    if target not in ctx.registry.names() and target not in ctx.registry.pools.names():
+        return {
+            "app": app, "status": "error", "target_connector": target,
+            "reason": f"no connector or pool named {target!r} (the plugin resolves its database through "
+                      f"connectors.pools.engine(target_connector)) — pass --target-connector",
+        }
+    out: dict = {"app": app, "target_connector": target, "revision": revision}
+
+    pending_fn = getattr(mod, "pending_revisions", None)
+    if pending_fn is not None:
+        res = pending_fn(connectors=ctx.registry, target_connector=target)
+        pending = list(await res) if inspect.isawaitable(res) else list(res)
+        out["pending"] = pending
+    else:
+        out["pending"] = None  # the plugin can't say; a run is still safe (alembic is idempotent)
+
+    if dry_run:
+        out["status"] = "pending" if out["pending"] else ("up-to-date" if out["pending"] == [] else "unknown")
+        return out
+    if out["pending"] == []:
+        out["status"] = "up-to-date"
+        return out
+    res = upgrade(connectors=ctx.registry, target_connector=target, revision=revision)
+    if inspect.isawaitable(res):
+        res = await res
+    out["status"] = "applied"
+    out["result"] = res
+    _record_schema_upgrade(ctx, app, out)
+    return out
+
+
+def _record_schema_upgrade(ctx: _Context, app: str, out: dict) -> None:
+    """Journal the applied revisions in the upgrade history (Settings → History → Upgrades),
+    next to the framework / apps version bumps. Best-effort: the migration already ran."""
+    try:
+        from liberty.versioning import ConfigVersionStore
+
+        store = ConfigVersionStore(ctx.connectors_path.parent)
+        pending = out.get("pending") or []
+        store.record_upgrade(
+            component=f"{app}-schema", kind="upgrade",
+            from_version=store.current_app_version(f"{app}-schema"),
+            to_version=pending[-1] if pending else out["revision"],
+            summary=f"liberty-admin migrate: {len(pending) or '?'} revision(s) on {out['target_connector']}",
+            who="liberty-admin",
+        )
+    except Exception as exc:  # noqa: BLE001 — journaling must never fail the migration
+        print(f"warning: could not record the upgrade in history: {exc}", file=sys.stderr)
+
+
+async def _cmd_migrate(ctx: _Context, args: argparse.Namespace) -> int:
+    """Apply (or, with ``--dry-run``, list) every app's pending schema migrations.
+
+    Replaces the manual "run the nomasx1-upgrade-schema-1 job from the UI" step: the
+    upgrade path (``liberty upgrade`` / the entrypoint) can call this and know, from the
+    exit code, whether the schema is in step with the code. Exit 0 = nothing pending or
+    everything applied; 1 = an app failed / is misconfigured; 2 = ``--dry-run`` found
+    pending revisions (so a pre-flight can gate on it).
+    """
+    plugins_dir = _plugins_dir(args.plugins_dir)
+    if args.plugins_dir and str(plugins_dir) not in sys.path:
+        sys.path.insert(0, str(plugins_dir))
+    apps = discover_migratable_apps(plugins_dir)
+    wanted = list(args.app or [])
+    unknown = [a for a in wanted if a not in apps]
+    if unknown:
+        print(f"error: no migratable plugin for {', '.join(unknown)} (found: {', '.join(apps) or 'none'} "
+              f"under {plugins_dir})", file=sys.stderr)
+        return 1
+    if wanted:
+        apps = wanted
+    results = []
+    for app in apps:
+        try:
+            results.append(await _migrate_one(
+                ctx, app, target=args.target_connector or "", revision=args.revision, dry_run=args.dry_run,
+            ))
+        except Exception as exc:  # noqa: BLE001 — report per app, keep going
+            results.append({"app": app, "status": "error", "reason": f"{type(exc).__name__}: {exc}"})
+    pending_total = sum(len(r.get("pending") or []) for r in results)
+    errors = [r for r in results if r["status"] == "error"]
+    _print({
+        "plugins_dir": str(plugins_dir), "dry_run": args.dry_run, "apps": results,
+        "pending_total": pending_total, "errors": len(errors),
+    })
+    if errors:
+        return 1
+    if args.dry_run and pending_total:
+        return 2
+    return 0
+
+
+
+# --------------------------------------------------------------------------- #
+# record-upgrade — the report `liberty upgrade` / `liberty rollback` hand in
+# --------------------------------------------------------------------------- #
+
+_STEP_MARK = {"ok": "✔", "warn": "!", "fail": "✗", "skipped": "–"}
+
+
+def _parse_step(raw: str) -> dict:
+    """``name=status[:detail]`` → ``{name, status, detail}``; status ∈ ok | warn | fail | skipped."""
+    name, _, rest = raw.partition("=")
+    status, _, detail = rest.partition(":")
+    status = (status or "ok").strip().lower()
+    if status not in _STEP_MARK:
+        raise argparse.ArgumentTypeError(f"step {name!r}: status must be one of {', '.join(_STEP_MARK)}")
+    return {"name": name.strip(), "status": status, "detail": detail.strip() or None}
+
+
+def render_upgrade_report(data: dict) -> str:
+    """The Markdown Settings → History → Upgrades shows for a report."""
+    kind = data.get("kind", "upgrade")
+    fw, apps, tag = data.get("framework", {}), data.get("apps", {}), data.get("image_tag", {})
+
+    def arrow(d: dict) -> str:
+        a, b = d.get("from") or "-", d.get("to") or "-"
+        return f"{a} → {b}" if a != b else b
+
+    lines = [f"# {kind.capitalize()} — {data.get('finished_at', '')[:19].replace('T', ' ')} UTC", ""]
+    lines += ["| | |", "|---|---|",
+              f"| Framework | {arrow(fw)} |",
+              f"| Apps | {arrow(apps) if (apps.get('from') or apps.get('to')) else 'not installed'} |",
+              f"| Image tag | {arrow(tag)} |",
+              f"| Layout / chain | {data.get('layout') or '?'} — `{data.get('chain') or '?'}` |",
+              f"| Backup | {('`' + data['backup'] + '`') if data.get('backup') else 'none'} |",
+              f"| Health after | {data.get('health') or '?'} |",
+              f"| Host | {data.get('host') or '?'} |", ""]
+    steps = data.get("steps") or []
+    if steps:
+        lines += ["## Steps", ""]
+        for st in steps:
+            mark = _STEP_MARK.get(st.get("status", "ok"), "?")
+            detail = f" — {st['detail']}" if st.get("detail") else ""
+            lines.append(f"- {mark} **{st['name']}**{detail}")
+        lines.append("")
+    mig = data.get("migrations")
+    if isinstance(mig, dict):
+        lines += ["## Schema migrations", ""]
+        apps_rows = mig.get("apps") or []
+        if not apps_rows:
+            lines.append("No migratable app plugin.")
+        for a in apps_rows:
+            pend = a.get("pending")
+            what = (f"{len(pend)} revision(s): " + ", ".join(pend)) if pend else ("up to date" if pend == [] else "")
+            reason = f" — {a['reason']}" if a.get("reason") else ""
+            lines.append(f"- **{a.get('app')}** on `{a.get('target_connector', '?')}`: {a.get('status')}{(' — ' + what) if what else ''}{reason}")
+        lines.append("")
+    doc = data.get("doctor") or {}
+    if doc.get("text"):
+        n = doc.get("problems")
+        lines += [f"## Doctor ({n} problem(s))" if n is not None else "## Doctor", "", "```", doc["text"].rstrip(), "```", ""]
+    return "\n".join(lines)
+
+
+async def _cmd_record_upgrade(ctx: _Context, args: argparse.Namespace) -> int:
+    """Store the report of an upgrade / rollback run by ``release/liberty`` and journal it as a
+    ``stack`` row of the upgrade history (next to the framework / apps version bumps the server
+    records at startup). The doctor output is read from stdin when ``--doctor-text -`` is given."""
+    import json
+    import socket
+    from datetime import datetime, timezone
+
+
+    if args.from_json:
+        # Re-journal a report saved earlier (the rollback keeps the upgrade's report across the
+        # volume restore this way). The JSON is taken as-is; nothing else on the command line is read.
+        raw = sys.stdin.read() if args.from_json == "-" else Path(args.from_json).read_text(encoding="utf-8")
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            print(f"error: --from-json is not JSON: {exc}", file=sys.stderr)
+            return 2
+        if not isinstance(data, dict) or data.get("kind") not in ("upgrade", "rollback", "install"):
+            print("error: --from-json: expected a report object with a kind", file=sys.stderr)
+            return 2
+        return _journal_report(ctx, data, who=args.who)
+    if not args.kind:
+        print("error: --kind is required (unless --from-json)", file=sys.stderr)
+        return 2
+    doctor_text = None
+    if args.doctor_text == "-":
+        doctor_text = sys.stdin.read()
+    elif args.doctor_text:
+        doctor_text = Path(args.doctor_text).read_text(encoding="utf-8")
+    migrations = None
+    if args.migrations:
+        try:
+            migrations = json.loads(args.migrations)
+        except json.JSONDecodeError as exc:
+            print(f"error: --migrations is not JSON: {exc}", file=sys.stderr)
+            return 2
+    now = datetime.now(timezone.utc)
+    data = {
+        "kind": args.kind,
+        "started_at": args.started_at or now.isoformat(timespec="seconds"),
+        "finished_at": now.isoformat(timespec="seconds"),
+        "host": args.host or socket.gethostname(),
+        "layout": args.layout, "chain": args.chain,
+        "image_tag": {"from": args.tag_from, "to": args.tag_to},
+        "framework": {"from": args.fw_from, "to": args.fw_to},
+        "apps": {"from": args.apps_from, "to": args.apps_to},
+        "backup": args.backup, "health": args.health,
+        "doctor": {"problems": args.doctor_problems, "text": doctor_text},
+        "migrations": migrations,
+        "steps": list(args.step or []),
+    }
+    return _journal_report(ctx, data, who=args.who)
+
+
+def _journal_report(ctx: _Context, data: dict, *, who: str) -> int:
+    """Write the report files and the ``stack`` history row for *data*; prints where they went."""
+    from datetime import datetime
+
+    from liberty.versioning import ConfigVersionStore
+
+    kind = data["kind"]
+    fw, apps, tag = data.get("framework") or {}, data.get("apps") or {}, data.get("image_tag") or {}
+    steps = data.get("steps") or []
+    failed = [st["name"] for st in steps if st.get("status") == "fail"]
+    finished = data.get("finished_at") or datetime.now().astimezone().isoformat(timespec="seconds")
+    stamp = finished[:19].replace("-", "").replace(":", "").replace("T", "-")
+    store = ConfigVersionStore(ctx.connectors_path.parent)
+    name = f"{stamp}-{kind}"
+    jp, mp = store.write_upgrade_report(name, data, render_upgrade_report(data))
+    summary = f"{kind}: framework {fw.get('from') or '-'} → {fw.get('to') or '-'}"
+    if apps.get("to"):
+        summary += f", apps {apps.get('from') or '-'} → {apps['to']}"
+    if failed:
+        summary += f"; FAILED: {', '.join(failed)}"
+    row = store.record_upgrade(
+        component="stack", kind=kind, from_version=fw.get("from"), to_version=fw.get("to") or tag.get("to") or "?",
+        summary=summary, who=who, report=name, created_at=finished,
+    )
+    _print({"id": row["id"], "report": name, "json_path": str(jp), "markdown_path": str(mp), "failed_steps": failed})
+    return 0
+
+
 def _add_password_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--password", help="set this password (otherwise a random one is generated)")
     p.add_argument("--password-env", metavar="VAR", help="read the password from this env var")
@@ -382,6 +678,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="re-run jobs that already have a SUCCEEDED run (default: skip them)",
     )
     p_rij.set_defaults(func=_cmd_run_install_jobs)
+
+    p_mig = sub.add_parser(
+        "migrate",
+        help="apply each app plugin's pending schema migrations (plugins/<app>/db) — used by `liberty upgrade`",
+    )
+    p_mig.add_argument("--app", action="append", help="only this app (repeatable; default: every migratable plugin)")
+    p_mig.add_argument("--dry-run", action="store_true", help="list pending revisions, apply nothing (exit 2 when some are pending)")
+    p_mig.add_argument("--target-connector", help="the connector the schema lives on (default: the plugin's DEFAULT_TARGET_CONNECTOR, else the app name)")
+    p_mig.add_argument("--revision", default="head", help="alembic target revision (default: head)")
+    p_mig.add_argument("--plugins-dir", help="where the app plugins live (default: ${LIBERTY_APPS_DIR}/../plugins)")
+    p_mig.set_defaults(func=_cmd_migrate)
+
+    p_rec = sub.add_parser(
+        "record-upgrade",
+        help="store an upgrade / rollback report (written by `liberty upgrade`) in the upgrade history",
+    )
+    p_rec.add_argument("--kind", choices=["upgrade", "rollback", "install"], help="required unless --from-json")
+    p_rec.add_argument("--from-json", help="re-journal a saved report (its .json file, or '-' for stdin) as-is")
+    p_rec.add_argument("--who", default="liberty")
+    p_rec.add_argument("--host")
+    p_rec.add_argument("--started-at", help="ISO timestamp of the run's start (default: now)")
+    p_rec.add_argument("--layout")
+    p_rec.add_argument("--chain", help="the COMPOSE_FILE chain in force")
+    p_rec.add_argument("--tag-from"); p_rec.add_argument("--tag-to")
+    p_rec.add_argument("--fw-from"); p_rec.add_argument("--fw-to")
+    p_rec.add_argument("--apps-from"); p_rec.add_argument("--apps-to")
+    p_rec.add_argument("--backup", help="the backup directory taken before the run")
+    p_rec.add_argument("--health", help="the container's health status at the end")
+    p_rec.add_argument("--doctor-problems", type=int)
+    p_rec.add_argument("--doctor-text", help="file with doctor's output, or '-' for stdin")
+    p_rec.add_argument("--migrations", help="the JSON printed by `liberty-admin migrate`")
+    p_rec.add_argument("--step", action="append", type=_parse_step, help="name=status[:detail] (status: ok|warn|fail|skipped); repeatable, in order")
+    p_rec.set_defaults(func=_cmd_record_upgrade)
 
     return parser
 

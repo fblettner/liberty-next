@@ -14,7 +14,7 @@
 # Point LIBERTY_DB_URL at Postgres for a real deployment (see docker-compose.yml).
 
 # ── Stage 1 — build the frontend (Vite → frontend/dist) ──────────────────────────────
-FROM node:20-slim AS frontend
+FROM node:20.20.2-slim AS frontend
 WORKDIR /build/frontend
 # Copy only the manifest + lockfile first so the install layer is cached across source-only
 # edits. `npm ci` installs exactly the committed lockfile and FAILS if package.json and
@@ -28,7 +28,7 @@ COPY frontend/ ./
 RUN npm run build   # emits /build/frontend/dist (vite.config.ts: outDir "dist")
 
 # ── Stage 2 — Python runtime (FastAPI + Socket.IO, serving the built SPA) ─────────────
-FROM python:3.12-slim AS runtime
+FROM python:3.12.15-slim AS runtime
 
 # Runtime system libs:
 #   curl                         — container HEALTHCHECK hits /info
@@ -66,29 +66,43 @@ RUN apt-get update \
 # client can. ``liberty.connectors.thick`` runs those few queries in a subprocess that turns
 # on thick mode with this client — the main app stays thin/async.
 #
-# VENDORED, not downloaded at build time (Oracle's download is login-gated, so a build-time
-# fetch fails in CI). Drop the **Linux** Instant Client Basic ZIP per platform into:
-#   docker/instantclient/amd64/instantclient-basic-linux.x64-<ver>.zip     (Linux x86-64)
-#   docker/instantclient/arm64/instantclient-basic-linux.arm64-<ver>.zip   (Linux aarch64)
-# ⚠ These must be the LINUX zips — NOT the macOS client you may use for local `fastapi dev`.
-# An arch you don't deploy can hold just its .gitkeep — the build still succeeds and thick mode
-# is simply unavailable there (a clean ThickFetchError at runtime). Match the client version to
-# your Oracle DB: a 19c client connects to 11.2 … 23ai; a 23ai client connects to 19c+ only.
-# (The release builds linux/amd64 + linux/arm64; ``TARGETARCH`` selects the matching dir.)
+# FETCHED AT BUILD TIME from Oracle's public download (no login since 19.x; ~75 MB per arch)
+# and verified against a pinned SHA-256 — the 146 MB of zips used to be committed in git.
+# Air-gapped build: drop the matching **Linux** Basic ZIP into docker/instantclient/<arch>/
+# (gitignored) and it is used instead of the download. An arch without a client still builds;
+# thick mode is then unavailable there (a clean ThickFetchError at runtime). Match the client
+# to your Oracle DB: a 19c client connects to 11.2 … 23ai; a 23ai client to 19c+ only.
 ARG TARGETARCH
+ARG INSTANTCLIENT_VERSION=19.31.0.0.0
+ARG INSTANTCLIENT_SHA256_AMD64=50007f6c5146882291530b68034ff0ed471d95e675b6bde2ad5cb1cae4ef892c
+ARG INSTANTCLIENT_SHA256_ARM64=e71f91749d7d3446e37c767370c169acf65c2bd6485e8f8456f3a72d848ff3f6
 COPY docker/instantclient/${TARGETARCH}/ /tmp/ic/
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends unzip; \
-    mkdir -p /opt/oracle/instantclient; \
-    if ls /tmp/ic/*.zip >/dev/null 2>&1; then \
-      unzip -q /tmp/ic/*.zip -d /tmp/icx; \
+    mkdir -p /opt/oracle/instantclient /tmp/icx; \
+    case "$TARGETARCH" in \
+      amd64) oarch=x64;   sha="$INSTANTCLIENT_SHA256_AMD64" ;; \
+      arm64) oarch=arm64; sha="$INSTANTCLIENT_SHA256_ARM64" ;; \
+      *)     oarch="";    sha="" ;; \
+    esac; \
+    zip="$(ls /tmp/ic/*.zip 2>/dev/null | head -1 || true)"; \
+    if [ -z "$zip" ] && [ -n "$oarch" ]; then \
+      ver_path="$(echo "$INSTANTCLIENT_VERSION" | awk -F. '{printf "%s%s000", $1, $2}')"; \
+      url="https://download.oracle.com/otn_software/linux/instantclient/${ver_path}/instantclient-basic-linux.${oarch}-${INSTANTCLIENT_VERSION}dbru.zip"; \
+      echo "fetching $url"; \
+      curl -fsSL --retry 3 -o /tmp/ic/client.zip "$url"; \
+      echo "$sha  /tmp/ic/client.zip" | sha256sum -c -; \
+      zip=/tmp/ic/client.zip; \
+    fi; \
+    if [ -n "$zip" ]; then \
+      unzip -q "$zip" -d /tmp/icx; \
       cp -a /tmp/icx/instantclient_*/. /opt/oracle/instantclient/; \
       echo /opt/oracle/instantclient > /etc/ld.so.conf.d/oracle-instantclient.conf; \
       ldconfig; \
-      echo "Instant Client installed for $TARGETARCH"; \
+      echo "Instant Client ${INSTANTCLIENT_VERSION} installed for $TARGETARCH"; \
     else \
-      echo "no Instant Client zip for $TARGETARCH — thick mode unavailable on this arch"; \
+      echo "no Instant Client for $TARGETARCH — thick mode unavailable on this arch"; \
     fi; \
     rm -rf /tmp/ic /tmp/icx; \
     apt-get purge -y unzip; \
@@ -101,13 +115,24 @@ WORKDIR /app
 
 # Install the framework. Copy the package + build metadata first, install, then drop in the
 # built SPA — keeps the (slow) pip layer cached when only frontend assets change.
-COPY pyproject.toml ./
+COPY pyproject.toml requirements.txt ./
 COPY liberty/ ./liberty/
-RUN pip install --no-cache-dir ".[all]"   # reports (WeasyPrint) + ldap + alembic extras — the image ships every feature
+# requirements.txt is the pip-compile lock of `.[all]` (every extra: reports, ldap, alembic) —
+# the image, CI and the dev venv resolve to the same versions. Refresh it with:
+#   pip-compile --extra all --strip-extras --output-file requirements.txt pyproject.toml
+RUN pip install --no-cache-dir -c requirements.txt ".[all]"
 
 COPY --from=frontend /build/frontend/dist ./frontend/dist
 COPY docker/entrypoint.sh /usr/local/bin/liberty-entrypoint
 RUN chmod +x /usr/local/bin/liberty-entrypoint
+# The app runs as `liberty` (uid/gid 1000), not root. The image still STARTS as root: the
+# entrypoint fixes the ownership of the mounted volumes (a volume created by an older,
+# root-running release; the apps bind mount written by the installer), then drops to this
+# user with setpriv (util-linux). LIBERTY_RUN_AS_ROOT=1 opts out. `docker exec` therefore
+# runs as root unless you pass `-u liberty` — release/liberty does.
+RUN groupadd --gid 1000 liberty && useradd --uid 1000 --gid 1000 --home-dir /app --no-create-home --shell /usr/sbin/nologin liberty \
+    && mkdir -p /app/config /data && chown -R liberty:liberty /app /data
+ENV LIBERTY_USER=liberty
 
 # Default config templates — the entrypoint copies these into /app/config/ on first
 # boot if nothing's mounted there. Mirrors what ``./start.sh init-config`` does in the
@@ -133,7 +158,7 @@ EXPOSE 8000
 
 # /info is unauthenticated and reports connector/pool/screen counts — a good liveness probe.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-    CMD curl -fsS "http://127.0.0.1:${PORT}/info" >/dev/null || exit 1
+    CMD curl -fsS "http://127.0.0.1:${PORT}/ready" >/dev/null || exit 1
 
 ENTRYPOINT ["/usr/local/bin/liberty-entrypoint"]
 CMD ["serve"]

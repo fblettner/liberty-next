@@ -17,6 +17,7 @@ from typing import AsyncIterator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from liberty.auth.models import Base
+from liberty.schema_sync import SchemaChange, sync_tables
 from liberty.connectors.db import PoolRegistry
 
 
@@ -56,11 +57,12 @@ class AuthDatabase:
                 await session.rollback()
                 raise
 
-    async def create_schema(self) -> None:
-        """Create the auth tables on the configured pool if they don't exist."""
+    async def create_schema(self) -> list[SchemaChange]:
+        """Create the auth tables on the configured pool if they don't exist and forward-add
+        missing columns. Returns what was added."""
         engine = self._pools.engine(self._pool_name)
         async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+            return await conn.run_sync(sync_tables, Base.metadata)
 
     async def drop_schema(self) -> None:  # pragma: no cover - destructive helper
         engine = self._pools.engine(self._pool_name)

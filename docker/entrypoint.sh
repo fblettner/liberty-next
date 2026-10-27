@@ -12,6 +12,12 @@
 #   LIBERTY_DB_URL            — framework pool (auth + nomaflow). Default: SQLite in /app.
 #   LIBERTY_ADMIN_PASSWORD    — when set, the bootstrap admin gets this password
 #                               (else init-db generates a random one and prints it once).
+#   LIBERTY_AUTO_MIGRATE=1    — apply the apps' pending schema migrations at boot (default: only
+#                               warn; `liberty upgrade` applies them).
+#   <VAR>_FILE                — for any LIBERTY_* / POSTGRES_* variable: read its value from this
+#                               file (Docker / Swarm / Kubernetes secrets) when <VAR> itself is unset.
+#   LIBERTY_RUN_AS_ROOT=1     — keep running as root (default: fix the mounts' ownership, then drop to
+#                               the `liberty` user, uid 1000).
 #   LIBERTY_SKIP_INITDB=1     — skip the bootstrap (e.g. a read-replica / scaled-out worker
 #                               where another instance already ran it).
 #   LIBERTY_DB_WAIT_TRIES     — how many 1s probes to wait for the framework DB before
@@ -19,6 +25,48 @@
 set -euo pipefail
 
 log() { echo "[entrypoint] $*"; }
+
+load_file_secrets() {
+  # VAR_FILE=/run/secrets/x → VAR=<content> (when VAR is unset). Only LIBERTY_* / POSTGRES_* /
+  # PGADMIN_* names, so an unrelated *_FILE variable is never read as a secret.
+  local name file
+  while IFS='=' read -r name _; do
+    case "$name" in LIBERTY_*_FILE|POSTGRES_*_FILE|PGADMIN_*_FILE) ;; *) continue ;; esac
+    file="${!name}"
+    local var="${name%_FILE}"
+    if [ -z "${!var:-}" ] && [ -n "$file" ]; then
+      if [ -r "$file" ]; then
+        export "$var"="$(cat "$file")"
+        log "$var read from $file"
+      else
+        log "warning: $name=$file is not readable — $var stays unset"
+      fi
+    fi
+  done < <(env)
+}
+
+own_mounts() {
+  # Volumes created by a root-running release and bind mounts written by the installer are
+  # root-owned; the app (uid 1000) must be able to write its config, data and journal.
+  local d
+  for d in /app/config /data "${LIBERTY_APPS_DIR:+$(dirname "$LIBERTY_APPS_DIR")}"; do
+    [ -n "$d" ] && [ -d "$d" ] || continue
+    if [ "$(stat -c %u "$d")" != "1000" ]; then
+      log "fixing ownership of $d for ${LIBERTY_USER:-liberty}…"
+      chown -R 1000:1000 "$d" 2>/dev/null || log "warning: could not chown $d (read-only mount?)"
+    fi
+  done
+}
+
+drop_privileges() {
+  # Re-exec this script as `liberty` once the mounts are owned by it. setpriv is util-linux
+  # (present in python:*-slim); --init-groups resets supplementary groups.
+  if [ "$(id -u)" = "0" ] && [ "${LIBERTY_RUN_AS_ROOT:-}" != "1" ] && command -v setpriv >/dev/null 2>&1; then
+    own_mounts
+    export HOME=/app
+    exec setpriv --reuid=1000 --regid=1000 --init-groups "$0" "$@"
+  fi
+}
 
 seed_config() {
   # Populate /app/config/ from the image's default templates on first boot. Mirrors
@@ -84,6 +132,24 @@ PY
   return 0
 }
 
+check_migrations() {
+  # The licensed apps ship Alembic migrations (plugins/<app>/db). They are applied by
+  # `liberty upgrade` / `liberty-admin migrate`; at boot we only SAY when some are pending —
+  # unless LIBERTY_AUTO_MIGRATE=1 asks for them to be applied right here.
+  if [ "${LIBERTY_AUTO_MIGRATE:-}" = "1" ]; then
+    log "applying pending app schema migrations (LIBERTY_AUTO_MIGRATE=1)…"
+    liberty-admin migrate || log "warning: liberty-admin migrate reported a problem."
+    return 0
+  fi
+  local rc=0
+  liberty-admin migrate --dry-run >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0) ;;
+    2) log "WARNING: app schema migrations are PENDING — run './liberty migrate' (or 'liberty-admin migrate' in the container; LIBERTY_AUTO_MIGRATE=1 applies them at boot)." ;;
+    *) log "warning: could not check the app schema migrations (liberty-admin migrate --dry-run exited $rc)." ;;
+  esac
+}
+
 serve() {
   seed_config
   if [ "${LIBERTY_SKIP_INITDB:-}" != "1" ]; then
@@ -94,6 +160,7 @@ serve() {
     # existing admin and ensures the nomaflow_* tables exist on the framework pool).
     log "bootstrapping auth + nomaflow schema (liberty-admin init-db)…"
     liberty-admin init-db "${args[@]}" || log "init-db reported a problem (continuing to serve)."
+    check_migrations
   else
     log "LIBERTY_SKIP_INITDB=1 — skipping bootstrap."
   fi
@@ -101,7 +168,8 @@ serve() {
   exec uvicorn liberty.main:asgi_app --host "${HOST:-0.0.0.0}" --port "${PORT:-8000}"
 }
 
+load_file_secrets
 case "${1:-serve}" in
-  serve) serve ;;
+  serve) drop_privileges "$@"; serve ;;
   *)     exec "$@" ;;
 esac

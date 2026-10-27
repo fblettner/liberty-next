@@ -30,13 +30,12 @@ from liberty.jobs import (
     RunContext,
     RunState,
     Step,
-    StepFailed,
     StepResult,
     StepRun,
     StepType,
     load_jobs,
 )
-from liberty.jobs.registry import JobRegistry, UnknownJobError
+from liberty.jobs.registry import JobRegistry
 from liberty.jobs.steps import CallJobExecutor
 
 

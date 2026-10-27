@@ -293,6 +293,41 @@ if [ -f "$ENV_FILE" ]; then
     printf '\n# Added by install.sh: pins compose to the right layout (no -f juggling).\nCOMPOSE_FILE=%s\n' "$COMPOSE_FILE_LINE" >> "$ENV_FILE"
   fi
 
+  # The compose chain is STATE, recorded in .env by the install and by every later
+  # `install-apps.sh` / `--ssl` run. Until 7.0.58 a re-run recomputed it from THIS run's
+  # flags, so the documented upgrade path (`./install.sh full` with no flags) brought the
+  # stack up without the TLS overlay and without the apps overlay: HTTPS vanished and the
+  # container, missing its /apps mount, seeded the .example templates — "all my config is
+  # gone" (it was still on the host, under ./apps). Now: start from the recorded chain;
+  # only an explicit --ssl swaps the TLS overlay; the apps overlay is never dropped.
+  recorded="$(grep -E '^COMPOSE_FILE=' "$ENV_FILE" | head -1 | cut -d= -f2-)"
+  if [ -n "$recorded" ]; then
+    chain="$recorded"
+    if [ -n "$SSL_MODE" ]; then
+      chain="$(printf '%s' "$chain" | tr ':' '\n' | grep -vE '^docker-compose\.tls-(letsencrypt|provided)\.yml$' | paste -sd: -)"
+      case "$SSL_MODE" in
+        letsencrypt) tls="docker-compose.tls-letsencrypt.yml" ;;
+        provided)    tls="docker-compose.tls-provided.yml" ;;
+        *)           tls="" ;;
+      esac
+      if [ -n "$tls" ]; then
+        # Overlays order: layout, TLS, apps — keep the apps overlay last.
+        case "$chain" in
+          *:docker-compose.apps.yml) chain="${chain%:docker-compose.apps.yml}:${tls}:docker-compose.apps.yml" ;;
+          *)                         chain="${chain}:${tls}" ;;
+        esac
+      fi
+    fi
+    if [ "$chain" != "$COMPOSE_FILE_LINE" ]; then
+      info "Using the compose chain recorded in .env: ${chain}"
+    fi
+    COMPOSE_FILE_LINE="$chain"
+    if [ "$chain" != "$recorded" ]; then
+      sed -i.bak "s|^COMPOSE_FILE=.*|COMPOSE_FILE=${chain}|" "$ENV_FILE" && rm -f "${ENV_FILE}.bak"
+      info "Updated COMPOSE_FILE in .env → ${chain}"
+    fi
+  fi
+
 else
   info "Generating .env with random secrets…"
 
@@ -300,6 +335,9 @@ else
   LIBERTY_MASTER_KEY="$(gen_secret 32)"   # always per-install random — no override flag
   POSTGRES_PASSWORD="$(gen_secret 24)"
   PGADMIN_PASSWORD="$(gen_secret 16)"
+  TRAEFIK_DASHBOARD_PASSWORD="$(gen_secret 16)"
+  # apr1 (htpasswd) hash — accepted by Traefik's basicAuth; `$` doubled so compose keeps it literal.
+  TRAEFIK_DASHBOARD_USERS="admin:$(openssl passwd -apr1 "$TRAEFIK_DASHBOARD_PASSWORD" | sed 's/\$/$$/g')"
   # First-boot admin password is NOT written to .env — it's only needed once by init-db.
   # We export it via the shell environment for ``docker compose up`` below so the bootstrap
   # sees it, then show it in the install summary. On re-runs it's gone (intentionally —
@@ -372,6 +410,12 @@ POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 
 PGADMIN_PASSWORD=${PGADMIN_PASSWORD}
 # PGADMIN_EMAIL=admin@liberty.fr
+# Postgres is published on the host's loopback only; POSTGRES_BIND=0.0.0.0 opens it (firewall!).
+# POSTGRES_BIND=127.0.0.1
+
+# Traefik dashboard (/traefik) basic-auth — the password is printed once at install.
+# Regenerate with: ./liberty dashboard-password
+TRAEFIK_DASHBOARD_USERS=${TRAEFIK_DASHBOARD_USERS}
 
 # ── OPTIONAL ───────────────────────────────────────────────────────────────
 # Image tag — which ghcr.io/.../liberty-next:<tag> gets pulled:
@@ -527,6 +571,10 @@ case "$LAYOUT" in
     fi
     echo
     echo "  pgAdmin:        admin@liberty.fr / ${PGADMIN_PASSWORD}"
+    if [ -n "${TRAEFIK_DASHBOARD_PASSWORD:-}" ]; then
+      echo "  Traefik:        admin / ${TRAEFIK_DASHBOARD_PASSWORD}   (dashboard at ${BASE:-http://localhost}/traefik — shown once; ./liberty dashboard-password regenerates)"
+    fi
+    echo "  Postgres:       published on 127.0.0.1:${POSTGRES_PORT:-5432} only (POSTGRES_BIND=0.0.0.0 in .env to open it)"
     POSTGRES_PASSWORD_LINE=$(grep -E '^POSTGRES_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)
     POSTGRES_USER_LINE=$(grep -E '^POSTGRES_USER=' "$ENV_FILE" | cut -d= -f2- || true)
     echo "  Postgres root:  ${POSTGRES_USER_LINE:-liberty} / ${POSTGRES_PASSWORD_LINE}"

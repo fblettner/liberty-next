@@ -36,3 +36,9 @@ services:
     environment:
       # Re-route every per-section TOML default to /apps/<file>.toml (see liberty/config.py).
       LIBERTY_APPS_DIR: /apps/config
+      # The apps wheel ships its JDE connection values as ${ENV} references (no lab host / user in
+      # the delivery). Set them in .env, or leave them empty and fill the fields in Settings →
+      # Pools / Connectors — the live value is kept on every later upgrade either way.
+      JDE_DB_URL: "${JDE_DB_URL:-}"
+      JDE_AIS_URL: "${JDE_AIS_URL:-}"
+      JDE_AIS_VERIFY_SSL: "${JDE_AIS_VERIFY_SSL:-true}"

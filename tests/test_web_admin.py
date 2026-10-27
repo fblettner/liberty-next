@@ -1450,6 +1450,30 @@ def test_upgrades_and_release_notes(env) -> None:
         assert client.get("/admin/release-notes", headers=_h(client, "reader")).status_code == 403
 
 
+def test_upgrade_report_route(env) -> None:
+    """A `stack` row with a report serves its markdown + data; rows without one 404."""
+    from liberty.versioning import ConfigVersionStore
+
+    app, _conn_toml, _db_url = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        store: ConfigVersionStore = app.state.config_versions
+        store.write_upgrade_report("r1", {"kind": "upgrade", "backup": "/b"}, "# Upgrade\n\nok")
+        with_report = store.record_upgrade(component="stack", kind="upgrade", to_version="7.0.58", report="r1")
+        without = store.record_upgrade(component="framework", kind="upgrade", to_version="7.0.58")
+        r = client.get(f"/admin/upgrades/{with_report['id']}/report", headers=h)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["markdown"].startswith("# Upgrade") and body["data"]["backup"] == "/b"
+        assert body["upgrade"]["report"] == "r1"
+        assert client.get(f"/admin/upgrades/{without['id']}/report", headers=h).status_code == 404
+        assert client.get("/admin/upgrades/999999/report", headers=h).status_code == 404
+        # the list carries the report name so the UI knows which rows have one
+        rows = client.get("/admin/upgrades", headers=h).json()["upgrades"]
+        assert {x["id"]: x["report"] for x in rows}[with_report["id"]] == "r1"
+        assert client.get(f"/admin/upgrades/{with_report['id']}/report").status_code == 401
+
+
 def test_screen_bundle_versioning(env) -> None:
     """Phase 2 — every screen save snapshots the CHANGED screens' dependency bundle (a deploy ZIP).
     A brand-new screen captures nothing (no prior state); editing it captures its pre-edit bundle.

@@ -86,7 +86,7 @@ async def copy_query_to_table(
                 insert_sql = text(f'INSERT INTO {target_table} ({col_list}) VALUES ({bind_list})')
             assert target_names is not None  # set on first batch above
             payload = [
-                {tgt: row._mapping[src] for tgt, src in zip(target_names, batch[0]._mapping.keys())}
+                {tgt: row._mapping[src] for tgt, src in zip(target_names, batch[0]._mapping.keys(), strict=False)}
                 for row in batch
             ]
             async with tgt_conn.begin():

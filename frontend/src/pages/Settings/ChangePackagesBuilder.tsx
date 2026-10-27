@@ -244,7 +244,7 @@ export default function ChangePackagesBuilder() {
       // The import log is secondary — a failure (endpoint missing on an un-restarted backend,
       // changesets disabled) shouldn't error the whole page. Surface in the console for diagnosis
       // and leave the list empty.
-      .catch((e) => { console.warn('applied-bundles load failed', e); setApplied([]) }), [])  // eslint-disable-line no-console
+      .catch((e) => { console.warn('applied-bundles load failed', e); setApplied([]) }), [])
 
   useEffect(() => { void loadList() }, [loadList])
   // Reload the import log on mount AND whenever the Apply tab is (re)opened — so it's fresh when you

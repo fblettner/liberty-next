@@ -361,8 +361,8 @@ class DbAuthBackend:
             provider=u.provider, provider_subject=u.provider_subject, roles=u.role_names, permissions=u.permissions,
         )
 
-    async def ready(self) -> None:
-        await self.db.create_schema()
+    async def ready(self) -> list:
+        return await self.db.create_schema()
 
     async def authenticate(self, username: str, password: str) -> UserRecord | None:
         async with self.db.session() as s:

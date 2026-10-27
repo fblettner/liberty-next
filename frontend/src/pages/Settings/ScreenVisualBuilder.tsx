@@ -548,11 +548,11 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
     Promise.all([
       api.get<DictionaryDoc>('/admin/config/dictionary/parsed').catch((e) => {
         // Surface but don't abort — the canvas still works without the palette.
-        console.warn('dictionary fetch failed', e)  // eslint-disable-line no-console
+        console.warn('dictionary fetch failed', e)
         return null
       }),
       api.get<ConnectorsDoc>('/admin/config/connectors/parsed').catch((e) => {
-        console.warn('connectors fetch failed', e)  // eslint-disable-line no-console
+        console.warn('connectors fetch failed', e)
         return null
       }),
     ]).then(([dd, _conns]) => {

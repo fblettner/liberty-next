@@ -149,7 +149,7 @@ async def _fetch_jde_dd_table(
         if not key or key in out:
             continue
         def _s(col: str) -> str | None:
-            v = m.get(col)
+            v = m.get(col)  # noqa: B023 — closure runs within this iteration
             return str(v).strip() if v is not None and str(v).strip() != "" else None
         def _i(col: str) -> int | None:
             s = _s(col)

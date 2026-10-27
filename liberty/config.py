@@ -7,10 +7,12 @@ the JWT signing key, the OIDC client secret — are referenced, never inlined.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import tomllib
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -71,15 +73,35 @@ def _default_jobs_path() -> Path:
 
 # ${NAME}  or  ${NAME:-default}  (shell semantics: the default is used when NAME is
 # unset *or* empty). The default may contain anything except '}'.
+_log = logging.getLogger(__name__)
+
 _ENV_REF = re.compile(r"\$\{(\w+)(?::-([^}]*))?\}")
 
 
+def _env_or_file(src: Mapping[str, str], name: str) -> str | None:
+    """``NAME`` from *src*; else the content of the file ``NAME_FILE`` points at (Docker / Swarm /
+    Kubernetes secrets are mounted as files). Trailing newlines are stripped; an unreadable file
+    counts as unset (logged once)."""
+    v = src.get(name)
+    if v:
+        return v
+    path = src.get(f"{name}_FILE")
+    if not path:
+        return None
+    try:
+        return Path(path).read_text(encoding="utf-8").rstrip("\r\n")
+    except OSError as exc:
+        _log.warning("%s_FILE=%s is not readable (%s) — treated as unset", name, path, exc)
+        return None
+
+
 def substitute_env(value: Any, *, env: dict[str, str] | None = None) -> Any:
-    """Recursively replace ``${NAME}`` / ``${NAME:-default}`` references with env values."""
+    """Recursively replace ``${NAME}`` / ``${NAME:-default}`` references with env values — or
+    with the content of the file ``NAME_FILE`` names, when ``NAME`` itself is unset."""
     src = os.environ if env is None else env
 
     def _repl(m: re.Match[str]) -> str:
-        v = src.get(m.group(1))
+        v = _env_or_file(src, m.group(1))
         if v:
             return v
         return m.group(2) if m.group(2) is not None else ""
@@ -98,6 +120,9 @@ class AppSettings(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "info"
+    # "text" (human-readable line, UTC timestamp, request id) or "json" (one object per line for a
+    # log shipper). Every line carries the X-Request-ID of the request it was logged in.
+    log_format: Literal["text", "json"] = "text"
     # Built frontend (Vite `dist/`) served as static; empty or missing dir → not mounted.
     static_dir: str = "frontend/dist"
     # When true, the server watches the config TOML files (menus / screens / dictionary /

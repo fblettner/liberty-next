@@ -12,7 +12,7 @@ segment position is a wildcard, and ``"*"`` alone (or :attr:`is_superuser`) mean
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 def _segment_match(pattern: str, value: str) -> bool:

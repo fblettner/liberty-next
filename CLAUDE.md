@@ -30,7 +30,9 @@ docs at https://docs.nomana-it.fr/liberty/ (a separate Docusaurus repo).
   `claude-opus-4-7` unless the user names another; consult the `claude-api` skill before
   changing `liberty/ai/`.
 - **Match the surrounding code's style.** Type hints everywhere (`from __future__ import
-  annotations`). Tests for new modules (backend); frontend has no test runner yet.
+  annotations`). Tests for new modules: pytest on the backend, Vitest for the frontend's pure
+  modules (`*.test.ts` next to the module). `ruff check` and `npm run lint` must stay at zero
+  errors (CI enforces both; `.pre-commit-config.yaml` mirrors them).
 - **Work step by step and never commit before the operator has reviewed the diff.** Finish
   one step, run the tests, leave the tree uncommitted, report, wait. "Commit" means commit
   *and* push. Verify a claim against the current code and `git log` (and measure, for
@@ -66,7 +68,7 @@ lazy) + socket.io-client; built `frontend/dist/` is served by the backend.
 ## Repository map
 
 ```
-liberty/                  the framework (≈44k lines, 84 test files, 1250+ tests)
+liberty/                  the framework (≈44k lines, 85 test files, 1280+ tests)
   main.py                 create_app(): lifespan builds everything onto app.state, mounts the
                           routers, /health (liveness) /ready (pool ping) /info, serves the SPA
   runtime.py              load_registry() + rebuild_runtime(app, sections=…): THE reload path
@@ -106,14 +108,22 @@ liberty/                  the framework (≈44k lines, 84 test files, 1250+ test
   versioning/             config snapshot history (.versions/) + upgrade journal
   userviews/              DB-backed saved grid / chart views (shared + per user)
   plugins/invoke.py       module:function resolution for the apps' Python (allow-listed)
+  config_merge.py         per-entity additive merge of a shipped config into the live one (the apps
+                          installer + Package & Deploy): override / untouched-vs-.bundled snapshot /
+                          custom / withdrawn rules, secrets always from the live connectors.toml
+  schema_sync.py          create_all + forward-add model columns on the framework's own tables
+  observability.py        X-Request-ID middleware (ASGI), request-id log filter, JSON formatter
   migrations/             v1 → v2 migration + `liberty-migrate diff` (kept for reference)
   sio.py                  Socket.IO: record locks (rooms), technical dashboard, log tail
   web/                    the HTTP layer — see the router table
 frontend/src/             see the frontend map
 config/                   app.toml (committed) + *.toml.example templates; the live per-
                           deployment TOMLs are NOT here (see liberty-apps); auth.toml is local
-release/                  docker-compose layouts (light / full / swarm / TLS / apps), install /
-                          upgrade / backup scripts, Traefik config
+release/                  docker-compose layouts (light / full / swarm / TLS / apps), `liberty`
+                          (the one ops command: install|start|stop|status|doctor|ssl|apps|
+                          upgrade|backup|restore|logs|migrate — the compose chain is STATE in
+                          .env, only `ssl`/`apps` change it) wrapping install / upgrade /
+                          backup scripts, Traefik config
 docker/                   entrypoint + vendored Oracle Instant Client zips
 tests/                    pytest (asyncio auto mode); SQLite fixtures; no live DB needed
 ```
@@ -227,13 +237,15 @@ Dev: `export LIBERTY_APPS_DIR=$PWD/../liberty-apps/config`.
 ## Run it
 
 ```bash
-python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # dev = every extra + pytest
+python3.12 -m venv .venv && .venv/bin/pip install -c requirements.txt -e ".[dev]"   # the lock = what the image runs
 ./start.sh init-db            # first run: auth store + an `admin` user (prints the password)
 ./start.sh                    # build frontend/dist if stale, serve SPA + API on :8000
 ./start.sh dev                # --reload   ·   ./start.sh frontend → Vite :5173 with API proxy
-.venv/bin/pytest -q           # ~100 s, no live DB needed
-(cd frontend && npm ci && npm run build)   # tsc --noEmit && vite build
-# CLIs: liberty-next · liberty-connectors list|describe|run · liberty-admin init-db|create-user|…
+.venv/bin/pytest -q           # ~100 s, no live DB needed   ·   .venv/bin/ruff check liberty tests
+(cd frontend && npm ci && npm run lint && npm test && npm run build)   # eslint · vitest · tsc + vite
+# CLIs: liberty-next · liberty-connectors list|describe|run · liberty-admin init-db|create-user|…|migrate [--dry-run]|record-upgrade
+#       liberty-ops status|doctor|start|stop|restart|logs|backup|restore|migrate|upgrade|rollback (Python installs; Docker twin = release/liberty)
+#       (migrate = each plugins/<app>/db upgrade_schema / pending_revisions; journaled as <app>-schema)
 #       liberty-migrate (v1 → v2, incl. `diff`) · liberty-crypto encrypt|decrypt · liberty-license verify|status
 # Dev env (typical): LIBERTY_JWT_SECRET (≥ 32 bytes), LIBERTY_MASTER_KEY, LIBERTY_APPS_DIR,
 #                    LIBERTY_APP_CONFIG=config/app-dev.toml, ANTHROPIC_API_KEY
@@ -242,7 +254,8 @@ python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # dev = every ex
 ## Branches, CI, releases
 
 - `develop` is the working branch; `main` is release-only. CI (`.github/workflows/ci.yml`)
-  runs pytest + `npm ci && npm run build` on every push to develop and PR to main.
+  runs ruff + pytest and `npm ci` + eslint + vitest + the build on every push to develop and PR
+  to main.
 - A push to `main` runs `release.yml`: the CI checks → version resolution (auto-bumps the
   patch when `pyproject.toml`'s version is already tagged) → **a real `## <version>` section
   in `liberty/RELEASE.md` is mandatory** (the run fails on a missing or placeholder one — so
@@ -262,6 +275,17 @@ python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # dev = every ex
 - **Single-process assumptions**: APScheduler's in-memory jobstore and the Socket.IO lock
   rooms are per process — run one replica (PLAN D3 before scaling out).
 - **Audit**: `Screen.audit_table` mirrors writes into `AUD_<table>` in the same transaction.
+- **Framework tables** (nomaflow run history, change packages, saved views, optional `ly2_*` auth):
+  every store's `create_schema()` goes through `liberty.schema_sync.sync_tables` — `create_all` plus
+  forward-adding the model columns a live table lacks — and returns the changes, journaled as
+  `framework-schema` via `runtime.journal_schema`. Adding a column to a model is therefore enough;
+  a rename or type change needs a one-off script. The apps' schemas use Alembic (`liberty-admin migrate`).
+- **Dependencies are locked**: `requirements.txt` is the pip-compile lock of `.[all]` (image, CI and
+  dev venv install with `-c requirements.txt`); refresh it with `pip-compile --extra all
+  --strip-extras --output-file requirements.txt pyproject.toml` and drop the `liberty-next`
+  self-reference line it emits. Base / service images are version-pinned (Dependabot bumps them).
+- **The container runs as uid 1000** (`liberty`): the entrypoint starts as root, fixes the ownership
+  of the mounts, drops privileges; `docker exec -u liberty` for anything that writes.
 - **Optional features fail clearly**: PDF without the `reports` extra → 503 with the install
   hint; `ldap_sync` without `ldap3` → a StepFailed naming the extra.
 - **i18n**: every `t('key')` needs the key in both locale files; ~700 keys still exist only

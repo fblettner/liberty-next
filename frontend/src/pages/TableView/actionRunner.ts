@@ -488,7 +488,6 @@ async function runOneAction(
         // failure. Keep it as a console diagnostic (and the backend still logs the same case to the
         // server console with the "check the WHERE clause" hint); don't push it onto result.warnings.
         if (resp?.statement_type && resp.statement_type !== 'SELECT' && resp.rowcount === 0) {
-          // eslint-disable-next-line no-console
           console.info(`action ${a.label || a.id}: ${resp.statement_type} affected 0 rows on ${target}.${a.query}`)
         }
         if (a.bind_result) {
@@ -610,7 +609,7 @@ async function runOneAction(
           return { abort: true }
         }
         const msg = `action '${a.id}' (navigate) — no navigate handler in this context`
-        console.warn(msg)  // eslint-disable-line no-console
+        console.warn(msg)
         if (a.stop_on_error !== false) { result.error = msg; result.ok = false; return { abort: true } }
         result.warnings.push(msg)
         break

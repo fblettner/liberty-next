@@ -1,0 +1,485 @@
+#!/usr/bin/env bash
+#
+# Liberty Next — the one operator command for a Docker install (Compose layouts).
+#
+#   liberty install [light|full] [--tag X] [--ssl letsencrypt|provided …] [--apps <wheel>]
+#   liberty start | stop | restart            # the stack, with the compose chain recorded in .env
+#   liberty status                            # versions, chain in force, readiness, apps, last upgrade
+#   liberty doctor                            # what's wrong and how to fix it
+#   liberty ssl letsencrypt --domain D --email E      # enable / switch TLS AFTER the install
+#   liberty ssl provided --domain D --cert-dir DIR --cert-file F --key-file K
+#   liberty ssl off                           # back to plain HTTP
+#   liberty dashboard-password                # new random password for the Traefik dashboard (/traefik)
+#   liberty apps <wheel> [--force-config]     # link or refresh the licensed apps
+#   liberty upgrade [--tag X] [--apps <wheel>] [--keep DAYS]   # doctor → backup → pull → recreate → migrations → report → status
+#   liberty rollback [--yes]                  # back to the image + volumes from before the last upgrade
+#   liberty backup [--keep DAYS] | liberty restore <backup-dir>
+#   liberty logs [-f]                         # the liberty-next service's logs
+#   liberty migrate [--dry-run]               # pending app schema migrations (liberty-admin migrate)
+#
+# Design rule (the lesson behind this script): the compose chain — layout, TLS overlay, apps
+# overlay — is STATE, recorded in .env as COMPOSE_FILE. Only `ssl` and `apps` change it; every
+# other command reuses it verbatim. Recomputing it from an unrelated run's flags is what used
+# to drop the TLS + apps overlays on an upgrade ("all my config is gone").
+#
+# This script delegates to the historic scripts next to it (install.sh / install-apps.sh /
+# backup.sh / upgrade.sh), which keep working on their own.
+set -euo pipefail
+
+here="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")")" && pwd)"
+cd "$here"
+ENV_FILE=".env"
+SERVICE="liberty-next"
+
+if [ -t 1 ]; then
+  RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
+else
+  RED=''; GREEN=''; YELLOW=''; BLUE=''; BOLD=''; NC=''
+fi
+info()  { printf "${BLUE}▸${NC} %s\n" "$*"; }
+ok()    { printf "${GREEN}✔${NC} %s\n" "$*"; }
+warn()  { printf "${YELLOW}!${NC} %s\n" "$*"; }
+die()   { printf "${RED}✗${NC} %s\n" "$*" >&2; exit 1; }
+
+usage() { sed -n '3,22p' "$0" | sed 's/^# \{0,1\}//'; }
+
+# ── .env helpers ───────────────────────────────────────────────────────────────
+need_env() { [ -f "$ENV_FILE" ] || die ".env not found in $here — run './liberty install' first."; }
+# Never fails (a missing key is just empty) — with `set -o pipefail` a bare grep miss would abort the caller.
+env_get()  { { grep -E "^${1}=" "$ENV_FILE" 2>/dev/null || true; } | head -1 | cut -d= -f2-; }
+env_set() {
+  local key="$1" val="$2"
+  if grep -qE "^${key}=" "$ENV_FILE"; then
+    sed -i.bak "s|^${key}=.*|${key}=${val}|" "$ENV_FILE" && rm -f "${ENV_FILE}.bak"
+  else
+    printf '\n%s=%s\n' "$key" "$val" >> "$ENV_FILE"
+  fi
+}
+
+# The chain recorded in .env, exported so `docker compose` ignores any stray compose.yaml
+# found while walking up from the cwd (compose v2 checks the cwd BEFORE .env).
+chain()   { env_get COMPOSE_FILE; }
+compose() { COMPOSE_FILE="$(chain)" docker compose "$@"; }
+layout_of_chain() { case "$(chain)" in docker-compose.light.yml*) echo light ;; docker-compose.full.yml*) echo full ;; docker-compose.swarm.yml*) echo swarm ;; *) echo unknown ;; esac; }
+tls_of_chain()    { case "$(chain)" in *tls-letsencrypt*) echo letsencrypt ;; *tls-provided*) echo provided ;; *) echo off ;; esac; }
+apps_in_chain()   { case ":$(chain):" in *:docker-compose.apps.yml:*) echo yes ;; *) echo no ;; esac; }
+
+require_docker() {
+  command -v docker >/dev/null 2>&1 || die "docker is not installed."
+  docker compose version >/dev/null 2>&1 || die "docker compose v2 is not available."
+}
+
+wait_healthy() {
+  local tries="${1:-60}"
+  info "Waiting for $SERVICE to report healthy…"
+  for _ in $(seq 1 "$tries"); do
+    local st
+    st=$(docker inspect --format='{{.State.Health.Status}}' "$SERVICE" 2>/dev/null || echo starting)
+    case "$st" in
+      healthy)   ok "$SERVICE is healthy."; return 0 ;;
+      unhealthy) die "$SERVICE reported unhealthy — try: ./liberty logs" ;;
+    esac
+    sleep 2
+  done
+  warn "$SERVICE not healthy after $((tries * 2)) s — check ./liberty logs"
+  return 1
+}
+
+# -i: the python heredocs below need stdin forwarded. -u liberty: the app runs as uid 1000 since 7.0.58;
+# a root exec would leave root-owned files in the config volume the app can no longer write. An
+# older image has no such user — probed once per run, root then.
+EXEC_USER=""
+exec_user() {
+  if [ -z "$EXEC_USER" ]; then
+    if docker exec "$SERVICE" id -u liberty >/dev/null 2>&1; then EXEC_USER=liberty; else EXEC_USER=root; fi
+  fi
+  printf '%s' "$EXEC_USER"
+}
+in_container() { docker exec -i -u "$(exec_user)" "$SERVICE" "$@"; }
+ver_fw()   { in_container python -c 'import liberty;print(liberty.__version__)' 2>/dev/null </dev/null || true; }
+ver_apps() { in_container python -c "from importlib.metadata import version;print(version('liberty-apps'))" 2>/dev/null </dev/null || true; }
+health()   { docker inspect --format='{{.State.Health.Status}}' "$SERVICE" 2>/dev/null || echo absent; }
+
+# "up to date" | "N pending (app: n, …)" | "error: …" | "? …" — from `liberty-admin migrate
+# --dry-run`'s JSON (exit 0 = up to date, 2 = pending, 1 = an app errored).
+migrations_summary() {
+  in_container sh -c 'liberty-admin migrate --dry-run 2>/dev/null' | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("? (could not query)"); sys.exit(0)
+errs = [a for a in d["apps"] if a["status"] == "error"]
+if errs:
+    print("error: " + "; ".join(a["app"] + ": " + str(a.get("reason", "")) for a in errs)); sys.exit(0)
+pend = [(a["app"], a.get("pending") or []) for a in d["apps"] if a.get("pending")]
+if not pend:
+    print("up to date" if d["apps"] else "no migratable app plugin"); sys.exit(0)
+print(str(d["pending_total"]) + " pending (" + ", ".join(a + ": " + str(len(p)) for a, p in pend) + ")")
+' 2>/dev/null || echo "? (could not query)"
+}
+
+# ── commands ───────────────────────────────────────────────────────────────────
+cmd_install() {
+  require_docker
+  exec ./install.sh "$@"
+}
+
+cmd_start()   { need_env; require_docker; info "Starting (chain: $(chain))"; compose up -d; wait_healthy || true; }
+cmd_stop()    { need_env; require_docker; info "Stopping"; compose stop; ok "stopped (volumes + .env kept)"; }
+cmd_restart() { need_env; require_docker; info "Restarting $SERVICE"; compose restart "$SERVICE"; wait_healthy || true; }
+cmd_logs()    { need_env; require_docker; compose logs --tail=200 "$@" "$SERVICE"; }
+
+cmd_status() {
+  need_env; require_docker
+  local lay tls apps tag running
+  lay="$(layout_of_chain)"; tls="$(tls_of_chain)"; apps="$(apps_in_chain)"; tag="$(env_get LIBERTY_IMAGE_TAG)"
+  printf "${BOLD}Liberty Next — %s${NC}\n" "$here"
+  printf "  layout        %s\n" "$lay"
+  printf "  tls           %s%s\n" "$tls" "$([ "$tls" != off ] && printf ' (%s)' "$(env_get LIBERTY_DOMAIN)")"
+  printf "  apps overlay  %s%s\n" "$apps" "$([ "$apps" = yes ] && printf ' (%s)' "$(env_get APPS_HOST_PATH)")"
+  printf "  image tag     %s\n" "${tag:-latest}"
+  printf "  chain         %s\n" "$(chain)"
+  running=$(docker inspect --format='{{.State.Status}}/{{.State.Health.Status}}' "$SERVICE" 2>/dev/null || echo "not running")
+  printf "  container     %s\n" "$running"
+  if [ "$running" != "not running" ]; then
+    printf "  framework     %s\n" "$(in_container python -c 'import liberty;print(liberty.__version__)' 2>/dev/null || echo '?')"
+    printf "  apps bundle   %s\n" "$(in_container python -c "from importlib.metadata import version;print(version('liberty-apps'))" 2>/dev/null || echo 'not installed')"
+    printf "  /ready        %s\n" "$(in_container curl -fsS "http://127.0.0.1:8000/ready" 2>/dev/null || echo 'NOT READY')"
+    printf "  migrations    %s\n" "$(migrations_summary)"
+    printf "  last upgrade  "; in_container python - <<'PY' 2>/dev/null || echo "?"
+try:
+    from liberty.config import load_settings
+    from liberty.versioning import ConfigVersionStore
+    rows = ConfigVersionStore(load_settings().connectors.config_path.parent).list_upgrades()  # newest first
+    r = rows[0] if rows else None
+    print(f"{r['component']} {r['from_version'] or '-'} → {r['to_version']} ({r['created_at'][:19]})" if r else "none recorded")
+except Exception as e:
+    print(f"? ({type(e).__name__})")
+PY
+  fi
+}
+
+cmd_doctor() {
+  require_docker
+  local problems=0
+  # fail REPORTS and counts (bash locals are dynamically scoped, so it sees $problems); it must
+  # return 0 — a non-zero status inside `if … else fail …; fi` would trip `set -e` and abort.
+  fail() { printf "${RED}✗${NC} %s\n   → %s\n" "$1" "$2"; problems=$((problems + 1)); return 0; }
+  pass() { printf "${GREEN}✔${NC} %s\n" "$1"; return 0; }
+
+  if [ ! -f "$ENV_FILE" ]; then fail ".env is missing" "run ./liberty install [light|full]"; return 1; fi
+  pass ".env present"
+  local ch; ch="$(chain)"
+  if [ -z "$ch" ]; then fail "COMPOSE_FILE not recorded in .env" "add COMPOSE_FILE=docker-compose.<layout>.yml (install.sh does this on re-run)"; else pass "compose chain: $ch"; fi
+  local f
+  for f in $(printf '%s' "$ch" | tr ':' ' '); do
+    [ -f "$f" ] && pass "overlay file $f exists" || fail "overlay file $f missing" "you are not in the release/ directory of the right checkout"
+  done
+  local apps_path; apps_path="$(env_get APPS_HOST_PATH)"
+  if [ -n "$apps_path" ]; then
+    if [ "$(apps_in_chain)" = yes ]; then pass "apps overlay in the chain (APPS_HOST_PATH=$apps_path)"; else
+      fail "APPS_HOST_PATH is set but docker-compose.apps.yml is NOT in COMPOSE_FILE — the container runs WITHOUT your apps config (it looks like an empty install)" "run: ./liberty apps <wheel>   (re-adds the overlay; idempotent)"; fi
+    [ -d "$apps_path/config" ] && pass "apps config dir present" || fail "$apps_path/config not found" "re-run ./liberty apps <wheel>"
+  else
+    warn "no APPS_HOST_PATH — open-framework install (no licensed apps linked)"
+  fi
+  local key v
+  for key in LIBERTY_JWT_SECRET LIBERTY_MASTER_KEY; do
+    v="$(env_get "$key")"
+    if [ -z "$v" ]; then fail "$key empty in .env" "generate: openssl rand -base64 48";
+    elif [ "${#v}" -lt 32 ]; then fail "$key is ${#v} chars — below the 32 recommended" "rotate carefully: the master key encrypts every ENC: value; the JWT secret logs everyone out";
+    else pass "$key set (${#v} chars)"; fi
+  done
+  if [ "$(layout_of_chain)" = full ]; then
+    if [ -z "$(env_get TRAEFIK_DASHBOARD_USERS)" ]; then fail "Traefik dashboard still uses the historic default password (no TRAEFIK_DASHBOARD_USERS in .env)" "./liberty dashboard-password"; else pass "Traefik dashboard has a per-install password"; fi
+    case "$(env_get POSTGRES_BIND)" in
+      ""|127.0.0.1|localhost) pass "Postgres published on the loopback only" ;;
+      *) warn "Postgres published on $(env_get POSTGRES_BIND):$(env_get POSTGRES_PORT) — make sure a firewall covers it" ;;
+    esac
+  fi
+  case "$(tls_of_chain)" in
+    provided)
+      local cd; cd="$(env_get CERT_HOST_PATH)"
+      [ -d "$cd" ] && pass "cert dir $cd present" || fail "CERT_HOST_PATH=$cd not found" "./liberty ssl provided --cert-dir …"
+      [ -f traefik/dynamic/tls.yml ] && pass "traefik/dynamic/tls.yml present" || fail "traefik/dynamic/tls.yml missing" "./liberty ssl provided … regenerates it"
+      ;;
+    letsencrypt) [ -n "$(env_get LIBERTY_DOMAIN)" ] && pass "Let's Encrypt domain: $(env_get LIBERTY_DOMAIN)" || fail "LIBERTY_DOMAIN empty" "./liberty ssl letsencrypt --domain … --email …" ;;
+  esac
+  local vol
+  for vol in liberty-config pg-data traefik-acme; do
+    docker volume inspect "$vol" >/dev/null 2>&1 && pass "volume $vol exists" || warn "volume $vol absent (fine on light / before first start)"
+  done
+  local st; st=$(docker inspect --format='{{.State.Status}}' "$SERVICE" 2>/dev/null || echo "absent")
+  if [ "$st" = running ]; then
+    pass "$SERVICE running"
+    if in_container curl -fsS "http://127.0.0.1:8000/ready" >/dev/null 2>&1; then pass "/ready: framework pool answers"; else fail "/ready → 503: the framework database is unreachable" "check the database / the default pool in connectors.toml"; fi
+    local pend; pend="$(migrations_summary)"
+    case "$pend" in
+      *pending*) fail "schema migrations: $pend" "./liberty migrate" ;;
+      error:*)   fail "schema migrations: $pend" "./liberty migrate --dry-run for the details" ;;
+      \?*)       warn "schema migrations: $pend" ;;
+      *)         pass "schema migrations: $pend" ;;
+    esac
+    local mk; mk="$(in_container python -c "
+import tomllib
+from liberty.config import load_settings
+from liberty.crypto import decrypt_or_keep, is_encrypted
+s = load_settings(); doc = tomllib.loads(s.connectors.config_path.read_text())
+bad = [n for n, c in doc.get('pools', {}).items()
+       if is_encrypted(c.get('password', '')) and decrypt_or_keep(c['password'], s.crypto.master_key)[1]]
+print('ok' if not bad else 'cannot decrypt the password of pool(s): ' + ', '.join(bad))" 2>/dev/null || echo '?')"
+    [ "$mk" = ok ] && pass "master key decrypts every pool password" || fail "master key check: $mk" "LIBERTY_MASTER_KEY in .env must be the key those ENC: values were made with"
+  else
+    warn "$SERVICE is $st — start it with ./liberty start"
+  fi
+  local free; free=$(df -Pk . | awk 'NR==2 {print int($4/1024)}')
+  [ "$free" -gt 2048 ] && pass "disk free: ${free} MB" || fail "disk free: ${free} MB" "free space before pulling an image (~600 MB)"
+  echo
+  if [ "$problems" -eq 0 ]; then ok "no problems found"; return 0; fi
+  printf "${RED}✗${NC} %s\n" "$problems problem(s) — see the → lines above" >&2
+  return 1
+}
+
+cmd_ssl() {
+  need_env; require_docker
+  local mode="${1:-}"; shift || true
+  local lay; lay="$(layout_of_chain)"
+  [ "$lay" = full ] || die "TLS is wired on the full layout only (this install is '$lay')."
+  case "$mode" in
+    letsencrypt|provided)
+      # install.sh --ssl on an existing .env swaps ONLY the TLS overlay in the recorded chain
+      # (keeps the apps overlay), writes / removes tls.yml, and restarts the stack.
+      info "Switching TLS to '$mode' (the apps overlay and every secret are kept)"
+      ./install.sh full --ssl "$mode" "$@"
+      ;;
+    off)
+      local ch; ch="$(chain | tr ':' '\n' | grep -vE '^docker-compose\.tls-(letsencrypt|provided)\.yml$' | paste -sd: -)"
+      env_set COMPOSE_FILE "$ch"
+      rm -f traefik/dynamic/tls.yml
+      info "TLS overlay removed from the chain → $ch"
+      compose up -d --remove-orphans; wait_healthy || true
+      ;;
+    *) die "usage: ./liberty ssl letsencrypt --domain D --email E | ssl provided --domain D --cert-dir DIR --cert-file F --key-file K | ssl off" ;;
+  esac
+}
+
+cmd_dashboard_password() {
+  # A new random password for the Traefik dashboard (/traefik): written to .env as an apr1 hash
+  # (TRAEFIK_DASHBOARD_USERS), printed once, traefik recreated to pick it up.
+  need_env; require_docker
+  [ "$(layout_of_chain)" = full ] || die "the Traefik dashboard exists on the full layout only"
+  command -v openssl >/dev/null 2>&1 || die "openssl is needed to hash the password"
+  local pw hash
+  pw="$(openssl rand -base64 24 | tr -d '\n=$+/' | head -c 16)"
+  hash="$(openssl passwd -apr1 "$pw" | sed 's/\$/$$/g')"
+  env_set TRAEFIK_DASHBOARD_USERS "admin:${hash}"
+  compose up -d traefik >/dev/null
+  ok "Traefik dashboard: admin / ${pw}   (shown once — the .env holds only the hash)"
+}
+
+cmd_apps() {
+  # Plan first (a dry run prints the per-entity merge: added / refreshed / kept / removed), then
+  # the real install unless --dry-run was asked for; then the apps' schema migrations.
+  need_env; require_docker
+  [ -n "${1:-}" ] || die "usage: ./liberty apps <wheel-path-or-url> [--force-config] [--dry-run]"
+  case " $* " in *" --dry-run "*) ./install-apps.sh "$@" --layout "$(layout_of_chain)"; return 0 ;; esac
+  info "Merge plan"
+  ./install-apps.sh "$@" --dry-run --layout "$(layout_of_chain)" | sed -n '/^Merge plan/,$p'
+  ./install-apps.sh "$@" --layout "$(layout_of_chain)"
+  cmd_migrate
+}
+
+cmd_migrate() {
+  need_env; require_docker
+  in_container liberty-admin migrate "$@"
+}
+
+cmd_backup()  { ./backup.sh "$@"; }
+
+cmd_restore() {
+  # Mirrors the restore recipe backup.sh prints: one <volume>.tar.gz per named volume (made with
+  # `tar czf … -C /data .`), plus liberty-apps.tar.gz for the apps bind mount when it was set.
+  need_env; require_docker
+  local dir="${1:-}"; [ -d "$dir" ] || die "usage: ./liberty restore <backup-dir>   (a directory written by ./liberty backup)"
+  local abs tgz vol
+  abs="$(cd "$dir" && pwd)"
+  info "Stopping the stack before restoring volumes"
+  compose stop
+  for tgz in "$abs"/*.tar.gz; do
+    [ -f "$tgz" ] || continue
+    vol="$(basename "$tgz" .tar.gz)"
+    [ "$vol" = liberty-apps ] && continue   # the bind mount, handled below
+    info "Restoring volume $vol from $(basename "$tgz")"
+    docker volume create "$vol" >/dev/null
+    docker run --rm -v "$vol":/data -v "$abs":/backup:ro alpine \
+      sh -c "rm -rf /data/* /data/.[!.]* ; tar xzf /backup/$(basename "$tgz") -C /data"
+  done
+  local apps; apps="$(env_get APPS_HOST_PATH)"
+  if [ -f "$abs/liberty-apps.tar.gz" ] && [ -n "$apps" ]; then
+    info "Restoring the apps bundle into $apps"
+    mkdir -p "$apps" && tar xzf "$abs/liberty-apps.tar.gz" -C "$apps"
+  fi
+  ok "restore done — starting"
+  compose up -d; wait_healthy || true
+}
+
+cmd_upgrade() {
+  # doctor (advisory) → keep the running image for rollback → backup (the gate) → pin + pull +
+  # recreate → health → apps wheel / schema migrations → report (journaled in Settings → History
+  # → Upgrades) → status. Everything the rollback needs lands in .env: LIBERTY_ROLLBACK_TAG (a local
+  # tag of the image that was running), LIBERTY_ROLLBACK_FROM_TAG, LIBERTY_LAST_BACKUP.
+  need_env; require_docker
+  local wheel="" newtag="" keep=30
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --apps) [ -n "${2:-}" ] || die "--apps requires a wheel"; wheel="$2"; shift 2 ;;
+      --tag)  [ -n "${2:-}" ] || die "--tag requires a value"; newtag="$2"; shift 2 ;;
+      --keep) [ -n "${2:-}" ] || die "--keep requires a number of days"; keep="$2"; shift 2 ;;
+      *) die "unknown argument: $1" ;;
+    esac
+  done
+  local stamp started layout ch oldtag oldfw oldapps steps=() doctor_out problems=0
+  stamp="$(date -u +%Y%m%d-%H%M%S)"; started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  layout="$(layout_of_chain)"; ch="$(chain)"
+  oldtag="$(env_get LIBERTY_IMAGE_TAG)"; oldtag="${oldtag:-latest}"
+  oldfw="$(ver_fw)"; oldapps="$(ver_apps)"
+
+  info "1/6 Pre-flight (advisory — an upgrade is often the fix for what doctor reports; the backup is the gate)"
+  doctor_out="$(mktemp)"
+  if cmd_doctor >"$doctor_out" 2>&1; then steps+=("doctor=ok"); else
+    problems="$(grep -c '^   → ' "$doctor_out" || true)"
+    steps+=("doctor=warn:${problems} problem(s) before the upgrade")
+  fi
+  cat "$doctor_out"
+
+  info "2/6 Keeping the running image for a rollback"
+  local oldimg oldref repo
+  oldimg="$(docker inspect --format '{{.Image}}' "$SERVICE" 2>/dev/null || true)"
+  oldref="$(docker inspect --format '{{.Config.Image}}' "$SERVICE" 2>/dev/null || true)"
+  if [ -n "$oldimg" ] && [ -n "$oldref" ]; then
+    repo="${oldref%:*}"
+    docker tag "$oldimg" "${repo}:rollback-${stamp}"
+    env_set LIBERTY_ROLLBACK_TAG "rollback-${stamp}"
+    env_set LIBERTY_ROLLBACK_FROM_TAG "$oldtag"
+    ok "image kept as ${repo}:rollback-${stamp}"
+    steps+=("keep-image=ok:${repo}:rollback-${stamp}")
+  else
+    warn "no running container — nothing to keep for a rollback"
+    steps+=("keep-image=skipped:no running container")
+  fi
+
+  info "3/6 Backup (gate: an upgrade never starts without one; --keep ${keep} days)"
+  local backup_out bdir
+  backup_out="$(mktemp)"
+  if ! ./backup.sh --keep "$keep" >"$backup_out" 2>&1; then cat "$backup_out"; die "backup failed — upgrade aborted, nothing was changed"; fi
+  cat "$backup_out"
+  bdir="$(grep -E 'Backup complete:' "$backup_out" | sed -E 's/.*Backup complete: *//' | tail -1)"
+  [ -n "$bdir" ] || die "backup.sh did not report its destination — upgrade aborted"
+  env_set LIBERTY_LAST_BACKUP "$bdir"
+  steps+=("backup=ok:${bdir}")
+
+  info "4/6 Pull + recreate (chain: ${ch})"
+  [ -n "$newtag" ] && env_set LIBERTY_IMAGE_TAG "$newtag"
+  if compose pull; then steps+=("pull=ok"); else warn "pull reported a problem — recreating with what is available"; steps+=("pull=warn:pull reported a problem"); fi
+  compose up -d
+  if wait_healthy; then steps+=("health=ok"); else steps+=("health=fail:$(health)"); fi
+
+  info "5/6 Apps + schema migrations"
+  if [ -n "$wheel" ]; then
+    if ./install-apps.sh "$wheel" --layout "$layout"; then steps+=("apps=ok:${wheel##*/}"); else steps+=("apps=fail:install-apps.sh failed"); fi
+  fi
+  local migjson="" migrc=0
+  migjson="$(in_container liberty-admin migrate 2>/dev/null </dev/null)" || migrc=$?
+  case "$migrc" in
+    0) steps+=("migrate=ok") ;;
+    *) steps+=("migrate=fail:liberty-admin migrate exited ${migrc}") ;;
+  esac
+  [ -n "$migjson" ] && printf '%s\n' "$migjson"
+
+  info "6/6 Report"
+  local newfw newapps rec
+  newfw="$(ver_fw)"; newapps="$(ver_apps)"
+  local args=(--kind upgrade --started-at "$started" --host "$(hostname)" --layout "$layout" --chain "$ch"
+              --tag-from "$oldtag" --tag-to "$(env_get LIBERTY_IMAGE_TAG)" --fw-from "$oldfw" --fw-to "$newfw"
+              --apps-from "$oldapps" --apps-to "$newapps" --backup "$bdir" --health "$(health)"
+              --doctor-problems "$problems" --doctor-text -)
+  [ -n "$migjson" ] && args+=(--migrations "$migjson")
+  local st; for st in "${steps[@]}"; do args+=(--step "$st"); done
+  if rec="$(in_container liberty-admin record-upgrade "${args[@]}" <"$doctor_out" 2>/dev/null)"; then
+    local rname rjson
+    rname="$(printf '%s' "$rec" | grep -o '"report": "[^"]*"' | cut -d'"' -f4)"
+    rjson="$(printf '%s' "$rec" | grep -o '"json_path": "[^"]*"' | cut -d'"' -f4)"
+    env_set LIBERTY_LAST_REPORT "$rjson"
+    # a host-side copy next to the backup: survives a rollback's volume restore, handy for support
+    in_container cat "$rjson" </dev/null >"$bdir/upgrade-report.json" 2>/dev/null || true
+    ok "report recorded (Settings → History → Upgrades): $rname"
+  else
+    warn "could not record the report in the container (older image without record-upgrade?) — the run still completed"
+  fi
+  rm -f "$doctor_out" "$backup_out"
+  echo
+  cmd_status
+  case " ${steps[*]} " in *"=fail:"*) echo; warn "some steps FAILED — see above; './liberty rollback' goes back to the image + volumes from before this upgrade" ;; esac
+}
+
+cmd_rollback() {
+  # Back to the image that was running before the last `liberty upgrade` (kept as a local tag) and
+  # the volumes it snapshotted just before. Restores volumes → confirm first (or --yes).
+  need_env; require_docker
+  local yes=no; [ "${1:-}" = "--yes" ] && yes=yes
+  local tag from backup
+  tag="$(env_get LIBERTY_ROLLBACK_TAG)"; from="$(env_get LIBERTY_ROLLBACK_FROM_TAG)"; backup="$(env_get LIBERTY_LAST_BACKUP)"
+  [ -n "$tag" ] || die "nothing to roll back to — './liberty upgrade' records the previous image and a backup first"
+  [ -d "$backup" ] || die "the backup taken before the last upgrade ($backup) is gone — restore one by hand: ./liberty restore <dir>"
+  local curtag curfw; curtag="$(env_get LIBERTY_IMAGE_TAG)"; curfw="$(ver_fw)"
+  printf "${BOLD}Rollback${NC}\n  image tag  %s → %s (the image that ran before the upgrade, tagged %s)\n  volumes    restored from %s\n" "${curtag:-latest}" "${from:-latest}" "$tag" "$backup"
+  if [ "$yes" != yes ]; then
+    local ans; read -r -p "Everything written since that backup will be lost. Continue? [y/N] " ans
+    case "$ans" in y|Y|yes) ;; *) die "rollback cancelled" ;; esac
+  fi
+  local steps=() saved_report=""
+  # The upgrade's report lives in .versions/ inside the config volume — the restore below puts the
+  # pre-upgrade .versions/ back. Keep the report (the host copy next to the backup, else the live file)
+  # and re-journal it afterwards: the history must show the upgrade AND its rollback.
+  if [ -f "$backup/upgrade-report.json" ]; then saved_report="$backup/upgrade-report.json"
+  elif [ -n "$(env_get LIBERTY_LAST_REPORT)" ]; then
+    saved_report="$(mktemp)"; in_container cat "$(env_get LIBERTY_LAST_REPORT)" </dev/null >"$saved_report" 2>/dev/null || saved_report=""
+  fi
+  env_set LIBERTY_IMAGE_TAG "$tag"; steps+=("pin-image=ok:${tag}")
+  if cmd_restore "$backup"; then steps+=("restore=ok:${backup}"); else steps+=("restore=fail:see above"); fi
+  if [ -n "$saved_report" ] && [ -s "$saved_report" ]; then
+    if in_container liberty-admin record-upgrade --from-json - <"$saved_report" >/dev/null 2>&1; then steps+=("keep-upgrade-report=ok")
+    else steps+=("keep-upgrade-report=warn:could not re-journal the upgrade's report"); fi
+  fi
+  # the recorded tag is what install / upgrade should go back to pinning
+  if [ -n "$from" ] && [ "$from" != latest ]; then env_set LIBERTY_IMAGE_TAG "$from"; else env_set LIBERTY_IMAGE_TAG "$tag"; fi
+  local args=(--kind rollback --host "$(hostname)" --layout "$(layout_of_chain)" --chain "$(chain)"
+              --tag-from "${curtag:-latest}" --tag-to "$(env_get LIBERTY_IMAGE_TAG)" --fw-from "$curfw" --fw-to "$(ver_fw)"
+              --apps-to "$(ver_apps)" --backup "$backup" --health "$(health)")
+  local st; for st in "${steps[@]}"; do args+=(--step "$st"); done
+  in_container liberty-admin record-upgrade "${args[@]}" </dev/null >/dev/null 2>&1 || warn "could not record the rollback report in the container"
+  ok "rolled back — LIBERTY_IMAGE_TAG=$(env_get LIBERTY_IMAGE_TAG) (the ${tag} image stays available locally)"
+  cmd_status
+}
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  install)  cmd_install "$@" ;;
+  start)    cmd_start ;;
+  stop)     cmd_stop ;;
+  restart)  cmd_restart ;;
+  status)   cmd_status ;;
+  doctor)   cmd_doctor ;;
+  ssl)      cmd_ssl "$@" ;;
+  apps)     cmd_apps "$@" ;;
+  dashboard-password) cmd_dashboard_password ;;
+  upgrade)  cmd_upgrade "$@" ;;
+  rollback) cmd_rollback "$@" ;;
+  backup)   cmd_backup "$@" ;;
+  restore)  cmd_restore "$@" ;;
+  logs)     cmd_logs "$@" ;;
+  migrate)  cmd_migrate "$@" ;;
+  help|-h|--help) usage ;;
+  *) die "unknown command: $cmd (try ./liberty help)" ;;
+esac

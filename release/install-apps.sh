@@ -4,7 +4,9 @@
 #
 # What this does (no git clone — uses the licensed wheel you were delivered):
 #   1. Materializes the wheel's payload (config + plugins) into ./apps/ via a throwaway
-#      python:3.12-slim container — your host doesn't need python or pip.
+#      container from the liberty-next image already pulled (LIBERTY_IMAGE_TAG in .env) — your
+#      host doesn't need python or pip, and the installer can use the framework's per-entity
+#      config merge.
 #   2. Updates .env: APPS_HOST_PATH + COMPOSE_FILE (adds the apps overlay).
 #   3. Restarts the stack so liberty-next picks up the new mount.
 #   4. Runs install-time jobs (deploy-databases / init-db / import-reference …).
@@ -21,10 +23,9 @@
 # Re-running is idempotent: rematerializes the wheel (operator edits are preserved
 # unless you pass --force-config), refreshes .env keys, re-applies compose.
 #
-# --force-config refreshes the product config (new screens / columns / queries) but is now
-# SAFE for credentials: connectors.toml is secret-preservingly *merged*, not clobbered — your
-# [pools.*] (DB user/password/host/dblinks) and any API auth are kept, only the structure is
-# updated. So run it on every upgrade to pick up new config without re-entering credentials.
+# Config is merged per entity: product additions land, your edits / overrides / own entities /
+# secrets stay. --force-config also refreshes vendor entities you changed without flagging them
+# `override = true`. --dry-run prints the merge plan and writes nothing.
 set -euo pipefail
 
 if [ -t 1 ]; then
@@ -45,12 +46,14 @@ WHEEL=""
 APPS_PATH="./apps"
 LAYOUT="full"
 FORCE_CONFIG="no"
+DRY_RUN="no"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --target)        [ -z "${2:-}" ] && die "--target requires a value"; APPS_PATH="$2"; shift 2 ;;
     --layout)        [ -z "${2:-}" ] && die "--layout requires a value (full|light)"; LAYOUT="$2"; shift 2 ;;
     --force-config)  FORCE_CONFIG="yes"; shift ;;
+    --dry-run)       DRY_RUN="yes"; shift ;;
     --license-key)
       die "--license-key was removed — set the license via Settings → App → License after install (encrypted at rest in app.toml)." ;;
     --help|-h)       sed -n '4,23p' "$0"; exit 0 ;;
@@ -94,23 +97,39 @@ case "$WHEEL_LOCAL" in *.whl) ;; *) die "Not a wheel file: $WHEEL_LOCAL (expecte
 # then invokes the liberty-apps CLI which copies config/ and plugins/ into $APPS_PATH.
 # Nothing python-related is left on the host afterwards.
 APPS_ABS="$(mkdir -p "$APPS_PATH" && cd "$APPS_PATH" && pwd)"
-info "Materializing wheel into $APPS_ABS via a throwaway python:3.12-slim container…"
+IMAGE_TAG="$(grep -E '^LIBERTY_IMAGE_TAG=' .env | head -1 | cut -d= -f2- || true)"
+RUNNER_IMAGE="ghcr.io/fblettner/liberty-next:${IMAGE_TAG:-latest}"
+info "Materializing wheel into $APPS_ABS via a throwaway ${RUNNER_IMAGE} container…"
 
 EXTRA_FLAGS=""
-[ "$FORCE_CONFIG" = "yes" ] && EXTRA_FLAGS="--force-config"
+[ "$FORCE_CONFIG" = "yes" ] && EXTRA_FLAGS="$EXTRA_FLAGS --force-config"
+[ "$DRY_RUN" = "yes" ] && EXTRA_FLAGS="$EXTRA_FLAGS --dry-run"
 
 WHEEL_DIR="$(dirname "$WHEEL_LOCAL")"
 WHEEL_NAME="$(basename "$WHEEL_LOCAL")"
 
-docker run --rm \
+# The framework image: python + liberty-next are there, so `liberty-apps install` runs the
+# per-entity merge (liberty.config_merge). Falls back to python:3.12-slim when that image is
+# not available locally and cannot be pulled (whole-file copy, as before).
+if ! docker image inspect "$RUNNER_IMAGE" >/dev/null 2>&1 && ! docker pull -q "$RUNNER_IMAGE" >/dev/null 2>&1; then
+  warn "${RUNNER_IMAGE} not available — using python:3.12.15-slim (no per-entity config merge)"
+  RUNNER_IMAGE="python:3.12.15-slim"
+fi
+docker run --rm --entrypoint bash \
   -v "${WHEEL_DIR}":/wheel:ro \
   -v "${APPS_ABS}":/dest \
-  python:3.12-slim \
-  bash -c "
+  "$RUNNER_IMAGE" \
+  -c "
     set -e
     pip install --quiet --no-cache-dir --root-user-action=ignore '/wheel/${WHEEL_NAME}'
     liberty-apps install --target /dest/config ${EXTRA_FLAGS}
+    chown -R 1000:1000 /dest   # the app runs as liberty (uid 1000) and writes here (Settings, .versions/)
   "
+if [ "$DRY_RUN" = "yes" ]; then
+  ok "dry run — nothing written (no .env change, no restart, no install jobs)"
+  [ -n "$WHEEL_TMP" ] && rm -rf "$(dirname "$WHEEL_TMP")"
+  exit 0
+fi
 
 # Clean up downloaded wheel if we fetched it
 [ -n "$WHEEL_TMP" ] && rm -rf "$(dirname "$WHEEL_TMP")"
@@ -131,6 +150,12 @@ upsert_env() {
   fi
 }
 upsert_env "APPS_HOST_PATH" "$APPS_ABS"
+# The JDE connection values the wheel ships as ${ENV} references — documented, left for the
+# operator (empty = fill them in Settings → Pools / Connectors instead).
+if ! grep -qE '^#? *JDE_DB_URL=' .env; then
+  printf '\n# JD Edwards connection (the apps wheel ships these as ${ENV} references; empty = set them in Settings)\n# JDE_DB_URL=oracle+oracledb://user@host:1521/?service_name=JDEPROD\n# JDE_AIS_URL=https://jde.example.com:7077/jderest/v2\n# JDE_AIS_VERIFY_SSL=true\n' >> .env
+  info "Added the commented JDE_* keys to .env"
+fi
 
 # Append docker-compose.apps.yml to COMPOSE_FILE (colon-separated) so every
 # subsequent ``docker compose <command>`` automatically includes the overlay.

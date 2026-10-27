@@ -2891,7 +2891,7 @@ async def test_read_menus(v1_engine) -> None:
 
 @pytest.mark.asyncio
 async def test_read_applications_column_hints_dictionary_menus_missing_tables(tmp_path) -> None:
-    from liberty.migrations import read_dictionary_rules, read_screens
+    from liberty.migrations import read_dictionary_rules
     engine = make_engine(f"sqlite+aiosqlite:///{tmp_path / 'no_meta.db'}")
     async with engine.begin() as conn:
         await conn.execute(text("CREATE TABLE ly_query (query_id INTEGER PRIMARY KEY)"))

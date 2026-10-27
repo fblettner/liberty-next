@@ -224,7 +224,9 @@ async def build_nomaflow(
     # Self-bootstrap the schema. Idempotent (create_all skips existing tables);
     # makes "deploy and forget init-db" work as long as the pool itself exists.
     try:
-        await db.create_schema()
+        from liberty.runtime import journal_schema
+
+        journal_schema(settings, await db.create_schema())
     except UnknownPoolError as exc:
         # Pool defined but unusable (empty URL etc.). Skip nomaflow without
         # raising so the rest of the app (auth, connectors, AI) still boots.

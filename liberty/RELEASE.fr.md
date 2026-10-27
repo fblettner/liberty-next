@@ -1,5 +1,103 @@
 # Liberty Next — Notes de version
 
+## 7.0.58 — 2026-10-27
+
+**Installation / mise à jour**
+- **Corrigé : l'image Docker ne pouvait pas ouvrir sa base par défaut.** Le pilote `aiosqlite`, celui
+  du pool `sqlite+aiosqlite://` fourni dans la configuration par défaut et utilisé par la disposition
+  Light, n'était installé qu'en développement depuis la première version. Le serveur démarrait quand
+  même (le backend d'authentification TOML n'a pas besoin de base), mais les paquets de changements,
+  les vues enregistrées et nomaflow restaient désactivés sans message, et `/ready` répondait 503 sur
+  toute installation Light. Le pilote fait maintenant partie des dépendances de l'image.
+- **Corrigé : une installation qui perdait toute sa configuration après un changement de TLS ou une
+  mise à jour.** Relancer `install.sh` (la méthode documentée pour activer le TLS) ou exécuter
+  `docker compose -f docker-compose.full.yml pull` recalculait la liste des fichiers compose à partir
+  des options de la commande en cours : les fichiers TLS et apps disparaissaient, le conteneur
+  redémarrait sans le montage `/apps` et recréait les fichiers de configuration vides. Les données
+  n'étaient pas perdues, mais l'installation paraissait réinitialisée. `install.sh` réutilise
+  maintenant la valeur `COMPOSE_FILE` enregistrée dans `.env` ; seule l'option `--ssl` remplace le
+  fichier TLS.
+- **Nouvelle commande `release/liberty`**, point d'entrée unique d'une installation Docker :
+  `install`, `start`, `stop`, `restart`, `status`, `doctor`, `ssl letsencrypt|provided|off`,
+  `apps <wheel>`, `upgrade [--tag] [--apps]`, `backup`, `restore <dossier>`, `logs`, `migrate`. La
+  liste des fichiers compose est enregistrée dans `.env` ; seules les commandes `ssl` et `apps` la
+  modifient. `doctor` affiche ce qui ne va pas et la correction à appliquer ; `upgrade` enchaîne le
+  diagnostic, une sauvegarde obligatoire, le téléchargement de l'image, le redémarrage, les migrations
+  de schéma et l'état final.
+- **Nouvelle commande `liberty-admin migrate [--dry-run]`** : applique, ou liste avec `--dry-run`, les
+  révisions Alembic en attente de chaque application (`plugins/<app>/db`), et les enregistre dans
+  Paramètres → Historique → Mises à jour. Elle remplace le lancement manuel de la tâche
+  `nomasx1-upgrade-schema-1` après une mise à jour des applications.
+- `liberty-admin` vérifie maintenant la clé de licence comme le serveur ; auparavant, les commandes
+  d'administration ignoraient sans message les connecteurs sous licence.
+- **`liberty upgrade` produit un rapport et `liberty rollback` annule une mise à jour.** Chaque
+  exécution enregistre ce qui s'est passé (versions avant et après, étiquette d'image, fichiers
+  compose, dossier de sauvegarde, constats du diagnostic, résultat de chaque étape, migrations de
+  schéma appliquées) en JSON et en Markdown dans le volume de configuration (`.versions/upgrades/`)
+  et l'ajoute à Paramètres → Historique → Mises à jour, à côté des changements de version
+  (`liberty-admin record-upgrade`). Avant le téléchargement de la nouvelle image, l'image en cours
+  d'exécution est conservée sous une étiquette locale `rollback-<horodatage>` ; `liberty rollback`
+  restaure la sauvegarde prise avant la mise à jour et relance cette image.
+- Le contrôle de santé du conteneur interroge maintenant `/ready` (la base du framework répond) au
+  lieu de `/info` (le processus est démarré) : une pile dont la base est injoignable apparaît
+  `unhealthy`.
+- Au démarrage, le conteneur signale dans son journal les migrations de schéma en attente ;
+  `LIBERTY_AUTO_MIGRATE=1` les applique au démarrage.
+- **Corrigé : une version qui ajoute une colonne à l'une des tables du framework ne casse plus les
+  installations mises à jour.** L'historique des exécutions nomaflow, les paquets de changements, les
+  vues enregistrées et les tables `ly2_*` optionnelles étaient créés avec `create_all`, qui ne modifie
+  jamais une table existante (les paquets de changements portaient une liste d'`ALTER TABLE` écrite
+  à la main pour cette raison). Au démarrage, chaque module compare maintenant ses modèles aux tables
+  réelles et ajoute les colonnes manquantes, avec la valeur par défaut du modèle pour les lignes
+  existantes ; les ajouts sont consignés sous `framework-schema` dans Paramètres → Historique → Mises
+  à jour, à côté des migrations des applications.
+- **Corrigé : la mise à jour des applications sous licence ne perd plus les modifications de
+  l'exploitant et n'oublie plus les ajouts du produit.** `liberty-apps install` copiait des fichiers
+  entiers : sans `--force-config`, un fichier existant était conservé tel quel (un nouvel écran, une
+  nouvelle entrée de menu ou de dictionnaire n'arrivait jamais) ; avec l'option, chaque fichier était
+  remplacé (vos modifications dans les écrans, menus, dictionnaire, tableaux de bord, graphiques et
+  actions étaient perdues ; l'indicateur `override` était ignoré, seul `connectors.toml` gardait ses
+  secrets). L'installateur fusionne maintenant **entité par entité**, avec les règles que Paramètres →
+  Package & Deploy appliquait déjà : les ajouts du produit sont ajoutés ; les entités marquées
+  `override = true`, celles que vous avez créées et celles que vous avez modifiées sont conservées ;
+  les entités du produit jamais touchées sont rafraîchies ; ce que le produit a retiré n'est supprimé
+  que si vous n'y aviez pas touché. `[pools.*]` et chaque secret `ENC:` viennent toujours de votre
+  fichier, `theme.toml` est le vôtre. La livraison est enregistrée dans `<config>/.bundled/` pour que
+  la mise à jour suivante distingue « intact » de « modifié ». `--force-config` signifie désormais
+  « rafraîchir aussi les entités du produit que j'ai modifiées sans les marquer » ; `--dry-run` affiche
+  le plan, et `liberty apps` / `liberty upgrade --apps` le montrent avant d'écrire. Les entités
+  conservées parce que modifiées localement sont listées pour vérification. (`liberty.config_merge`,
+  partagé avec Package & Deploy.)
+- **Durcissement des dispositions livrées.** Le conteneur exécute l'application sous l'utilisateur
+  `liberty` (uid 1000) et non plus root : il démarre en root uniquement pour corriger le
+  propriétaire du volume de configuration et du montage des applications d'une installation
+  antérieure, puis abandonne ses privilèges (`LIBERTY_RUN_AS_ROOT=1` pour l'ancien comportement).
+  Postgres n'est publié que sur `127.0.0.1` (`POSTGRES_BIND=0.0.0.0` l'ouvre). Le tableau de bord
+  Traefik reçoit un mot de passe aléatoire par installation (`liberty dashboard-password` en
+  génère un nouveau ; `doctor` signale l'ancien mot de passe par défaut). Les surcouches TLS
+  redirigent HTTP vers HTTPS et envoient les en-têtes de sécurité. Chaque variable `LIBERTY_*` /
+  `POSTGRES_*` / `PGADMIN_*` se lit aussi depuis `<NOM>_FILE` (secrets Docker / Swarm /
+  Kubernetes).
+- **Chaîne d'approvisionnement.** Les dépendances Python sont figées dans `requirements.txt` (un
+  verrou pip-compile partagé par l'image, l'intégration continue et l'environnement de
+  développement ; il correspond à ce que l'image 7.0.57 exécutait déjà) ; les images de base et
+  les services compose sont épinglés à une version précise et mis à jour par Dependabot ; la
+  publication attache un SBOM et une provenance à l'image et exécute Trivy (échec sur une faille
+  CRITICAL / HIGH corrigeable). Le client Oracle Instant Client est téléchargé chez Oracle à la
+  construction de l'image et vérifié par SHA-256, au lieu de 146 Mo d'archives dans git (une
+  copie locale reste possible pour une construction hors ligne).
+- **Identifiants de requête et journaux JSON.** Chaque réponse porte `X-Request-ID` (celui de
+  l'appelant ou un nouveau) et chaque ligne de journal écrite pendant son traitement porte le
+  même identifiant ; `[app] log_format = "json"` émet un objet JSON par ligne.
+- **Nouvelle commande `liberty-ops` pour les installations Python** (pipx ou venv, avec ou sans
+  systemd), pendant de `release/liberty` : `status`, `doctor`, `start` / `stop` / `restart` / `logs`,
+  `backup` / `restore` (dossier de configuration, dossier des applications, fichier SQLite,
+  `pg_dump`), `migrate`, `upgrade [--version X] [--apps WHEEL]` (diagnostic → sauvegarde
+  obligatoire → `pipx upgrade` ou version épinglée → wheel des applications → migrations →
+  redémarrage → rapport → état) et `rollback` (version précédente et sauvegarde prise avant la mise
+  à jour). Le rapport est le même que celui du chemin Docker, dans Paramètres → Historique → Mises à
+  jour.
+
 ## 7.0.57 — 2026-10-26
 
 **Rechargement**

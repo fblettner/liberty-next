@@ -13,7 +13,7 @@ passed as a query arg on GET/DELETE and in the body on PUT so it may contain
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field

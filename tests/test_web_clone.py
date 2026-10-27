@@ -418,7 +418,7 @@ def test_delete_app_atomic_when_validation_fails(cfg_tree: dict[str, Path]) -> N
     )
     # Snapshot file contents pre-delete (corruption test: nothing should change if
     # delete fails). Here we test the happy path — the delete should succeed.
-    before_other = cfg_tree["screens"].read_text()
+    _before_other = cfg_tree["screens"].read_text()
     delete_app(
         "foo2",
         connectors_path=cfg_tree["connectors"],

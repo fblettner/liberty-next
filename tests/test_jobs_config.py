@@ -18,7 +18,6 @@ from liberty.jobs import (
     CopyMode,
     DecimalMode,
     JobRegistry,
-    JobsFile,
     StepType,
     UnknownJobError,
     load_jobs,
@@ -153,7 +152,7 @@ target = { schema = "nomajde", table = "f9200" }
     registry = load_jobs(path)
     job = registry.get("nomajde-daily-sync")
     assert len(job.steps) == 2
-    for step, expected_table in zip(job.steps, ["F0004", "F9200"]):
+    for step, expected_table in zip(job.steps, ["F0004", "F9200"], strict=False):
         # type / mode / coercion came from step_defaults
         assert step.type is StepType.SQL_COPY
         assert step.mode is CopyMode.OVERWRITE

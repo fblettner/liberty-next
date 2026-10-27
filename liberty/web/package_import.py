@@ -39,6 +39,8 @@ from typing import Any, Literal
 import tomli_w
 import tomlkit
 
+from liberty.config_merge import enumerate_entities, get_path, is_overridden, resolve_path, set_path
+
 
 Strategy = Literal["merge", "overwrite", "replace_all"]
 
@@ -213,132 +215,19 @@ def _apply_one(filename: str, pkg_data: dict[str, Any], target: Path, strategy: 
     return report
 
 
-def _enumerate_entities(data: dict[str, Any], filename: str):
-    """Yield (kind, {name: value}) for each entity kind in *data*. Per-file shapes:
-       connectors.toml: pools.<name>, connectors.<name>
-       dictionary.toml: entries.<id>, lookups.<id>, sequences.<id>, enums.<id>,
-                        connectors.<scope>.entries.<id>, etc.
-       screens.toml:    screens.<app>.<id>
-       menus.toml:      handled via _merge_menu_items (item arrays)
-       charts.toml:     charts.<scope>.<id>
-       dashboards.toml: dashboards.<scope>.<id>
-
-    The (kind, name) pairs are FLAT — scope-aware kinds carry the scope in the name as
-    "<scope>/<id>" so the merge bookkeeping shows e.g. ``connectors/nomasx1``."""
-    if filename == "connectors.toml":
-        for n, v in (data.get("pools") or {}).items():
-            yield "pool", {n: v}
-        for n, v in (data.get("connectors") or {}).items():
-            yield "connector", {n: v}
-    elif filename == "dictionary.toml":
-        for n, v in (data.get("entries") or {}).items():
-            yield "entry/shared", {n: v}
-        for n, v in (data.get("lookups") or {}).items():
-            yield "lookup/shared", {n: v}
-        for n, v in (data.get("sequences") or {}).items():
-            yield "sequence/shared", {n: v}
-        for n, v in (data.get("enums") or {}).items():
-            yield "enum/shared", {n: v}
-        for scope, section in (data.get("connectors") or {}).items():
-            if not isinstance(section, dict):
-                continue
-            for n, v in (section.get("entries") or {}).items():
-                yield f"entry/{scope}", {n: v}
-            for n, v in (section.get("lookups") or {}).items():
-                yield f"lookup/{scope}", {n: v}
-            for n, v in (section.get("sequences") or {}).items():
-                yield f"sequence/{scope}", {n: v}
-            for n, v in (section.get("enums") or {}).items():
-                yield f"enum/{scope}", {n: v}
-    elif filename == "screens.toml":
-        for app, by_id in (data.get("screens") or {}).items():
-            if not isinstance(by_id, dict):
-                continue
-            for n, v in by_id.items():
-                yield f"screen/{app}", {n: v}
-    elif filename == "charts.toml":
-        for scope, by_id in (data.get("charts") or {}).items():
-            if not isinstance(by_id, dict):
-                continue
-            for n, v in by_id.items():
-                yield f"chart/{scope}", {n: v}
-    elif filename == "dashboards.toml":
-        for scope, by_id in (data.get("dashboards") or {}).items():
-            if not isinstance(by_id, dict):
-                continue
-            for n, v in by_id.items():
-                yield f"dashboard/{scope}", {n: v}
-    # menus.toml is handled by _merge_menu_items — its [[items]] arrays don't have
-    # dict-style ids at the leaf so the generic add/replace path doesn't apply.
+# Entity enumeration + path helpers are shared with the apps installer (liberty.config_merge).
+_enumerate_entities = enumerate_entities
+_resolve_path = resolve_path
+_get_path = get_path
+_is_overridden = is_overridden
 
 
 def _path_exists(data: dict[str, Any], kind: str, name: str, filename: str) -> bool:
-    """Does *data* already carry the entity (kind, name)?"""
-    path, leaf = _resolve_path(kind, name, filename)
-    cur: Any = data
-    for k in path:
-        if not isinstance(cur, dict) or k not in cur:
-            return False
-        cur = cur[k]
-    return isinstance(cur, dict) and leaf in cur
-
-
-def _get_path(data: dict[str, Any], kind: str, name: str, filename: str) -> dict[str, Any] | None:
-    """Fetch the entity dict at *kind* / *name*. Returns None when not present."""
-    path, leaf = _resolve_path(kind, name, filename)
-    cur: Any = data
-    for k in path:
-        if not isinstance(cur, dict) or k not in cur:
-            return None
-        cur = cur[k]
-    if isinstance(cur, dict):
-        v = cur.get(leaf)
-        return v if isinstance(v, dict) else None
-    return None
-
-
-def _is_overridden(entity: dict[str, Any] | None) -> bool:
-    """True when *entity* carries ``override = true`` (a customer-marked fork that
-    upgrade-package imports should preserve). Lenient: missing key / None / non-bool
-    all read as False so a typo doesn't accidentally lock vendor entities."""
-    if not isinstance(entity, dict):
-        return False
-    return entity.get("override") is True
+    return get_path(data, kind, name, filename) is not None
 
 
 def _set_path(data: dict[str, Any], kind: str, name: str, value: Any, filename: str) -> None:
-    """Insert / replace value at the entity's path inside *data*."""
-    path, leaf = _resolve_path(kind, name, filename)
-    cur: Any = data
-    for k in path:
-        if k not in cur or not isinstance(cur[k], dict):
-            cur[k] = {}
-        cur = cur[k]
-    cur[leaf] = value
-
-
-def _resolve_path(kind: str, name: str, filename: str) -> tuple[list[str], str]:
-    """Map (kind, name, filename) → (path_keys_to_parent, leaf_key) inside the TOML tree."""
-    if filename == "connectors.toml":
-        if kind == "pool":      return ["pools"], name
-        if kind == "connector": return ["connectors"], name
-    if filename == "dictionary.toml":
-        # kind is e.g. "entry/shared", "entry/nomasx1", "lookup/nomajde", …
-        coll_singular, _, scope = kind.partition("/")
-        coll = {"entry": "entries", "lookup": "lookups", "sequence": "sequences", "enum": "enums"}[coll_singular]
-        if scope == "shared":
-            return [coll], name
-        return ["connectors", scope, coll], name
-    if filename == "screens.toml":
-        _, _, app = kind.partition("/")
-        return ["screens", app], name
-    if filename == "charts.toml":
-        _, _, scope = kind.partition("/")
-        return ["charts", scope], name
-    if filename == "dashboards.toml":
-        _, _, scope = kind.partition("/")
-        return ["dashboards", scope], name
-    return [], name
+    set_path(data, kind, name, value, filename)
 
 
 def _merge_menu_items(merged: dict[str, Any], pkg_data: dict[str, Any], strategy: Strategy, report: FileReport) -> None:
@@ -379,9 +268,8 @@ def _merge_menu_items(merged: dict[str, Any], pkg_data: dict[str, Any], strategy
 
 
 def _deep_copy(data: dict[str, Any]) -> dict[str, Any]:
-    """Cheap deep-copy via tomlkit round-trip — TOML data is JSON-shaped (no dates,
-    no references, no functions) so a JSON round-trip would also work; tomlkit is just
-    avail here already."""
+    """Deep copy via a JSON round-trip — TOML data is JSON-shaped (no references, no
+    functions; dates are stringified, which the config files don't use)."""
     import json
     return json.loads(json.dumps(data, default=str))
 

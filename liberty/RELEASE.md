@@ -1,5 +1,83 @@
 # Liberty Next — Release notes
 
+## 7.0.58 — 2026-10-27
+
+**Install / upgrade**
+- **Fixed: the image could not open its own default database.** `aiosqlite`, the driver behind the
+  shipped `sqlite+aiosqlite://` default pool (and the Light layout), was a development-only
+  dependency since the first release. The process still booted (the TOML auth backend needs no
+  database), but change packages, saved views and nomaflow were silently disabled and `/ready`
+  answered 503 on every Light install. The driver is now a runtime dependency.
+- **Fixed: re-running `install.sh` (the documented way to switch TLS) or `docker compose -f
+  docker-compose.full.yml pull` dropped the TLS and apps overlays** from the compose chain, so the
+  container came back without `/apps` and seeded the empty templates — the install looked wiped.
+  `install.sh` now reuses the `COMPOSE_FILE` recorded in `.env`; only `--ssl` swaps the TLS overlay.
+- **New `release/liberty` command** — the one entry point for a Docker install: `install`, `start`,
+  `stop`, `restart`, `status`, `doctor`, `ssl letsencrypt|provided|off`, `apps <wheel>`, `upgrade
+  [--tag] [--apps]`, `backup`, `restore <dir>`, `logs`, `migrate`. The compose chain is state in
+  `.env`, changed only by `ssl` and `apps`. `doctor` lists what is wrong and how to fix it;
+  `upgrade` = doctor → backup gate → pull and recreate → schema migrations → status.
+- **New `liberty-admin migrate [--dry-run]`** — applies (or lists) every app plugin's pending
+  Alembic revisions (`plugins/<app>/db`), journaled under Settings → History → Upgrades. Replaces
+  the manual run of the `nomasx1-upgrade-schema-1` job after an apps upgrade.
+- `liberty-admin` now verifies the license key like the server does; before, every admin command
+  silently dropped the licensed connectors.
+- **`liberty upgrade` writes a report and `liberty rollback` undoes an upgrade.** Each run records
+  what happened (versions before / after, image tag, compose chain, backup directory, doctor
+  findings, every step's outcome, the schema migrations applied) as JSON + Markdown under the
+  config volume (`.versions/upgrades/`) and journals it in Settings → History → Upgrades next to the
+  version bumps (`liberty-admin record-upgrade`). Before pulling, the running image is kept under a
+  local `rollback-<stamp>` tag; `liberty rollback` restores the pre-upgrade snapshot and re-runs
+  that image.
+- The container's healthcheck now probes `/ready` (the framework database answers) instead of
+  `/info` (the process is up): a stack whose database is unreachable is reported `unhealthy`.
+- The container warns in its log at boot when app schema migrations are pending;
+  `LIBERTY_AUTO_MIGRATE=1` applies them at boot.
+- **Fixed: a release that adds a column to one of the framework's own tables no longer breaks
+  upgraded installs.** The nomaflow run history, change packages, saved views and the optional
+  `ly2_*` auth tables were created with `create_all`, which never alters an existing table (change
+  packages carried a hand-written `ALTER TABLE` list for exactly that). The stores now compare
+  their models with the live tables at boot and add the missing columns, with the model's default
+  so existing rows get a value; what was added is journaled as a `framework-schema` row in
+  Settings → History → Upgrades, next to the apps' migrations.
+- **Fixed: upgrading the licensed apps no longer loses operator edits — or misses product
+  additions.** `liberty-apps install` copied whole files: without `--force-config` an existing file
+  was kept as is (a new product screen, menu item or dictionary entry never reached the install);
+  with it every file was replaced (your edits in screens, menus, dictionary, dashboards, charts and
+  actions were lost — the `override` flag was ignored, only `connectors.toml` kept its secrets). The
+  installer now merges **per entity**, with the rules Settings → Package & Deploy already applied:
+  product additions are added; `override = true` entities, your own entities and entities you
+  changed are kept; vendor entities you never touched are refreshed; what the vendor withdrew is
+  removed only when untouched. `[pools.*]` and every `ENC:` secret always come from your file,
+  `theme.toml` is yours. The shipment is recorded under `<config>/.bundled/` so the next upgrade
+  can tell "untouched" from "edited". `--force-config` now means "also refresh vendor entities I
+  changed without flagging them"; `--dry-run` prints the plan, and `liberty apps` / `liberty upgrade
+  --apps` show it before writing. Entities kept because they changed locally are listed for review.
+  (`liberty.config_merge`, shared with Package & Deploy.)
+- **Hardening of the shipped layouts.** The container runs the app as the `liberty` user (uid
+  1000) instead of root — it starts as root only to fix the ownership of the config volume and
+  the apps mount of an older install, then drops privileges (`LIBERTY_RUN_AS_ROOT=1` opts out).
+  Postgres is published on `127.0.0.1` only (`POSTGRES_BIND=0.0.0.0` opens it). The Traefik
+  dashboard gets a random password per install (`liberty dashboard-password` regenerates it;
+  `doctor` flags the historic default). The TLS overlays redirect HTTP to HTTPS and send
+  security headers. Every `LIBERTY_*` / `POSTGRES_*` / `PGADMIN_*` variable also reads from
+  `<NAME>_FILE` (Docker / Swarm / Kubernetes secrets).
+- **Supply chain.** Python dependencies are pinned in `requirements.txt` (a pip-compile lock shared
+  by the image, CI and the dev venv — the lock equals what the 7.0.57 image already ran); base
+  images and the compose services are version-pinned and bumped by Dependabot; the release
+  attaches an SBOM and provenance to the image and runs Trivy (fails on fixable CRITICAL / HIGH).
+  The Oracle Instant Client is fetched from Oracle at image build time against a pinned SHA-256
+  instead of 146 MB of zips in git (a local copy still works for air-gapped builds).
+- **Request ids and JSON logs.** Every response carries `X-Request-ID` (the caller's or a fresh
+  one) and every log line written while handling it carries the same id; `[app] log_format =
+  "json"` emits one JSON object per line.
+- **New `liberty-ops` command for Python installs** (pipx or venv, with or without systemd) — the
+  twin of `release/liberty`: `status`, `doctor`, `start` / `stop` / `restart` / `logs`, `backup` /
+  `restore` (config dir, apps dir, SQLite file, `pg_dump`), `migrate`, `upgrade [--version X]
+  [--apps WHEEL]` (doctor → backup gate → `pipx upgrade` or pinned install → apps wheel →
+  migrations → restart → report → status) and `rollback` (previous version + the pre-upgrade
+  backup). Same report in Settings → History → Upgrades as the Docker path.
+
 ## 7.0.57 — 2026-10-26
 
 **Reload**

@@ -22,7 +22,9 @@ interface Version {
   id: number; file: string; version: number; size: number; checksum: string
   source: string; comment: string | null; who: string | null; created_at: string
 }
-interface Upgrade { id: number; component: string; from_version: string | null; to_version: string; kind: string; summary: string | null; who: string | null; created_at: string }
+interface Upgrade { id: number; component: string; from_version: string | null; to_version: string; kind: string; summary: string | null; who: string | null; created_at: string; report: string | null }
+// The report `liberty upgrade` / `liberty rollback` recorded (a `stack` row): rendered instead of release notes.
+interface UpgradeReport { markdown: string; data: Record<string, unknown> }
 // Slice the "## <version> …" section for one version out of the release-notes markdown.
 function releaseSection(md: string, version: string): string {
   for (const p of md.split(/^## /m).slice(1)) {
@@ -132,6 +134,16 @@ export default function ConfigVersions() {
   const [upgrades, setUpgrades] = useState<Upgrade[] | null>(null)
   const [releaseByComp, setReleaseByComp] = useState<Record<string, string>>({})  // component → EN markdown
   const [selUpgrade, setSelUpgrade] = useState<number | null>(null)
+  const [reports, setReports] = useState<Record<number, UpgradeReport | null>>({})
+  // Fetch the selected row's report once (null = asked, nothing there).
+  useEffect(() => {
+    if (mode !== 'upgrades' || selUpgrade === null || selUpgrade in reports) return
+    const u = upgrades?.find((x) => x.id === selUpgrade)
+    if (!u?.report) return
+    void api.get<UpgradeReport>(`/admin/upgrades/${u.id}/report`)
+      .then((r) => setReports((m) => ({ ...m, [u.id]: r })))
+      .catch(() => setReports((m) => ({ ...m, [u.id]: null })))
+  }, [mode, selUpgrade, upgrades, reports])
   useEffect(() => {
     if (mode !== 'upgrades' || upgrades !== null) return
     void api.get<{ upgrades: Upgrade[] }>('/admin/upgrades')
@@ -353,9 +365,16 @@ export default function ConfigVersions() {
         upgrades === null ? <SpinnerRing /> : upgrades.length === 0 ? (
           <Muted>{t('versions.upgradesEmpty', 'No upgrade history yet — an entry is recorded each time the application version changes.')}</Muted>
         ) : (() => {
-          const compLabel = (c: string) => c === 'apps' ? t('versions.compApps', 'Apps') : t('versions.compFramework', 'Framework')
+          // framework / apps = the version bumps the server records at startup; stack = a `liberty
+          // upgrade|rollback` run (with its report); <app>-schema = `liberty-admin migrate`.
+          const compLabel = (c: string) => c === 'apps' ? t('versions.compApps', 'Apps')
+            : c === 'framework' ? t('versions.compFramework', 'Framework')
+            : c === 'stack' ? t('versions.compStack', 'Stack')
+            : c.endsWith('-schema') ? t('versions.compSchema', '{{app}} schema', { app: c.slice(0, -'-schema'.length) })
+            : c
           const u = upgrades.find((x) => x.id === selUpgrade) ?? upgrades[0]
           const section = u ? releaseSection(releaseByComp[u.component] ?? '', u.to_version) : ''
+          const report = u?.report ? reports[u.id] : undefined
           return (
             <Wrap>
               <Rail>
@@ -378,7 +397,13 @@ export default function ConfigVersions() {
                       </Toggle>
                     </PanelHead>
                     <PanelBody style={{ padding: '12px 14px' }}>
-                      {section ? <Markdown>{section}</Markdown> : <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('versions.noNotes', 'No release notes for {{v}}.', { v: u.to_version })}</span>}
+                      {u.report ? (
+                        report === undefined ? <SpinnerRing />
+                          : report === null ? <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('versions.reportMissing', 'The report file is missing.')}</span>
+                          : <Markdown>{report.markdown}</Markdown>
+                      ) : u.summary && !section ? (
+                        <span style={{ fontSize: fontSize.sm }}>{u.summary}</span>
+                      ) : section ? <Markdown>{section}</Markdown> : <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('versions.noNotes', 'No release notes for {{v}}.', { v: u.to_version })}</span>}
                     </PanelBody>
                   </Panel>
                 </Stack>

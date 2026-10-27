@@ -754,7 +754,6 @@ export function DataTable<T extends object>({
     }
     document.addEventListener('paste', onPaste)
     return () => document.removeEventListener('paste', onPaste)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- isInternal/colHeaderText are stable; table is the live instance
   }, [onPasteRows, table])
 
   // ── row virtualizer ───────────────────────────────────────────────────────────────────
