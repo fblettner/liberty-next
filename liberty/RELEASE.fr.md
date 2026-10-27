@@ -87,8 +87,23 @@
   entités (l'éditeur d'entité découvre les colonnes de la requête et laisse cocher la clé, les
   mesures avec leur agrégat, les colonnes masquées et la date par défaut) et les relations ;
   `GET/PUT /admin/config/explorer/parsed`, rechargé à chaud, inclus dans la fusion du bundle des
-  apps. L'éditeur d'accès propose « Explorateur de données » comme type de règle. Le moteur,
-  l'interface, les analyses enregistrées et l'export suivent dans les parties suivantes.
+  apps. L'éditeur d'accès propose « Explorateur de données » comme type de règle.
+- **Le moteur (mode agrégé).** `POST /api/explorer/<app>/query` reçoit des lignes (dimensions, une
+  date avec un `bucket` jour / semaine / mois / trimestre / année), des mesures (`sum` / `avg` /
+  `min` / `max` / `count` / `count_distinct` d'un champ numérique, ou `count(*)`), un sac de filtres
+  plat (`key`, `key__op`, `key__from` / `key__to`, une liste = IN ; opérateurs selon le type), une
+  période sur un champ date, un tri et un Top N, et exécute **un seul** `SELECT dims, aggs … GROUP
+  BY`, le même sur Oracle, Postgres et SQLite : les sources de lignes sont l'entité principale (le
+  pivot, ou `entity`) plus les entités des dimensions, au plus une d'entre elles côté « plusieurs »
+  pour que les lignes ne se multiplient jamais deux fois ; les entités côté « une » sont jointes en
+  LEFT JOIN par les relations (autant de sauts que nécessaire) ; une entité côté « plusieurs » hors
+  des lignes est atteinte par une sous-requête corrélée pour une mesure et par `EXISTS` pour un
+  filtre. Chaque requête d'entité tourne avec la portée de données de l'appelant appliquée dedans
+  (`SQLConnector.scoped_select`). Le SQL groupe au jour ; Python replie les dates dans le bucket,
+  fusionne les groupes, calcule `avg` à partir de somme + nombre, trie et coupe à la limite
+  (`groups`, `scanned`, `truncated` dans la réponse). Une demande que le modèle ne peut pas servir
+  est un 422 qui dit pourquoi ; `debug = true` renvoie le SQL et les binds à un superutilisateur.
+  L'interface, les analyses enregistrées et l'export suivent dans les parties suivantes.
 
 **Écrans : `editable_when`, une règle de lecture seule par ligne**
 - Un écran peut dire quand une ligne existante peut être modifiée : `editable_when = [{ field =

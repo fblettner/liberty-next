@@ -2688,6 +2688,63 @@ class SQLConnector:
         duration_ms = (time.perf_counter() - started) * 1000.0
         yield StreamDone(total=sent, truncated=truncated, duration_ms=duration_ms)
 
+    # ── composed SELECTs (the Data Explorer) ─────────────────────────────────────────
+    async def scoped_select(
+        self, query_name: str, params: dict[str, Any] | None = None, *,
+        column_hints: list[ColumnHint] | None = None, dictionary_scope: str | None = None,
+        scope: DataScope | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """A named SELECT as text ready to be embedded in a larger statement — the dialect's
+        variant, schema / dblink placeholders substituted, the caller's row-level scope applied
+        (``SELECT * FROM (<sql>) lib_rls WHERE …``) and its binds resolved. Returns ``(sql, binds)``;
+        the trailing ORDER BY is dropped (meaningless inside a derived table). The explorer
+        engine builds its joins and aggregates on top of these."""
+        qdef = self.get_query(query_name)
+        sql_text = _apply_schema_placeholders(
+            qdef.sql_for(self._resolve_dialect()), self._pools.schemas(self.pool_name),
+            connector=self.name, query=query_name, pool=self.pool_name,
+        )
+        sql_text = _apply_dblink_placeholders(
+            sql_text, self._pools.dblinks(self.pool_name),
+            connector=self.name, query=query_name, pool=self.pool_name,
+        )
+        if detect_statement_type(sql_text) != "SELECT":
+            raise StatementNotAllowedError(f"{self.name}.{query_name}: only a SELECT can be composed.")
+        dict_scope = dictionary_scope or self.name
+        scope = scope if scope is not None else current_scope.get()
+        sql_text, params = await self._apply_scope_wrap(
+            sql_text, params, query_name=query_name, qdef=qdef, stmt_type="SELECT",
+            column_hints=column_hints, dict_scope=dict_scope, scope=scope,
+        )
+        body, _order = _split_order_by(sql_text)
+        return body, self._build_params(body, qdef, params)
+
+    async def run_select(
+        self, sql_text: str, binds: dict[str, Any], *, max_rows: int,
+    ) -> tuple[list[Column], list[dict[str, Any]], bool]:
+        """Run a composed SELECT on this connector's pool: ``(columns, rows, truncated)``. The
+        pool's ``trim_strings`` applies to the string values; numbers become JSON-able. No
+        name lookup, no hints — the caller built the statement and owns its meaning."""
+        if detect_statement_type(sql_text) != "SELECT":
+            raise StatementNotAllowedError(f"{self.name}: run_select takes a SELECT.")
+        cap = max(1, min(int(max_rows), self.HARD_MAX_ROWS))
+        trim = self._pools.trim_strings(self.pool_name)
+        engine = self._pools.engine(self.pool_name)
+        self._debug_log_sql("<explorer>", "SELECT", sql_text, binds)
+        async with engine.connect() as conn:
+            result = await conn.execute(_text(sql_text), binds)
+            columns = _columns_from_result(result)
+            rows: list[dict[str, Any]] = []
+            truncated = False
+            for row in result.mappings():
+                if len(rows) >= cap:
+                    truncated = True
+                    break
+                rows.append({
+                    k: (v.rstrip() if (trim and isinstance(v, str)) else _jsonable_number(v)) for k, v in row.items()
+                })
+        return columns, rows, truncated
+
     async def test_run(
         self, sql_text: str, params: dict[str, Any] | None = None, *,
         max_rows: int | None = None, dry_run: bool = True,

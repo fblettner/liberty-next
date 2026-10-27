@@ -4,6 +4,7 @@
 |---|---|---|
 | ``GET /api/explorer`` | authenticated | the models the caller may use (``explorer:{app}``) |
 | ``GET /api/explorer/{app}/model`` | ``explorer:{app}`` | the model with its discovered fields; ``?refresh=1`` bypasses the cache |
+| ``POST /api/explorer/{app}/query`` | ``explorer:{app}`` | an aggregate run (:mod:`liberty.explorer.engine`); ``debug`` adds the SQL for a superuser |
 
 The permission is checked before the model lookup (no name enumeration). The fields come
 from :mod:`liberty.explorer.model`, under the caller's row-level scope and language.
@@ -15,12 +16,23 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+import logging
+
+from sqlalchemy.exc import SQLAlchemyError
+
 from liberty.auth.dependencies import CurrentPrincipal
+from liberty.auth.scope import current_scope
+from liberty.connectors.base import ConnectorError
 from liberty.connectors.registry import ConnectorRegistry
 from liberty.explorer import ExplorerFile
+from liberty.explorer.engine import AggregateRequest, ExplorerError, run_aggregate
 from liberty.explorer.model import ModelCache
+from liberty.web.errors import db_error_detail, http_for_connector_error
+
 from liberty.screens import ScreensFile
 from liberty.web.deps import get_connectors, get_screens, request_language, require_permission
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["explorer"])
 
@@ -66,3 +78,31 @@ async def get_model(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no explorer model for {app!r}")
     view = await cache.get(connectors, screens, app, model, language=language, refresh=refresh)
     return view.to_dict()
+
+
+@router.post("/explorer/{app}/query", summary="Run an explorer aggregate")
+async def query_model(
+    app: str, body: AggregateRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
+    screens: Screens, language: Language,
+) -> dict[str, Any]:
+    """``{columns, rows, groups, scanned, truncated}`` — see :func:`liberty.explorer.engine.run_aggregate`.
+    A request the model cannot serve is a 422 naming the reason; a database error a 502 (the
+    full text for a superuser)."""
+    require_permission(principal, permission_for(app))
+    model = explorer.explorer.get(app)
+    if model is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no explorer model for {app!r}")
+    view = await cache.get(connectors, screens, app, model, language=language)
+    try:
+        return await run_aggregate(
+            connectors, screens, view, body, scope=current_scope.get(), debug=body.debug and principal.is_superuser,
+        )
+    except ExplorerError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    except ConnectorError as exc:
+        raise http_for_connector_error(exc) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail=db_error_detail(exc, context=f"explorer {app} query failed", verbose=principal.is_superuser, log=_log),
+        ) from exc

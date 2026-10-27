@@ -209,3 +209,23 @@ def test_admin_parsed_round_trip(env) -> None:
         assert client.get("/admin/config/explorer/parsed", headers=_h(client, "analyst")).status_code == 403
         assert "explorer" in client.get("/admin/config/schema", headers=h).json()
         assert client.get("/info", headers=h).json()["explorer"]["apps"] == ["shop", "other"]
+
+
+def test_query_route(env) -> None:
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "analyst")
+        body = {"rows": [{"field": "company.NAME"}], "measures": [{"field": "sales.REVENUE"}], "debug": True}
+        r = client.post("/api/explorer/shop/query", json=body, headers=h)
+        assert r.status_code == 200, r.text
+        out = r.json()
+        assert out["rows"] == [{"company.NAME": "Corp one", "sum(sales.REVENUE)": 30.5}] and out["groups"] == 1
+        assert "sql" not in out                                  # debug SQL is for a superuser
+        assert "sql" in client.post("/api/explorer/shop/query", json=body, headers=_h(client, "admin")).json()
+        assert client.post("/api/explorer/shop/query", json={"rows": [{"field": "sales.NOPE"}]}, headers=h).status_code == 422
+        assert client.post("/api/explorer/shop/query", json={"rows": [{"field": "sales.COMPANY", "bucket": "month"}]}, headers=h).status_code == 422
+        assert client.post("/api/explorer/shop/query", json=body, headers=_h(client, "nobody")).status_code == 403
+        assert client.post("/api/explorer/ghost/query", json=body, headers=_h(client, "admin")).status_code == 404
+        # a broken entity: a database error, reported with its text to a superuser
+        r = client.post("/api/explorer/other/query", json={}, headers=_h(client, "admin"))
+        assert r.status_code == 502 and "missing_table" in r.text

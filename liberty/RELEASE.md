@@ -76,7 +76,21 @@
   (the entity editor discovers the query's columns and lets the operator tick the key, the
   measures with their aggregate, the hidden ones and the default date) and the relations;
   `GET/PUT /admin/config/explorer/parsed`, hot-reloaded, part of the apps bundle merge. The
-  Access editor offers "Data Explorer" as a rule type. The engine, the UI, saved analyses and
+  Access editor offers "Data Explorer" as a rule type.
+- **The engine (aggregate mode).** `POST /api/explorer/<app>/query` takes rows (dimensions, a date
+  one with a `bucket` day / week / month / quarter / year), measures (`sum` / `avg` / `min` /
+  `max` / `count` / `count_distinct` of a numeric field, or `count(*)`), a flat filter bag
+  (`key`, `key__op`, `key__from` / `key__to`, a list = IN; operators by type), a period on a date
+  field, a sort and a Top N, and runs **one** `SELECT dims, aggs … GROUP BY` that is the same on
+  Oracle, Postgres and SQLite: the row sources are the primary entity (the hub, or `entity`) plus
+  the entities of the dimensions, at most one of them many-side so rows never multiply twice;
+  one-side entities are LEFT JOINed through the relations (any number of hops); a many-side
+  entity that is not among the rows is reached by a correlated sub-query for a measure and by
+  `EXISTS` for a filter. Every entity query runs with the caller's row-level scope applied inside
+  it (`SQLConnector.scoped_select`). SQL groups at day level; Python folds the dates into the
+  bucket, merges the groups, computes `avg` from sum + count, sorts and cuts to the limit
+  (`groups`, `scanned`, `truncated` in the reply). A request the model cannot serve is a 422 that
+  says why; `debug = true` returns the SQL and binds to a superuser. The UI, saved analyses and
   the export follow in the next parts.
 
 **Screens: `editable_when`, a row-level read-only rule**
