@@ -103,7 +103,23 @@
   fusionne les groupes, calcule `avg` à partir de somme + nombre, trie et coupe à la limite
   (`groups`, `scanned`, `truncated` dans la réponse). Une demande que le modèle ne peut pas servir
   est un 422 qui dit pourquoi ; `debug = true` renvoie le SQL et les binds à un superutilisateur.
-  L'interface, les analyses enregistrées et l'export suivent dans les parties suivantes.
+- **Mode détail, descente, champs calculés.** `POST /api/explorer/<app>/detail` renvoie les
+  lignes elles-mêmes : les colonnes demandées (toute entité, mêmes règles de jointure) ou les
+  champs visibles de l'entité principale, avec les mêmes filtres et période, un tri, `total` et
+  une page (`page` / `page_size`, jusqu'à 5 000) ; `drill` prend les valeurs de dimension d'une
+  cellule agrégée et en fait des filtres (un libellé de mois devient la plage de jours du mois,
+  un groupe vide les lignes vides) : les lignes derrière un chiffre sont à un appel. Les **champs
+  calculés** sont déclarés dans la demande (`calculated = [{name, label, expr}]`) et utilisés
+  comme `calc.<name>` dans les lignes, mesures, filtres et colonnes : un petit langage typé
+  (`REVENUE / QTY`, `QTY >= 4 ? 'big' : 'small'`, `company.REGION = 'EU'`, `year(SOLD_ON)`,
+  `days(ORDERED, SHIPPED)`, `round`, `abs`, `coalesce`, `upper` / `lower` / `length` / `concat`,
+  `in (…)`, `is empty`, `and` / `or` / `not`) compilé dans le dialecte du pool au sein de la même
+  instruction, jamais du SQL libre ; une division est réelle et protégée par `NULLIF`, un booléen
+  s'affiche `Y` / `N`, une date julienne JDE est convertie avant une fonction de date. Un résultat
+  numérique est une mesure, tout autre une dimension ; une erreur de type nomme la position.
+  `POST /api/explorer/<app>/calc/test` en compile un et prélève huit valeurs : le « Tester »
+  de l'éditeur avant « Enregistrer ». L'interface, les analyses enregistrées et l'export suivent
+  dans les parties suivantes.
 
 **Écrans : `editable_when`, une règle de lecture seule par ligne**
 - Un écran peut dire quand une ligne existante peut être modifiée : `editable_when = [{ field =

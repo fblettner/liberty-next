@@ -90,8 +90,22 @@
   it (`SQLConnector.scoped_select`). SQL groups at day level; Python folds the dates into the
   bucket, merges the groups, computes `avg` from sum + count, sorts and cuts to the limit
   (`groups`, `scanned`, `truncated` in the reply). A request the model cannot serve is a 422 that
-  says why; `debug = true` returns the SQL and binds to a superuser. The UI, saved analyses and
-  the export follow in the next parts.
+  says why; `debug = true` returns the SQL and binds to a superuser.
+- **Detail mode, drill, calculated fields.** `POST /api/explorer/<app>/detail` returns the rows
+  themselves — the columns asked for (any entity, same join rules) or the primary entity's
+  visible fields — with the same filters and period, a sort, `total` and a page (`page` /
+  `page_size`, up to 5 000); `drill` takes an aggregate cell's dimension values and turns them
+  into filters (a month label becomes the month's day range, a null group the empty rows), so
+  the rows behind a figure are one call away. **Calculated fields** are declared in the request
+  (`calculated = [{name, label, expr}]`) and used as `calc.<name>` in rows, measures, filters and
+  columns: a small typed language (`REVENUE / QTY`, `QTY >= 4 ? 'big' : 'small'`, `company.REGION
+  = 'EU'`, `year(SOLD_ON)`, `days(ORDERED, SHIPPED)`, `round`, `abs`, `coalesce`, `upper` /
+  `lower` / `length` / `concat`, `in (…)`, `is empty`, `and` / `or` / `not`) compiled to the
+  pool's dialect inside the same statement, never free SQL; a division is real and guarded by
+  `NULLIF`, a boolean renders `Y` / `N`, a JDE Julian date is converted before a date function. A
+  numeric result is a measure, any other a dimension; a type error names the position.
+  `POST /api/explorer/<app>/calc/test` compiles one and samples eight values — the editor's
+  "Test" before "Save". The UI, saved analyses and the export follow in the next parts.
 
 **Screens: `editable_when`, a row-level read-only rule**
 - A screen can say when an existing row may be changed: `editable_when = [{ field = "PERIOD_STATUS",

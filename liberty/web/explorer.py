@@ -5,6 +5,8 @@
 | ``GET /api/explorer`` | authenticated | the models the caller may use (``explorer:{app}``) |
 | ``GET /api/explorer/{app}/model`` | ``explorer:{app}`` | the model with its discovered fields; ``?refresh=1`` bypasses the cache |
 | ``POST /api/explorer/{app}/query`` | ``explorer:{app}`` | an aggregate run (:mod:`liberty.explorer.engine`); ``debug`` adds the SQL for a superuser |
+| ``POST /api/explorer/{app}/detail`` | ``explorer:{app}`` | detail rows, paged; ``drill`` turns an aggregate cell into filters |
+| ``POST /api/explorer/{app}/calc/test`` | ``explorer:{app}`` | compile a calculated field and sample eight values |
 
 The permission is checked before the model lookup (no name enumeration). The fields come
 from :mod:`liberty.explorer.model`, under the caller's row-level scope and language.
@@ -25,7 +27,7 @@ from liberty.auth.scope import current_scope
 from liberty.connectors.base import ConnectorError
 from liberty.connectors.registry import ConnectorRegistry
 from liberty.explorer import ExplorerFile
-from liberty.explorer.engine import AggregateRequest, ExplorerError, run_aggregate
+from liberty.explorer.engine import AggregateRequest, CalcTestRequest, DetailRequest, ExplorerError, run_aggregate, run_calc_test, run_detail
 from liberty.explorer.model import ModelCache
 from liberty.web.errors import db_error_detail, http_for_connector_error
 
@@ -80,22 +82,20 @@ async def get_model(
     return view.to_dict()
 
 
-@router.post("/explorer/{app}/query", summary="Run an explorer aggregate")
-async def query_model(
-    app: str, body: AggregateRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
-    screens: Screens, language: Language,
+async def _run(
+    app: str, runner: Any, body: Any, principal: Any, explorer: ExplorerFile, cache: ModelCache, connectors: ConnectorRegistry,
+    screens: ScreensFile, language: str | None,
 ) -> dict[str, Any]:
-    """``{columns, rows, groups, scanned, truncated}`` — see :func:`liberty.explorer.engine.run_aggregate`.
-    A request the model cannot serve is a 422 naming the reason; a database error a 502 (the
-    full text for a superuser)."""
+    """Permission, model, cached view, then the engine; a request the model cannot serve is a
+    422 naming the reason, a database error a 502 (the full text for a superuser)."""
     require_permission(principal, permission_for(app))
     model = explorer.explorer.get(app)
     if model is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no explorer model for {app!r}")
     view = await cache.get(connectors, screens, app, model, language=language)
     try:
-        return await run_aggregate(
-            connectors, screens, view, body, scope=current_scope.get(), debug=body.debug and principal.is_superuser,
+        return await runner(
+            connectors, screens, view, body, scope=current_scope.get(), debug=getattr(body, "debug", True) and principal.is_superuser,
         )
     except ExplorerError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
@@ -106,3 +106,32 @@ async def query_model(
             status.HTTP_502_BAD_GATEWAY,
             detail=db_error_detail(exc, context=f"explorer {app} query failed", verbose=principal.is_superuser, log=_log),
         ) from exc
+
+
+@router.post("/explorer/{app}/query", summary="Run an explorer aggregate")
+async def query_model(
+    app: str, body: AggregateRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
+    screens: Screens, language: Language,
+) -> dict[str, Any]:
+    """``{columns, rows, groups, scanned, truncated}`` — see :func:`liberty.explorer.engine.run_aggregate`."""
+    return await _run(app, run_aggregate, body, principal, explorer, cache, connectors, screens, language)
+
+
+@router.post("/explorer/{app}/detail", summary="Run an explorer detail query")
+async def detail_model(
+    app: str, body: DetailRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
+    screens: Screens, language: Language,
+) -> dict[str, Any]:
+    """``{columns, rows, total, page, page_size}`` — the rows behind an aggregate cell (``drill``)
+    or any filtered list of the primary entity's rows."""
+    return await _run(app, run_detail, body, principal, explorer, cache, connectors, screens, language)
+
+
+@router.post("/explorer/{app}/calc/test", summary="Test a calculated field")
+async def calc_test(
+    app: str, body: CalcTestRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
+    screens: Screens, language: Language,
+) -> dict[str, Any]:
+    """Compile the named calculated field (declared in ``calculated``) and sample eight values:
+    ``{name, type, kind, values}`` — the editor's "Test" before "Save"."""
+    return await _run(app, run_calc_test, body, principal, explorer, cache, connectors, screens, language)

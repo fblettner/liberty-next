@@ -176,3 +176,85 @@ async def test_sort_top_n_and_scope(env) -> None:
     out = await run(env, scope=scope, rows=[{"field": "company.NAME"}], measures=[{"field": "sales.REVENUE"}, {"field": "lines.AMOUNT"}])
     assert out["rows"] == [{"company.NAME": "Corp one", "sum(sales.REVENUE)": 125, "sum(lines.AMOUNT)": 55}]
     assert "lib_rls" in out["sql"]
+
+
+async def run_detail_(env, **req):
+    from liberty.explorer.engine import DetailRequest, run_detail
+    registry, screens, view = env
+    return await run_detail(registry, screens, view, DetailRequest.model_validate(req), debug=True)
+
+
+@pytest.mark.asyncio
+async def test_calculated_fields(env) -> None:
+    calc = [
+        {"name": "unit_price", "label": "Unit price", "expr": "REVENUE / QTY"},
+        {"name": "big", "expr": "QTY >= 4 ? 'big' : 'small'"},
+        {"name": "is_eu", "expr": "company.REGION = 'EU'"},
+        {"name": "y", "expr": "year(SOLD_ON)"},
+        {"name": "tag", "expr": "upper(company.NAME) + '-' + COMPANY"},
+        {"name": "age", "expr": "days(SOLD_ON, SOLD_ON)"},
+    ]
+    # a numeric calculated field is a measure; a text one a dimension; a boolean renders Y / N
+    out = await run(env, calculated=calc, rows=[{"field": "calc.big"}, {"field": "calc.is_eu"}], measures=[{"field": "calc.unit_price", "agg": "avg"}, {"field": "sales.QTY"}])
+    assert out["rows"] == [
+        {"calc.big": "big", "calc.is_eu": "N", "avg(calc.unit_price)": 11.0, "sum(sales.QTY)": 4},
+        {"calc.big": "big", "calc.is_eu": "Y", "avg(calc.unit_price)": 13.0, "sum(sales.QTY)": 12},
+        {"calc.big": "small", "calc.is_eu": "Y", "avg(calc.unit_price)": (10 + 12.5 + 10) / 3, "sum(sales.QTY)": 6},
+    ]
+    assert "NULLIF" in out["sql"] and "CASE WHEN" in out["sql"]
+    assert [c["label"] for c in out["columns"]][2] == "Unit price"
+    out = await run(env, calculated=calc, rows=[{"field": "calc.y"}], measures=[{"field": "calc.age", "agg": "max"}])
+    assert out["rows"] == [{"calc.y": 2025, "max(calc.age)": 0}, {"calc.y": 2026, "max(calc.age)": 0}]
+    out = await run(env, calculated=calc, rows=[{"field": "calc.tag"}], filters={"calc.tag": "CORP T"}, measures=[{"agg": "count"}])
+    assert [r["calc.tag"] for r in out["rows"]] == ["CORP THREE-C3", "CORP TWO-C2"]
+    # errors carry the reason and the position
+    for expr, msg in (("QTY + 'x'", "+ needs a num"), ("nope(1)", "unknown function"), ("GHOST * 2", "unknown field 'GHOST'"),
+                      ("QTY > 'a'", "cannot compare num with str"), ("lines.AMOUNT * 2", "many-side entity"), ("(QTY", "expected ')'")):
+        with pytest.raises(ExplorerError, match=__import__("re").escape(msg)):
+            await run(env, calculated=[{"name": "c", "expr": expr}], rows=[{"field": "calc.c"}])
+    with pytest.raises(ExplorerError, match="declared twice"):
+        await run(env, calculated=[{"name": "c", "expr": "1"}, {"name": "C", "expr": "2"}])
+    with pytest.raises(ExplorerError, match="name"):
+        await run(env, calculated=[{"name": "1bad", "expr": "1"}])
+    # the test endpoint's engine side: type + eight sample values
+    from liberty.explorer.engine import CalcTestRequest, run_calc_test
+    registry, screens, view = env
+    t = await run_calc_test(registry, screens, view, CalcTestRequest(calculated=calc, name="unit_price"), debug=True)
+    assert t["type"] == "number" and t["kind"] == "measure" and t["values"][:2] == [10.0, 12.5] and len(t["values"]) == 6
+    t = await run_calc_test(registry, screens, view, CalcTestRequest(calculated=calc, name="big"))
+    assert t["type"] == "string" and t["kind"] == "dimension" and t["values"][0] == "small"
+
+
+@pytest.mark.asyncio
+async def test_detail_paging_sort_and_drill(env) -> None:
+    out = await run_detail_(env, columns=["sales.ID", "company.NAME", "sales.SOLD_ON", "sales.REVENUE"], page_size=2)
+    assert out["total"] == 6 and out["page"] == 1 and len(out["rows"]) == 2
+    assert out["rows"][0] == {"sales.ID": 1, "company.NAME": "Corp one", "sales.SOLD_ON": "2026-01-05", "sales.REVENUE": 30}
+    assert [c["key"] for c in out["columns"]] == ["sales.ID", "company.NAME", "sales.SOLD_ON", "sales.REVENUE"] and out["columns"][2]["format"] == "date"
+    page3 = await run_detail_(env, columns=["sales.ID"], page_size=2, page=3)
+    assert [r["sales.ID"] for r in page3["rows"]] == [5, 6] and "LIMIT 2 OFFSET 4" in page3["sql"]
+    desc = await run_detail_(env, columns=["sales.ID", "sales.REVENUE"], sort=[{"key": "sales.REVENUE", "dir": "desc"}], page_size=3)
+    assert [r["sales.ID"] for r in desc["rows"]] == [3, 6, 5]
+    # no columns: the primary's visible fields, in the model's order (the screen's hinted columns first)
+    out = await run_detail_(env, page_size=1)
+    assert list(out["rows"][0]) == ["sales.SOLD_ON", "sales.QTY", "sales.COMPANY", "sales.ID", "sales.REVENUE"]
+    # drill from an aggregate cell: a month bucket becomes a range, a dimension an equality
+    agg = await run(env, rows=[{"field": "company.NAME"}, {"field": "sales.SOLD_ON", "bucket": "month"}], measures=[{"field": "sales.REVENUE"}])
+    cell = agg["rows"][1]
+    assert cell["company.NAME"] == "Corp one" and cell["sales.SOLD_ON@month"] == "2026-01"
+    out = await run_detail_(env, columns=["sales.ID", "sales.REVENUE"], drill=[{"field": "company.NAME", "value": "Corp one"}, {"field": "sales.SOLD_ON", "bucket": "month", "value": "2026-01"}])
+    assert out["total"] == 2 and [r["sales.ID"] for r in out["rows"]] == [1, 2]
+    # a null group drills to the empty rows; a many-side filter stays an EXISTS
+    out = await run_detail_(env, columns=["sales.ID"], drill=[{"field": "lines.LINE", "value": None}])
+    assert [r["sales.ID"] for r in out["rows"]] == [4, 6]
+    out = await run_detail_(env, columns=["sales.ID"], filters={"lines.AMOUNT__from": 100})
+    assert [r["sales.ID"] for r in out["rows"]] == [5] and "EXISTS" in out["sql"]
+    with pytest.raises(ExplorerError, match="cannot sort"):
+        await run_detail_(env, columns=["sales.ID"], sort=[{"key": "sales.QTY"}])
+    from liberty.explorer.engine import bucket_range
+    from datetime import date as d
+    assert bucket_range("2026-W01", "week") == (d(2025, 12, 29), d(2026, 1, 4))
+    assert bucket_range("2026-Q2", "quarter") == (d(2026, 4, 1), d(2026, 6, 30))
+    assert bucket_range("2024-02", "month") == (d(2024, 2, 1), d(2024, 2, 29)) and bucket_range("2026", "year") == (d(2026, 1, 1), d(2026, 12, 31))
+    with pytest.raises(ExplorerError, match="not a month label"):
+        bucket_range("x", "month")

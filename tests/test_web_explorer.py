@@ -229,3 +229,19 @@ def test_query_route(env) -> None:
         # a broken entity: a database error, reported with its text to a superuser
         r = client.post("/api/explorer/other/query", json={}, headers=_h(client, "admin"))
         assert r.status_code == 502 and "missing_table" in r.text
+
+
+def test_detail_and_calc_routes(env) -> None:
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "analyst")
+        r = client.post("/api/explorer/shop/detail", json={"columns": ["sales.ID", "company.NAME"], "drill": [{"field": "company.NAME", "value": "Corp one"}]}, headers=h)
+        assert r.status_code == 200, r.text
+        assert r.json()["total"] == 1 and r.json()["rows"] == [{"sales.ID": 1, "company.NAME": "Corp one"}]
+        r = client.post("/api/explorer/shop/calc/test", json={"calculated": [{"name": "up", "expr": "REVENUE / QTY"}], "name": "up"}, headers=h)
+        assert r.status_code == 200, r.text
+        assert r.json() == {"name": "up", "type": "number", "kind": "measure", "values": [10.166666666666666]}
+        r = client.post("/api/explorer/shop/calc/test", json={"calculated": [{"name": "up", "expr": "REVENUE +"}], "name": "up"}, headers=h)
+        assert r.status_code == 422 and "unexpected" in r.json()["detail"]
+        assert client.post("/api/explorer/shop/detail", json={"columns": ["sales.NOPE"]}, headers=h).status_code == 422
+        assert client.post("/api/explorer/shop/detail", json={}, headers=_h(client, "nobody")).status_code == 403
