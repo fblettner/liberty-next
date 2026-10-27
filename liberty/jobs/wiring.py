@@ -27,6 +27,7 @@ from liberty.jobs.scheduler import JobScheduler
 from liberty.jobs.schema import StepType
 from liberty.jobs.steps import (
     CallJobExecutor,
+    FileLoadExecutor,
     HttpStepExecutor,
     LdapSyncExecutor,
     PythonStepExecutor,
@@ -121,6 +122,7 @@ def build_executors(
         StepType.PYTHON: PythonStepExecutor(connectors, settings=settings, changesets=changesets),
         StepType.LDAP_SYNC: LdapSyncExecutor(connectors),
         StepType.HTTP: HttpStepExecutor(),
+        StepType.FILE_LOAD: FileLoadExecutor(connectors),
     }
     if registry is not None:
         # The runner reference is back-filled by build_nomaflow after the

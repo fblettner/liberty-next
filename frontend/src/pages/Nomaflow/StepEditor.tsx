@@ -67,9 +67,9 @@ const TextArea = styled.textarea`
 `
 
 const STEP_TONE: Record<StepType, 'blue' | 'green' | 'orange' | 'purple' | 'neutral' | 'yellow'> = {
-  sql_copy: 'blue', sql_query: 'green', python: 'purple', ldap_sync: 'orange', http: 'neutral', call_job: 'yellow',
+  sql_copy: 'blue', sql_query: 'green', python: 'purple', ldap_sync: 'orange', http: 'neutral', call_job: 'yellow', file_load: 'green',
 }
-const STEP_TYPES: StepType[] = ['sql_copy', 'sql_query', 'python', 'ldap_sync', 'http', 'call_job']
+const STEP_TYPES: StepType[] = ['sql_copy', 'sql_query', 'python', 'ldap_sync', 'http', 'call_job', 'file_load']
 
 /** A fresh blank step of *type* — the "+ Add" buttons append one of these. */
 function blankStep(type: StepType): StepConfig {
@@ -86,6 +86,8 @@ function blankStep(type: StepType): StepConfig {
       return { type, name: '', url: '', method: 'GET' }
     case 'call_job':
       return { type, name: '', target_job_id: '' }
+    case 'file_load':
+      return { type, name: '', path: '', target: {}, load_mode: 'append', on_error: 'fail' }
   }
 }
 
@@ -102,6 +104,7 @@ function stepSummary(s: StepConfig): string {
     case 'ldap_sync': return String(f.server ?? '')
     case 'http': return `${f.method ?? 'GET'} ${f.url ?? ''}`
     case 'call_job': return `→ ${f.target_job_id ?? '?'}`
+    case 'file_load': return `${String(f.path ?? '').split('/').pop() || '?'} → ${ep(f.target)}`
     default: return ''
   }
 }
@@ -356,13 +359,20 @@ function ParamAddPicker({
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const btnRef = useRef<HTMLButtonElement>(null)
-  const [coords, setCoords] = useState<{ top: number; left: number; minWidth: number } | null>(null)
+  const [coords, setCoords] = useState<{ top?: number; bottom?: number; left: number; minWidth: number; maxHeight: number } | null>(null)
   useEffect(() => {
     if (!open) { setCoords(null); return }
     const compute = () => {
       const r = btnRef.current?.getBoundingClientRect()
       if (!r) return
-      setCoords({ top: r.bottom + 4, left: r.left, minWidth: Math.max(r.width, 360) })
+      // Open downward when the panel fits below the button, else upward (the form sits at the
+      // bottom of a scrolling page more often than not); cap the height to the room available.
+      const below = window.innerHeight - r.bottom - 8
+      const above = r.top - 8
+      const wanted = 360
+      const base = { left: r.left, minWidth: Math.max(r.width, 360) }
+      if (below >= Math.min(wanted, above)) setCoords({ ...base, top: r.bottom + 4, maxHeight: Math.min(wanted, below) })
+      else setCoords({ ...base, bottom: window.innerHeight - r.top + 4, maxHeight: Math.min(wanted, above) })
     }
     compute()
     window.addEventListener('resize', compute)
@@ -385,7 +395,7 @@ function ParamAddPicker({
               app shell but below the panel itself so clicks on the panel still work. */}
           <div style={{ position: 'fixed', inset: 0, zIndex: 9998 }} onClick={() => setOpen(false)} />
           <PickerPanel
-            style={{ top: coords.top, left: coords.left, minWidth: coords.minWidth }}
+            style={{ top: coords.top, bottom: coords.bottom, left: coords.left, minWidth: coords.minWidth, maxHeight: coords.maxHeight }}
             onClick={(e) => e.stopPropagation()}
           >
             {schema.map((s) => {
@@ -755,6 +765,113 @@ function loadJobIds(): Promise<JobBrief[]> {
   return _jobIdsPromise
 }
 
+/** A comma-separated list typed freely: the text is local state (so a trailing comma survives
+ *  the keystroke) and the parsed list goes out on every change. */
+function ListInput({ value, onChange, placeholder, disabled }: { value: string[]; onChange: (v: string[]) => void; placeholder?: string; disabled?: boolean }) {
+  const joined = value.join(', ')
+  const [text, setText] = useState(joined)
+  const [lastValue, setLastValue] = useState(joined)
+  if (joined !== lastValue) {       // changed from outside (another step selected, a reset): resync
+    setLastValue(joined)
+    if (text.split(',').map((s) => s.trim()).filter(Boolean).join(', ') !== joined) setText(joined)
+  }
+  return (
+    <Input value={text} placeholder={placeholder} disabled={disabled}
+      onChange={(e) => { setText(e.target.value); onChange(e.target.value.split(',').map((s) => s.trim()).filter(Boolean)) }} />
+  )
+}
+
+// file_load — a spreadsheet / CSV into a table (liberty/jobs/steps/file_load.py). Path and
+// constants take ${params.x} / ${run.id}; columns map target ← header (or #position); the rest
+// match by name; replace_partition deletes the partitions the load carries, in one transaction.
+function FileLoadForm({ step, patch, sqlConnectors }: FormProps) {
+  const { t } = useTranslation()
+  const f = step as Record<string, unknown>
+  const tgt = (f.target ?? {}) as Record<string, unknown>
+  const setTarget = (part: Record<string, unknown>) => patch({ target: { ...(f.target as object ?? {}), ...part } } as Partial<StepConfig>)
+  const connOpts: SearchSelectOption[] = sqlConnectors.map((c) => ({ value: c.name, label: c.name, mono: c.name }))
+  const modeOpts: SearchSelectOption[] = [
+    { value: 'append', label: t('nomaflow.steps.loadAppend') },
+    { value: 'replace_partition', label: t('nomaflow.steps.loadReplace') },
+  ]
+  const errorOpts: SearchSelectOption[] = [
+    { value: 'fail', label: t('nomaflow.steps.onErrorFail') },
+    { value: 'skip', label: t('nomaflow.steps.onErrorSkip') },
+  ]
+  const strMap = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {})
+  return (
+    <>
+      <SubHead>{t('nomaflow.steps.file')}</SubHead>
+      <Grid>
+        <Field $span={2}>
+          <FieldLabel>{t('nomaflow.steps.path')}</FieldLabel>
+          <Input value={String(f.path ?? '')} onChange={(e) => patch({ path: e.target.value } as Partial<StepConfig>)} placeholder="/data/in/sales-${params.period}.xlsx" />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.sheet')}</FieldLabel>
+          <Input value={String(f.sheet ?? '')} onChange={(e) => patch({ sheet: e.target.value || null } as Partial<StepConfig>)} placeholder={t('nomaflow.steps.sheetPlaceholder')} />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.headerRow')}</FieldLabel>
+          <Input type="number" min={1} value={String(f.header_row ?? 1)} onChange={(e) => patch({ header_row: Number(e.target.value) || 1 } as Partial<StepConfig>)} />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.delimiter')}</FieldLabel>
+          <Input value={String(f.delimiter ?? '')} onChange={(e) => patch({ delimiter: e.target.value || null } as Partial<StepConfig>)} placeholder={t('nomaflow.steps.delimiterPlaceholder')} />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.encoding')}</FieldLabel>
+          <Input value={String(f.encoding ?? 'utf-8-sig')} onChange={(e) => patch({ encoding: e.target.value || 'utf-8-sig' } as Partial<StepConfig>)} />
+        </Field>
+      </Grid>
+      <SubHead>{t('nomaflow.steps.target')}</SubHead>
+      <Grid>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.connector')}</FieldLabel>
+          <SearchSelect value={String(tgt.connector ?? '')} onChange={(v) => setTarget({ connector: v })} options={connOpts} placeholder="—" />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.schema')}</FieldLabel>
+          <Input value={String(tgt.schema ?? '')} onChange={(e) => setTarget({ schema: e.target.value })} />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.table')}</FieldLabel>
+          <Input value={String(tgt.table ?? '')} onChange={(e) => setTarget({ table: e.target.value })} />
+        </Field>
+        <Field $span={3}>
+          <FieldLabel>{t('nomaflow.steps.columnsMap')}</FieldLabel>
+          <KeyValueEditor value={strMap(f.columns)} onChange={(v) => patch({ columns: v } as Partial<StepConfig>)} />
+        </Field>
+        <Field $span={3}>
+          <FieldLabel>{t('nomaflow.steps.constants')}</FieldLabel>
+          <KeyValueEditor value={strMap(f.constants)} onChange={(v) => patch({ constants: v } as Partial<StepConfig>)} />
+        </Field>
+      </Grid>
+      <SubHead>{t('nomaflow.steps.options')}</SubHead>
+      <Grid>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.loadMode')}</FieldLabel>
+          <SearchSelect value={String(f.load_mode ?? 'append')} onChange={(v) => patch({ load_mode: v } as Partial<StepConfig>)} options={modeOpts} />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.partitionBy')}</FieldLabel>
+          <ListInput value={Array.isArray(f.partition_by) ? (f.partition_by as string[]) : []}
+            onChange={(v) => patch({ partition_by: v } as Partial<StepConfig>)}
+            placeholder="period, company" disabled={f.load_mode !== 'replace_partition'} />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.onError')}</FieldLabel>
+          <SearchSelect value={String(f.on_error ?? 'fail')} onChange={(v) => patch({ on_error: v } as Partial<StepConfig>)} options={errorOpts} />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.batchSize')}</FieldLabel>
+          <Input type="number" min={1} value={String(f.batch_size ?? 10000)} onChange={(e) => patch({ batch_size: Number(e.target.value) || 10000 } as Partial<StepConfig>)} />
+        </Field>
+      </Grid>
+    </>
+  )
+}
+
 function CallJobForm({ step, patch }: FormProps) {
   const { t } = useTranslation()
   const f = step as Record<string, unknown>
@@ -832,6 +949,7 @@ function StepCard({ step, index, count, sqlConnectors, onPatch, onMove, onDuplic
           {step.type === 'ldap_sync' && <LdapSyncForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
           {step.type === 'http' && <HttpForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
           {step.type === 'call_job' && <CallJobForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
+          {step.type === 'file_load' && <FileLoadForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
         </Body>
       )}
     </Card>

@@ -17,6 +17,26 @@
 - Le rapport de mise à jour n'affiche plus « - » comme étiquette d'image sur une installation non
   épinglée.
 
+**nomaflow : étape `file_load`, un classeur ou un CSV dans une table, rejouable par partition**
+- Ce que l'import Excel de la grille n'est pas : un chargement qui tourne sans personne au clavier
+  (une planification, une chaîne d'étapes), sur les volumes d'une table de faits, rejouable pour une
+  période sans toucher aux autres, et qui laisse une trace. L'étape prend un `path` (avec
+  `${params.x}` depuis les paramètres d'exécution et `${run.id}`), une `sheet`, la `header_row`, le
+  `delimiter` CSV (détecté s'il est vide), un connecteur / une table `target`, `columns` qui relie
+  les colonnes cibles aux en-têtes du fichier ou à des `#positions` (les autres se retrouvent par
+  leur nom), `constants` pour les colonnes que le fichier ne porte pas (`period =
+  "${params.period}"`, `batch_id = "${run.id}"`), `load_mode = "append" | "replace_partition"` avec
+  `partition_by`, et `on_error = "fail" | "skip"`.
+- Le fichier est lu en flux, jamais chargé entier ; les cellules sont converties au type de la
+  colonne cible (entiers, décimaux avec l'un ou l'autre séparateur, dates dans les formes usuelles,
+  booléens, texte ; un code que le classeur a transformé en nombre redevient du texte).
+  `replace_partition` supprime les partitions présentes dans le chargement (d'après les constantes,
+  sinon les valeurs distinctes trouvées dans le fichier) et insère les lignes dans **une seule
+  transaction** : un chargement en échec laisse les données précédentes en place, un mois corrigé
+  remplace ce mois seulement. Le journal d'exécution et le résultat de l'étape donnent les lignes
+  lues, insérées, rejetées, les partitions remplacées et les lignes supprimées, avec les premiers
+  rejets cités. L'éditeur d'étapes a son formulaire.
+
 **Périmètre de données par ligne (première partie)**
 - Un rôle peut maintenant restreindre **les lignes** que ses titulaires voient, en plus des
   requêtes qu'ils peuvent exécuter : `[roles.<r>] scope = [{dd = "CO", values = ["00001"]}, …]`

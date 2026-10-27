@@ -42,12 +42,19 @@ class StepType(str, Enum):
     # parent's log_level (so DEBUG traces the whole chain) and any per-fire
     # params_override (so an operator's "run with apps_id=42" cascades).
     CALL_JOB = "call_job"
+    FILE_LOAD = "file_load"
 
 
 class CopyMode(str, Enum):
     OVERWRITE = "overwrite"
     APPEND = "append"
     UPSERT = "upsert"  # spec §11 #5 may drop this in 13a; kept for now to validate intent
+
+
+class LoadMode(str, Enum):
+    """``file_load``: just insert, or delete the partitions the file carries first (one transaction)."""
+    APPEND = "append"
+    REPLACE_PARTITION = "replace_partition"
 
 
 class DecimalMode(str, Enum):
@@ -200,6 +207,22 @@ class Step(BaseModel):
     # the step at fire time with "cycle detected: A → B → A".
     target_job_id: str | None = None
 
+    # file_load — a spreadsheet / CSV into ``target`` (see :class:`FileLoadExecutor`).
+    # ``path`` / ``constants`` values take ``${params.x}`` (the run parameters), ``${run.id}``,
+    # ``${job.id}`` — dotted on purpose, a plain ``${NAME}`` is env-substituted at load time. ``columns`` maps target column → file header (or ``#<position>``); the rest
+    # match by name. ``partition_by`` names the target columns a ``replace_partition`` load
+    # deletes by (their values from ``constants`` or the file).
+    path: str | None = None
+    sheet: str | int | None = None
+    header_row: int = Field(1, ge=1)
+    delimiter: str | None = None
+    encoding: str = "utf-8-sig"
+    columns: dict[str, str] = Field(default_factory=dict)
+    constants: dict[str, Any] = Field(default_factory=dict)
+    load_mode: LoadMode | None = None
+    partition_by: list[str] = Field(default_factory=list)
+    on_error: Literal["fail", "skip"] = "fail"
+
     # universal
     timeout_seconds: int = Field(3600, ge=1)
 
@@ -229,6 +252,10 @@ class Step(BaseModel):
             self._require("url")
         elif self.type is StepType.CALL_JOB:
             self._require("target_job_id")
+        elif self.type is StepType.FILE_LOAD:
+            self._require("path", "target")
+            if self.load_mode is LoadMode.REPLACE_PARTITION and not self.partition_by:
+                raise ValueError(f"step {self.name!r}: load_mode = replace_partition needs `partition_by`")
         return self
 
     def _require(self, *fields: str) -> None:

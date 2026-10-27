@@ -102,7 +102,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           scaffold_tools.py (proposal-only), routes.py (SSE)
   jobs/ (nomaflow)        schema.py (jobs.toml), registry, runner (state machine, retries,
                           cancel), scheduler (APScheduler, single process), recovery, retention,
-                          runlog, wiring, steps/{sql_query,sql_copy,http,python,ldap_sync,call_job}
+                          runlog, wiring, steps/{sql_query,sql_copy,http,python,ldap_sync,call_job,
+                          file_load (xlsx / csv → table, replace_partition in one transaction)}
   etl/                    streaming copy + snapshot / truncate / audit primitives for the steps
   reports/                registry (plugin + operator Jinja templates), render (markdown → PDF)
   changesets/             change packages: capture writes, lifecycle, compaction, apply bundle

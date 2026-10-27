@@ -15,6 +15,23 @@
   only a fresh database.)
 - The upgrade report's "Image tag" no longer shows "-" for an unpinned install.
 
+**nomaflow: `file_load` step — a spreadsheet or CSV into a table, replayable by partition**
+- What the grid's Excel import is not: a load that runs without a person at the keyboard (a
+  schedule, a chain of steps) on the volumes a facts table takes, that can be replayed for one
+  period without touching the others, and that leaves a trace. The step takes a `path` (with
+  `${params.x}` from the run parameters and `${run.id}`), a `sheet`, the `header_row`, the CSV
+  `delimiter` (detected when blank), a `target` connector / table, `columns` mapping target
+  columns to file headers or `#positions` (the rest match by name), `constants` for the columns the
+  file does not carry (`period = "${params.period}"`, `batch_id = "${run.id}"`), `load_mode =
+  "append" | "replace_partition"` with `partition_by`, and `on_error = "fail" | "skip"`.
+- The file is streamed, never loaded whole; cells are coerced to the target column's type
+  (integers, decimals with either separator, dates in the usual shapes, booleans, text — a code the
+  spreadsheet turned into a number comes back as text). `replace_partition` deletes the partitions
+  the load carries (from the constants, else the distinct values found in the file) and inserts the
+  rows in **one transaction**: a failed load leaves the previous data in place, a corrected month
+  replaces that month only. The run log and the step result say rows read, inserted, rejected,
+  partitions replaced and rows deleted, with the first rejects quoted. The step editor has its form.
+
 **Row-level data scope (first part)**
 - A role can now restrict **which rows** its holders see, on top of which queries they may run:
   `[roles.<r>] scope = [{dd = "CO", values = ["00001"]}, …]` in `auth.toml` (the DB backend keeps
