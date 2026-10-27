@@ -217,7 +217,9 @@ pages/TableView/       the data screen: index (params, streaming run), ResultTab
                        actionRunner.ts (chain / if / loop / return runtime), Summary / Tree / Chart views
 pages/Settings/        one *Builder per config section + the Visual Designer (ScreenVisualBuilder,
                        ScreenEditor, ActionListEditor…), ApiConnectorEditor, wizards, ConfigVersions,
-                       AccessBuilder, AppBuilder, ReportsBuilder, ThemeBuilder, TechnicalDashboard,
+                       AccessBuilder (+ Access/: RoleEditor panel, MenuTree inherit|allow|deny, OtherAccess,
+                       permissions.ts = strings ⇄ tree model + the backend's glob matcher, tested),
+                       AppBuilder, ReportsBuilder, ThemeBuilder, TechnicalDashboard,
                        Package / ChangePackages / IntegrityBuilder (reached from nomaflow pages)
 pages/Nomaflow/        JobsList, JobEditor, StepEditor, RunDetail, Schedule, RetentionPanel
 pages/DashboardView/ Chat/ (AiDrawer) Reports/ ScreenAssistant/ HttpRunner/ Monitoring/ Login/

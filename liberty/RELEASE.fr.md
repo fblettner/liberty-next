@@ -42,6 +42,17 @@
   tableaux de bord, requêtes de l'assistant, rapports) est enveloppé dans `SELECT * FROM (<sql>)
   lib_rls WHERE …` avec de vrais paramètres, et une mise à jour ou une suppression d'une ligne hors
   périmètre est refusée (403). `/auth/me` renvoie les attributs et le périmètre calculé.
+- **Les rôles se modifient dans un panneau, sur l'arbre des menus.** Paramètres → Accès → Rôles
+  affiche le rôle à côté de la liste, à la place d'une fenêtre remplie de chaînes de permissions. Le
+  rôle reprend l'arbre de la barre latérale, un bloc par application, avec hériter / autoriser /
+  refuser sur chaque nœud : un dossier se propage à ses enfants, une feuille montre ce qu'elle
+  exécute, et un œil indique si la barre latérale l'affichera pour un titulaire du rôle, jokers
+  compris. « Tout sauf le dossier Sécurité », c'est la base « accès complet » plus un refus sur le
+  dossier ; « ce dossier seulement », c'est la base vide plus une autorisation. Les règles hors
+  menus (un connecteur entier, une requête, un point d'accès, un tableau de bord, l'assistant, un
+  motif expert) se trouvent sous l'arbre, et les chaînes de permissions obtenues sont à un clic.
+  Les chaînes écrites sont celles de l'éditeur précédent : les rôles existants s'ouvrent tels
+  quels et rien ne change côté serveur.
 - Mise en place sans l'interface (qui arrive ensuite) : `liberty-admin create-role <r> --scope '{dd =
   "CO", source = "#USER.company#", mode = "deny"}'`, `set-scope <r> --rule … | --clear`,
   `list-roles`, `create-user --attribute company=00001,00050`, `set-attributes <u> CLÉ=VALEUR…

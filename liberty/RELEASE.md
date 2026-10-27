@@ -37,6 +37,15 @@
   the AI assistant's queries, reports) is wrapped as `SELECT * FROM (<sql>) lib_rls WHERE …` with
   real binds, and an update or delete whose row lies outside the scope is refused (403). `/auth/me`
   reports the attributes and the resolved scope.
+- **Roles are edited in a panel, on a menu tree.** Settings → Access → Roles shows the role next to
+  the list instead of a modal full of permission strings. The role is the sidebar's own tree, one
+  block per app, with inherit / allow / deny on every node: a folder cascades, a leaf shows what it
+  runs, and an eye tells whether the sidebar will show it for a holder of the role, globs included.
+  "Full access minus the Security folder" is the baseline plus one deny on the folder; "that folder
+  only" is the empty baseline plus one allow. Rules menus don't cover (a whole connector, a query,
+  an endpoint, a dashboard, the assistant, an expert pattern) sit below the tree, and the resulting
+  permission strings are one click away. The strings written are the ones the previous editor
+  wrote, so existing roles open as they are and nothing changes server-side.
 - Setting it up without the UI (which comes next): `liberty-admin create-role <r> --scope '{dd =
   "CO", source = "#USER.company#", mode = "deny"}'`, `set-scope <r> --rule … | --clear`,
   `list-roles`, `create-user --attribute company=00001,00050`, `set-attributes <u> KEY=VALUE…

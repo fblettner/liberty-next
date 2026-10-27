@@ -1,26 +1,23 @@
 // Settings → Access — RBAC management (users + roles), superuser-only. The framework enforces
 // permissions (Principal.has_permission, allow/deny, deny-wins); this is the management UI.
 //
-// Roles use a baseline + allow/deny rules model: pick "Full access" (the `*` permission) or "No
-// access", then add allow/deny rules. Each rule targets a resource via a type → item cascade
-// (Connector / Query / Menu / Dashboard / API / AI). Menu & dashboard rules use the first-class
-// menu:<app>:<id> / dashboard:<id> permissions; allowing a menu also grants its target query so
-// the menu is usable, denying a menu also denies its target. So you can do "all access but
-// disable the Security menu" (Full access + deny menu) or "Security menu only" (No access + allow
-// menu).
+// Roles are edited in a full-height panel next to the roles list (pages/Settings/Access/
+// RoleEditor): a baseline (`*` or nothing), the menu tree with inherit / allow / deny per node,
+// the rules beyond menus, and the resulting permission strings. The strings written are the
+// same `menu:<app>:<id>` / `sql:…` / `!…` the chip editor wrote, so nothing changes server-side.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Users, Shield, Plus, X, Check, Ban } from 'lucide-react'
+import { Users, Shield, Plus, X } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Centered, Checkbox, Field, Input, Overlay, Modal, ModalBody, ModalFooter, PasswordInput, SearchSelect, SpinnerRing, Tag, type SearchSelectOption } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import RoleEditor, { type AppRole } from './Access/RoleEditor'
+import { PermChip } from './Access/OtherAccess'
+import { buildMenuForest, type MenusCatalog } from './Access/permissions'
 
 interface AppUser { username: string; email: string | null; full_name: string | null; is_active: boolean; is_superuser: boolean; roles: string[] }
-interface AppRole { name: string; permissions: string[]; description: string | null }
-interface MenuItemRaw { id: string; parent?: string | null; label?: string; type?: string | null; connector?: string | null; target?: string | null }
-type MenusCatalog = Record<string, { items: MenuItemRaw[] }>
 
 const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; height: 100%;`
 const Tabs = styled.div`display: flex; gap: 16px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0;`
@@ -33,215 +30,21 @@ const TabBtn = styled.button<{ $active?: boolean }>`
 `
 const Bar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0;`
 const List = styled(Card)`flex: 1; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px;`
-const Item = styled.div`
-  display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: ${radius.md};
-  border: 1px solid ${colors.border}; background: ${colors.bg.input}; min-width: 0;
+const Split = styled.div`display: flex; gap: 12px; flex: 1; min-height: 0;`
+const Side = styled.div`width: 300px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; min-height: 0;`
+const Item = styled.div<{ $selected?: boolean }>`
+  display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: ${radius.md}; cursor: pointer;
+  border: 1px solid ${({ $selected }) => ($selected ? colors.blue.border : colors.border)};
+  background: ${({ $selected }) => ($selected ? colors.blue.bg : colors.bg.input)}; min-width: 0;
+  &:hover { border-color: ${colors.blue.border}; background: ${colors.blue.bg}; }
   & .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   & .name { font-family: ${fonts.mono}; font-size: ${fontSize.base}; color: ${colors.text.primary}; }
   & .sub { font-size: ${fontSize.micro}; color: ${colors.text.muted}; display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
 `
 const Chips = styled.div`display: flex; flex-wrap: wrap; gap: 5px; align-items: center;`
-const PermChip = styled.span<{ $deny?: boolean }>`
-  display: inline-flex; align-items: center; gap: 5px; padding: 2px 4px 2px 8px; border-radius: ${radius.sm};
-  background: ${({ $deny }) => ($deny ? colors.red.bg : colors.green.bg)};
-  border: 1px solid ${({ $deny }) => ($deny ? colors.red.border : colors.green.border)};
-  color: ${colors.text.primary}; font-family: ${fonts.mono}; font-size: ${fontSize.sm};
-  & button { border: 0; background: transparent; color: ${colors.text.muted}; cursor: pointer; display: inline-flex; padding: 1px; }
-  & button:hover { color: ${colors.red.main}; }
-`
-const Seg = styled.div`display: inline-flex; border: 1px solid ${colors.border}; border-radius: ${radius.md}; overflow: hidden;`
-const SegBtn = styled.button<{ $active?: boolean; $tone?: 'allow' | 'deny' }>`
-  display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border: 0; cursor: pointer; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; font-weight: 600;
-  background: ${({ $active, $tone }) => (!$active ? 'transparent' : $tone === 'deny' ? colors.red.bg : colors.green.bg)};
-  color: ${({ $active, $tone }) => (!$active ? colors.text.muted : $tone === 'deny' ? colors.red.main : colors.green.main)};
-  & + & { border-left: 1px solid ${colors.border}; }
-`
-const AddRow = styled.div`display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-top: 8px;`
 const Box = styled(Modal)`width: min(620px, 96vw);`
 const Header = styled.div`display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0; & .title { font-size: ${fontSize.lg}; font-weight: 700; color: ${colors.text.primary}; }`
-const BaselineRow = styled.div`display: flex; gap: 8px; align-items: center;`
-
-type RuleType = 'connector' | 'query' | 'menu' | 'dashboard' | 'api' | 'ai'
-
-// ── permission picker ───────────────────────────────────────────────────────────────────
-function PermissionPicker({ value, onChange, menus, dashboardIds }: { value: string[]; onChange: (next: string[]) => void; menus: MenusCatalog; dashboardIds: string[] }) {
-  const { t } = useTranslation()
-  const { connectors } = useWorkspace()
-  const [effect, setEffect] = useState<'allow' | 'deny'>('allow')
-  const [type, setType] = useState<RuleType>('menu')
-  const [item, setItem] = useState('')
-
-  const hasStar = value.includes('*')
-  const setBaseline = (full: boolean) => {
-    const rest = value.filter((v) => v !== '*' && v !== '!*')
-    onChange(full ? ['*', ...rest] : rest)
-  }
-
-  const sqlConns = useMemo(() => (connectors ?? []).filter((c) => c.type === 'sql'), [connectors])
-  const apiConns = useMemo(() => (connectors ?? []).filter((c) => c.type === 'api'), [connectors])
-
-  // Resolve a menu leaf's target permission (so allowing/denying a menu also grants/denies data).
-  const leafTargetPerm = (app: string, it: MenuItemRaw): string | null => {
-    if (!it.type || !it.target) return null
-    if (it.type === 'dashboard') return `dashboard:${it.target}`
-    if (it.type === 'page') return null
-    const conn = it.connector || app
-    return `${it.type === 'query' ? 'sql' : 'api'}:${conn}:${it.target}`
-  }
-  // Descendant leaves of a menu node (itself if it's a leaf) — for folder selection.
-  const descendantLeaves = (app: string, id: string): MenuItemRaw[] => {
-    const items = menus[app]?.items ?? []
-    const out: MenuItemRaw[] = []
-    const walk = (nid: string) => {
-      const node = items.find((x) => x.id === nid)
-      if (node && node.type && node.target) out.push(node)               // a leaf
-      for (const ch of items.filter((x) => x.parent === nid)) walk(ch.id)
-    }
-    walk(id)
-    return out
-  }
-
-  // The second-dropdown options + the resolver that turns the picked item into permission patterns.
-  const { itemOpts, resolve } = useMemo<{ itemOpts: SearchSelectOption[]; resolve: (v: string) => string[] }>(() => {
-    if (type === 'connector') {
-      return {
-        itemOpts: sqlConns.map((c) => ({ value: c.name, label: `${c.name}  (all queries)`, mono: `sql:${c.name}:*` })),
-        resolve: (v) => [`sql:${v}:*`],
-      }
-    }
-    if (type === 'query') {
-      const opts: SearchSelectOption[] = []
-      for (const c of sqlConns) for (const q of c.queries) opts.push({ value: `sql:${c.name}:${q.name}`, label: `${c.name} · ${q.label || q.name}`, mono: `sql:${c.name}:${q.name}` })
-      return { itemOpts: opts, resolve: (v) => [v] }
-    }
-    if (type === 'api') {
-      const opts: SearchSelectOption[] = []
-      for (const c of apiConns) for (const e of c.endpoints) opts.push({ value: `api:${c.name}:${e.name}`, label: `${c.name} · ${e.label || e.name}`, mono: `api:${c.name}:${e.name}` })
-      return { itemOpts: opts, resolve: (v) => [v] }
-    }
-    if (type === 'dashboard') {
-      return { itemOpts: dashboardIds.map((d) => ({ value: d, label: d, mono: `dashboard:${d}` })), resolve: (v) => [`dashboard:${v}`] }
-    }
-    if (type === 'ai') {
-      return { itemOpts: [{ value: 'ai:chat', label: 'AI assistant (ai:chat)', mono: 'ai:chat' }], resolve: (v) => [v] }
-    }
-    // menu — list every node (folders + leaves), labelled by app; resolve expands to the node's
-    // menu: perm + its leaves' menu: + target perms (so the menu shows AND its screens run).
-    const opts: SearchSelectOption[] = []
-    for (const [app, m] of Object.entries(menus)) {
-      for (const it of m.items) opts.push({ value: `${app} ${it.id}`, label: `${app} · ${it.label || it.id}${it.type ? '' : '  (folder)'}`, mono: `menu:${app}:${it.id}` })
-    }
-    const resolveMenu = (v: string): string[] => {
-      const [app, id] = v.split(' ')
-      const patterns = new Set<string>([`menu:${app}:${id}`])
-      for (const leaf of descendantLeaves(app, id)) {
-        patterns.add(`menu:${app}:${leaf.id}`)
-        const tp = leafTargetPerm(app, leaf)
-        if (tp) patterns.add(tp)
-      }
-      return [...patterns]
-    }
-    return { itemOpts: opts, resolve: resolveMenu }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, sqlConns, apiConns, menus, dashboardIds])
-
-  const add = () => {
-    if (!item) return
-    const pref = effect === 'deny' ? '!' : ''
-    const next = [...value]
-    for (const p of resolve(item)) { const s = pref + p; if (!next.includes(s)) next.push(s) }
-    onChange(next)
-    setItem('')
-  }
-
-  const typeOpts: SearchSelectOption[] = [
-    { value: 'menu', label: t('settings.access.tMenu', 'Menu') },
-    { value: 'dashboard', label: t('settings.access.tDashboard', 'Dashboard') },
-    { value: 'connector', label: t('settings.access.tConnector', 'Connector (all queries)') },
-    { value: 'query', label: t('settings.access.tQuery', 'Query') },
-    { value: 'api', label: t('settings.access.tApi', 'API endpoint') },
-    { value: 'ai', label: t('settings.access.tAi', 'AI assistant') },
-  ]
-
-  return (
-    <div>
-      <BaselineRow>
-        <span style={{ fontSize: fontSize.sm, color: colors.text.muted, fontWeight: 600 }}>{t('settings.access.baseline', 'Baseline')}:</span>
-        <Seg>
-          <SegBtn $active={!hasStar} onClick={() => setBaseline(false)}><Ban size={13} /> {t('settings.access.noAccess', 'No access')}</SegBtn>
-          <SegBtn $active={hasStar} $tone="allow" onClick={() => setBaseline(true)}><Check size={13} /> {t('settings.access.fullAccess', 'Full access')}</SegBtn>
-        </Seg>
-        <span style={{ fontSize: fontSize.micro, color: colors.text.muted }}>{hasStar ? t('settings.access.fullHint', 'everything, minus the denies below') : t('settings.access.noneHint', 'nothing, plus the allows below')}</span>
-      </BaselineRow>
-
-      <Chips style={{ marginTop: 10 }}>
-        {value.filter((p) => p !== '*' && p !== '!*').map((p) => {
-          const deny = p.startsWith('!')
-          return <PermChip key={p} $deny={deny}>{deny ? p.slice(1) : p}<button type="button" onClick={() => onChange(value.filter((x) => x !== p))} title={t('common.delete')}><X size={11} /></button></PermChip>
-        })}
-        {value.filter((p) => p !== '*' && p !== '!*').length === 0 && <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.access.noRules', 'No rules yet.')}</span>}
-      </Chips>
-
-      <AddRow>
-        <Seg>
-          <SegBtn $active={effect === 'allow'} $tone="allow" onClick={() => setEffect('allow')}><Check size={13} /> {t('settings.access.allow', 'Allow')}</SegBtn>
-          <SegBtn $active={effect === 'deny'} $tone="deny" onClick={() => setEffect('deny')}><Ban size={13} /> {t('settings.access.deny', 'Deny')}</SegBtn>
-        </Seg>
-        <div style={{ minWidth: 140 }}>
-          <SearchSelect value={type} onChange={(v) => { setType(v as RuleType); setItem('') }} options={typeOpts} />
-        </div>
-        <div style={{ minWidth: 240, flex: 1 }}>
-          <SearchSelect value={item} onChange={setItem} options={itemOpts} placeholder={t('settings.access.pickItem', 'Pick a {{type}}…', { type })} allowCustom={type !== 'connector' && type !== 'dashboard' && type !== 'menu'} />
-        </div>
-        <Button $size="sm" $variant="ghost" onClick={add} disabled={!item}><Plus size={13} /> {t('settings.access.addRule', 'Add')}</Button>
-      </AddRow>
-    </div>
-  )
-}
-
-// ── role editor ─────────────────────────────────────────────────────────────────────────
-function RoleModal({ initial, takenNames, menus, dashboardIds, onSaved, onClose }: { initial: AppRole | null; takenNames: string[]; menus: MenusCatalog; dashboardIds: string[]; onSaved: () => void; onClose: () => void }) {
-  const { t } = useTranslation()
-  const isNew = initial == null
-  const [name, setName] = useState(initial?.name ?? '')
-  const [description, setDescription] = useState(initial?.description ?? '')
-  const [permissions, setPermissions] = useState<string[]>(initial?.permissions ?? [])
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const save = async () => {
-    const n = name.trim()
-    if (!n) { setError(t('settings.access.errName', 'A role name is required.')); return }
-    if (isNew && takenNames.includes(n)) { setError(t('settings.access.errNameTaken', 'That role name is taken.')); return }
-    setBusy(true); setError(null)
-    try {
-      await api.put(`/admin/access/roles/${encodeURIComponent(n)}`, { permissions, description: description.trim() || null })
-      onSaved()
-    } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) } finally { setBusy(false) }
-  }
-
-  return (
-    <Overlay onClick={onClose}>
-      <Box onClick={(e) => e.stopPropagation()}>
-        <Header><Shield size={16} color={colors.blue.main} /><span className="title">{isNew ? t('settings.access.addRole', 'Add role') : `[roles.${initial?.name}]`}</span></Header>
-        <ModalBody>
-          {error && <Banner $tone="error">{error}</Banner>}
-          <Field label={t('settings.access.roleName', 'Role name')}>
-            <Input value={name} disabled={!isNew} onChange={(e) => setName(e.target.value)} placeholder="reader" />
-          </Field>
-          <Field label={t('settings.access.description', 'Description')}>
-            <Input value={description} onChange={(e) => setDescription(e.target.value)} />
-          </Field>
-          <PermissionPicker value={permissions} onChange={setPermissions} menus={menus} dashboardIds={dashboardIds} />
-        </ModalBody>
-        <ModalFooter>
-          <Button $size="sm" $variant="ghost" onClick={onClose}>{t('common.cancel', 'Cancel')}</Button>
-          <Button $size="sm" $variant="primary" onClick={() => void save()} disabled={busy}>{busy ? <SpinnerRing size={13} thickness={2} /> : t('common.save')}</Button>
-        </ModalFooter>
-      </Box>
-    </Overlay>
-  )
-}
+const Placeholder = styled(Card)`flex: 1; display: flex; align-items: center; justify-content: center; color: ${colors.text.muted}; font-size: ${fontSize.sm};`
 
 // ── user editor ─────────────────────────────────────────────────────────────────────────
 function UserModal({ initial, roleNames, onSaved, onClose }: { initial: AppUser | null; roleNames: string[]; onSaved: () => void; onClose: () => void }) {
@@ -317,6 +120,7 @@ function UserModal({ initial, roleNames, onSaved, onClose }: { initial: AppUser 
 
 export default function AccessBuilder() {
   const { t } = useTranslation()
+  const { screens } = useWorkspace()
   const [tab, setTab] = useState<'users' | 'roles'>('users')
   const [users, setUsers] = useState<AppUser[] | null>(null)
   const [roles, setRoles] = useState<AppRole[] | null>(null)
@@ -324,7 +128,8 @@ export default function AccessBuilder() {
   const [dashboardIds, setDashboardIds] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const [userEdit, setUserEdit] = useState<AppUser | null | undefined>(undefined)
-  const [roleEdit, setRoleEdit] = useState<AppRole | null | undefined>(undefined)
+  // undefined = nothing open; null = a new role; a name = that role (keyed so the editor remounts on switch)
+  const [roleEdit, setRoleEdit] = useState<string | null | undefined>(undefined)
 
   const load = useCallback(() => {
     setError(null)
@@ -340,9 +145,13 @@ export default function AccessBuilder() {
   useEffect(load, [load])
 
   const roleNames = useMemo(() => (roles ?? []).map((r) => r.name), [roles])
+  // The superuser's screen catalog resolves `screen` leaves to their read query (a superuser sees every screen).
+  const forest = useMemo(() => buildMenuForest(menus, screens ?? {}), [menus, screens])
 
   if (error && !users) return <Banner $tone="error">{error}</Banner>
   if (!users || !roles) return <Centered />
+
+  const editing = roleEdit === null ? null : roleEdit !== undefined ? roles.find((r) => r.name === roleEdit) ?? null : undefined
 
   return (
     <Shell>
@@ -357,9 +166,7 @@ export default function AccessBuilder() {
           <Bar><div style={{ flex: 1 }} /><Button $size="sm" $variant="primary" onClick={() => setUserEdit(null)}><Plus size={13} /> {t('settings.access.addUser', 'Add user')}</Button></Bar>
           <List>
             {users.map((u) => (
-              <Item key={u.username} onClick={() => setUserEdit(u)} style={{ cursor: 'pointer' }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = colors.blue.border; e.currentTarget.style.background = colors.blue.bg }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = colors.border; e.currentTarget.style.background = colors.bg.input }}>
+              <Item key={u.username} onClick={() => setUserEdit(u)}>
                 <Users size={15} color={colors.text.muted} />
                 <span className="text">
                   <span className="name">{u.username}{u.full_name ? ` — ${u.full_name}` : ''}</span>
@@ -375,33 +182,36 @@ export default function AccessBuilder() {
           </List>
         </>
       ) : (
-        <>
-          <Bar><div style={{ flex: 1 }} /><Button $size="sm" $variant="primary" onClick={() => setRoleEdit(null)}><Plus size={13} /> {t('settings.access.addRole', 'Add role')}</Button></Bar>
-          <List>
-            {roles.map((r) => (
-              <Item key={r.name} onClick={() => setRoleEdit(r)} style={{ cursor: 'pointer' }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = colors.blue.border; e.currentTarget.style.background = colors.blue.bg }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = colors.border; e.currentTarget.style.background = colors.bg.input }}>
-                <Shield size={15} color={colors.text.muted} />
-                <span className="text">
-                  <span className="name">{r.name}</span>
-                  <span className="sub">
-                    {r.description || ''}{r.description ? ' · ' : ''}
-                    {r.permissions.includes('*') ? <Tag $tone="green">{t('settings.access.fullAccess', 'Full access')}</Tag> : null}
-                    {t('settings.access.permCount', '{{n}} rule(s)', { n: r.permissions.filter((p) => p !== '*').length })}
+        <Split>
+          <Side>
+            <Bar><div style={{ flex: 1 }} /><Button $size="sm" $variant="primary" onClick={() => setRoleEdit(null)}><Plus size={13} /> {t('settings.access.addRole', 'Add role')}</Button></Bar>
+            <List>
+              {roles.map((r) => (
+                <Item key={r.name} $selected={roleEdit === r.name} onClick={() => setRoleEdit(r.name)}>
+                  <Shield size={15} color={colors.text.muted} />
+                  <span className="text">
+                    <span className="name">{r.name}</span>
+                    <span className="sub">
+                      {r.description || ''}{r.description ? ' · ' : ''}
+                      {r.permissions.includes('*') ? <Tag $tone="green">{t('settings.access.fullAccess', 'Full access')}</Tag> : null}
+                      {t('settings.access.permCount', '{{n}} rule(s)', { n: r.permissions.filter((p) => p !== '*').length })}
+                    </span>
                   </span>
-                </span>
-              </Item>
-            ))}
-          </List>
-        </>
+                </Item>
+              ))}
+            </List>
+          </Side>
+          {editing !== undefined ? (
+            <RoleEditor key={roleEdit ?? '__new__'} initial={editing} takenNames={roleNames} forest={forest} dashboardIds={dashboardIds}
+              onCancel={() => setRoleEdit(undefined)} onSaved={(name) => { setRoleEdit(name); load() }} />
+          ) : (
+            <Placeholder>{t('settings.access.pickRole', 'Pick a role to edit, or add one.')}</Placeholder>
+          )}
+        </Split>
       )}
 
       {userEdit !== undefined && (
         <UserModal initial={userEdit} roleNames={roleNames} onClose={() => setUserEdit(undefined)} onSaved={() => { setUserEdit(undefined); load() }} />
-      )}
-      {roleEdit !== undefined && (
-        <RoleModal initial={roleEdit} takenNames={roleNames} menus={menus} dashboardIds={dashboardIds} onClose={() => setRoleEdit(undefined)} onSaved={() => { setRoleEdit(undefined); load() }} />
       )}
     </Shell>
   )
