@@ -6,6 +6,7 @@ discovered from its query's result columns + the dictionary / screen hints at re
 from __future__ import annotations
 
 from liberty.explorer.config import (
+    BundledObject,
     ExplorerEntity,
     ExplorerFile,
     ExplorerModel,
@@ -15,6 +16,7 @@ from liberty.explorer.config import (
 )
 
 __all__ = [
+    "BundledObject",
     "ExplorerEntity",
     "ExplorerFile",
     "ExplorerModel",

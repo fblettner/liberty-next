@@ -25,3 +25,25 @@ cardinality = "one"                   # rows of this entity per hub row: one (a 
 from = "sales"
 to = "period"
 on = [["PERIOD", "PERIOD"]]           # pairs: a column of `from`, a column of `to`
+
+# Bundled analyses / dashboards: installed once into the saved-views store (shared), refreshed on
+# a `version` bump only while nobody edited the copy; a deleted copy stays deleted.
+[explorer.nomajde.analyses.qty_by_company]
+label = "Quantity by company"
+audience = "sales"
+version = 1
+[explorer.nomajde.analyses.qty_by_company.definition]
+entity = "sales"
+view = "table"
+rows = [{ field = "sales.COMPANY" }, { field = "sales.SOLD_ON", bucket = "month" }]
+measures = [{ field = "sales.QTY", agg = "sum" }, { field = "sales.REVENUE", agg = "sum" }]
+filterRows = []
+sort = []
+limit = 1000
+calculated = []
+
+[explorer.nomajde.dashboards.sales_home]
+label = "Sales — home"
+version = 1
+[explorer.nomajde.dashboards.sales_home.definition]
+tiles = [{ analysis = "qty_by_company", w = 4, h = "m" }]

@@ -201,6 +201,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # like the changesets table above so a bad/unreachable pool degrades the
         # feature rather than failing boot (the grid then just won't persist).
         app.state.user_views = await build_user_views(settings, app.state.connectors)
+        if app.state.user_views is not None:
+            from liberty.explorer.store import sync_bundled
+            try:
+                await sync_bundled(app.state.user_views, app.state.explorer)
+            except Exception as exc:  # noqa: BLE001 — a catalogue problem must not stop the boot
+                _log.warning("explorer: bundled catalogue not applied: %s", exc)
         # Notifications — the inbox table on [notify] pool (self-bootstrapping, guarded like the
         # two above) and the dispatcher (portal / email / action) the routes, hooks and jobs call.
         app.state.notifications = await build_notifications(settings, app.state.connectors)

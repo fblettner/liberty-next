@@ -152,7 +152,29 @@
   modification et suppression. En vue détail et après une descente, une ligne d'une entité qui a
   un **écran** ouvre le dialogue de cet écran : la requête de lecture de l'écran est exécutée avec
   les valeurs de clé de la ligne et la fiche s'affiche comme partout ailleurs, modifications
-  comprises. Les analyses enregistrées, les tableaux de bord d'analyses et l'export PDF suivent.
+  comprises.
+- **Analyses enregistrées et tableaux de bord d'analyses.** Un seul objet `AnalysisDefinition`
+  pilote l'éditeur, les tableaux de bord et (ensuite) le digest. La page gagne une barre de mode,
+  **Analyses** et **Tableaux de bord**, avec un sélecteur des éléments enregistrés (groupés par
+  public, « à moi » signalé), Enregistrer, Enregistrer sous et Supprimer. Une analyse ou un tableau
+  de bord est rangé dans le magasin des vues enregistrées (`ly2_user_view`, genres `analysis` /
+  `explorer_dashboard`, l'app en clé, l'id un slug du nom) : **privé** sous son propriétaire, ou
+  **partagé** sous l'utilisateur réservé `*` pour que toute personne ayant la permission
+  d'exploration de l'app le voie ; le propriétaire, le public, une version et le marqueur `bundled`
+  voyagent dans l'enregistrement. Enregistrer un objet partagé le change pour tout le monde (la
+  fenêtre le dit, « Enregistrer sous » fait votre propre copie) ; supprimer un objet partagé revient
+  à son propriétaire ou à un superutilisateur. Un **tableau de bord** est une grille de tuiles (une
+  analyse enregistrée chacune, 1 à 4 colonnes de large, trois hauteurs), chacune exécutant son
+  analyse dans sa propre vue, avec une période qui prime sur les analyses ayant un champ de
+  période ; « Modifier la disposition » déplace, redimensionne, retire et ajoute des tuiles ; le
+  crayon ouvre l'analyse dans l'éditeur, une descente depuis une tuile aussi, avec les valeurs de la
+  cellule en filtres. Un **catalogue livré** accompagne l'app : `[explorer.<app>.analyses.<id>]` /
+  `.dashboards.<id>` dans `explorer.toml`, chacun avec une `version`, installés une fois comme
+  objets partagés au démarrage et au rechargement, rafraîchis à un changement de version seulement
+  tant que personne n'a modifié la copie (un enregistrement utilisateur retire le marqueur), et
+  jamais réinstallés une fois qu'un utilisateur les a supprimés (une ligne marqueur des ids
+  installés s'en souvient). Routes `GET / PUT /api/explorer/<app>/saved/<analyses|dashboards>`,
+  `DELETE …/<id>`. L'export PDF et le raccordement au digest suivent.
 
 **Écrans : `editable_when`, une règle de lecture seule par ligne**
 - Un écran peut dire quand une ligne existante peut être modifiée : `editable_when = [{ field =

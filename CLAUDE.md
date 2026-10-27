@@ -121,7 +121,10 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           JOINs, correlated sub-queries / EXISTS for many-side measures / filters,
                           scope per entity via SQLConnector.scoped_select, buckets / merge / sort /
                           Top N in Python; detail mode paged + drill from a cell), calc.py (the
-                          calculated-field language: typed, compiled to dialect SQL, never free SQL)
+                          calculated-field language: typed, compiled to dialect SQL, never free SQL),
+                          store.py (saved analyses / dashboards on the user-views store: shared under
+                          the `*` user, private under the owner; sync_bundled applies the catalogue
+                          of explorer.toml once, refreshes untouched copies, keeps deletions)
   notify/                 notifications: store.py (ly2_notification inbox, schema_sync), dispatcher.py
                           (Message → portal rows + Socket.IO push / SMTP email / a connector query or
                           endpoint; recipients user: role: email:; channels isolated), rules.py
@@ -158,7 +161,7 @@ tests/                    pytest (asyncio auto mode); SQLite fixtures; no live D
 | `/api` | `web/menus.py`, `web/screens.py`, `web/export.py`, `web/charts.py`, `web/dashboards.py`, `web/actions.py`, `web/license.py`, `web/theme.py` | permission-pruned catalogs: menus, screens (+ dialog / actions resolved), workbook export, charts, dashboards, shared actions, license status, theme |
 | `/api/reports` `/api/views` `/api/plugins` | `web/reports.py`, `web/views.py`, `web/plugins.py` | run / download reports, saved views, invoke app callables |
 | `/api/notifications` `/admin/notify/test` | `web/notifications.py` | my inbox (list, unread count, mark read); a superuser's test send through the dispatcher |
-| `/api/explorer` | `web/explorer.py` | the explorer models the caller may use (perm `explorer:{app}`), `{app}/model` with the discovered fields (`?refresh=1`), `POST {app}/query` (aggregate: rows / measures / filters bag / period / sort / limit), `POST {app}/detail` (rows, paged, `drill`), `POST {app}/calc/test` |
+| `/api/explorer` | `web/explorer.py` | the explorer models the caller may use (perm `explorer:{app}`), `{app}/model` with the discovered fields (`?refresh=1`), `POST {app}/query` (aggregate: rows / measures / filters bag / period / sort / limit), `POST {app}/detail` (rows, paged, `drill`), `POST {app}/calc/test`, `GET/PUT {app}/saved/{analyses|dashboards}` + `DELETE …/{id}` |
 | `/ai` | `ai/routes.py` | `POST /ai/chat` (SSE), `GET /ai/tools` — perm `ai:chat` |
 | `/admin` | `web/admin.py` (3.3k lines — the config builders' backend), `web/dictgen.py` | reload, `GET /admin/config/schema`, `GET/PUT /admin/config/<section>/parsed`, rename / move / clone / delete-with-deps / find-usages / dependencies / integrity, packages (build / import), versions, AI proposal apply, API test, dictionary scan — **superuser** |
 | `/admin/access` `/admin/jobs` `/admin/changesets` | `web/access.py`, `web/jobs.py`, `web/changesets.py` | roles / permissions, nomaflow jobs + runs + presets + `{job}/upload` / `runs/{id}/files/{name}` + `retention` / `missed` policies, change packages |
@@ -252,9 +255,10 @@ pages/Nomaflow/        JobsList, JobEditor, StepEditor, RunDetail, Schedule, Ret
 pages/Explorer/        the Data Explorer page: index (model, the AnalysisDefinition, runs, drill, views), FieldsPane
                        (+ calculated fields), Shelves (rows / measures / filters chips), PeriodBar, ResultTable, PivotView,
                        ChartView (bar / line / pie via TableView/ChartCanvas, KPI), CalcModal (Test before Save),
-                       RecordDialog (a detail row in its screen's dialog); logic in services/explorer.ts (definition ⇄
-                       requests, filter bag, click-to-add) and services/explorerPivot.ts (pivot tree, chart shaping,
-                       KPI totals), both tested; shapes in types/explorer.ts
+                       RecordDialog (a detail row in its screen's dialog), SaveModal, DashboardsView (tiles grid, each
+                       running a saved analysis); logic in services/explorer.ts (definition ⇄ requests, filter bag,
+                       click-to-add), services/explorerPivot.ts (pivot tree, chart shaping, KPI totals), both tested,
+                       services/explorerSaved.ts (the saved routes, dashboard shape); shapes in types/explorer.ts
 pages/DashboardView/ Chat/ (AiDrawer) Reports/ Notifications/ (the inbox; components/NotificationBell
                        in the header, live via SioContext.subscribeNotifications) ScreenAssistant/ HttpRunner/ Monitoring/ Login/
 services/ types/       no-React helpers (lookups, cells, gridViews, poolSchema, sqlCompletion…) and

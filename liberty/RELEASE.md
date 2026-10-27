@@ -135,7 +135,26 @@
   `calc` entity of the pane as a measure or a dimension, with edit and delete. In detail view and
   after a drill, a row of an entity that has a **screen** opens that screen's dialog: the screen's
   read query is run with the row's key values and the record shows as it does anywhere else,
-  edits included. Saved analyses, dashboards of analyses and the export to PDF follow.
+  edits included.
+- **Saved analyses and dashboards of analyses.** One `AnalysisDefinition` object drives the
+  editor, the dashboards and (next) the digest. The page gains a mode bar — **Analyses** and
+  **Dashboards** — with a picker of the saved ones (grouped by audience, "mine" flagged), Save,
+  Save as and Delete. An analysis or a dashboard is stored on the saved-views store (`ly2_user_view`,
+  kinds `analysis` / `explorer_dashboard`, the app as key, the id a slug of the name): **private**
+  under its owner, or **shared** under the reserved `*` user so everyone with the app's explorer
+  permission sees it; the owner, the audience, a version and the `bundled` marker ride in the
+  record. Saving a shared object changes it for everyone (the modal says so, "Save as" makes
+  your own copy); deleting a shared one is for its owner or a superuser. A **dashboard** is a grid
+  of tiles (a saved analysis each, 1–4 columns wide, three heights), each running its analysis in
+  its own view, with a period that overrides the analyses that have a period field; "Edit
+  layout" moves, resizes, removes and adds tiles; the pencil opens the analysis in the editor, a
+  drill from a tile too, with the cell's values as filters. A **bundled catalogue** ships with the
+  app: `[explorer.<app>.analyses.<id>]` / `.dashboards.<id>` in `explorer.toml`, each with a
+  `version`, installed once as shared objects at boot and on reload, refreshed on a version bump
+  only while nobody edited the copy (a user save drops the marker), and never reinstalled once a
+  user deleted it (an installed-ids marker row remembers). Routes `GET / PUT
+  /api/explorer/<app>/saved/<analyses|dashboards>`, `DELETE …/<id>`. The export to PDF and the
+  digest hook follow.
 
 **Screens: `editable_when`, a row-level read-only rule**
 - A screen can say when an existing row may be changed: `editable_when = [{ field = "PERIOD_STATUS",

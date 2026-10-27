@@ -252,6 +252,12 @@ async def rebuild_runtime(
         cache = getattr(app.state, "explorer_cache", None)
         if cache is not None:
             cache.clear()
+        if "explorer" in wanted and getattr(app.state, "user_views", None) is not None:
+            from liberty.explorer.store import sync_bundled
+            try:
+                await sync_bundled(app.state.user_views, app.state.explorer)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("explorer: bundled catalogue not applied: %s", exc)
         if "notifications" in wanted and getattr(settings, "notify", None) is not None:
             from liberty.notify import load_notification_rules
 

@@ -245,3 +245,25 @@ def test_detail_and_calc_routes(env) -> None:
         assert r.status_code == 422 and "unexpected" in r.json()["detail"]
         assert client.post("/api/explorer/shop/detail", json={"columns": ["sales.NOPE"]}, headers=h).status_code == 422
         assert client.post("/api/explorer/shop/detail", json={}, headers=_h(client, "nobody")).status_code == 403
+
+
+def test_saved_analyses_routes(env) -> None:
+    app, _ = env
+    with TestClient(app) as client:
+        ha, hb = _h(client, "analyst"), _h(client, "admin")
+        r = client.put("/api/explorer/shop/saved/analyses", json={"name": "Revenue by company", "definition": {"rows": [{"field": "company.NAME"}]}, "audience": "sales"}, headers=ha)
+        assert r.status_code == 200, r.text
+        item = r.json()["item"]
+        assert item["id"] == "revenue-by-company" and item["owner"] == "analyst" and not item["shared"]
+        assert client.get("/api/explorer/shop/saved/analyses", headers=hb).json()["items"] == []     # private to the analyst
+        r = client.put("/api/explorer/shop/saved/analyses", json={"id": item["id"], "name": "Revenue by company", "definition": {}, "shared": True}, headers=ha)
+        assert r.json()["item"]["shared"] and r.json()["item"]["version"] == 2
+        assert [x["id"] for x in client.get("/api/explorer/shop/saved/analyses", headers=hb).json()["items"]] == ["revenue-by-company"]
+        # the admin cannot be refused; nobody has no permission; a bad kind is a 404
+        assert client.get("/api/explorer/shop/saved/analyses", headers=_h(client, "nobody")).status_code == 403
+        assert client.get("/api/explorer/shop/saved/things", headers=ha).status_code == 404
+        r = client.put("/api/explorer/shop/saved/dashboards", json={"name": "Home", "definition": {"tiles": [{"analysis": "revenue-by-company", "w": 2, "h": "m"}]}, "shared": True}, headers=hb)
+        assert r.status_code == 200 and r.json()["item"]["id"] == "home"
+        assert client.delete("/api/explorer/shop/saved/dashboards/home", headers=ha).status_code == 403   # shared by the admin
+        assert client.delete("/api/explorer/shop/saved/dashboards/home", headers=hb).json()["deleted"] is True
+        assert client.delete("/api/explorer/shop/saved/analyses/revenue-by-company", headers=ha).json()["deleted"] is True

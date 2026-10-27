@@ -97,6 +97,20 @@ class ExplorerRelation(BaseModel):
         return v
 
 
+class BundledObject(BaseModel):
+    """A shipped analysis or dashboard: installed once into the store, refreshed while untouched
+    (see :func:`liberty.explorer.store.sync_bundled`). ``definition`` is the frontend's
+    AnalysisDefinition (or the dashboard's tiles), kept opaque here."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str | None = None
+    description: str | None = None
+    audience: str | None = Field(default=None, description="Groups the picker: finance, sales, it…")
+    version: int = Field(default=1, ge=1, description="Bump to refresh installed, untouched copies.")
+    definition: dict[str, Any] = Field(default_factory=dict)
+
+
 class ExplorerModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -106,6 +120,8 @@ class ExplorerModel(BaseModel):
     hub: str = Field(description="The entity every analysis starts from.")
     entities: dict[str, ExplorerEntity] = Field(default_factory=dict)
     relations: list[ExplorerRelation] = Field(default_factory=list)
+    analyses: dict[str, BundledObject] = Field(default_factory=dict, description="The bundled analyses, by id.")
+    dashboards: dict[str, BundledObject] = Field(default_factory=dict, description="The bundled dashboards of analyses, by id.")
     override: bool = False
 
     @model_validator(mode="after")
