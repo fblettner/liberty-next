@@ -76,6 +76,13 @@
   become cards; the numbers follow the reader's language (`1 234,5` / `1,234.5`); the
   template's own words (cover labels, confidential lines) follow it too. Excel keeps the data
   only.
+- **Dashboards export to Excel and PDF.** A config dashboard (`dashboards.toml`) has Excel and
+  PDF buttons in its bar, next to Refresh. The export runs server-side with exactly what the bar
+  holds — the filter picks bound through each widget's screen, the period's binds and date range,
+  under the caller's row-level scope (`POST /api/dashboards/{id}/export`) — and goes through the
+  same renderers as the Explorer: one sheet per widget (the KPIs together as "Key figures"), or a
+  PDF synthesis whose cover names the period and the filters, with the charts drawn and the KPIs as
+  cards. A widget whose query fails becomes an error section; the rest still renders.
 - **The chat drawer on nomaubl's layout**: a header line (title, the model picker when there is a
   choice, "+" new conversation, ×), a context line under it when the page gives one, a greeting
   bubble, and the starter questions as chips above the composer, under headings when the app

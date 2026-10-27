@@ -4,6 +4,7 @@
 |---|---|---|
 | ``GET /api/dashboards`` | authenticated | every dashboard, with widgets the caller can't read filtered out |
 | ``GET /api/dashboards/{id}`` | authenticated | one dashboard, same filtering; 404 when the id doesn't exist |
+| ``POST /api/dashboards/{id}/export`` | authenticated | the dashboard as the page shows it (filters, period) → xlsx / pdf |
 
 Each widget is permission-gated by the underlying query's ``sql:<connector>:<query>``;
 widgets the caller can't read are dropped from the catalog (the dashboard still surfaces
@@ -20,14 +21,22 @@ fetch needed. A reference to a missing chart drops the widget with a logged warn
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
+
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field
 
 from liberty.auth.dependencies import CurrentPrincipal
 from liberty.auth.principal import Principal
 from liberty.charts import ChartConfig, ChartsFile
+from liberty.connectors.registry import ConnectorRegistry
 from liberty.dashboards import ChartWidget, Dashboard, DashboardsFile, KpiWidget, TableWidget
+from liberty.dashboards.report import PeriodPick, dashboard_sections, resolve_column
+from liberty.screens import ScreensFile
+from liberty.web.deps import get_connectors, get_screens, request_language
 
 _log = logging.getLogger(__name__)
 
@@ -44,6 +53,8 @@ def _charts(request: Request) -> ChartsFile:
 
 Dashboards = Annotated[DashboardsFile, Depends(get_dashboards)]
 Charts = Annotated[ChartsFile, Depends(_charts)]
+Screens = Annotated[ScreensFile, Depends(get_screens)]
+Connectors = Annotated[ConnectorRegistry, Depends(get_connectors)]
 
 
 def _resolve_chart_widget(w: ChartWidget, charts: ChartsFile, scope: str) -> dict[str, Any] | None:
@@ -225,3 +236,85 @@ async def get_dashboard(
         # caller who's been denied the dashboard).
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Unknown dashboard {dashboard_id!r}")
     return resolved
+
+
+class ExportPeriod(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    from_: date | None = Field(default=None, alias="from", description="The range's first day; both blank = all dates.")
+    to: date | None = None
+    basis: str = Field(default="", description="The chosen basis value (one of the period's ``basis[].value``).")
+
+
+class DashboardExportBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    format: Literal["xlsx", "pdf"] = "xlsx"
+    filters: dict[str, str] = Field(default_factory=dict, description="The filter bar's picks, by filter id (blank = all).")
+    period: ExportPeriod | None = Field(default=None, description="The period control's state, when the dashboard has one.")
+
+
+@router.post("/dashboards/{dashboard_id}/export", summary="Export dashboard")
+async def export_dashboard(
+    dashboard_id: str, body: DashboardExportBody, request: Request, principal: CurrentPrincipal, dashboards: Dashboards, charts: Charts,
+    connectors: Connectors, screens: Screens,
+) -> StreamingResponse:
+    """The dashboard as the page shows it — every readable widget run with the filter picks and
+    the period the caller sends, under the caller's row-level scope — as an Excel workbook
+    (one sheet per widget, the KPIs together) or a PDF synthesis (cover with the period and
+    the filters, the charts drawn, the KPIs as cards). A PDF needs the ``reports`` extra (503)."""
+    from liberty.explorer.report import sections_to_pdf, sections_to_xlsx
+    from liberty.web.connectors import _build_dd_map_for, _run_sql, _request_pool
+
+    d = dashboards.find(dashboard_id)
+    resolved = _resolve_dashboard(d, charts, principal) if d is not None else None
+    if resolved is None or d is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Unknown dashboard {dashboard_id!r}")
+    language = request_language(request)
+    pool = _request_pool(request)
+    pick = PeriodPick(body.period.from_, body.period.to, body.period.basis) if (body.period and resolved.get("period")) else (PeriodPick() if resolved.get("period") else None)
+
+    async def run(connector: str, query: str, params: dict[str, Any]) -> dict[str, Any]:
+        return await _run_sql(
+            connectors, connector, query, params, language=language, user=principal.username, screens=screens,
+            scope=principal.data_scope, verbose_errors=principal.is_superuser, pool=pool,
+        )
+
+    sections = await dashboard_sections(resolved, run=run, dd_map=lambda c, q: _build_dd_map_for(screens, c, q), values=body.filters, pick=pick, lang=language)
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in d.label).strip("_") or "dashboard"
+    if body.format == "pdf":
+        from liberty.reports.render import ReportsUnavailableError
+        settings = request.app.state.settings
+        branding = getattr(getattr(settings, "reports", None), "branding", None)
+        period = (pick.date_from, pick.date_to) if pick and pick.date_from and pick.date_to else None
+        rows = await _filter_rows(resolved, body.filters, run)
+        try:
+            data = sections_to_pdf(
+                sections, d.label, app_name=getattr(settings.app, "name", ""), branding=branding.model_dump() if branding is not None else None,
+                lang=language, author=principal.username, period=period, cover_rows=rows,
+            )
+        except ReportsUnavailableError as exc:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+        return StreamingResponse(iter([data]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{safe}.pdf"'})
+    data = sections_to_xlsx(sections)
+    return StreamingResponse(iter([data]), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{safe}.xlsx"'})
+
+
+async def _filter_rows(resolved: dict[str, Any], values: dict[str, str], run: Any) -> list[tuple[str, str]]:
+    """The cover's filter rows — ``(label, the picked value's label)``: the options query gives
+    the label (best effort; the raw value when it cannot)."""
+    out: list[tuple[str, str]] = []
+    for f in resolved.get("filters") or []:
+        v = values.get(f["id"])
+        if not v:
+            continue
+        shown = v
+        try:
+            o = f["options"]
+            res = await run(o["connector"], o["query"], {})
+            vk, lk = resolve_column(res, o["value_column"]), resolve_column(res, o["label_column"])
+            hit = next((r for r in res.get("rows") or [] if r.get(vk) is not None and str(r[vk]) == v), None)
+            if hit is not None and hit.get(lk) is not None:
+                shown = str(hit[lk])
+        except Exception:  # noqa: BLE001 — the cover row is a nicety
+            pass
+        out.append((f["label"], shown))
+    return out

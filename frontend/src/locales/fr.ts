@@ -300,6 +300,8 @@ const fr: Resources = {
     empty: 'Aucun widget lisible sur ce tableau de bord pour le moment.',
     refresh: 'Actualiser',
     updatedAt: 'Mis à jour à {{time}}',
+    exportExcel: 'Exporter vers Excel',
+    exportPdf: 'Exporter en PDF',
     kpi: {
       previous: 'précédent : {{value}}',
       previousTitle: 'Évolution par rapport à la période précédente',

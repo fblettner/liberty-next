@@ -298,6 +298,8 @@ const en = {
     empty: 'No widgets you can read on this dashboard yet.',
     refresh: 'Refresh',
     updatedAt: 'Updated at {{time}}',
+    exportExcel: 'Export to Excel',
+    exportPdf: 'Export to PDF',
     kpi: {
       previous: 'previous: {{value}}',
       previousTitle: 'Change from the previous period',

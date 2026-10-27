@@ -197,11 +197,11 @@ def _bars(labels: list[str], series: list[Series], colors: list[str], stacked: b
                 out.append(_text(x + bw / 2, y_of(up) - 3, fmt_compact(up, lang), size=7.5, anchor="middle"))
     else:
         gap = min(6.0, slot * 0.2)
-        bw = max(2.0, (slot - gap) / k)
+        bw = max(2.0, min((slot - gap) / k, 56.0 / k))      # a few wide categories: bars stay bars, centred in the slot
         for i in range(n):
             for si, (s, c) in enumerate(zip(series, colors, strict=True)):
                 v = _v(s.values[i])
-                x = x0 + slot * i + gap / 2 + bw * si
+                x = x0 + slot * i + (slot - bw * k) / 2 + bw * si
                 y = y_of(max(v, 0))
                 out.append(_rect(x, y, bw - (1 if k > 1 else 0), abs(y_of(v) - zero), c))
                 if show_values and v != 0:

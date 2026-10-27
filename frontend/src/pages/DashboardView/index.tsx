@@ -12,6 +12,7 @@ import { LayoutDashboard } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { useBranding } from '../../branding/BrandingContext'
 import { lastFetchedAt } from '../../services/widgetCache'
+import { downloadDashboardExport, exportPeriod } from '../../services/dashboards'
 import { Banner, Centered, Mono, PageLayout, Stack } from '../../common'
 import type { Dashboard, DashboardFilterWire, DashboardWidget } from '../../types/dashboards'
 import { isPreset, rangeForPreset, type DatePreset, type DateRange } from '../../services/period'
@@ -70,6 +71,7 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
   // newest widget result was fetched.
   const [refreshKey, setRefreshKey] = useState(0)
   const [updatedAt, setUpdatedAt] = useState<number | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -115,6 +117,14 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
   const period = dashboard?.period
   const selection: PeriodSelection | undefined = period ? { range, basis } : undefined
 
+  // The export runs server-side with what the bar holds: the picks and the period.
+  const exportFile = async (format: 'xlsx' | 'pdf') => {
+    setExportError(null)
+    try {
+      await downloadDashboardExport(dashboardId, { format, filters: filterValues, ...(period ? { period: exportPeriod(range, basis) } : {}) })
+    } catch (e) { setExportError(e instanceof Error ? e.message : String(e)) }
+  }
+
   if (error) return <PageLayout title={dashboardId}><Banner $tone="error">{error}</Banner></PageLayout>
   if (!dashboard) return <Centered />
 
@@ -138,7 +148,9 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
           } : undefined}
           updatedAt={updatedAt}
           onRefresh={() => setRefreshKey((k) => k + 1)}
+          onExport={(f) => void exportFile(f)}
         />
+        {exportError && <Banner $tone="error">{exportError}</Banner>}
         {dashboard.widgets.length === 0 ? (
           <EmptyState>{t('dashboard.empty')}</EmptyState>
         ) : (

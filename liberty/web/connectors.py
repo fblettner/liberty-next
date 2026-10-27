@@ -183,6 +183,16 @@ def _find_screen_for_query(
     return None, None, None
 
 
+def _build_dd_map_for(screens: ScreensFile | None, connector: str, query: str) -> dict[str, str] | None:
+    """The ``dd → column`` map of the screen reading *(connector, query)* — what the dashboard
+    page binds its filters and its period's date column through; ``None`` without a screen."""
+    if screens is None:
+        return None
+    from liberty.web.screens import _build_dd_map
+    screen, _slot, _app = _find_screen_for_query(screens, connector, query)
+    return _build_dd_map(screen) if screen is not None else None
+
+
 def _resolve_action_screen(screens: ScreensFile | None, action_context: dict[str, Any] | None) -> Screen | None:
     """The originating :class:`Screen` for a tagged screen-action call. The frontend tags each
     action backend call (run_query / call_api / call_plugin) fired from a change-tracked screen's

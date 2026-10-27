@@ -360,3 +360,27 @@ def test_dashboard_period_is_on_the_wire(app) -> None:
             "basis": [{"value": "doc", "label": "Document date", "dd": "SALES_DATE"}, {"value": "paid", "label": "Paid on", "column": "PAID_ON"}],
         }
         assert "period" not in client.get("/api/dashboards/app1.security_overview", headers=h).json()
+
+
+def test_export_dashboard_as_xlsx_and_pdf(app) -> None:
+    """The export runs the readable widgets with the bar's picks: one sheet per widget, the KPIs
+    together; a pruned widget is absent; the PDF needs the reports extra."""
+    import io
+
+    from openpyxl import load_workbook
+
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        r = client.post("/api/dashboards/app1.security_overview/export", json={"format": "xlsx"}, headers=h)
+        assert r.status_code == 200 and r.headers["content-disposition"].endswith('filename="Security_Overview.xlsx"')
+        assert load_workbook(io.BytesIO(r.content)).sheetnames == ["Users per app", "Users by status", "Key figures"]
+        r = client.post("/api/dashboards/app1.security_overview/export", json={"format": "xlsx"}, headers=_h(client, "user"))
+        assert load_workbook(io.BytesIO(r.content)).sheetnames == ["Users per app", "Users by status"]      # the KPI on secret_get is pruned
+        r = client.post("/api/dashboards/app1.ops/export", json={"format": "xlsx", "filters": {"x": "1"}, "period": {"from": "2026-09-01", "to": "2026-09-30", "basis": "paid"}}, headers=h)
+        assert r.status_code == 200 and load_workbook(io.BytesIO(r.content)).sheetnames == ["Users", "Secret rows"]
+        assert client.post("/api/dashboards/app1.nope/export", json={"format": "xlsx"}, headers=h).status_code == 404
+        assert client.post("/api/dashboards/app1.ops/export", json={"format": "xlsx", "bogus": 1}, headers=h).status_code == 422
+        r = client.post("/api/dashboards/app1.ops/export", json={"format": "pdf", "period": {"from": "2026-09-01", "to": "2026-09-30"}}, headers=h)
+        assert r.status_code in (200, 503)
+        if r.status_code == 200:
+            assert r.content[:4] == b"%PDF"

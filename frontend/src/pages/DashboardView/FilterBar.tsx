@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { RefreshCw } from 'lucide-react'
+import { FileDown, RefreshCw } from 'lucide-react'
 import { Button, DateRangeFilter, SearchSelect, type DateBasis, type DatePreset, type DateRange, type SearchSelectOption } from '../../common'
 import type { QueryResult } from '../../types/connectors'
 import type { DashboardFilterWire } from '../../types/dashboards'
@@ -78,9 +78,11 @@ export interface FilterBarProps {
   /** When the newest widget result was fetched (epoch ms), shown next to the Refresh button. */
   updatedAt?: number | null
   onRefresh?: () => void
+  /** Export what the page shows (the same filters and period), as a file. */
+  onExport?: (format: 'xlsx' | 'pdf') => void
 }
 
-export function FilterBar({ filters, values, onChange, period, updatedAt, onRefresh }: FilterBarProps) {
+export function FilterBar({ filters, values, onChange, period, updatedAt, onRefresh, onExport }: FilterBarProps) {
   const { t } = useTranslation()
   // One options-map per filter. Each filter loads its own options once; the cache above keeps
   // the same `(connector, query)` pair from refetching across filters / dashboards.
@@ -123,9 +125,11 @@ export function FilterBar({ filters, values, onChange, period, updatedAt, onRefr
           </Cell>
         )
       })}
-      {onRefresh && (
+      {(onRefresh || onExport) && (
         <Cell style={{ minWidth: 0, marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Button $size="sm" $variant="ghost" onClick={onRefresh} title={t('dashboard.refresh')}><RefreshCw size={13} /></Button>
+          {onExport && <Button $size="sm" $variant="ghost" onClick={() => onExport('xlsx')} title={t('dashboard.exportExcel')}><FileDown size={13} /> Excel</Button>}
+          {onExport && <Button $size="sm" $variant="ghost" onClick={() => onExport('pdf')} title={t('dashboard.exportPdf')}><FileDown size={13} /> PDF</Button>}
+          {onRefresh && <Button $size="sm" $variant="ghost" onClick={onRefresh} title={t('dashboard.refresh')}><RefreshCw size={13} /></Button>}
           {updatedLabel && <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('dashboard.updatedAt', { time: updatedLabel })}</span>}
         </Cell>
       )}

@@ -134,7 +134,7 @@ async def test_pdf_markdown_draws_the_charts_and_localises(env) -> None:  # noqa
     assert section_chart_svg(sections[0]) is None and (section_chart_svg(sections[1]) or "").startswith("<svg")
     md = sections_to_markdown(sections, "Report", lang="fr", heading=False, figures=True)
     assert not md.startswith("# ") and md.count("<svg") == 1 and '<div class="chart-figure">' in md and "| NAME |" in md
-    assert '<div class="kpi-row">' in md and "<b>Total" not in md and "259" in md
+    assert '<table class="kpi-grid">' in md and "<b>Total" not in md and "259" in md
     plain = sections_to_markdown(sections, "Report")
     assert plain.startswith("# Report") and "<svg" not in plain and "| 259 |" in plain
     assert load_workbook(io.BytesIO(sections_to_xlsx(sections))).sheetnames == ["Table", "Chart", "KPI"]

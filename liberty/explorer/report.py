@@ -450,12 +450,19 @@ def _md_cell(v: Any, bold: bool, lang: str | None = None) -> str:
     return f"**{s}**" if bold and s else s
 
 
+KPI_PER_ROW = 4
+
+
 def _kpi_cards(s: Section, lang: str | None) -> list[str]:
-    cards = "".join(
-        f'<div class="kpi"><div class="kpi-label">{_md_cell(h, False)}</div><div class="kpi-value">{_md_cell(v, False, lang) or "—"}</div></div>'
+    """The KPI section as cards: a table (the renderer lays tables out reliably), up to
+    :data:`KPI_PER_ROW` per row."""
+    cards = [
+        f'<td class="kpi"><div class="kpi-label">{_md_cell(h, False)}</div><div class="kpi-value">{_md_cell(v, False, lang) or "—"}</div></td>'
         for h, v in zip(s.headers, s.rows[0] if s.rows else [], strict=False)
-    )
-    return [f'<div class="kpi-row">{cards}</div>', ""]
+    ]
+    # the last row padded with empty cells so every card keeps the same width
+    rows = ["<tr>" + "".join(cards[i:i + KPI_PER_ROW]) + '<td class="kpi-empty"></td>' * (KPI_PER_ROW - len(cards[i:i + KPI_PER_ROW])) + "</tr>" for i in range(0, len(cards), KPI_PER_ROW)]
+    return [f'<table class="kpi-grid"><tbody>{"".join(rows)}</tbody></table>', ""]
 
 
 def sections_to_markdown(sections: list[Section], title: str, *, lang: str | None = None, heading: bool = True, figures: bool = False) -> str:
@@ -493,12 +500,13 @@ def sections_to_markdown(sections: list[Section], title: str, *, lang: str | Non
 
 def sections_to_pdf(
     sections: list[Section], title: str, *, app_name: str = "", branding: dict[str, Any] | None = None, lang: str | None = None,
-    author: str = "", period: tuple[date, date] | None = None, today: date | None = None,
+    author: str = "", period: tuple[date, date] | None = None, today: date | None = None, cover_rows: list[tuple[str, str]] | None = None,
 ) -> bytes:
     """Through the reports pipeline (needs the ``reports`` extra — raises
     :class:`liberty.reports.render.ReportsUnavailableError` otherwise): a cover carrying the
-    application, the period, the date, the author and the version, then the sections flowing
-    (no contents page, no page per section), the charts drawn in print colours."""
+    application, the period, the date, the author and the version (+ *cover_rows*, e.g. a
+    dashboard's filter picks), then the sections flowing (no contents page, no page per
+    section), the charts drawn in print colours."""
     from liberty.reports.render import render_content
     from liberty.reports.schema import ReportContent
 
@@ -506,6 +514,7 @@ def sections_to_pdf(
     meta = [(w["application"], app_name)] if app_name else []
     if period is not None:
         meta.append((w["period"], period_label(period, lang)))
+    meta += list(cover_rows or [])
     options: dict[str, Any] = {
         "lang": "fr" if (lang or "").lower().startswith("fr") else "en", "toc": False, "section_breaks": False,
         "date": long_date(today or date.today(), lang), "author": author or app_name, "version": __version__, "cover_meta": meta,

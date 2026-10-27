@@ -680,14 +680,14 @@ html, body {{
 /* ============ FIGURES (charts drawn by liberty.explorer.chart_svg) ============ */
 .chart-figure {{ margin: 2mm 0 3mm 0; page-break-inside: avoid; }}
 .chart-figure svg {{ display: block; }}
-.kpi-row {{ display: flex; flex-wrap: wrap; gap: 4mm; margin: 2mm 0 4mm 0; }}
-.kpi {{
-  flex: 1 1 40mm; min-width: 40mm;
-  border: 0.5pt solid #e5e7eb; border-radius: 2pt; background: #f8fafc;
-  padding: 3mm 4mm; page-break-inside: avoid;
+.content table.kpi-grid {{ width: calc(100% + 8mm); border-collapse: separate; border-spacing: 4mm 0; margin: 1mm 0 3mm -4mm; page-break-inside: avoid; }}
+.content table.kpi-grid tbody tr td.kpi-empty {{ border: none; background: none; padding: 0; width: 25%; }}
+.content table.kpi-grid tbody tr td.kpi {{
+  width: 25%; border: 0.5pt solid #e5e7eb; border-radius: 2pt; background: #f8fafc;
+  padding: 3mm 4mm; vertical-align: top;
 }}
-.kpi-label {{ font-size: 8pt; color: #6b7280; text-transform: uppercase; letter-spacing: 1pt; margin-bottom: 1.5mm; }}
-.kpi-value {{ font-size: 16pt; font-weight: 700; color: {primary}; }}
+.content table.kpi-grid tbody tr td.kpi .kpi-label {{ font-size: 8pt; color: #6b7280; text-transform: uppercase; letter-spacing: 1pt; margin-bottom: 1.5mm; }}
+.content table.kpi-grid tbody tr td.kpi .kpi-value {{ font-size: 16pt; font-weight: 700; color: {primary}; }}
 
 /* ============ LINKS ============ */
 a {{ color: #1d4ed8; text-decoration: none; }}

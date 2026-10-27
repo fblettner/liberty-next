@@ -86,6 +86,14 @@
   digest. Les KPI deviennent des cartes ; les nombres suivent la langue du lecteur (`1 234,5` /
   `1,234.5`), les mots du gabarit (libellés de couverture, mentions de confidentialité) aussi.
   Excel garde les données seules.
+- **Les tableaux de bord s'exportent en Excel et en PDF.** Un tableau de bord de configuration
+  (`dashboards.toml`) a des boutons Excel et PDF dans sa barre, à côté d'Actualiser. L'export
+  s'exécute côté serveur avec exactement ce que la barre contient — les filtres choisis liés par
+  l'écran de chaque widget, les binds de la période et sa plage de dates, sous le périmètre de
+  données de l'appelant (`POST /api/dashboards/{id}/export`) — et passe par les mêmes rendus que
+  l'Explorateur : une feuille par widget (les KPI réunis en « Chiffres clés »), ou une synthèse PDF
+  dont la couverture nomme la période et les filtres, avec les graphiques dessinés et les KPI en
+  cartes. Un widget dont la requête échoue devient une section d'erreur ; le reste s'affiche.
 - **Le volet de chat sur la mise en page de nomaubl** : une ligne d'en-tête (titre, choix du modèle
   s'il y en a un, « + » nouvelle conversation, ×), une ligne de contexte dessous quand la page en
   donne un, une bulle d'accueil, et les questions de départ en puces au-dessus de la saisie, sous
