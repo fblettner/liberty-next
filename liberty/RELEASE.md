@@ -8,6 +8,8 @@
 - Dialog → Duplicate: the related 1:1 rows (column groups) are inserted under the new key. Since
   June the copy re-seeded the source row behind the form, so the group ran an UPDATE on the new
   key (0 rows, silently) instead of its INSERT; the source key also reappeared in the form.
+- Settings → Menus: a `dashboard` item's target dropdown lists the dashboards (by qualified id,
+  the menu's own app first); it offered nothing.
 - Parameters: a declared default or a supplied value reaches its bind whatever the case
   (`status` declared, `:STATUS` in the SQL).
 - nomaflow: a cloned job's presets lose their schedules (they fired twice: the scheduler runs a

@@ -16,7 +16,7 @@ import { Save, Plus, Trash2, Search, FolderOpen, Folder, FileText, ChevronRight,
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Row, Stack, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
-import type { AppMenu, ConfigSchemas, ConnectorsDoc, MenuItem, MenusDoc, ScreensDoc } from '../../types/config'
+import type { AppMenu, ConfigSchemas, ConnectorsDoc, DashboardsDoc, MenuItem, MenusDoc, ScreensDoc } from '../../types/config'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { validateId, suggestCloneId } from '../../services/idValidator'
@@ -204,6 +204,7 @@ export default function MenusBuilder() {
   const [connectors, setConnectors] = useState<Record<string, Record<string, unknown>> | null>(null)
   // Designed screens, by app → id → screen. Feeds the target dropdown for ``screen`` menu items.
   const [screens, setScreens] = useState<ScreensDoc['screens'] | null>(null)
+  const [dashboards, setDashboards] = useState<DashboardsDoc['dashboards'] | null>(null)
   const [apps, setApps] = useState<AppsMap | null>(null)
   const [original, setOriginal] = useState('')
   const [selApp, setSelApp] = useState<string | null>(null)
@@ -226,11 +227,14 @@ export default function MenusBuilder() {
       // Screens feed the ``screen`` menu-item target dropdown. Non-fatal — a failure just leaves
       // that dropdown empty (the operator can still wire ``query`` / ``endpoint`` targets).
       api.get<ScreensDoc>('/admin/config/screens/parsed').catch((): ScreensDoc => ({ path: '', screens: {} })),
+      // Dashboards feed the ``dashboard`` target dropdown the same way (non-fatal too).
+      api.get<DashboardsDoc>('/admin/config/dashboards/parsed').catch((): DashboardsDoc => ({ path: '', dashboards: {} })),
     ])
-      .then(([s, d, c, sc]) => {
+      .then(([s, d, c, sc, db]) => {
         setSchemas(s); setApps(d.menus); setOriginal(JSON.stringify(d.menus))
         setConnectors(c.connectors)
         setScreens(sc.screens)
+        setDashboards(db.dashboards)
         setSelApp((cur) => (cur && d.menus[cur] ? cur : (workspaceApp && d.menus[workspaceApp] ? workspaceApp : Object.keys(d.menus)[0] ?? null)))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
@@ -340,18 +344,33 @@ export default function MenusBuilder() {
         const desc = typeof e?.description === 'string' ? e.description : (typeof e?.label === 'string' ? e.label : '')
         targets.push({ value: name, label: desc || name })
       }
+    } else if (selRec?.type === 'dashboard') {
+      // Every dashboard, by its qualified id ``<scope>.<id>`` (what the runtime routes on and what
+      // ``target`` stores); the app's own scope first, the others after.
+      for (const [scope, byId] of Object.entries(dashboards ?? {})) {
+        for (const [did, dash] of Object.entries(byId ?? {})) {
+          const lbl = typeof dash?.label === 'string' && dash.label ? dash.label : did
+          targets.push({ value: `${scope}.${did}`, label: lbl, mono: `${scope}.${did}` })
+        }
+      }
+      targets.sort((a, b) => {
+        const own = (v: string) => (selApp && v.startsWith(`${selApp}.`) ? 0 : 1)
+        return own(a.value) - own(b.value) || a.value.localeCompare(b.value)
+      })
     }
     base.MENU_TARGETS = {
       label: selRec?.type === 'endpoint'
         ? `Endpoints — ${connKey ?? ''}`
         : selRec?.type === 'screen'
           ? `Screens — ${connKey ?? ''}`
-          : `Queries — ${connKey ?? ''}`,
+          : selRec?.type === 'dashboard'
+            ? 'Dashboards'
+            : `Queries — ${connKey ?? ''}`,
       values: targets,
     }
 
     return base
-  }, [schemas, connectors, screens, apps, selApp, selItem])
+  }, [schemas, connectors, screens, dashboards, apps, selApp, selItem])
 
   if (error && !apps) return <Banner $tone="error">{error}</Banner>
   if (!apps || !schemas) return <Centered />

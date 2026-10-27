@@ -9,6 +9,8 @@
   clé. Depuis juin, la copie réinjectait la ligne source derrière le formulaire : le groupe
   exécutait un UPDATE sur la nouvelle clé (0 ligne, en silence) au lieu de son INSERT, et la clé
   source réapparaissait dans le formulaire.
+- Configuration → Menus : la liste des cibles d'un élément `dashboard` propose les tableaux de bord
+  (par id qualifié, ceux de l'application du menu d'abord) ; elle était vide.
 - Paramètres : une valeur par défaut déclarée ou une valeur fournie atteint son bind quelle que
   soit la casse (`status` déclaré, `:STATUS` dans le SQL).
 - nomaflow : les préréglages d'une tâche clonée perdent leur planification (ils tournaient deux
