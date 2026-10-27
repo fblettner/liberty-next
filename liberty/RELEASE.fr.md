@@ -133,9 +133,26 @@
   L'analyse se relance d'elle-même quand sa définition change. La vue **Détail** liste les lignes
   avec l'étagère Lignes en colonnes, paginée ; un clic sur une ligne agrégée **descend** vers les
   lignes derrière elle (les clés de l'entité, les dimensions, les champs des mesures), avec les
-  valeurs de la cellule affichées et un retour. Un superutilisateur peut afficher le SQL. Le
-  tableau croisé, les graphiques, l'édition des champs calculés, les analyses enregistrées et
-  l'export suivent dans les parties suivantes.
+  valeurs de la cellule affichées et un retour. Un superutilisateur peut afficher le SQL.
+- **La page (deuxième partie) : croisé, graphiques, KPI, champs calculés, la fiche.** Le résultat
+  change de vue sans nouvelle requête. Le **tableau croisé** replie les dimensions des lignes en
+  une hiérarchie dépliable (tout déplier / replier) avec une dimension étalée en colonnes (la
+  dernière, ou celle choisie), des sous-totaux sur les lignes de groupe pour une mesure additive
+  seulement (une somme de moyennes n'a pas de sens, une mesure non additive garde les valeurs des
+  feuilles), une part du parent ou du total à côté de chaque valeur, un total général, un export
+  Excel et une descente depuis toute cellule feuille. **Barres, courbes et secteurs** passent par
+  le canevas de graphique partagé : x est la première dimension, les séries la deuxième (ou les
+  mesures), les 10 premières séries ou parts plus « Autres », les dates dans l'ordre
+  chronologique et les autres catégories par valeur, une option empilée ; **KPI** montre une carte
+  par mesure avec son total. Le tableau et le détail s'exportent aussi vers Excel. Le volet des
+  champs gagne les **champs calculés** : « Nouveau champ calculé » ouvre l'éditeur (nom, libellé,
+  l'expression avec des sélecteurs insérer-un-champ et insérer-une-fonction, un Tester qui la
+  compile côté serveur et montre le type et huit valeurs d'exemple ; Enregistrer demande un test
+  réussi), le champ siège ensuite dans une entité `calc` du volet comme mesure ou dimension, avec
+  modification et suppression. En vue détail et après une descente, une ligne d'une entité qui a
+  un **écran** ouvre le dialogue de cet écran : la requête de lecture de l'écran est exécutée avec
+  les valeurs de clé de la ligne et la fiche s'affiche comme partout ailleurs, modifications
+  comprises. Les analyses enregistrées, les tableaux de bord d'analyses et l'export PDF suivent.
 
 **Écrans : `editable_when`, une règle de lecture seule par ligne**
 - Un écran peut dire quand une ligne existante peut être modifiée : `editable_when = [{ field =

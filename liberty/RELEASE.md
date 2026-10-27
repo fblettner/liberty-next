@@ -118,8 +118,24 @@
   sortable by header. The analysis re-runs on its own when its definition changes. **Detail**
   view lists the rows with the Rows shelf as columns, paged; a click on an aggregate row
   **drills** to the rows behind it (the primary's keys, the dimensions, the measures' fields),
-  with the cell's values shown and a way back. A superuser can show the SQL. Pivot, charts,
-  calculated-field editing, saved analyses and the export follow in the next parts.
+  with the cell's values shown and a way back. A superuser can show the SQL.
+- **The page (second part): pivot, charts, KPI, calculated fields, the record.** The result
+  switches between views without a new query. The **pivot** builds the row dimensions into a
+  collapsible hierarchy (expand / collapse all) with one dimension spread as columns (the last
+  one, or the one picked), subtotals on the group rows for an additive measure only (a sum of
+  averages is meaningless, so a non-additive one keeps leaf values), a share of the parent or of
+  the total beside each value, a grand total, Excel export, and a drill from any leaf cell.
+  **Bars, lines and pie** go through the shared chart canvas: x is the first dimension, the series
+  the second one (or the measures), the top 10 series or slices plus "Others", dates in
+  chronological order and other categories by value, a stacked option; **KPI** shows one card per
+  measure with its total. The table and the detail export to Excel too. The fields pane gains the
+  **calculated fields**: "New calculated field" opens the editor (name, label, the expression
+  with insert-a-field and insert-a-function pickers, a Test that compiles it on the server and
+  shows the type and eight sample values; Save needs a passing test), the field then sits in a
+  `calc` entity of the pane as a measure or a dimension, with edit and delete. In detail view and
+  after a drill, a row of an entity that has a **screen** opens that screen's dialog: the screen's
+  read query is run with the row's key values and the record shows as it does anywhere else,
+  edits included. Saved analyses, dashboards of analyses and the export to PDF follow.
 
 **Screens: `editable_when`, a row-level read-only rule**
 - A screen can say when an existing row may be changed: `editable_when = [{ field = "PERIOD_STATUS",

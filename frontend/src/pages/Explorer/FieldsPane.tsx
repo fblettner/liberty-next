@@ -5,7 +5,7 @@
 import { useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ChevronRight, Filter, Hash, Calendar, Type, ToggleLeft, Sigma, Search } from 'lucide-react'
+import { ChevronDown, ChevronRight, Filter, Hash, Calendar, Type, ToggleLeft, Sigma, Search, Plus, Pencil, Trash2 } from 'lucide-react'
 import type { ExplorerEntity, ExplorerField } from '../../types/explorer'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -36,6 +36,21 @@ const Row = styled.div<{ $used?: boolean }>`
   &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; & .funnel { opacity: 1; } }
 `
 const Empty = styled.div`padding: 16px 10px; color: ${colors.text.muted}; font-size: ${fontSize.sm};`
+const NewCalc = styled.button`
+  display: flex; align-items: center; gap: 6px; width: 100%; margin-top: 6px; padding: 6px 10px; border: none; border-top: 1px dashed ${colors.border};
+  background: transparent; cursor: pointer; color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  &:hover { color: ${colors.text.primary}; background: var(--hover-subtle); }
+`
+const Mini = styled.button`border: none; background: transparent; color: ${colors.text.muted}; cursor: pointer; padding: 0 2px; display: inline-flex; opacity: 0; &:hover { color: ${colors.text.primary}; }`
+
+function CalcBtns({ name, onEdit, onDelete }: { name: string; onEdit: (n: string) => void; onDelete: (n: string) => void }) {
+  return (
+    <>
+      <Mini type="button" className="funnel" onClick={(ev) => { ev.stopPropagation(); onEdit(name) }}><Pencil size={11} /></Mini>
+      <Mini type="button" className="funnel" onClick={(ev) => { ev.stopPropagation(); onDelete(name) }}><Trash2 size={11} /></Mini>
+    </>
+  )
+}
 
 function TypeIcon({ f }: { f: ExplorerField }) {
   if (f.kind === 'measure') return <Sigma className="icon" size={12} />
@@ -45,13 +60,16 @@ function TypeIcon({ f }: { f: ExplorerField }) {
   return <Type className="icon" size={12} />
 }
 
-export function FieldsPane({ entities, primary, used, onAdd, onFilter, onPrimary }: {
+export function FieldsPane({ entities, primary, used, onAdd, onFilter, onPrimary, onCalcNew, onCalcEdit, onCalcDelete }: {
   entities: ExplorerEntity[]
   primary: string
   used: Set<string>
   onAdd: (f: ExplorerField) => void
   onFilter: (f: ExplorerField) => void
   onPrimary: (entity: string) => void
+  onCalcNew: () => void
+  onCalcEdit: (name: string) => void
+  onCalcDelete: (name: string) => void
 }) {
   const { t } = useTranslation()
   const [search, setSearch] = useState('')
@@ -87,6 +105,7 @@ export function FieldsPane({ entities, primary, used, onAdd, onFilter, onPrimary
               {open && dims.map((f) => (
                 <Row key={f.key} $used={used.has(f.key)} draggable onDragStart={start(f)} onClick={() => onAdd(f)} title={f.key}>
                   <TypeIcon f={f} /><span className="label">{f.label}</span>
+                  {e.id === 'calc' && <CalcBtns name={f.name} onEdit={onCalcEdit} onDelete={onCalcDelete} />}
                   <button type="button" className="funnel" title={t('explorer.addFilter')} onClick={(ev) => { ev.stopPropagation(); onFilter(f) }}><Filter size={11} /></button>
                 </Row>
               ))}
@@ -94,12 +113,16 @@ export function FieldsPane({ entities, primary, used, onAdd, onFilter, onPrimary
               {open && meas.map((f) => (
                 <Row key={f.key} $used={used.has(f.key)} draggable onDragStart={start(f)} onClick={() => onAdd(f)} title={f.key}>
                   <TypeIcon f={f} /><span className="label">{f.label}</span>
+                  {e.id === 'calc' && <CalcBtns name={f.name} onEdit={onCalcEdit} onDelete={onCalcDelete} />}
                   <button type="button" className="funnel" title={t('explorer.addFilter')} onClick={(ev) => { ev.stopPropagation(); onFilter(f) }}><Filter size={11} /></button>
                 </Row>
               ))}
             </div>
           )
         })}
+        {!needle && (
+          <NewCalc type="button" onClick={onCalcNew}><Plus size={12} /> {t('explorer.newCalcField')}</NewCalc>
+        )}
       </List>
     </Pane>
   )
