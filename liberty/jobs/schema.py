@@ -229,8 +229,9 @@ class Step(BaseModel):
     partition_by: list[str] = Field(default_factory=list)
     on_error: Literal["fail", "skip"] = "fail"
     # Guards. ``refuse_query`` (a named query on ``refuse_connector``, default the target's) runs
-    # first with the run parameters + constants as binds: any row back refuses the load, the row's
-    # first column being the reason ("period 2026-03 is closed"). ``control_column`` is summed over
+    # first with the run parameters + constants as binds — and, with ``partition_by``, once per
+    # partition the file carries with the partition columns as binds: any row back refuses the
+    # load, the row's first column being the reason ("period 2026-03 is closed"). ``control_column`` is summed over
     # the inserted rows and compared with ``control_total`` — a value, ``${params.x}``, or ``@B2``
     # (a cell of the file) — within ``control_tolerance``; a mismatch rolls the load back.
     refuse_query: str | None = None

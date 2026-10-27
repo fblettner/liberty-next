@@ -81,6 +81,12 @@
 - Le chat replie les appels d'outils d'un tour en une ligne discrète (« 3 appels d'outil », à
   ouvrir pour les voir) ; un appel en échec garde son message visible.
 - Listes déroulantes : un code long (un identifiant de modèle) n'est plus tronqué dans la liste.
+- nomaflow `file_load` : avec `partition_by`, la requête de refus s'exécute une fois par partition
+  présente dans le fichier, les colonnes de partition en binds (`:YEAR`, `:MONTH`…) : une garde de
+  période clôturée suit le fichier plutôt qu'un paramètre saisi.
+- nomaflow : l'erreur base de données d'une étape se lit comme la phrase du pilote au lieu de la
+  classe d'exception, du préfixe de dialecte, de l'instruction et des valeurs liées. L'instruction
+  va toujours dans le journal du serveur.
 - Graphiques : l'axe Y affiche des graduations compactes (1,2 k, 27,5 M) dans une gouttière plus
   large ; une grande valeur était coupée à gauche (« 0000 » de « 20 000 000 »). L'info-bulle garde
   le nombre complet.

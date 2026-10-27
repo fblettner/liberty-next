@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import logging
 import uuid
 
@@ -28,6 +30,15 @@ def summarize_db_error(exc: BaseException) -> str:
     msg = f"{type(exc).__name__}: {exc}"
     cut = msg.find("[SQL:")  # SQLAlchemy separates the tail with a newline, not a space
     return (msg[:cut] if cut > 0 else msg).strip()
+
+
+def driver_message(exc: BaseException) -> str:
+    """The driver's own sentence, for a message an operator reads (a job step's error): no
+    exception class, no ``(sqlalchemy.dialects…)`` prefix, no statement, no bound values —
+    ``invalid input for query argument $1: 2025 (expected str, got int)``."""
+    msg = summarize_db_error(exc)
+    msg = msg.split(": ", 1)[1] if ": " in msg else msg
+    return re.sub(r"^\([\w.]+\)\s*", "", msg).strip() or msg
 
 
 def db_error_detail(

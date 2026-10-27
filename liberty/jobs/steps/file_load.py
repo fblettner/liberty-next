@@ -31,9 +31,11 @@ The step (``jobs.toml``)::
   (ISO, ``dd/mm/yyyy``, Excel dates), booleans, text. A bad cell fails the step, or skips the
   row with ``on_error = "skip"``; the first ten rejects are quoted in the run log and the whole
   list lands in ``<files_dir>/<job>/<run>-<step>-rejects.csv`` (downloadable from the run).
-* Guards: ``refuse_query`` runs first on the target connector (or ``refuse_connector``) with the
-  run parameters and constants as binds; a row back refuses the load, its first column being the
-  reason. ``control_column`` + ``control_total`` (a value, ``${params.total}`` or ``@B2``, a cell
+* Guards: ``refuse_query`` runs on the target connector (or ``refuse_connector``) with the run
+  parameters and constants as binds; a row back refuses the load, its first column being the
+  reason. With ``partition_by`` it runs once per partition the file carries, the partition
+  columns as binds too (``:YEAR``, ``:MONTH``…) — the guard follows the file, not a typed
+  parameter ("period 2025-12 is closed"). ``control_column`` + ``control_total`` (a value, ``${params.total}`` or ``@B2``, a cell
   of the file) compare the sum of what was inserted with the expected total, within
   ``control_tolerance``; a mismatch rolls the file's load back.
 * ``replace_partition``: the partitions present in the load (from the constants, else the
@@ -437,7 +439,7 @@ class FileLoadExecutor:
             _log.info("nomaflow.file_load run=%s step=%r watched folder empty: nothing to do", ctx.run_id, step.name)
             return StepResult(rows_affected=0, log_excerpt="watched folder empty: nothing to load", extras={"files": []})
 
-        if step.refuse_query:
+        if step.refuse_query and not partition_by:
             await self._refuse_check(step, params=params, constants=constants, default_connector=tgt.name)
 
         totals = {"read": 0, "inserted": 0, "rejected": 0, "deleted": 0}
@@ -455,6 +457,7 @@ class FileLoadExecutor:
                 r = await self._load_file(
                     f, step, engine=engine, table_sql=table_sql, columns=columns, constants=constants,
                     mode=mode, partition_by=partition_by, run_id=ctx.run_id, expected_total=expected,
+                    refuse_params=params, refuse_default=tgt.name,
                 )
             except StepFailed:
                 if watched:
@@ -487,7 +490,7 @@ class FileLoadExecutor:
     async def _load_file(
         self, path: Path, step: Step, *, engine: AsyncEngine, table_sql: str, columns: list[ColumnInfo],
         constants: dict[str, Any], mode: LoadMode, partition_by: list[str], run_id: str,
-        expected_total: Decimal | None = None,
+        expected_total: Decimal | None = None, refuse_params: dict[str, Any] | None = None, refuse_default: str = "",
     ) -> dict[str, Any]:
         """One file, one transaction. Returns the counts, the partitions replaced and the rejects.
         With a control column, its sum over the inserted rows must match *expected_total* before
@@ -506,7 +509,8 @@ class FileLoadExecutor:
                 raise StepFailed(f"file_load: control column {step.control_column!r} is not loaded from the file")
         control_sum = Decimal(0)
         partitions: set[tuple[Any, ...]] = set()
-        if mode is LoadMode.REPLACE_PARTITION:
+        # The partitions present: what a replace deletes, and what the refuse query is asked about.
+        if partition_by and (mode is LoadMode.REPLACE_PARTITION or step.refuse_query):
             if all(p in plan.constants for p in partition_by):
                 partitions.add(tuple(plan.constants[p] for p in partition_by))
             else:
@@ -518,6 +522,14 @@ class FileLoadExecutor:
                     except CellError:
                         continue   # pass 2 reports it
                     partitions.add(tuple(vals[p] for p in partition_by))
+
+        # The guard, per partition the file carries (the partition columns are binds, in their own
+        # case and upper-cased) — before the transaction, so a closed period refuses the whole file.
+        if step.refuse_query and partition_by:
+            for key in sorted(partitions, key=lambda k: tuple(str(x) for x in k)):
+                await self._refuse_check(
+                    step, params=refuse_params or {}, constants={**constants, **dict(zip(partition_by, key, strict=True))}, default_connector=refuse_default,
+                )
 
         # pass 2 — one transaction: delete the partitions, insert every batch
         names = plan.loaded
@@ -586,7 +598,8 @@ class FileLoadExecutor:
         try:
             res = await conn.execute(step.refuse_query, params=binds)
         except Exception as exc:
-            raise StepFailed(f"file_load: refuse query {step.refuse_query!r} failed: {exc}") from exc
+            from liberty.web.errors import driver_message
+            raise StepFailed(f"file_load: refuse query {step.refuse_query!r} failed: {driver_message(exc)}") from exc
         rows = getattr(res, "rows", None) or []
         if rows:
             first = rows[0]

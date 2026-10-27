@@ -90,8 +90,9 @@ class SqlQueryExecutor:
             # SQL errors, statement-not-allowed, write-not-allowed, etc. Don't
             # eat the original traceback; ``raise X from exc`` keeps it visible
             # in tracebacks + log lines.
+            from liberty.web.errors import driver_message
             raise StepFailed(
-                f"sql_query step {step.name!r} on {step.connector}.{step.query} failed: {exc}"
+                f"sql_query step {step.name!r} on {step.connector}.{step.query} failed: {driver_message(exc)}"
             ) from exc
 
         # row_count handles SELECT/write asymmetry — SELECT returns len(rows),

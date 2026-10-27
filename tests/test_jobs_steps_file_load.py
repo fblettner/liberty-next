@@ -322,3 +322,26 @@ async def test_control_total_from_a_parameter_or_a_cell(registry, tmp_path) -> N
         await ex.execute(step(path=str(c), control_column="nope", control_total="1"), ctx())
     with pytest.raises(ValueError, match="go together"):
         step(path=str(c), control_column="revenue")
+
+
+@pytest.mark.asyncio
+async def test_refuse_query_runs_per_partition_of_the_file(registry, tmp_path) -> None:
+    """With partition_by, the guard follows the FILE: one check per partition it carries, the
+    partition columns as binds — no typed parameter to forget."""
+    ex = FileLoadExecutor(registry)
+    f = csvfile(tmp_path / "two.csv", ["period", "company", "article", "qty"], [["2026-03", "00001", "A", "1"], ["2026-02", "00001", "B", "2"], ["2026-03", "00002", "C", "3"]])
+    s = step(path=str(f), load_mode="replace_partition", partition_by=["period", "company"], refuse_query="period_closed_get")
+    with pytest.raises(StepFailed, match="refused by period_closed_get: period 2026-02 is closed"):
+        await ex.execute(s, ctx())
+    assert await rows(registry) == []                       # refused before the transaction: nothing loaded
+    ok = csvfile(tmp_path / "open.csv", ["period", "company", "article", "qty"], [["2026-03", "00001", "A", "1"], ["2026-03", "00002", "C", "3"]])
+    assert (await ex.execute(step(path=str(ok), load_mode="append", partition_by=["period"], refuse_query="period_closed_get"), ctx())).rows_affected == 2
+
+
+def test_driver_message_keeps_the_sentence_only() -> None:
+    from liberty.web.errors import driver_message
+    class E(Exception):
+        pass
+    e = E("(sqlalchemy.dialects.postgresql.asyncpg.Error) invalid input for query argument $1: 2025 (expected str, got int)\n[SQL: SELECT 1] [parameters: (2025,)]")
+    assert driver_message(e) == "invalid input for query argument $1: 2025 (expected str, got int)"
+    assert driver_message(ValueError("plain")) == "plain"

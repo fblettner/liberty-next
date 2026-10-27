@@ -72,6 +72,12 @@
 - The chat folds a turn's tool calls into one muted line ("3 tool calls", open to see them); a
   failed call keeps its message visible.
 - Dropdowns: a long code (a model id) is no longer cut short in the list.
+- nomaflow `file_load`: with `partition_by`, the refuse query runs once per partition the file
+  carries, with the partition columns as binds (`:YEAR`, `:MONTH`…), so a closed-period guard
+  follows the file rather than a typed parameter.
+- nomaflow: a step's database error reads as the driver's sentence ("invalid input for query argument
+  $1: 2025 (expected str, got int)") instead of the exception class, dialect prefix, statement and
+  bound values. The statement still goes to the server log.
 - Charts: the Y axis shows compact ticks (1.2k, 27.5M) in a wider gutter; a large value was cut
   on the left ("0000" of "20,000,000"). The tooltip keeps the full number.
 - Data Explorer: a chart in a dashboard tile (and on the page) stayed an empty frame when the
