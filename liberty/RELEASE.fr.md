@@ -86,6 +86,12 @@
   digest. Les KPI deviennent des cartes ; les nombres suivent la langue du lecteur (`1 234,5` /
   `1,234.5`), les mots du gabarit (libellés de couverture, mentions de confidentialité) aussi.
   Excel garde les données seules.
+- **Explorateur : les sélecteurs suivent le modèle.** Changer de modèle rapidement (le premier,
+  puis celui de l'application courante) pouvait laisser les analyses enregistrées d'un autre
+  modèle dans les sélecteurs : une réponse pour un modèle que la page a quitté est désormais
+  ignorée, et une liste en échec vide les sélecteurs. Après un déploiement qui remplace le
+  bundle, une page qui ne parvient pas à charger un morceau différé se recharge une fois au lieu
+  d'afficher « Failed to fetch dynamically imported module ».
 - **Les graphiques pivotent sur une colonne.** Une spec de graphique prend une colonne
   `series` : une série par valeur distincte (un processus, un statut…), chacune l'agrégat de
   la première colonne `y` — les conflits par rafraîchissement empilés par processus depuis une

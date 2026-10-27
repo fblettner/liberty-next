@@ -76,6 +76,11 @@
   become cards; the numbers follow the reader's language (`1 234,5` / `1,234.5`); the
   template's own words (cover labels, confidential lines) follow it too. Excel keeps the data
   only.
+- **Explorer: the pickers follow the model.** Switching models quickly (the first model, then
+  the current app's) could leave another model's saved analyses in the pickers: a response for a
+  model the page has left is now dropped, and a failed list empties the pickers. After a deploy
+  replaces the bundle, a page that fails to load a lazy chunk reloads itself once instead of
+  showing "Failed to fetch dynamically imported module".
 - **Charts pivot on a column.** A chart spec takes a `series` column: one series per distinct
   value of it (a process, a status…), each the aggregate of the first `y` column — conflicts
   per refresh stacked by process from a three-column query, no pivot in SQL. In the chart

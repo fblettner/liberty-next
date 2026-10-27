@@ -104,19 +104,28 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
     if (first) { setApp(first.app); setModelId((cur) => (models?.some((m) => m.app === first.app && m.model === cur) ? cur : first.model)) }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- initial is fixed for the tab's life
   }, [currentApp, models])
+  // The model and its saved objects are fetched per (app, model); a response for a model the
+  // user has already left is dropped, so a quick switch (the first model, then the current app's)
+  // never leaves another model's analyses in the pickers. A failed list empties them.
+  const savedReq = useRef(0)
+  const modelReq = useRef(0)
   const loadSaved = useCallback(async (a: string, m: string) => {
+    const n = ++savedReq.current
     try {
       const [an, da] = await Promise.all([listSaved<AnalysisDefinition>(a, m, 'analyses'), listSaved<DashboardDefinition>(a, m, 'dashboards')])
+      if (n !== savedReq.current) return
       setAnalyses(an); setDashboards(da)
-    } catch { /* the pickers stay empty */ }
+    } catch { if (n === savedReq.current) { setAnalyses([]); setDashboards([]) } }
   }, [])
   useEffect(() => {
     if (!app || !modelId) return
     setModel(null); setDef(null); setResult(null); setDetail(null); setDrill(null); setError(null)
     setCurrentAnalysis(null); setCurrentDashboard(null); setDashDef({ period: null, tiles: [] }); setDashEditing(false)
+    setAnalyses([]); setDashboards([])
+    const n = ++modelReq.current
     api.get<ExplorerModel>(`/api/explorer/${encodeURIComponent(app)}/${encodeURIComponent(modelId)}/model`)
-      .then((m) => { setModel(m); setDef(emptyDefinition(m.hub)) })
-      .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
+      .then((m) => { if (n === modelReq.current) { setModel(m); setDef(emptyDefinition(m.hub)) } })
+      .catch((e) => { if (n === modelReq.current) setError(e instanceof ApiError ? e.message : String(e)) })
     void loadSaved(app, modelId)
   }, [app, modelId, loadSaved])
 
