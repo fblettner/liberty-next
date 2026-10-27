@@ -149,10 +149,14 @@ def resolve_env(args: argparse.Namespace, *, runner: Runner = run) -> Env:
 
 
 # ── probes ────────────────────────────────────────────────────────────────────────────────
-def dist_version(name: str) -> str | None:
+def dist_version(name: str, config_dir: Path | None = None) -> str | None:
     try:
         return _dist_version(name)
     except PackageNotFoundError:
+        if name == APPS_DIST and config_dir is not None:  # the materialised bundle's manifest
+            from liberty.config_merge import bundled_version
+
+            return bundled_version(config_dir)
         return None
 
 
@@ -292,7 +296,7 @@ def default_pool_url(env: Env) -> str | None:
 
 # ── commands ──────────────────────────────────────────────────────────────────────────────
 def cmd_status(env: Env, args: argparse.Namespace) -> int:
-    fw, apps = dist_version(FRAMEWORK_DIST), dist_version(APPS_DIST)
+    fw, apps = dist_version(FRAMEWORK_DIST), dist_version(APPS_DIST, env.apps_dir or env.config_dir)
     up, body = ready(env)
     code, mig = migrations(env)
     print(f"{_C['bold']}Liberty Next — Python install{_C['nc']}")

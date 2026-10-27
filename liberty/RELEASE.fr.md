@@ -1,5 +1,22 @@
 # Liberty Next — Notes de version
 
+## 7.0.59 — non publiée
+
+**Installation / mise à jour**
+- **Corrigé : la version du lot d'applications apparaissait comme « non installée » sous Docker.**
+  Le wheel est déposé dans le montage `/apps`, pas installé comme paquet dans le conteneur en
+  cours d'exécution ; `liberty status`, le rapport de mise à jour et le journal du serveur ne le
+  voyaient donc jamais. La version vient maintenant du manifeste écrit par l'installateur
+  (`.bundled/manifest.json`), les métadonnées du paquet restant la solution de repli sur une
+  installation pipx.
+- **Nouvelle option `liberty-admin migrate --app X --stamp REV`** : fixe la version Alembic d'une
+  application sans rien exécuter, puis applique ce qui est devenu en attente (`--dry-run` le liste).
+  C'est la réparation d'une base dont la table de version est en avance sur son schéma réel. (Cause
+  corrigée côté applications : `init_schema` marquait la base existante à `head`, déclarant
+  appliquées des révisions jamais exécutées ; il ne le fait plus que sur une base neuve.)
+- Le rapport de mise à jour n'affiche plus « - » comme étiquette d'image sur une installation non
+  épinglée.
+
 ## 7.0.58 — 2026-10-27
 
 **Installation / mise à jour**

@@ -449,7 +449,9 @@ async def get_release_notes(request: Request, _: Superuser) -> dict[str, Any]:
         "component": "framework", "label": "Liberty Next", "version": __version__,
         "en": _read("liberty", "RELEASE.md"), "fr": _read("liberty", "RELEASE.fr.md"),
     }]
-    apps_version = _ver("liberty-apps")
+    from liberty.config_merge import apps_version as _apps_version
+
+    apps_version = _apps_version(Path(request.app.state.settings.connectors.config_path).parent)
     if apps_version is not None:
         components.append({
             "component": "apps", "label": "Liberty Apps", "version": apps_version,

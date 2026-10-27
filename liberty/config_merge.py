@@ -494,6 +494,29 @@ def merge_config_dir(
     return report
 
 
+def bundled_version(config_dir: Path | str | None) -> str | None:
+    """The apps bundle version recorded by the last install (``<config>/.bundled/manifest.json``).
+    On Docker the wheel is materialised into the mount, not pip-installed in the running
+    container, so the package metadata is absent — this file is the source of truth there."""
+    if not config_dir:
+        return None
+    try:
+        return json.loads((Path(config_dir) / BUNDLED_DIR / "manifest.json").read_text(encoding="utf-8")).get("version") or None
+    except (OSError, ValueError):
+        return None
+
+
+def apps_version(config_dir: Path | str | None) -> str | None:
+    """Installed apps bundle version: the pip metadata when the wheel is installed in this
+    interpreter (pipx / venv), else the materialised bundle's manifest, else None."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("liberty-apps")
+    except PackageNotFoundError:
+        return bundled_version(config_dir)
+
+
 def _same_bytes(a: Path, b: Path) -> bool:
     try:
         return a.read_bytes() == b.read_bytes()

@@ -1,5 +1,20 @@
 # Liberty Next — Release notes
 
+## 7.0.59 — unreleased
+
+**Install / upgrade**
+- **Fixed: the apps bundle version read as "not installed" on Docker.** The wheel is materialised
+  into the `/apps` mount, not installed as a package in the running container, so `liberty status`,
+  the upgrade report and the server's own upgrade journal never saw it. The version now comes from
+  the bundle manifest the installer writes (`.bundled/manifest.json`), with the package metadata as
+  the fallback on pipx installs.
+- **New `liberty-admin migrate --app X --stamp REV`** — sets an app's Alembic version without running
+  anything, then applies what became pending (`--dry-run` lists it). The repair for a database whose
+  version table is ahead of its real schema. (Cause fixed on the apps side: `init_schema` used to
+  stamp head on an existing database, marking revisions as applied that never ran — it now stamps
+  only a fresh database.)
+- The upgrade report's "Image tag" no longer shows "-" for an unpinned install.
+
 ## 7.0.58 — 2026-10-27
 
 **Install / upgrade**

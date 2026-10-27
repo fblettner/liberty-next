@@ -168,17 +168,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # never block startup. Base dir = where the colocated config files live.
         app.state.config_versions = None
         try:
-            from importlib.metadata import PackageNotFoundError, version as _dist_version
             from liberty.versioning import ConfigVersionStore, record_upgrades_if_changed
             store = ConfigVersionStore(settings.connectors.config_path.parent)
             app.state.config_versions = store
             # Upgrade history — record an install/upgrade row whenever the framework (liberty-next) OR
             # the licensed apps (liberty-apps) version changes from what we last ran. Idempotent across
             # restarts at the same versions; the apps entry is skipped when the bundle isn't installed.
-            try:
-                apps_version: str | None = _dist_version("liberty-apps")
-            except PackageNotFoundError:
-                apps_version = None
+            from liberty.config_merge import apps_version as _apps_version
+
+            # pip metadata on a pipx / venv install, the materialised bundle's manifest on Docker
+            apps_version: str | None = _apps_version(settings.connectors.config_path.parent)
             for entry in record_upgrades_if_changed(store, {"framework": __version__, "apps": apps_version}):
                 _log.info("recorded %s %s: %s", entry["component"], entry["kind"], entry.get("summary"))
         except Exception:  # noqa: BLE001 — versioning is non-critical; log and continue

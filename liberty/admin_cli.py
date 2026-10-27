@@ -368,7 +368,8 @@ def discover_migratable_apps(plugins_dir: Path | None) -> list[str]:
     )
 
 
-async def _migrate_one(ctx: _Context, app: str, *, target: str, revision: str, dry_run: bool) -> dict:
+async def _migrate_one(ctx: _Context, app: str, *, target: str, revision: str, dry_run: bool,
+                       stamp: str | None = None) -> dict:
     """Drive one app's ``db`` module. Contract (duck-typed, what nomasx1.db already exposes):
 
     * ``upgrade_schema(*, connectors, target_connector, revision="head")`` — async, applies.
@@ -376,6 +377,9 @@ async def _migrate_one(ctx: _Context, app: str, *, target: str, revision: str, d
       returns the revision ids not yet applied; without it a dry run can only say "unknown".
     * ``DEFAULT_TARGET_CONNECTOR`` — optional; the connector the schema lives on when the
       operator doesn't pass ``--target-connector`` (defaults to the app's own name).
+    * ``stamp_revision(*, connectors, target_connector, revision)`` — optional; sets the version
+      table without running anything (``--stamp REV``: the repair when the version is ahead of
+      the real schema). ``--dry-run`` after it shows what became pending.
     """
     import importlib
     import inspect
@@ -392,6 +396,16 @@ async def _migrate_one(ctx: _Context, app: str, *, target: str, revision: str, d
                       f"connectors.pools.engine(target_connector)) — pass --target-connector",
         }
     out: dict = {"app": app, "target_connector": target, "revision": revision}
+
+    if stamp:
+        stamp_fn = getattr(mod, "stamp_revision", None)
+        if stamp_fn is None:
+            return {"app": app, "status": "error", "target_connector": target,
+                    "reason": f"{app}.{MIGRATE_MODULE} has no stamp_revision() — stamp with alembic directly"}
+        res = stamp_fn(connectors=ctx.registry, target_connector=target, revision=stamp)
+        if inspect.isawaitable(res):
+            await res
+        out["stamped"] = stamp
 
     pending_fn = getattr(mod, "pending_revisions", None)
     if pending_fn is not None:
@@ -456,11 +470,15 @@ async def _cmd_migrate(ctx: _Context, args: argparse.Namespace) -> int:
         return 1
     if wanted:
         apps = wanted
+    if args.stamp and len(wanted) != 1:  # never stamp implicitly: name the app
+        print("error: --stamp needs exactly one explicit --app X", file=sys.stderr)
+        return 1
     results = []
     for app in apps:
         try:
             results.append(await _migrate_one(
                 ctx, app, target=args.target_connector or "", revision=args.revision, dry_run=args.dry_run,
+                stamp=args.stamp,
             ))
         except Exception as exc:  # noqa: BLE001 — report per app, keep going
             results.append({"app": app, "status": "error", "reason": f"{type(exc).__name__}: {exc}"})
@@ -688,6 +706,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_mig.add_argument("--target-connector", help="the connector the schema lives on (default: the plugin's DEFAULT_TARGET_CONNECTOR, else the app name)")
     p_mig.add_argument("--revision", default="head", help="alembic target revision (default: head)")
     p_mig.add_argument("--plugins-dir", help="where the app plugins live (default: ${LIBERTY_APPS_DIR}/../plugins)")
+    p_mig.add_argument("--stamp", metavar="REV", help="set the app's alembic version to REV without running anything (repair: the version is ahead of the real schema), then apply what is pending unless --dry-run; needs --app")
     p_mig.set_defaults(func=_cmd_migrate)
 
     p_rec = sub.add_parser(

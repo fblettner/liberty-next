@@ -160,3 +160,27 @@ def test_plugin_exception_is_reported_per_app(env, capsys) -> None:
     rc, out = _run(base, plugins, capsys=capsys)
     assert rc == 1
     assert out["apps"][0] == {"app": "fakeapp", "status": "error", "reason": "RuntimeError: boom"}
+
+
+def test_stamp_then_apply(env, capsys) -> None:
+    """--stamp REV sets the version through the plugin's stamp_revision, then applies what is pending
+    (or just lists it with --dry-run)."""
+    base, plugins = env
+    (plugins / "fakeapp" / "db" / "__init__.py").write_text(PLUGIN_DB + '''
+
+def stamp_revision(*, connectors, target_connector, revision):
+    _log({"fn": "stamp_revision", "target": target_connector, "revision": revision})
+    return 1
+''')
+    rc, out = _run(base, plugins, "--app", "fakeapp", "--stamp", "0006_x", "--dry-run", capsys=capsys)
+    assert rc == 2 and out["apps"][0]["stamped"] == "0006_x" and out["apps"][0]["status"] == "pending"
+    assert [c["fn"] for c in _calls(plugins)] == ["stamp_revision", "pending_revisions"]
+    rc, out = _run(base, plugins, "--app", "fakeapp", "--stamp", "0006_x", capsys=capsys)
+    assert rc == 0 and out["apps"][0]["status"] == "applied"
+    assert [c["fn"] for c in _calls(plugins)][-2:] == ["pending_revisions", "upgrade_schema"]
+    # without --app it refuses; a plugin without stamp_revision is an error, not a crash
+    assert main([*base, "migrate", "--plugins-dir", str(plugins), "--stamp", "x"]) == 1
+    (plugins / "fakeapp" / "db" / "__init__.py").write_text(PLUGIN_DB)
+    sys.modules.pop("fakeapp.db", None)  # re-import the rewritten module
+    rc, out = _run(base, plugins, "--app", "fakeapp", "--stamp", "x", capsys=capsys)
+    assert rc == 1 and "stamp_revision" in out["apps"][0]["reason"]

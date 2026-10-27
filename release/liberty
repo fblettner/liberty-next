@@ -97,7 +97,19 @@ exec_user() {
 }
 in_container() { docker exec -i -u "$(exec_user)" "$SERVICE" "$@"; }
 ver_fw()   { in_container python -c 'import liberty;print(liberty.__version__)' 2>/dev/null </dev/null || true; }
-ver_apps() { in_container python -c "from importlib.metadata import version;print(version('liberty-apps'))" 2>/dev/null </dev/null || true; }
+# The apps wheel is materialised into the /apps mount, not pip-installed in the running container:
+# the version comes from the bundle manifest the installer writes (pip metadata as a fallback).
+ver_apps() { in_container python -c "
+import json, os
+from pathlib import Path
+d = os.environ.get('LIBERTY_APPS_DIR', '/apps/config')
+try:
+    print(json.loads((Path(d) / '.bundled' / 'manifest.json').read_text())['version'] or '')
+except Exception:
+    try:
+        from importlib.metadata import version; print(version('liberty-apps'))
+    except Exception:
+        print('')" 2>/dev/null </dev/null || true; }
 health()   { docker inspect --format='{{.State.Health.Status}}' "$SERVICE" 2>/dev/null || echo absent; }
 
 # "up to date" | "N pending (app: n, …)" | "error: …" | "? …" — from `liberty-admin migrate
@@ -144,7 +156,7 @@ cmd_status() {
   printf "  container     %s\n" "$running"
   if [ "$running" != "not running" ]; then
     printf "  framework     %s\n" "$(in_container python -c 'import liberty;print(liberty.__version__)' 2>/dev/null || echo '?')"
-    printf "  apps bundle   %s\n" "$(in_container python -c "from importlib.metadata import version;print(version('liberty-apps'))" 2>/dev/null || echo 'not installed')"
+    local av; av="$(ver_apps)"; printf "  apps bundle   %s\n" "${av:-not installed}"
     printf "  /ready        %s\n" "$(in_container curl -fsS "http://127.0.0.1:8000/ready" 2>/dev/null || echo 'NOT READY')"
     printf "  migrations    %s\n" "$(migrations_summary)"
     printf "  last upgrade  "; in_container python - <<'PY' 2>/dev/null || echo "?"
@@ -401,7 +413,7 @@ cmd_upgrade() {
   local newfw newapps rec
   newfw="$(ver_fw)"; newapps="$(ver_apps)"
   local args=(--kind upgrade --started-at "$started" --host "$(hostname)" --layout "$layout" --chain "$ch"
-              --tag-from "$oldtag" --tag-to "$(env_get LIBERTY_IMAGE_TAG)" --fw-from "$oldfw" --fw-to "$newfw"
+              --tag-from "$oldtag" --tag-to "${newtag:-$oldtag}" --fw-from "$oldfw" --fw-to "$newfw"
               --apps-from "$oldapps" --apps-to "$newapps" --backup "$bdir" --health "$(health)"
               --doctor-problems "$problems" --doctor-text -)
   [ -n "$migjson" ] && args+=(--migrations "$migjson")

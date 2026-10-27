@@ -167,7 +167,7 @@ class AdminAwareRunner(FakeRunner):
 def test_upgrade_runs_every_phase_and_records(env, monkeypatch) -> None:
     r = AdminAwareRunner(_upgrade_runner().responses)
     env.runner = r
-    monkeypatch.setattr(ops_cli, "dist_version", lambda name: {"liberty-next": "7.0.57", "liberty-apps": None}[name])
+    monkeypatch.setattr(ops_cli, "dist_version", lambda name, config_dir=None: {"liberty-next": "7.0.57", "liberty-apps": None}[name])
     rc = ops_cli.cmd_upgrade(env, _ns(keep=30, backup_dest=str(env.config_dir.parent / "bk")))
     assert rc == 0
     flat = [" ".join(Path(c[0]).name.split() + c[1:]) for c in r.calls]
@@ -198,7 +198,7 @@ def test_upgrade_aborts_when_backup_fails(env, monkeypatch) -> None:
 def test_upgrade_pins_version_and_installs_apps_wheel(env, monkeypatch, tmp_path: Path) -> None:
     r = AdminAwareRunner(_upgrade_runner().responses)
     env.runner = r
-    monkeypatch.setattr(ops_cli, "dist_version", lambda name: "7.0.57" if name == "liberty-next" else None)
+    monkeypatch.setattr(ops_cli, "dist_version", lambda name, config_dir=None: "7.0.57" if name == "liberty-next" else None)
     wheel = tmp_path / "liberty_apps-7.0.58-py3-none-any.whl"
     wheel.write_bytes(b"PK")
     rc = ops_cli.cmd_upgrade(env, _ns(version="7.0.58", apps=str(wheel), no_restart=True))
@@ -215,7 +215,7 @@ def test_upgrade_reports_a_failed_install(env, monkeypatch) -> None:
     resp = _upgrade_runner().responses | {("pipx", "upgrade"): (1, "")}
     r = AdminAwareRunner(resp)
     env.runner = r
-    monkeypatch.setattr(ops_cli, "dist_version", lambda name: "7.0.57" if name == "liberty-next" else None)
+    monkeypatch.setattr(ops_cli, "dist_version", lambda name, config_dir=None: "7.0.57" if name == "liberty-next" else None)
     rc = ops_cli.cmd_upgrade(env, _ns(no_restart=True))
     assert rc == 1
     rec = next(c for c in r.calls if "record-upgrade" in c)
@@ -232,7 +232,7 @@ def test_rollback_uses_the_recorded_state(env, monkeypatch) -> None:
     store = ConfigVersionStore(env.config_dir)
     store.write_upgrade_report("r-up", {"kind": "upgrade", "framework": {"from": "7.0.57", "to": "7.0.58"}}, "# up")
     store.record_upgrade(component="stack", kind="upgrade", to_version="7.0.58", report="r-up")
-    monkeypatch.setattr(ops_cli, "dist_version", lambda name: "7.0.58" if name == "liberty-next" else None)
+    monkeypatch.setattr(ops_cli, "dist_version", lambda name, config_dir=None: "7.0.58" if name == "liberty-next" else None)
     rc = ops_cli.cmd_rollback(env, _ns(yes=True))
     assert rc == 0
     flat = [" ".join(c) for c in r.calls]
