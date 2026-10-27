@@ -55,6 +55,16 @@
   conversation » l'efface. Les listes de l'éditeur App (modèle, effort, niveau de journal,
   connecteurs autorisés) sont le sélecteur partagé avec recherche ; la liste des modèles ajoute
   la famille Claude 5.
+- **Les applications livrent leurs propres questions de départ.** Un nouveau fichier par
+  application, `ai.toml` (`[ai.<app>] starters`, `[ai.<app>.screens.<id>] starters`), voyage avec
+  le lot d'applications comme les autres fichiers par application (fusionné à l'installation,
+  rechargé à chaud, versionné) et s'édite sous Configuration → IA. Les questions de l'opérateur
+  sous App → Assistant IA l'emportent, clé par clé.
+- Listes déroulantes : un code long (un identifiant de modèle) n'est plus tronqué dans la liste.
+- Explorateur de données : les champs d'une entité table portent maintenant leurs libellés du
+  dictionnaire. Les éléments étaient cherchés sous le connecteur de données (`jdedwards`) alors que
+  le dictionnaire les range sous l'application (`nomajde`), comme le font les écrans ; et un champ
+  sans libellé affichait son nom en minuscules à côté de son nom en majuscules.
 
 **Installation / mise à jour**
 - **Corrigé : la version du lot d'applications apparaissait comme « non installée » sous Docker.**

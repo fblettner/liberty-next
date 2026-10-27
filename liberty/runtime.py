@@ -51,7 +51,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 _log = logging.getLogger("liberty.runtime")
 
 ALL_SECTIONS: frozenset[str] = frozenset(
-    {"license", "connectors", "menus", "screens", "charts", "actions", "dashboards", "explorer", "jobs", "notifications"}
+    {"license", "connectors", "menus", "screens", "charts", "actions", "dashboards", "explorer", "jobs", "notifications", "ai"}
 )
 
 
@@ -258,6 +258,10 @@ async def rebuild_runtime(
                 await sync_bundled(app.state.user_views, app.state.explorer)
             except Exception as exc:  # noqa: BLE001
                 _log.warning("explorer: bundled catalogue not applied: %s", exc)
+        if "ai" in wanted and getattr(settings, "ai", None) is not None:
+            from liberty.ai.appconfig import load_ai_config
+
+            app.state.ai_config = load_ai_config(settings.ai.config_path)
         if "notifications" in wanted and getattr(settings, "notify", None) is not None:
             from liberty.notify import load_notification_rules
 

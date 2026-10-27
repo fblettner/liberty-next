@@ -184,8 +184,10 @@ def fields_from_columns(
             else:
                 warnings.append(f"{entity.id}.{col.name}: declared as a measure but typed {tc}")
                 agg = None
+        # No label anywhere → the upper-cased name (the dialect may report a lower-cased key for a
+        # case-insensitive Oracle column; the field's name is upper-cased too, so the pane shows one).
         out.append(ExplorerField(
-            key=f"{entity.id}.{up}", entity=entity.id, name=up, label=col.label or col.name, type=tc,
+            key=f"{entity.id}.{up}", entity=entity.id, name=up, label=col.label or up, type=tc,
             kind=kind, aggregate=agg, format=col.format, rule=col.rule, dd=col.dd, hidden=(up in hidden or col.hidden),
         ))
     if entity.default_date and entity.default_date.upper() not in names:
@@ -196,13 +198,17 @@ def fields_from_columns(
     return out, warnings
 
 
-def resolve_dictionary(columns: list[Column], dictionary: Any, connector: str | None, prefix: int, language: str | None) -> None:
+def resolve_dictionary(
+    columns: list[Column], dictionary: Any, connector: str | None, prefix: int, language: str | None, *, fallback: str | None = None,
+) -> None:
     """Label, format, rule and item of the columns a screen did not hint, from the dictionary —
     the entry named like the column, else (on a ``dd_prefix`` connector) like the column minus
-    the table prefix (``ABALPH`` → ``ALPH``); the connector's section first, then the shared
-    one. What the screen set is kept."""
+    the table prefix (``ABALPH`` → ``ALPH``); *connector*'s section first (the APP's: a JDE
+    item is filed under ``nomajde``, the app, the way screens look it up), then *fallback*'s
+    (the data connector's own section), then the shared one. What the screen set is kept."""
     if dictionary is None:
         return
+    scopes = [s for s in (connector, fallback) if s]
     for col in columns:
         if col.label is not None and col.dd:
             continue
@@ -211,7 +217,10 @@ def resolve_dictionary(columns: list[Column], dictionary: Any, connector: str | 
             keys += [col.name[prefix:], col.name[prefix:].upper()]
         entry = key = None
         for k in keys:
-            entry = dictionary.find_entry(k, connector=connector)
+            for scope in scopes or [None]:
+                entry = dictionary.find_entry(k, connector=scope)
+                if entry is not None:
+                    break
             if entry is not None:
                 key = k
                 break
@@ -256,7 +265,9 @@ async def describe_entity(
     except Exception as exc:  # noqa: BLE001 — reported on the entity
         view.error = f"{connector}.{entity.query or entity.table}: {exc}"
         return view
-    resolve_dictionary(result.columns, getattr(connectors, "dictionary", None), conn.name, int(getattr(conn.config, "dd_prefix", 0) or 0), language)
+    # The dictionary scope is the APP (where the screens file the items), the data connector's
+    # own section next — ``dictionary_scope=app`` above did the same for the hinted columns.
+    resolve_dictionary(result.columns, getattr(connectors, "dictionary", None), app, int(getattr(conn.config, "dd_prefix", 0) or 0), language, fallback=conn.name)
     view.fields, view.warnings = fields_from_columns(entity, result.columns, result.rows[0] if result.rows else None)
     return view
 

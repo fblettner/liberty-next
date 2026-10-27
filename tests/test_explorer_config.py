@@ -153,3 +153,22 @@ def test_resolve_dictionary_labels_unhinted_columns_through_the_prefix() -> None
     assert (cols[3].label, cols[3].dd) == ("Tax id", "TAX")                                        # the screen's hint is kept
     resolve_dictionary([c := Column(name="ABALPH", type="NCHAR")], d, "other", 2, "en")
     assert c.label == "Alpha Name"                                                                 # the shared entry
+
+
+def test_resolve_dictionary_tries_the_app_scope_then_the_connectors() -> None:
+    from liberty.connectors.dictionary import DictionaryEntry, DictionaryFile, DictionarySection
+    from liberty.explorer.model import fields_from_columns, resolve_dictionary
+    from liberty.explorer.config import ExplorerEntity
+    # JDE items are filed under the APP (nomajde) — the data connector (jdedwards) has its own section too
+    d = DictionaryFile(default_language="en", connectors={
+        "nomajde": DictionarySection(entries={"AN8": DictionaryEntry(label="Address Number", format="integer")}),
+        "jdedwards": DictionarySection(entries={"AN8": DictionaryEntry(label="AN8 (connector)"), "MCU": DictionaryEntry(label="Business Unit")}),
+    })
+    cols = [Column(name="aban8", type="NUMBER"), Column(name="abmcu", type="NCHAR"), Column(name="abalph", type="NCHAR")]
+    resolve_dictionary(cols, d, "nomajde", 2, "en", fallback="jdedwards")
+    assert (cols[0].label, cols[0].dd) == ("Address Number", "AN8")      # the app's section wins
+    assert (cols[1].label, cols[1].dd) == ("Business Unit", "MCU")       # then the connector's
+    assert cols[2].label is None
+    # a lower-cased result key (the Oracle dialect) never becomes the label: the field shows its upper-cased name once
+    fields, _ = fields_from_columns(ExplorerEntity(id="f0101", query="q"), cols)
+    assert [(f.name, f.label) for f in fields] == [("ABAN8", "Address Number"), ("ABMCU", "Business Unit"), ("ABALPH", "ABALPH")]

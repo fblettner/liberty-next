@@ -44,7 +44,7 @@ def _make_app(tmp_path, *, ai_enabled: bool = True):
         app=AppSettings(static_dir=""),
         connectors=ConnectorSettings(config_path=Path(conn_toml)),
         auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
-        ai=AISettings(enabled=ai_enabled, api_key=""),  # no API key → "unconfigured"
+        ai=AISettings(enabled=ai_enabled, api_key="", config_path=tmp_path / "ai.toml"),  # no API key → "unconfigured"
     )
     return create_app(settings)
 
@@ -260,3 +260,22 @@ def test_model_picker_and_starters(app) -> None:
         assert r.status_code == 400 and "allowed_models" in r.json()["detail"]
         r = client.post("/ai/chat", json={"messages": msgs, "model": "claude-haiku-5-5"}, headers=h)
         assert r.status_code == 200 and app.state.ai._client.messages.calls[-1]["model"] == "claude-haiku-5-5"
+
+
+def test_bundled_starters_are_edited_and_merged_under_the_operators(app, tmp_path) -> None:
+    with TestClient(app) as client:
+        token = _login(client, "admin", "adminpw")
+        h = {"Authorization": f"Bearer {token}"}
+        assert client.get("/admin/config/ai/parsed", headers=h).json() == {"path": str(tmp_path / "ai.toml"), "ai": {}}
+        body = {"ai": {"nomajde": {"starters": ["Who has no role?"], "screens": {"f0092": {"starters": ["Users never logged in"]}, "f0093": {"starters": []}}}}}
+        r = client.put("/admin/config/ai/parsed", json=body, headers=h)
+        assert r.status_code == 200, r.text
+        text = (tmp_path / "ai.toml").read_text()
+        assert "f0093" not in text and 'starters = [\n    "Who has no role?",' in text
+        assert client.get("/admin/config/ai/parsed", headers=h).json()["ai"] == {"nomajde": {"starters": ["Who has no role?"], "screens": {"f0092": {"starters": ["Users never logged in"]}}}}
+        assert client.put("/admin/config/ai/parsed", json={"ai": {"nomajde": {"playbook": 1}}}, headers=h).status_code == 422
+        # the running server sees it after a reload, with the operator's [ai] starters on top
+        assert client.post("/admin/reload", headers=h).status_code == 200
+        _install_fake_assistant(app, starters={"*": ["What can you do?"], "nomajde": ["The operator's question"]})
+        starters = client.get("/ai/tools", headers=h).json()["starters"]
+        assert starters == {"nomajde": ["The operator's question"], "nomajde/f0092": ["Users never logged in"], "*": ["What can you do?"]}

@@ -548,6 +548,7 @@ async def get_config_schema(request: Request, _: Superuser) -> dict[str, Any]:
         "actions": SharedActionsFile.model_json_schema(),
         "dashboards": DashboardsFile.model_json_schema(),
         "explorer": ExplorerFile.model_json_schema(),
+        "ai": AiFile.model_json_schema(),
         "framework_enums": bundled,
     }
 
@@ -1306,6 +1307,47 @@ class ExplorerBody(BaseModel):
     explorer: dict[str, dict[str, dict[str, Any]]]
 
 
+@router.get("/config/ai/parsed", summary="Get the apps' AI config")
+async def get_ai_parsed(request: Request, _: Superuser) -> dict[str, Any]:
+    """The current ``ai.toml`` parsed — ``{path, ai: {<app>: {starters, screens: {<id>: {starters}}}}}``;
+    a missing file reads as empty."""
+    from liberty.ai.appconfig import load_ai_config
+    path = Path(request.app.state.settings.ai.config_path)
+    cfg = load_ai_config(path)
+    return {"path": str(path), "ai": cfg.model_dump()["ai"]}
+
+
+class AiBody(BaseModel):
+    ai: dict[str, dict[str, Any]]
+
+
+@router.put("/config/ai/parsed", summary="Update the apps' AI config")
+async def put_ai_parsed(body: AiBody, request: Request, _: Superuser) -> dict[str, object]:
+    """Validate against :class:`AiFile`, rewrite ``ai.toml`` through ``tomli-w`` (the builder
+    owns the file; empty lists and empty screen blocks are dropped). Does not reload — call
+    ``POST /admin/reload``."""
+    try:
+        validated = parse_ai_config({"ai": _drop_none(body.ai)})
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid ai config: {exc}") from exc
+    normalized: dict[str, Any] = {"ai": {}}
+    for app, block in validated.ai.items():
+        d: dict[str, Any] = {}
+        if block.starters:
+            d["starters"] = list(block.starters)
+        screens = {sid: {"starters": list(s.starters)} for sid, s in block.screens.items() if s.starters}
+        if screens:
+            d["screens"] = screens
+        normalized["ai"][app] = d
+    import tomli_w
+    new_text = tomli_w.dumps(normalized)
+    path = Path(request.app.state.settings.ai.config_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
+    path.write_text(new_text, encoding="utf-8")
+    return {"saved": True, "path": str(path)}
+
+
 @router.put("/config/explorer/parsed", summary="Update explorer config")
 async def put_explorer_parsed(body: ExplorerBody, request: Request, _: Superuser) -> dict[str, object]:
     """Validate against :class:`ExplorerFile`, rewrite ``explorer.toml`` through ``tomli-w`` (the
@@ -1655,6 +1697,7 @@ async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dic
 # so comments + ``${VAR}`` references on untouched keys survive a save). Changes do NOT take
 # effect live: app.toml is loaded once at startup. The PUT returns ``requires_restart: true`` to
 # nudge the UI.
+from liberty.ai.appconfig import AiFile, parse_ai_config
 from liberty.ai.catalog import KNOWN_MODELS
 from liberty.config import AISettings, AppSettings, LicenseSettings, OIDCSettings, ReportsBrandingSettings, load_settings, resolve_app_config_path, NotifySettings
 

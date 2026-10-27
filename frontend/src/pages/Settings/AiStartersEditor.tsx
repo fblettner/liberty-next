@@ -51,6 +51,34 @@ export function ModelsPicker({ value, models, onChange }: {
   )
 }
 
+/** One list of questions: each a line with its ×, plus an input to add one (Enter or +). */
+export function QuestionsList({ value, onChange }: { value: string[]; onChange: (next: string[]) => void }) {
+  const { t } = useTranslation()
+  const [draft, setDraft] = useState('')
+  const add = () => {
+    const q = draft.trim()
+    if (!q) return
+    if (!value.includes(q)) onChange([...value, q])
+    setDraft('')
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {value.map((q) => (
+        <Question key={q}>
+          <span>{q}</span>
+          <RemoveBtn type="button" onClick={() => onChange(value.filter((x) => x !== q))} aria-label="Remove"><X size={11} /></RemoveBtn>
+        </Question>
+      ))}
+      <div style={{ display: 'flex', gap: 6 }}>
+        <Input value={draft} placeholder={t('settings.app.aiStarterPlaceholder', 'A question the user can click…')}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }} style={{ flex: 1 }} />
+        <Button $variant="ghost" $size="sm" onClick={add} disabled={!draft.trim()}><Plus size={12} /></Button>
+      </div>
+    </div>
+  )
+}
+
 export function AiStartersEditor({ value, apps, onChange }: {
   value: Record<string, string[]>
   /** The connector / app names the scope dropdown offers (``*`` is always offered; ``app/screen`` is typed). */
@@ -58,7 +86,6 @@ export function AiStartersEditor({ value, apps, onChange }: {
   onChange: (next: Record<string, string[]>) => void
 }) {
   const { t } = useTranslation()
-  const [drafts, setDrafts] = useState<Record<string, string>>({})
   const scopes = Object.keys(value)
   const scopeOptions: SearchSelectOption[] = [
     { value: '*', label: t('settings.app.aiStartersEverywhere', 'everywhere'), mono: '*' },
@@ -66,12 +93,6 @@ export function AiStartersEditor({ value, apps, onChange }: {
   ].filter((o) => !scopes.includes(o.value))
   const setScope = (key: string, list: string[]) => onChange({ ...value, [key]: list })
   const dropScope = (key: string) => { const next = { ...value }; delete next[key]; onChange(next) }
-  const addQuestion = (key: string) => {
-    const q = (drafts[key] ?? '').trim()
-    if (!q) return
-    if (!(value[key] ?? []).includes(q)) setScope(key, [...(value[key] ?? []), q])
-    setDrafts((d) => ({ ...d, [key]: '' }))
-  }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {scopes.map((key) => (
@@ -81,18 +102,7 @@ export function AiStartersEditor({ value, apps, onChange }: {
             <span className="spacer" />
             <Button $variant="ghost" $size="sm" onClick={() => dropScope(key)} title={t('common.remove', 'Remove')}><X size={12} /></Button>
           </ScopeHead>
-          {(value[key] ?? []).map((q) => (
-            <Question key={q}>
-              <span>{q}</span>
-              <RemoveBtn type="button" onClick={() => setScope(key, value[key].filter((x) => x !== q))} aria-label="Remove"><X size={11} /></RemoveBtn>
-            </Question>
-          ))}
-          <div style={{ display: 'flex', gap: 6 }}>
-            <Input value={drafts[key] ?? ''} placeholder={t('settings.app.aiStarterPlaceholder', 'A question the user can click…')}
-              onChange={(e) => setDrafts((d) => ({ ...d, [key]: e.target.value }))}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addQuestion(key) } }} style={{ flex: 1 }} />
-            <Button $variant="ghost" $size="sm" onClick={() => addQuestion(key)} disabled={!(drafts[key] ?? '').trim()}><Plus size={12} /></Button>
-          </div>
+          <QuestionsList value={value[key] ?? []} onChange={(list) => setScope(key, list)} />
         </Scope>
       ))}
       <div style={{ maxWidth: 320 }}>

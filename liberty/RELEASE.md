@@ -48,6 +48,15 @@
   now survives closing the drawer and a reload (the last 40 messages, on this device); "new
   conversation" clears it. The App editor's dropdowns (model, effort, log level, the allowed
   connectors) are the shared searchable select; the model list adds the Claude 5 family.
+- **The applications ship their own starter questions.** A new per-app file, `ai.toml`
+  (`[ai.<app>] starters`, `[ai.<app>.screens.<id>] starters`), travels with the apps bundle like
+  the other per-app files (merged on install, hot-reloaded, versioned) and is edited under
+  Settings → AI. The operator's questions under App → AI Assistant win over it, key by key.
+- Dropdowns: a long code (a model id) is no longer cut short in the list.
+- Data Explorer: a table entity's fields now carry their dictionary labels. The items were looked
+  up under the data connector (`jdedwards`) while the dictionary files them under the app
+  (`nomajde`), as the screens do; and a field with no label showed its lower-cased name next to
+  its upper-cased one.
 
 **Install / upgrade**
 - **Fixed: the apps bundle version read as "not installed" on Docker.** The wheel is materialised

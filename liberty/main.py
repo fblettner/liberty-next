@@ -219,6 +219,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         app.state.oidc = build_oidc(settings.oidc, master_key=settings.crypto.master_key)
         app.state.ai = build_assistant(settings.ai, app.state.connectors, master_key=settings.crypto.master_key)
+        from liberty.ai.appconfig import load_ai_config
+        app.state.ai_config = load_ai_config(settings.ai.config_path)   # the apps' starters (ai.toml)
         from liberty.reports.wiring import build_reports
         app.state.reports = build_reports(settings, app.state.license)
         # Log-handler attach against the running loop. The SIO server itself is

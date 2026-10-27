@@ -106,8 +106,10 @@ const Item = styled.button<{ $active?: boolean }>`
   background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
   color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
   font-size: ${fontSize.sm}; font-family: ${fonts.sans};
-  & .mono { font-family: ${fonts.mono}; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: ${colors.text.primary}; }
-  & .t { flex: 2 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The code column sizes to its content (a long id such as a model name is never cut short while
+     the label has room), capped so a very long code still leaves the label a share of the row. */
+  & .mono { font-family: ${fonts.mono}; flex: 0 1 auto; max-width: 60%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: ${colors.text.primary}; }
+  & .t { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Extra LOOKUP display_fields columns — each its own equal-width cell so options read as a table. */
   & .cell { font-family: ${fonts.mono}; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: ${colors.text.muted}; }
   & svg { flex-shrink: 0; }

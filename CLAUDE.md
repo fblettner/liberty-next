@@ -101,7 +101,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
   menus/ charts/ dashboards/ actions/   their TOML schemas + loaders
   ai/                     assistant.py (streaming agentic loop; the page context = a 2nd uncached system
                           block), tools.py, connector_tools.py, scaffold_tools.py (proposal-only), routes.py
-                          (SSE; `/ai/tools` also lists the pickable models + starters), catalog.py (the model list)
+                          (SSE; `/ai/tools` also lists the pickable models + starters), catalog.py (the model list),
+                          appconfig.py (ai.toml: what the APPS ship — starters per app / screen; playbooks next)
   jobs/ (nomaflow)        schema.py (jobs.toml), registry, runner (state machine, retries,
                           cancel), scheduler (APScheduler, single process), recovery, retention,
                           missed.py (missed-schedule check: expected cron instants vs the run
@@ -211,6 +212,7 @@ hot-reloadable (`[app] hot_reload = true`, `web/hot_reload.py`) or reloaded via
 | `reports.toml` | `[reports] templates_config_path` | `reports/schema.py` | Reports |
 | `jobs.toml` | `[jobs]` (default `${LIBERTY_APPS_DIR}/../plugins/nomaflow/jobs.toml`) | `jobs/schema.py` | nomaflow → Jobs |
 | `explorer.toml` | `[explorer]` | `explorer/config.py::ExplorerFile` (`[explorer.<app>.<model>]`, perm `explorer:<app>:<model>`) | Explorer (models per app: hub, entities, relations, bundled analyses) |
+| `ai.toml` | `[ai] config_path` | `ai/appconfig.py::AiFile` (`[ai.<app>] starters`, `[ai.<app>.screens.<id>] starters`) | AI (what the apps ship; the operator's `[ai] starters` in app.toml win) |
 | `notifications.toml` | `[notify] config_path` (+ the inbox pool and SMTP, edited under App) | `notify/rules.py::NotificationsFile` | Notifications |
 | `auth.toml` | `[auth] backend = "toml"` | `auth/authstore.py::AuthFile` | Access |
 

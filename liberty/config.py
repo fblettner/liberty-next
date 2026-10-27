@@ -301,6 +301,10 @@ class AISettings(BaseModel):
     # (``nomajde``) or an app's screen (``nomajde/f0092``); the most specific key that matches
     # the page the user is on wins.
     starters: dict[str, list[str]] = Field(default_factory=dict)
+    # ai.toml — the assistant material the APPS ship (starters per app / screen, playbooks
+    # next), bundled and merged like the other per-app files; ``starters`` above are the
+    # operator's and win over it. See liberty.ai.appconfig.
+    config_path: Path = Field(default_factory=lambda: _default_config_path("ai"))
 
 
 class CryptoSettings(BaseModel):

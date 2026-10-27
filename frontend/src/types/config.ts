@@ -260,6 +260,11 @@ export interface ExplorerDoc {
   explorer: Record<string, Record<string, ExplorerModelBody>>
 }
 
+/** `GET /admin/config/ai/parsed` — the apps' assistant material (ai.toml). */
+export interface ScreenAiBody { starters?: string[] }
+export interface AppAiBody { starters?: string[]; screens?: Record<string, ScreenAiBody> }
+export interface AiDoc { path: string; ai: Record<string, AppAiBody> }
+
 export interface DashboardsDoc {
   path: string
   dashboards: Record<string, Record<string, Record<string, unknown>>>
