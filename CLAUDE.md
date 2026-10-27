@@ -34,8 +34,9 @@ docs at https://docs.nomana-it.fr/liberty/ (a separate Docusaurus repo).
   modules (`*.test.ts` next to the module). `ruff check` and `npm run lint` must stay at zero
   errors (CI enforces both; `.pre-commit-config.yaml` mirrors them).
 - **Work step by step and never commit before the operator has reviewed the diff.** Finish
-  one step, run the tests, leave the tree uncommitted, report, wait. "Commit" means commit
-  *and* push. Verify a claim against the current code and `git log` (and measure, for
+  one step, run the tests, leave the tree uncommitted, report, wait. "Commit" means a **local**
+  commit on `develop`; push only when the operator says "push" (every push runs CI — push once
+  a plan phase is done, not per step). Verify a claim against the current code and `git log` (and measure, for
   anything about performance) before proposing a change — a stale comment is not evidence.
 - **TOML round-trips: never `tomlkit.parse` a big nested config file.** tomlkit is O(n²) on
   deeply nested tables — measured on a real install: `screens.toml` (558 KB) **67 s**,
@@ -186,7 +187,7 @@ hot-reloadable (`[app] hot_reload = true`, `web/hot_reload.py`) or reloaded via
 | `theme.toml` | `[theme]` | `theme.py::ThemeFile` | Theme |
 | `reports.toml` | `[reports] templates_config_path` | `reports/schema.py` | Reports |
 | `jobs.toml` | `[jobs]` (default `${LIBERTY_APPS_DIR}/../plugins/nomaflow/jobs.toml`) | `jobs/schema.py` | nomaflow → Jobs |
-| `notifications.toml` | `[notify] config_path` (+ the inbox pool and SMTP) | `notify/rules.py::NotificationsFile` | Notifications (next) |
+| `notifications.toml` | `[notify] config_path` (+ the inbox pool and SMTP, edited under App) | `notify/rules.py::NotificationsFile` | Notifications |
 | `auth.toml` | `[auth] backend = "toml"` | `auth/authstore.py::AuthFile` | Access |
 
 Secrets: `${ENV_VAR}` / `${VAR:-default}` substitution in every TOML; `ENC:` values decrypted
@@ -236,7 +237,8 @@ pages/Settings/        one *Builder per config section + the Visual Designer (Sc
                        AppBuilder, ReportsBuilder, ThemeBuilder, TechnicalDashboard,
                        Package / ChangePackages / IntegrityBuilder (reached from nomaflow pages)
 pages/Nomaflow/        JobsList, JobEditor, StepEditor, RunDetail, Schedule, RetentionPanel
-pages/DashboardView/ Chat/ (AiDrawer) Reports/ ScreenAssistant/ HttpRunner/ Monitoring/ Login/
+pages/DashboardView/ Chat/ (AiDrawer) Reports/ Notifications/ (the inbox; components/NotificationBell
+                       in the header, live via SioContext.subscribeNotifications) ScreenAssistant/ HttpRunner/ Monitoring/ Login/
 services/ types/       no-React helpers (lookups, cells, gridViews, poolSchema, sqlCompletion…) and
                        the backend response shapes
 locales/{en,fr}.ts     react-i18next; keys must exist in both (fr is typed against en)

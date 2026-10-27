@@ -302,9 +302,6 @@ export function DashboardEditorModal({
                   <Field label={t('settings.dash.periodDd', 'or dictionary item')}>
                     <Input value={sstr(period.dd)} onChange={(e) => setPeriod({ ...period, dd: e.target.value })} placeholder="SALES_DATE" />
                   </Field>
-                  <span style={{ gridColumn: '1 / -1', fontSize: fontSize.micro, color: colors.text.muted }}>
-                    {t('settings.dash.periodHint', 'Queries receive :PERIOD_FROM / :PERIOD_TO (and :PREV_FROM / :PREV_TO). A widget whose screen carries the date column is also filtered on it without touching its SQL.')}
-                  </span>
                 </FilterRow>
                 <AddBar>
                   <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.dash.periodBasis', 'Date bases (optional: which date the period applies to)')}</span>

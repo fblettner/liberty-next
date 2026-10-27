@@ -265,6 +265,15 @@ const en = {
     saveValid: 'Save {{count}} valid rows',
     committedSome: '{{count}} rows saved.',
   },
+  notifications: {
+    title: 'Notifications',
+    subtitle: 'What the rules sent you — a click opens the record when the notification carries a link.',
+    all: 'All',
+    unread: 'Unread',
+    empty: 'No notification.',
+    markAllRead: 'Mark all read',
+    viewAll: 'View all',
+  },
   period: {
     label: 'Period',
     basis: 'Date',

@@ -109,9 +109,6 @@ export default function RoleEditor({ initial, takenNames, forest, dashboardIds, 
         {error && <Banner $tone="error">{error}</Banner>}
         {tab === 'scope' ? (
           <>
-            <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>
-              {t('settings.access.scopeIntro', 'Which rows the role\'s holders see, on every query that returns the item. Rules combine with AND; a user with several roles sees the union. Superusers and roles without rules see everything.')}
-            </span>
             <ScopeRulesEditor value={scope} onChange={setScope} dictionary={dictionary} attributeNames={attributeNames} columnNames={columnNames} />
           </>
         ) : (
@@ -137,12 +134,12 @@ export default function RoleEditor({ initial, takenNames, forest, dashboardIds, 
         </Section>
 
         <Section>
-          <div className="h">{t('settings.access.menus', 'Menus')} <span className="hint">{t('settings.access.menusHint', 'what the sidebar shows — allowing a menu also lets its screens run')}</span></div>
+          <div className="h">{t('settings.access.menus', 'Menus')}</div>
           <MenuTree forest={forest} effects={effects} onSetState={setState} />
         </Section>
 
         <Section>
-          <div className="h">{t('settings.access.other', 'Beyond the menus')} <span className="hint">{t('settings.access.otherHint', 'connectors, queries, endpoints, dashboards, the assistant')}</span></div>
+          <div className="h">{t('settings.access.other', 'Beyond the menus')}</div>
           <OtherAccess value={model.other} onChange={(other) => setModel((m) => ({ ...m, other }))} dashboardIds={dashboardIds} />
         </Section>
 

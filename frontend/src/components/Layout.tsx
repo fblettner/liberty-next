@@ -6,7 +6,7 @@ import { Outlet, useMatch, useNavigate, useLocation } from 'react-router-dom'
 import { isPageTabPath } from '../tabs/pageTabs'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Sun, Moon, LogOut, User, Sparkles, X } from 'lucide-react'
+import { Sun, Moon, LogOut, User, Sparkles, X, Bell } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { useTabs } from '../tabs/TabsContext'
 import { LANGUAGE_KEY, type Language } from '../i18n'
@@ -16,6 +16,7 @@ import { useWorkspace } from '../workspace/WorkspaceContext'
 import { Banner, Centered, ErrorBoundary } from '../common'
 import Sidebar from './Sidebar'
 import ProfileModal from './ProfileModal'
+import { NotificationBell } from './NotificationBell'
 import TabStrip from './TabStrip'
 import BackButton from './BackButton'
 import TabHost from './TabHost'
@@ -270,6 +271,10 @@ export default function Layout() {
         </UtilBtn>
         {user && (
           <>
+            <Sep />
+            <NotificationBell>
+              {(open) => <UtilBtn type="button" title={t('notifications.title')} style={open ? { color: colors.text.primary } : undefined}><Bell size={14} /></UtilBtn>}
+            </NotificationBell>
             <Sep />
             {/* Identity is icon-only now (username + superuser flag moved to the hover title) —
                 keeps the pill compact; the icon still opens the profile modal. */}

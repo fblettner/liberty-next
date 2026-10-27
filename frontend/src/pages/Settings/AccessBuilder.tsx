@@ -119,7 +119,6 @@ function UserModal({ initial, roleNames, attributeNames, onSaved, onClose }: { i
                 <div style={{ minWidth: 220 }}>
                   <SearchSelect value="" onChange={(k) => { if (k.trim()) setAttrs([...attrs, { key: k.trim(), text: '' }]) }} options={attrOpts} allowCustom placeholder={t('settings.access.addAttribute', 'Add an attribute…')} />
                 </div>
-                <span style={{ fontSize: fontSize.micro, color: colors.text.muted }}>{t('settings.access.attributesHint', 'Read by the roles\' rules (#USER.company#); a comma makes a list.')}</span>
               </div>
             </div>
           </Field>

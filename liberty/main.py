@@ -167,7 +167,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.actions = load_actions(settings.actions.config_path)
         app.state.dashboards = load_dashboards(settings.dashboards.config_path)
         from liberty.notify import load_notification_rules
-        app.state.notification_rules = load_notification_rules(settings.notify.config_path)
+        app.state.notification_rules = load_notification_rules(settings.notify.config_path, strict=False)
         # Config file versioning — filesystem snapshot history (.versions/ next to the TOMLs) so the
         # config editors can list / diff / restore prior saves. Best-effort: a store init failure must
         # never block startup. Base dir = where the colocated config files live.

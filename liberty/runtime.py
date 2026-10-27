@@ -148,7 +148,7 @@ def build_dispatcher(app: Any, settings: Settings) -> Any | None:
 
     state = app.state
     return Dispatcher(
-        getattr(state, "notifications", None), settings,
+        getattr(state, "notifications", None), lambda: getattr(state, "settings", settings),
         auth_backend=lambda: getattr(state, "auth_backend", None),
         connectors=lambda: getattr(state, "connectors", None),
         sio=lambda: getattr(state, "sio", None),
@@ -246,7 +246,7 @@ async def rebuild_runtime(
         if "notifications" in wanted and getattr(settings, "notify", None) is not None:
             from liberty.notify import load_notification_rules
 
-            app.state.notification_rules = load_notification_rules(settings.notify.config_path)
+            app.state.notification_rules = load_notification_rules(settings.notify.config_path, strict=False)
 
         # ── nomaflow: jobs.toml reconcile (the executors were rebound above) ──────
         jobs = getattr(app.state, "jobs", None)

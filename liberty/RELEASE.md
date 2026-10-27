@@ -36,8 +36,16 @@
   failure message even without a rule. An **action**: a new `send_notification` step in a
   screen's chains fires the rule server-side with the row's values; only a rule declared with
   `kind = "action"` can be fired that way, and the rule keeps the channels and recipients.
-  Dispatch runs on its own task, so a write or a run never waits on a mail server. The bell, the
-  inbox page and the rules editor come next.
+  Dispatch runs on its own task, so a write or a run never waits on a mail server.
+- **The UI.** A bell in the header with the unread count, updated live through Socket.IO, and a
+  dropdown of the latest notifications; a Notifications page (all / unread, mark all read; a row
+  opens its link); Settings → App gets a Notifications section for the SMTP account (host, port,
+  from, user, password encrypted at rest, STARTTLS or implicit TLS, retention); Settings →
+  Notifications edits the rules: the trigger (a screen event with app, screen, events and the
+  row condition; a job event with jobs, events and the long-run threshold; or "fired by a screen
+  action"), the channels, the recipients picked from users and roles or typed as addresses, the
+  subject / body / link templates, the action channel's target, and a "Send a test" button that
+  dispatches the rule with sample values.
 
 **Screens: `editable_when`, a row-level read-only rule**
 - A screen can say when an existing row may be changed: `editable_when = [{ field = "PERIOD_STATUS",

@@ -1295,6 +1295,45 @@ async def put_actions_parsed(body: ActionsBody, request: Request, _: Superuser) 
     return {"saved": True, "path": str(path)}
 
 
+@router.get("/config/notifications/parsed", summary="Get notification rules")
+async def get_notifications_parsed(request: Request, _: Superuser) -> dict[str, Any]:
+    """The current ``notifications.toml`` — ``{path, notifications: {<id>: rule dict}}``."""
+    from liberty.notify import load_notification_rules
+
+    path = Path(request.app.state.settings.notify.config_path)
+    cfg = load_notification_rules(path)
+    return {"path": str(path), "notifications": {rid: r.model_dump(exclude_none=True) for rid, r in cfg.notifications.items()}}
+
+
+class NotificationsBody(BaseModel):
+    notifications: dict[str, dict[str, Any]]
+
+
+@router.put("/config/notifications/parsed", summary="Update notification rules")
+async def put_notifications_parsed(body: NotificationsBody, request: Request, _: Superuser) -> dict[str, object]:
+    """Validate against :class:`NotificationsFile`, rewrite ``notifications.toml`` (tomllib +
+    tomli_w — a small file the editor owns) and reload the rules section at once."""
+    from liberty.notify import parse_notification_rules
+
+    try:
+        validated = parse_notification_rules({"notifications": _drop_none(body.notifications)})
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid notifications: {exc}") from exc
+    import tomli_w
+    new_text = tomli_w.dumps(validated.model_dump(exclude_none=True))
+    try:
+        parse_notification_rules(tomllib.loads(new_text))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting notifications are invalid: {exc}") from exc
+    path = Path(request.app.state.settings.notify.config_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _snapshot_config(request, path)
+    path.write_text(new_text, encoding="utf-8")
+    from liberty.runtime import rebuild_runtime
+    await rebuild_runtime(request.app, sections={"notifications"})
+    return {"saved": True, "path": str(path)}
+
+
 @router.get("/config/dashboards/parsed", summary="Get dashboards config")
 async def get_dashboards_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     """The current ``dashboards.toml`` parsed and normalised — ``{path, dashboards: {<id>: dict}}``.
@@ -1526,7 +1565,7 @@ async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dic
 # so comments + ``${VAR}`` references on untouched keys survive a save). Changes do NOT take
 # effect live: app.toml is loaded once at startup. The PUT returns ``requires_restart: true`` to
 # nudge the UI.
-from liberty.config import AISettings, AppSettings, LicenseSettings, OIDCSettings, ReportsBrandingSettings, load_settings, resolve_app_config_path
+from liberty.config import AISettings, AppSettings, LicenseSettings, OIDCSettings, ReportsBrandingSettings, load_settings, resolve_app_config_path, NotifySettings
 
 
 # Keys safe to expose: secrets, path fields, and backend toggles that require a coordinated
@@ -1551,10 +1590,15 @@ _OIDC_SAFE_KEYS = {
 
 # Fields that get encrypt-on-save + mask-on-get. Identified by (section, field) tuple
 # so encryption is targeted (other strings in the same section stay as-is).
+_NOTIFY_SAFE_KEYS = {
+    "enabled", "smtp_host", "smtp_port", "smtp_user", "smtp_from", "smtp_tls", "smtp_ssl", "smtp_timeout", "retention_days",
+    "smtp_password",   # sensitive — encrypted on save
+}
 _APP_TOML_SENSITIVE_FIELDS: set[tuple[str, str]] = {
     ("ai", "api_key"),
     ("license", "key"),
     ("oidc", "client_secret"),
+    ("notify", "smtp_password"),
 }
 
 # Canonical Anthropic model list the AppBuilder's Model dropdown offers. Keep ordered
@@ -1603,6 +1647,7 @@ async def get_app_parsed(request: Request, _: Superuser) -> dict[str, Any]:
         ai_model = AISettings.model_validate(raw.get("ai") or {})
         license_model = LicenseSettings.model_validate(raw.get("license") or {})
         oidc_model = OIDCSettings.model_validate(raw.get("oidc") or {})
+        notify_model = NotifySettings.model_validate(raw.get("notify") or {})
     except ValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"existing app.toml is invalid: {exc}") from exc
 
@@ -1613,6 +1658,7 @@ async def get_app_parsed(request: Request, _: Superuser) -> dict[str, Any]:
         "ai": _pick(ai_model.model_dump(), _AI_SAFE_KEYS),
         "license": _pick(license_model.model_dump(), _LICENSE_SAFE_KEYS),
         "oidc": _pick(oidc_model.model_dump(), _OIDC_SAFE_KEYS),
+        "notify": _pick(notify_model.model_dump(), _NOTIFY_SAFE_KEYS),
         "choices": {
             "log_levels": ["debug", "info", "warning", "error", "critical"],
             "effort_levels": ["", "low", "medium", "high", "xhigh", "max"],
@@ -1627,6 +1673,7 @@ class AppConfigBody(BaseModel):
     ai: dict[str, Any] = {}
     license: dict[str, Any] = {}
     oidc: dict[str, Any] = {}
+    notify: dict[str, Any] | None = None   # None: the section is left as it is on disk
 
 
 def _encrypt_sensitives(section: str, fields: dict[str, Any], master_key: str) -> dict[str, Any]:
@@ -1674,11 +1721,14 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
     ai_in = _pick(body.ai or {}, _AI_SAFE_KEYS)
     license_in = _pick(body.license or {}, _LICENSE_SAFE_KEYS)
     oidc_in = _pick(body.oidc or {}, _OIDC_SAFE_KEYS)
+    notify_in = _pick(body.notify, _NOTIFY_SAFE_KEYS) if body.notify is not None else None
     try:
         AppSettings.model_validate(app_in)
         AISettings.model_validate(ai_in)
         LicenseSettings.model_validate(license_in)
         OIDCSettings.model_validate(oidc_in)
+        if notify_in is not None:
+            NotifySettings.model_validate(notify_in)
     except ValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid app settings: {exc}") from exc
 
@@ -1689,6 +1739,8 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
     ai_in = _encrypt_sensitives("ai", ai_in, master_key)
     license_in = _encrypt_sensitives("license", license_in, master_key)
     oidc_in = _encrypt_sensitives("oidc", oidc_in, master_key)
+    if notify_in is not None:
+        notify_in = _encrypt_sensitives("notify", notify_in, master_key)
 
     path = _app_config_path()
     text = path.read_text(encoding="utf-8") if path.exists() else ""
@@ -1704,6 +1756,8 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
     _upsert("ai", ai_in)
     _upsert("license", license_in)
     _upsert("oidc", oidc_in)
+    if notify_in is not None:
+        _upsert("notify", notify_in)
 
     new_text = tomlkit.dumps(doc)
     try:
@@ -1712,6 +1766,7 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
         AISettings.model_validate(reparsed.get("ai") or {})
         LicenseSettings.model_validate(reparsed.get("license") or {})
         OIDCSettings.model_validate(reparsed.get("oidc") or {})
+        NotifySettings.model_validate(reparsed.get("notify") or {})
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting app.toml is invalid: {exc}") from exc
 

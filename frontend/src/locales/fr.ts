@@ -267,6 +267,15 @@ const fr: Resources = {
     saveValid: 'Enregistrer {{count}} lignes valides',
     committedSome: '{{count}} lignes enregistrées.',
   },
+  notifications: {
+    title: 'Notifications',
+    subtitle: 'Ce que les règles vous ont envoyé ; un clic ouvre l\'enregistrement quand la notification porte un lien.',
+    all: 'Toutes',
+    unread: 'Non lues',
+    empty: 'Aucune notification.',
+    markAllRead: 'Tout marquer comme lu',
+    viewAll: 'Tout voir',
+  },
   period: {
     label: 'Période',
     basis: 'Date',

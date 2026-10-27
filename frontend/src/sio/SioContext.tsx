@@ -17,6 +17,7 @@ import { useAuth } from "../auth/AuthContext"
 import type {
   DashboardSnapshot, HeldLock, LockPayload, LogEntry,
 } from "./types"
+import type { Notification } from '../types/notifications'
 import { canonicalLockKey } from "./types"
 
 type SioStatus = "idle" | "connecting" | "open" | "closed"
@@ -43,6 +44,8 @@ interface SioContextValue {
   subscribeDashboard: (onSnapshot: (snap: DashboardSnapshot | null) => void) => () => void
   /** Subscribe to the logs stream — buffered replay then live tail. */
   subscribeLogs: (handlers: { onReplay: (entries: LogEntry[]) => void; onLine: (entry: LogEntry) => void }) => () => void
+  /** A new inbox row for this user (the server pushes it to the user's room). Returns an unsubscribe. */
+  subscribeNotifications: (onNotification: (n: Notification) => void) => () => void
 }
 
 const SioContext = createContext<SioContextValue | null>(null)
@@ -65,6 +68,7 @@ export function SioProvider({ children }: { children: ReactNode }) {
   // / `locks` changes (the things consumers actually need to know about).
   const socketRef = useRef<Socket | null>(null)
   const dashboardHandlers = useRef<Set<(s: DashboardSnapshot | null) => void>>(new Set())
+  const notificationHandlers = useRef<Set<(n: Notification) => void>>(new Set())
   const logHandlers = useRef<Set<{ onReplay: (e: LogEntry[]) => void; onLine: (e: LogEntry) => void }>>(new Set())
 
   // Connect once per logged-in user. Single effect with ``[userId]`` as the
@@ -122,6 +126,7 @@ export function SioProvider({ children }: { children: ReactNode }) {
       if (logHandlers.current.size > 0) socket.emit("logs.subscribe")
     })
     socket.on("disconnect", () => { setStatus("closed"); setSid(null) })
+    socket.on("notification", (n: Notification) => { notificationHandlers.current.forEach((h) => h(n)) })
     socket.on("connect_error", (err) => {
       console.warn("[sio] connect_error", err.message)
       setStatus("closed")
@@ -208,6 +213,11 @@ export function SioProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const subscribeNotifications = useCallback((onNotification: (n: Notification) => void) => {
+    notificationHandlers.current.add(onNotification)
+    return () => { notificationHandlers.current.delete(onNotification) }
+  }, [])
+
   const subscribeLogs = useCallback((handlers: { onReplay: (e: LogEntry[]) => void; onLine: (e: LogEntry) => void }) => {
     logHandlers.current.add(handlers)
     const s = socketRef.current
@@ -226,8 +236,8 @@ export function SioProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo<SioContextValue>(() => ({
-    status, sid, locks, acquireLock, releaseLock, subscribeDashboard, subscribeLogs,
-  }), [status, sid, locks, acquireLock, releaseLock, subscribeDashboard, subscribeLogs])
+    status, sid, locks, acquireLock, releaseLock, subscribeDashboard, subscribeLogs, subscribeNotifications,
+  }), [status, sid, locks, acquireLock, releaseLock, subscribeDashboard, subscribeLogs, subscribeNotifications])
 
   return <SioContext.Provider value={value}>{children}</SioContext.Provider>
 }

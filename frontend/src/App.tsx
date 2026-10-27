@@ -100,6 +100,7 @@ export default function App() {
         <Route path="nomaflow/package" element={<TabRoute kind="page" />} />
         <Route path="nomaflow/changes" element={<TabRoute kind="page" />} />
         <Route path="nomaflow/integrity" element={<TabRoute kind="page" />} />
+        <Route path="notifications" element={<TabRoute kind="page" />} />
         {/* nomaflow run detail is hosted by TabHost as a `nomaflow_run` workspace tab — the
             TabRoute marker just opens/activates the tab; the actual rendering happens in
             TabHost so the run-detail page sits in the tab strip alongside Job Runs / Users / … */}

@@ -167,10 +167,20 @@ def parse_notification_rules(data: dict[str, Any]) -> NotificationsFile:
     return NotificationsFile.model_validate(data)
 
 
-def load_notification_rules(path: Path | str) -> NotificationsFile:
-    """Load and validate ``notifications.toml``; a missing file means no rules."""
+def load_notification_rules(path: Path | str, *, strict: bool = True) -> NotificationsFile:
+    """Load and validate ``notifications.toml``; a missing file means no rules. With
+    ``strict=False`` (the app's boot and reloads) a file that does not parse or validate is
+    logged and treated as empty — a broken rule file must not keep the server from starting."""
+    import logging
+
     path = Path(path)
     if not path.exists():
         return NotificationsFile()
-    with path.open("rb") as fh:
-        return parse_notification_rules(tomllib.load(fh))
+    try:
+        with path.open("rb") as fh:
+            return parse_notification_rules(tomllib.load(fh))
+    except Exception as exc:  # noqa: BLE001 — tomllib / pydantic errors alike
+        if strict:
+            raise
+        logging.getLogger(__name__).error("notifications.toml at %s is invalid — no rule is active until it is fixed: %s", path, exc)
+        return NotificationsFile()

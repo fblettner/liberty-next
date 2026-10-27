@@ -33,6 +33,7 @@ const AppBuilder = lazy(() => import('./AppBuilder'))
 // report) lives inside AppBuilder now since it's stored in app.toml.
 const ReportsBuilder = lazy(() => import('./ReportsBuilder'))
 const ActionsBuilder = lazy(() => import('./ActionsBuilder'))
+const NotificationsBuilder = lazy(() => import('./NotificationsBuilder'))
 const ConfigVersions = lazy(() => import('./ConfigVersions'))
 const ReleaseNotes = lazy(() => import('./ReleaseNotes'))
 // NOTE: Package, Changes and Integrity moved OUT of Settings into the nomaflow area — they're
@@ -40,7 +41,7 @@ const ReleaseNotes = lazy(() => import('./ReleaseNotes'))
 // components still live in this folder (they share FindDependenciesModal / FindUsagesModal with the
 // other config editors); the nomaflow pages import them. See pages/Nomaflow/{Package,Changes,Integrity}Page.
 
-const TABS = ['pools', 'connectors', 'dictionary', 'actions', 'menus', 'screens', 'charts', 'dashboards', 'reports', 'theme', 'access', 'app', 'versions', 'releasenotes'] as const
+const TABS = ['pools', 'connectors', 'dictionary', 'actions', 'menus', 'screens', 'charts', 'dashboards', 'reports', 'notifications', 'theme', 'access', 'app', 'versions', 'releasenotes'] as const
 type Tab = typeof TABS[number]
 const isTab = (v: string | null): v is Tab => v != null && (TABS as readonly string[]).includes(v)
 
@@ -114,6 +115,7 @@ export default function Settings() {
             the framework. Sits next to dashboards as the other "visualization
             output" surface. Install-wide PDF branding is in the App tab now. */}
         <TabBtn $active={tab === 'reports'} onClick={() => setTab('reports')}>{t('settings.tabs.reports', 'Reports')}</TabBtn>
+        <TabBtn $active={tab === 'notifications'} onClick={() => setTab('notifications')}>{t('settings.tabs.notifications', 'Notifications')}</TabBtn>
         <TabSep />
         {/* Shared — install-wide, not tied to any connector/app. */}
         <TabGroupLabel>{t('settings.tabGroups.shared', 'Shared')}</TabGroupLabel>
@@ -141,6 +143,7 @@ export default function Settings() {
           : tab === 'dashboards' ? <DashboardsBuilder />
           : tab === 'reports' ? <ReportsBuilder />
           : tab === 'actions' ? <ActionsBuilder />
+          : tab === 'notifications' ? <NotificationsBuilder />
           : tab === 'theme' ? <ThemeBuilder />
           : tab === 'access' ? <AccessBuilder />
           : tab === 'versions' ? <ConfigVersions />

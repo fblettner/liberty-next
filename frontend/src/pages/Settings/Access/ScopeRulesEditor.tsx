@@ -150,9 +150,6 @@ export default function ScopeRulesEditor({ value, onChange, dictionary, attribut
             <SegBtn $active={!byColumn} onClick={() => switchTarget(false)}>{t('settings.access.byItem', 'Dictionary item')}</SegBtn>
             <SegBtn $active={byColumn} onClick={() => switchTarget(true)}>{t('settings.access.byColumn', 'Column name')}</SegBtn>
           </Seg>
-          <span style={{ fontSize: fontSize.micro, color: colors.text.muted }}>
-            {byColumn ? t('settings.access.byColumnHint', 'the exact result column — one table') : t('settings.access.byItemHint', 'every table carrying the item (JDE: whatever the prefix)')}
-          </span>
         </div>
         <div className="grid">
           {byColumn ? (

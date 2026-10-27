@@ -116,3 +116,14 @@ async def test_events_dispatch_matching_rules() -> None:
     assert report is not None and d.calls[-1]["rule"] == "on_demand" and d.calls[-1]["payload"]["USER"] == "ann"
     assert await fire_action_rule(rules, d, rule_id="period_closed", payload={}, user="ann") is None
     assert await fire_action_rule(rules, d, rule_id="off", payload={}, user="ann") is None
+
+
+def test_load_tolerates_a_broken_file_when_asked(tmp_path, caplog) -> None:
+    from liberty.notify import load_notification_rules
+    bad = tmp_path / "notifications.toml"
+    bad.write_text('[notifications.x]\ntrigger = { kind = "screen",\n  app = "a" }\nsubject = "s"\n')   # an inline table over two lines
+    with pytest.raises(Exception):
+        load_notification_rules(bad)
+    assert load_notification_rules(bad, strict=False).notifications == {}
+    assert "is invalid" in caplog.text
+    assert load_notification_rules(tmp_path / "missing.toml").notifications == {}

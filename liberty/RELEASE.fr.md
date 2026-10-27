@@ -41,8 +41,17 @@
   `send_notification` dans les chaînes d'un écran déclenche la règle côté serveur avec les valeurs
   de la ligne ; seule une règle déclarée `kind = "action"` peut l'être ainsi, et la règle garde ses
   canaux et ses destinataires. L'envoi tourne sur sa propre tâche : une écriture ou une exécution
-  n'attend jamais un serveur de messagerie. La cloche, la page de réception et l'éditeur de règles
-  arrivent ensuite.
+  n'attend jamais un serveur de messagerie.
+- **L'interface.** Une cloche dans l'en-tête avec le nombre de non-lues, mise à jour en direct par
+  Socket.IO, et une liste déroulante des dernières notifications ; une page Notifications (toutes /
+  non lues, tout marquer comme lu ; une ligne ouvre son lien) ; Paramètres → App reçoit une section
+  Notifications pour le compte SMTP (hôte, port, expéditeur, utilisateur, mot de passe chiffré au
+  repos, STARTTLS ou TLS implicite, rétention) ; Paramètres → Notifications édite les règles : le
+  déclencheur (un événement d'écran avec application, écran, événements et condition sur la ligne ;
+  un événement de tâche avec tâches, événements et seuil de durée ; ou « déclenchée par une action
+  d'écran »), les canaux, les destinataires choisis parmi les utilisateurs et les rôles ou saisis
+  comme adresses, les modèles de sujet / corps / lien, la cible du canal action, et un bouton
+  « Envoyer un test » qui diffuse la règle avec des valeurs d'exemple.
 
 **Écrans : `editable_when`, une règle de lecture seule par ligne**
 - Un écran peut dire quand une ligne existante peut être modifiée : `editable_when = [{ field =

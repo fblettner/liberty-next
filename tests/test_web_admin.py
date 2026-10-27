@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from liberty.auth.db import AuthDatabase
 from liberty.auth.service import AuthService
 from liberty.config import (
+    NotifySettings,
     AISettings,
     AppSettings,
     AuthSettings,
@@ -87,6 +88,7 @@ def env(tmp_path):
         screens=ScreenSettings(config_path=tmp_path / "screens.toml"),
         charts=ChartSettings(config_path=tmp_path / "charts.toml"),
         dashboards=DashboardSettings(config_path=tmp_path / "dashboards.toml"),
+        notify=NotifySettings(config_path=tmp_path / "notifications.toml"),
         auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
         ai=AISettings(enabled=False),
         # Configured master key so the password-encryption tests have something to use; a
@@ -235,6 +237,7 @@ def test_config_pools_put_refuses_plaintext_when_no_master_key(tmp_path) -> None
         screens=ScreenSettings(config_path=tmp_path / "screens.toml"),
         charts=ChartSettings(config_path=tmp_path / "charts.toml"),
         dashboards=DashboardSettings(config_path=tmp_path / "dashboards.toml"),
+        notify=NotifySettings(config_path=tmp_path / "notifications.toml"),
         auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
         ai=AISettings(enabled=False),
         # Deliberately NO crypto.master_key — that's the scenario under test.
@@ -1743,3 +1746,39 @@ def test_app_parsed_round_trips_the_ui_defaults(env, tmp_path, monkeypatch) -> N
         assert r.status_code == 200, r.text
         got = client.get("/admin/config/app/parsed", headers=h).json()["app"]
         assert got["default_period"] == "lastMonth" and got["default_page_size"] == 100 and got["dashboard_cache_seconds"] == 0
+
+
+def test_app_parsed_notify_section_round_trip_encrypts_the_password(env, tmp_path, monkeypatch) -> None:
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        got = client.get("/admin/config/app/parsed", headers=h).json()
+        assert got["notify"]["smtp_port"] == 587 and got["notify"]["smtp_host"] == ""
+        body = {k: got[k] for k in ("app", "ai", "license", "oidc")}
+        body["notify"] = {**got["notify"], "smtp_host": "smtp.test", "smtp_user": "mailer", "smtp_password": "s3cr3t-pw", "smtp_from": "liberty@test"}
+        r = client.put("/admin/config/app/parsed", json=body, headers=h)
+        assert r.status_code == 200, r.text
+        got = client.get("/admin/config/app/parsed", headers=h).json()["notify"]
+        assert got["smtp_host"] == "smtp.test" and got["smtp_password"].startswith("ENC:")
+        text = (tmp_path / "app.toml").read_text()
+        assert "s3cr3t-pw" not in text and 'smtp_host = "smtp.test"' in text
+        # a save without the section leaves it alone
+        assert client.put("/admin/config/app/parsed", json={k: got_all[k] for k in ("app", "ai", "license", "oidc")} if (got_all := client.get("/admin/config/app/parsed", headers=h).json()) else {}, headers=h).status_code == 200
+        assert client.get("/admin/config/app/parsed", headers=h).json()["notify"]["smtp_host"] == "smtp.test"
+
+
+def test_notifications_parsed_round_trip_and_reload(env, tmp_path) -> None:
+    app, _conn_toml, _db_url = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        assert client.get("/admin/config/notifications/parsed", headers=h).json()["notifications"] == {}
+        rule = {"trigger": {"kind": "screen", "app": "a", "screen": "s", "events": ["update"], "when": [{"field": "STATUS", "value": "closed"}]},
+                "channels": ["portal"], "recipients": ["role:admin"], "subject": "x {PERIOD}", "label": None}
+        r = client.put("/admin/config/notifications/parsed", json={"notifications": {"closed": rule}}, headers=h)
+        assert r.status_code == 200, r.text
+        back = client.get("/admin/config/notifications/parsed", headers=h).json()["notifications"]
+        assert back["closed"]["trigger"]["when"] == [{"field": "STATUS", "value": "closed"}] and back["closed"]["enabled"] is True
+        assert "closed" in app.state.notification_rules.notifications      # reloaded at once
+        assert client.put("/admin/config/notifications/parsed", json={"notifications": {"bad": {"trigger": {"kind": "comet"}, "subject": "x"}}}, headers=h).status_code == 422
+        assert client.put("/admin/config/notifications/parsed", json={"notifications": {}}, headers=_h(client, "reader")).status_code == 403

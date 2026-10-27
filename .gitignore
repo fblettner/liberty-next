@@ -52,3 +52,5 @@ docs/work/
 # Oracle Instant Client zips are fetched at image build time (Dockerfile); a local copy here is
 # only for air-gapped builds and must not be committed (146 MB).
 docker/instantclient/*/*.zip
+# the per-install notification rules (Settings → Notifications writes it); the example is the doc
+config/notifications.toml

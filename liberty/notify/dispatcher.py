@@ -96,7 +96,9 @@ class Dispatcher:
         auth_backend: Callable[[], Any], connectors: Callable[[], Any], sio: Callable[[], Any] | None = None,
     ) -> None:
         self._store = store
-        self._settings = settings           # liberty.config.Settings (``[notify]`` + ``[crypto]``)
+        # liberty.config.Settings, or a callable returning it: the App editor swaps
+        # ``app.state.settings`` on save, so the SMTP account is read at send time.
+        self._settings = settings
         self._auth_backend = auth_backend   # callables: the app's holders are rebuilt on reload
         self._connectors = connectors
         self._sio = sio or (lambda: None)
@@ -188,26 +190,43 @@ class Dispatcher:
         return report
 
     # ── email ───────────────────────────────────────────────────────────────────
+    def _cfg(self) -> Any:
+        return self._settings() if callable(self._settings) else self._settings
+
     def _send_email(self, addresses: list[str], subject: str, body: str) -> None:
-        n = self._settings.notify
+        n = self._cfg().notify
         if not n.smtp_host:
             raise RuntimeError("[notify] smtp_host is not set")
         password = n.smtp_password or ""
         if password.startswith("ENC:"):
             from liberty.crypto import decrypt
-            password = decrypt(password, self._settings.crypto.master_key)
+            password = decrypt(password, self._cfg().crypto.master_key)
         msg = EmailMessage()
         msg["Subject"] = subject
         msg["From"] = n.smtp_from or n.smtp_user or "liberty@localhost"
         msg["To"] = ", ".join(addresses)
         msg.set_content(body or subject)
         smtp_cls = smtplib.SMTP_SSL if n.smtp_ssl else smtplib.SMTP
-        with smtp_cls(n.smtp_host, n.smtp_port, timeout=n.smtp_timeout) as smtp:
-            if n.smtp_tls and not n.smtp_ssl:
-                smtp.starttls()
-            if n.smtp_user:
-                smtp.login(n.smtp_user, password)
-            smtp.send_message(msg)
+        try:
+            with smtp_cls(n.smtp_host, n.smtp_port, timeout=n.smtp_timeout) as smtp:
+                if n.smtp_tls and not n.smtp_ssl:
+                    smtp.starttls()
+                if n.smtp_user:
+                    try:
+                        smtp.login(n.smtp_user, password)
+                    except (smtplib.SMTPAuthenticationError, smtplib.SMTPServerDisconnected) as exc:
+                        # Gmail and others drop the connection on a refused login rather than
+                        # answering 535 — name the likely cause instead of "connection closed".
+                        raise RuntimeError(
+                            f"login refused by {n.smtp_host} for user {n.smtp_user!r} ({exc}) — the user is usually the "
+                            "full address, and Gmail / Microsoft want an app password, not the account password"
+                        ) from exc
+                smtp.send_message(msg)
+        except smtplib.SMTPServerDisconnected as exc:
+            raise RuntimeError(
+                f"{n.smtp_host}:{n.smtp_port} closed the connection ({exc}) — check the port matches the encryption "
+                "(STARTTLS on 587, SSL on 465)"
+            ) from exc
 
     # ── action ──────────────────────────────────────────────────────────────────
     async def _run_action(self, action: ActionTarget, message: Message, *, subject: str, body: str) -> None:

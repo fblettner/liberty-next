@@ -1,0 +1,31 @@
+# notifications.toml — the rules that turn an event into a message (Settings → Notifications
+# edits this file; see liberty/notify/rules.py). One [notifications.<id>] per rule.
+#
+# A TOML inline table must stay on ONE line; use a sub-table ([notifications.<id>.trigger]) for
+# a long trigger, as below.
+
+[notifications.period_closed]
+label = "Period closed"
+channels = ["portal", "email"]                   # portal | email | action
+recipients = ["role:group", "email:cfo@corp.test"]   # user:<name> | role:<name> | email:<address>
+subject = "Period {PERIOD} closed by {USER}"     # {placeholders}: the row's columns (+ <COL>_ORIGINAL), USER, APP, SCREEN, EVENT
+body = "Period {PERIOD} of company {COMPANY} is now closed."
+link = "/screen/sales/period_status"
+
+[notifications.period_closed.trigger]
+kind = "screen"
+app = "sales"
+screen = "period_status"
+events = ["update"]                              # insert | update | delete
+when = [{ field = "STATUS", value = "closed" }]  # only when the written row matches (AND)
+
+[notifications.job_failed]
+trigger = { kind = "job", events = ["failure"] } # failure | succeeded | canceled | long_run (+ long_run_minutes); jobs = [...] to narrow
+recipients = ["role:admin"]
+subject = "Job {JOB} failed"                     # JOB, RUN_ID, STATE, ERROR, DURATION_MINUTES, ROWS
+body = "{ERROR}"
+
+[notifications.ask_review]
+trigger = { kind = "action" }                    # fired by a screen action of type send_notification
+recipients = ["role:group"]
+subject = "Please review {PERIOD}"

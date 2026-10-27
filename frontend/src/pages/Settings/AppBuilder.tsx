@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import {
   Save, Undo2, Settings as SettingsIcon, Sparkles, AlertTriangle, X,
-  ChevronDown, ChevronRight, KeyRound, ShieldCheck, FileText, RefreshCw,
+  ChevronDown, ChevronRight, KeyRound, ShieldCheck, FileText, RefreshCw, Bell,
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
@@ -66,6 +66,18 @@ interface OidcSection {
   redirect_url: string
   frontend_redirect: string
 }
+interface NotifySection {
+  enabled: boolean
+  smtp_host: string
+  smtp_port: number
+  smtp_user: string
+  smtp_password: string
+  smtp_from: string
+  smtp_tls: boolean
+  smtp_ssl: boolean
+  smtp_timeout: number
+  retention_days: number
+}
 interface ModelChoice { id: string; label: string }
 interface Choices {
   log_levels: string[]
@@ -79,6 +91,7 @@ interface AppParsed {
   ai: AiSection
   license: LicenseSection
   oidc: OidcSection
+  notify?: NotifySection
   choices: Choices
 }
 // PDF branding (``[reports.branding]`` in app.toml) — applied to every report
@@ -139,7 +152,7 @@ const InlineActions = styled.div`display: flex; align-items: center; gap: 6px;`
 const PERIOD_PRESETS = ['thisMonth', 'lastMonth', 'thisQuarter', 'thisYear', 'lastYear', 'last12', 'last30', 'last7', 'today', 'yesterday', 'all']
 
 const DEFAULTS: {
-  app: AppSection; ai: AiSection; license: LicenseSection; oidc: OidcSection; branding: BrandingFields;
+  app: AppSection; ai: AiSection; license: LicenseSection; oidc: OidcSection; notify: NotifySection; branding: BrandingFields;
 } = {
   app: { name: 'Liberty Next', host: '0.0.0.0', port: 8000, log_level: 'info', hot_reload: false, default_language: 'en', oracle_thick: false, default_period: 'thisMonth', default_page_size: 50, dashboard_cache_seconds: 60 },
   ai: {
@@ -154,16 +167,20 @@ const DEFAULTS: {
     scopes: 'openid email profile', username_claim: 'preferred_username',
     email_claim: 'email', name_claim: 'name', redirect_url: '', frontend_redirect: '',
   },
+  notify: {
+    enabled: true, smtp_host: '', smtp_port: 587, smtp_user: '', smtp_password: '', smtp_from: '',
+    smtp_tls: true, smtp_ssl: false, smtp_timeout: 20, retention_days: 90,
+  },
   branding: {
     author: '', primary_color: '', primary_color_light: '',
     cover_eyebrow: '', cover_ref: '', footer_left: '',
   },
 }
 
-type SectionKey = 'app' | 'license' | 'ai' | 'oidc' | 'branding'
+type SectionKey = 'app' | 'license' | 'ai' | 'oidc' | 'notify' | 'branding'
 const OPEN_STORAGE_KEY = 'liberty:appbuilder:open'
 const DEFAULT_OPEN: Record<SectionKey, boolean> = {
-  app: true, license: false, ai: false, oidc: false, branding: false,
+  app: true, license: false, ai: false, oidc: false, notify: false, branding: false,
 }
 
 function loadOpenState(): Record<SectionKey, boolean> {
@@ -181,6 +198,7 @@ export default function AppBuilder() {
   const [ai, setAi] = useState<AiSection>(DEFAULTS.ai)
   const [license, setLicense] = useState<LicenseSection>(DEFAULTS.license)
   const [oidc, setOidc] = useState<OidcSection>(DEFAULTS.oidc)
+  const [notify, setNotify] = useState<NotifySection>(DEFAULTS.notify)
   const [branding, setBranding] = useState<BrandingFields>(DEFAULTS.branding)
   // The framework's hard-coded defaults — used as input placeholders + by the
   // "Reset to defaults" button. Loaded alongside the current values so the UI
@@ -221,12 +239,13 @@ export default function AppBuilder() {
       setAi(r.ai)
       setLicense(r.license)
       setOidc(r.oidc)
+      setNotify({ ...DEFAULTS.notify, ...(r.notify ?? {}) })
       setChoices(r.choices)
       const loadedBranding = b?.branding ?? DEFAULTS.branding
       setBranding(loadedBranding)
       setBrandingDefaults(b?.defaults ?? DEFAULTS.branding)
       setOriginal(JSON.stringify({
-        app: r.app, ai: r.ai, license: r.license, oidc: r.oidc, branding: loadedBranding,
+        app: r.app, ai: r.ai, license: r.license, oidc: r.oidc, notify: { ...DEFAULTS.notify, ...(r.notify ?? {}) }, branding: loadedBranding,
       }))
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
@@ -268,7 +287,7 @@ export default function AppBuilder() {
       // Same pattern as PoolsBuilder / ConnectorsBuilder.
       const r = await api.put<{ saved: boolean; requires_restart?: boolean }>(
         '/admin/config/app/parsed',
-        { app, ai, license, oidc },
+        { app, ai, license, oidc, notify },
       )
       // Branding lives in the same file but has its own endpoint — second PUT,
       // so a typo here doesn't poison the app/ai/license/oidc save above.
@@ -501,6 +520,58 @@ export default function AppBuilder() {
               <Input type="number" min={1} value={ai.web_fetch_max_uses}
                 onChange={(e) => setAi({ ...ai, web_fetch_max_uses: Number(e.target.value) || 0 })} style={{ width: 130 }} />
             </Field>
+          </>,
+        )}
+
+        {renderSection(
+          'notify',
+          t('settings.app.notifySection', 'Notifications (email)'),
+          <Bell size={14} />,
+          !notify.enabled ? t('settings.app.oidcDisabled', 'disabled') : notify.smtp_host ? `${notify.smtp_host}:${notify.smtp_port}` : t('settings.app.notifyNoSmtp', 'no SMTP — portal only'),
+          <>
+            <Checkbox label={t('settings.app.notifyEnabled', 'Notifications enabled')} checked={notify.enabled} onChange={(c) => setNotify({ ...notify, enabled: c })} />
+            <Hint>{t('settings.app.smtpServer', 'Server')}</Hint>
+            <RowFlex>
+              <Field label={t('settings.app.smtpHost', 'SMTP host')}>
+                <Input value={notify.smtp_host} onChange={(e) => setNotify({ ...notify, smtp_host: e.target.value })} placeholder="smtp.example.com" style={{ width: 280 }} />
+              </Field>
+              <Field label={t('settings.app.smtpPort', 'Port')}>
+                <Input type="number" min={1} max={65535} value={notify.smtp_port} onChange={(e) => setNotify({ ...notify, smtp_port: Number(e.target.value) || 587 })} style={{ width: 110 }} />
+              </Field>
+              <Field label={t('settings.app.smtpEncryption', 'Encryption')}>
+                <div style={{ width: 240 }}>
+                  <SearchSelect
+                    value={notify.smtp_ssl ? 'ssl' : notify.smtp_tls ? 'starttls' : 'none'}
+                    onChange={(v) => setNotify({ ...notify, smtp_tls: v === 'starttls', smtp_ssl: v === 'ssl', smtp_port: v === 'ssl' && notify.smtp_port === 587 ? 465 : v === 'starttls' && notify.smtp_port === 465 ? 587 : notify.smtp_port })}
+                    options={[
+                      { value: 'starttls', label: t('settings.app.smtpStartTls', 'STARTTLS (usually port 587)') },
+                      { value: 'ssl', label: t('settings.app.smtpImplicitTls', 'SSL / implicit TLS (usually port 465)') },
+                      { value: 'none', label: t('settings.app.smtpNoTls', 'None (plain connection)') },
+                    ]} />
+                </div>
+              </Field>
+              <Field label={t('settings.app.smtpTimeout', 'Timeout (s)')}>
+                <Input type="number" min={1} value={notify.smtp_timeout} onChange={(e) => setNotify({ ...notify, smtp_timeout: Number(e.target.value) || 20 })} style={{ width: 90 }} />
+              </Field>
+            </RowFlex>
+            <Hint>{t('settings.app.smtpAccount', 'Account')}</Hint>
+            <RowFlex>
+              <Field label={t('settings.app.smtpUser', 'User')}>
+                <Input value={notify.smtp_user} onChange={(e) => setNotify({ ...notify, smtp_user: e.target.value })} style={{ width: 280 }} />
+              </Field>
+              <Field label={t('settings.app.smtpPassword', 'Password')}>
+                <PasswordInput value={notify.smtp_password} onChange={(e) => setNotify({ ...notify, smtp_password: e.target.value })} placeholder="…" style={{ fontFamily: fonts.mono, width: 280 }} />
+              </Field>
+            </RowFlex>
+            <Hint>{t('settings.app.smtpSending', 'Sending')}</Hint>
+            <RowFlex>
+              <Field label={t('settings.app.smtpFrom', 'From address')}>
+                <Input value={notify.smtp_from} onChange={(e) => setNotify({ ...notify, smtp_from: e.target.value })} placeholder="liberty@example.com" style={{ width: 280 }} />
+              </Field>
+              <Field label={t('settings.app.notifyRetention', 'Keep read notifications (days, 0 = forever)')}>
+                <Input type="number" min={0} value={notify.retention_days} onChange={(e) => setNotify({ ...notify, retention_days: Math.max(0, Number(e.target.value) || 0) })} style={{ width: 110 }} />
+              </Field>
+            </RowFlex>
           </>,
         )}
 
