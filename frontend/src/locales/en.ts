@@ -709,6 +709,13 @@ const en = {
     },
     tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', charts: 'Charts', dashboards: 'Dashboards', explorer: 'Explorer', theme: 'Theme', app: 'App', reports: 'Reports', changes: 'Changes', integrity: 'Integrity' },
     explorer: {
+      model: 'Model',
+      noModel: 'No model',
+      noModels: 'No model in this app yet. "Add model" starts a data mart: a hub entity and the entities around it.',
+      addModel: 'Add model',
+      modelPrompt: 'Id of the new model (letters, digits, "_" and "-"):',
+      deleteModel: 'Delete the model "{{id}}" with its entities and relations?',
+      deleteModelBtn: 'Delete model',
       app: 'App',
       noScopes: 'No explorer model yet — use "Add scope" to pick an app.',
       addScope: 'Add an app',

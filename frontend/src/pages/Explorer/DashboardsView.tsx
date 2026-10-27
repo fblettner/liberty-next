@@ -28,8 +28,9 @@ const Body = styled.div`flex: 1; min-height: 0; display: flex; flex-direction: c
 const Bar = styled.div`display: flex; align-items: center; gap: 8px; flex-wrap: wrap;`
 const Empty = styled.div`grid-column: 1 / -1; padding: 40px; text-align: center; color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; border: 1px dashed ${colors.border}; border-radius: ${radius.md};`
 
-export function DashboardsView({ app, definition, analyses, editing, lang, onChange, onOpenAnalysis }: {
+export function DashboardsView({ app, model, definition, analyses, editing, lang, onChange, onOpenAnalysis }: {
   app: string
+  model: string
   definition: DashboardDefinition
   analyses: SavedAnalysis[]
   editing: boolean
@@ -87,7 +88,7 @@ export function DashboardsView({ app, definition, analyses, editing, lang, onCha
                 ) : null}
               </Head>
               <Body>
-                {a ? <Tile app={app} analysis={a} period={period} lang={lang} onDrill={(cells) => onOpenAnalysis(a, cells)} />
+                {a ? <Tile app={app} model={model} analysis={a} period={period} lang={lang} onDrill={(cells) => onOpenAnalysis(a, cells)} />
                   : <Banner $tone="warning">{t('explorer.missingAnalysis', { id: tile.analysis })}</Banner>}
               </Body>
             </Card>
@@ -98,8 +99,8 @@ export function DashboardsView({ app, definition, analyses, editing, lang, onCha
   )
 }
 
-function Tile({ app, analysis, period, lang, onDrill }: {
-  app: string; analysis: SavedAnalysis; period: DashboardDefinition['period']; lang: string; onDrill: (cells: DrillCell[]) => void
+function Tile({ app, model, analysis, period, lang, onDrill }: {
+  app: string; model: string; analysis: SavedAnalysis; period: DashboardDefinition['period']; lang: string; onDrill: (cells: DrillCell[]) => void
 }) {
   const { t } = useTranslation()
   const def: AnalysisDefinition = useMemo(() => withDashboardPeriod(analysis.definition, period), [analysis, period])
@@ -113,8 +114,8 @@ function Tile({ app, analysis, period, lang, onDrill }: {
     setLoading(true); setError(null)
     const go = async () => {
       try {
-        if (def.view === 'detail') setDetail(await api.post<DetailResult>(`/api/explorer/${encodeURIComponent(app)}/detail`, buildDetailRequest(def, { pageSize: 50 })))
-        else setResult(await api.post<AggregateResult>(`/api/explorer/${encodeURIComponent(app)}/query`, buildAggregateRequest(def)))
+        if (def.view === 'detail') setDetail(await api.post<DetailResult>(`/api/explorer/${encodeURIComponent(app)}/${encodeURIComponent(model)}/detail`, buildDetailRequest(def, { pageSize: 50 })))
+        else setResult(await api.post<AggregateResult>(`/api/explorer/${encodeURIComponent(app)}/${encodeURIComponent(model)}/query`, buildAggregateRequest(def)))
       } catch (e) {
         if (!cancelled) setError(e instanceof ApiError ? e.message : String(e))
       } finally { if (!cancelled) setLoading(false) }
@@ -122,7 +123,7 @@ function Tile({ app, analysis, period, lang, onDrill }: {
     void go()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key is the serialised definition
-  }, [app, key])
+  }, [app, model, key])
   if (error) return <Banner $tone="error">{error}</Banner>
   if (loading && !result && !detail) return <div style={{ padding: 12 }}><SpinnerRing size={14} thickness={2} /></div>
   if (def.view === 'detail') return detail ? <ResultTable columns={detail.columns} rows={detail.rows} lang={lang} /> : null

@@ -42,11 +42,11 @@ def _connectors_toml(db_url: str) -> str:
 
 
 EXPLORER_TOML = textwrap.dedent("""
-    [explorer.shop]
+    [explorer.shop.sales]
     label = "Shop"
     hub = "sales"
 
-    [explorer.shop.entities.sales]
+    [explorer.shop.sales.entities.sales]
     query = "fact_sales_get"
     screen = "sales"
     key = ["ID"]
@@ -54,19 +54,19 @@ EXPLORER_TOML = textwrap.dedent("""
     measures = { QTY = "sum", REVENUE = "sum", COMPANY = "sum" }
     hidden = ["ID"]
 
-    [explorer.shop.entities.company]
+    [explorer.shop.sales.entities.company]
     label = "Company"
     query = "dim_company_get"
     key = ["COMPANY"]
 
-    [[explorer.shop.relations]]
+    [[explorer.shop.sales.relations]]
     from = "sales"
     to = "company"
     on = [["COMPANY", "COMPANY"]]
 
-    [explorer.other]
+    [explorer.other.x]
     hub = "x"
-    [explorer.other.entities.x]
+    [explorer.other.x.entities.x]
     connector = "shop"
     query = "broken_get"
     """)
@@ -99,7 +99,7 @@ def _seed(db_url: str) -> None:
         async with db.session() as s:
             svc = AuthService(s)
             await svc.get_or_create_role("admin", permissions=["*"])
-            await svc.get_or_create_role("analyst", permissions=["explorer:shop", "sql:shop:*"])
+            await svc.get_or_create_role("analyst", permissions=["explorer:shop:*", "sql:shop:*"])
             await svc.create_user("admin", password="adminpw", is_superuser=True, roles=["admin"])
             await svc.create_user("analyst", password="analystpw", roles=["analyst"])
             await svc.create_user("nobody", password="nobodypw")
@@ -136,7 +136,7 @@ def test_list_models_by_permission(env) -> None:
     with TestClient(app) as client:
         assert client.get("/api/explorer").status_code == 401
         admin = client.get("/api/explorer", headers=_h(client, "admin")).json()["models"]
-        assert [m["app"] for m in admin] == ["shop", "other"] and admin[0]["label"] == "Shop" and admin[0]["entities"] == 2
+        assert [(m["app"], m["model"]) for m in admin] == [("shop", "sales"), ("other", "x")] and admin[0]["label"] == "Shop" and admin[0]["entities"] == 2
         assert [m["app"] for m in client.get("/api/explorer", headers=_h(client, "analyst")).json()["models"]] == ["shop"]
         assert client.get("/api/explorer", headers=_h(client, "nobody")).json()["models"] == []
 
@@ -144,7 +144,7 @@ def test_list_models_by_permission(env) -> None:
 def test_model_fields_discovered_with_hints(env) -> None:
     app, _ = env
     with TestClient(app) as client:
-        r = client.get("/api/explorer/shop/model", headers=_h(client, "analyst"))
+        r = client.get("/api/explorer/shop/sales/model", headers=_h(client, "analyst"))
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["hub"] == "sales" and body["relations"] == [{"from": "sales", "to": "company", "on": [["COMPANY", "COMPANY"]]}]
@@ -159,14 +159,14 @@ def test_model_fields_discovered_with_hints(env) -> None:
         assert company["label"] == "Company" and [f["key"] for f in company["fields"]] == ["company.COMPANY", "company.NAME", "company.REGION"]
         assert any("COMPANY" in w and "typed string" in w for w in body["warnings"])
         # permission: nobody → 403; unknown app (with permission) → 404
-        assert client.get("/api/explorer/shop/model", headers=_h(client, "nobody")).status_code == 403
-        assert client.get("/api/explorer/ghost/model", headers=_h(client, "admin")).status_code == 404
+        assert client.get("/api/explorer/shop/sales/model", headers=_h(client, "nobody")).status_code == 403
+        assert client.get("/api/explorer/ghost/x/model", headers=_h(client, "admin")).status_code == 404
 
 
 def test_model_with_a_broken_entity_reports_it(env) -> None:
     app, _ = env
     with TestClient(app) as client:
-        body = client.get("/api/explorer/other/model", headers=_h(client, "admin")).json()
+        body = client.get("/api/explorer/other/x/model", headers=_h(client, "admin")).json()
         assert body["entities"][0]["fields"] == [] and "broken_get" in body["entities"][0]["error"]
         assert body["warnings"] and "broken_get" in body["warnings"][0]
 
@@ -175,14 +175,14 @@ def test_model_cache_and_refresh(env) -> None:
     app, tmp_path = env
     with TestClient(app) as client:
         h = _h(client, "admin")
-        first = client.get("/api/explorer/shop/model", headers=h).json()
+        first = client.get("/api/explorer/shop/sales/model", headers=h).json()
         assert app.state.explorer_cache._views  # cached
         # editing the file + reload empties the cache and the new label is seen
         (tmp_path / "explorer.toml").write_text(EXPLORER_TOML.replace('label = "Shop"', 'label = "Shop v2"'))
         client.post("/admin/reload", headers=h)
-        second = client.get("/api/explorer/shop/model", headers=h).json()
+        second = client.get("/api/explorer/shop/sales/model", headers=h).json()
         assert first["label"] == "Shop" and second["label"] == "Shop v2"
-        assert client.get("/api/explorer/shop/model?refresh=1", headers=h).json()["label"] == "Shop v2"
+        assert client.get("/api/explorer/shop/sales/model?refresh=1", headers=h).json()["label"] == "Shop v2" and first["model"] == "sales"
 
 
 def test_admin_parsed_round_trip(env) -> None:
@@ -190,7 +190,7 @@ def test_admin_parsed_round_trip(env) -> None:
     with TestClient(app) as client:
         h = _h(client, "admin")
         body = client.get("/admin/config/explorer/parsed", headers=h).json()
-        shop = body["explorer"]["shop"]
+        shop = body["explorer"]["shop"]["sales"]
         assert shop["hub"] == "sales" and shop["entities"]["sales"]["measures"]["QTY"] == "sum"
         assert shop["relations"][0]["from"] == "sales" and "id" not in shop["entities"]["sales"]
         shop["entities"]["company"]["label"] = "Companies"
@@ -201,14 +201,14 @@ def test_admin_parsed_round_trip(env) -> None:
         text_ = (tmp_path / "explorer.toml").read_text()
         assert 'label = "Companies"' in text_ and 'from = "company"' in text_
         client.post("/admin/reload", headers=h)
-        back = client.get("/admin/config/explorer/parsed", headers=h).json()["explorer"]["shop"]
+        back = client.get("/admin/config/explorer/parsed", headers=h).json()["explorer"]["shop"]["sales"]
         assert back["entities"]["company"]["label"] == "Companies" and len(back["relations"]) == 2
         # an invalid model is refused and the file untouched
-        bad = {"explorer": {"shop": {**shop, "hub": "ghost"}}}
+        bad = {"explorer": {"shop": {"sales": {**shop, "hub": "ghost"}}}}
         assert client.put("/admin/config/explorer/parsed", json=bad, headers=h).status_code == 422
         assert client.get("/admin/config/explorer/parsed", headers=_h(client, "analyst")).status_code == 403
         assert "explorer" in client.get("/admin/config/schema", headers=h).json()
-        assert client.get("/info", headers=h).json()["explorer"]["apps"] == ["shop", "other"]
+        assert client.get("/info", headers=h).json()["explorer"] == {"apps": ["shop", "other"], "models": 2}
 
 
 def test_query_route(env) -> None:
@@ -216,18 +216,18 @@ def test_query_route(env) -> None:
     with TestClient(app) as client:
         h = _h(client, "analyst")
         body = {"rows": [{"field": "company.NAME"}], "measures": [{"field": "sales.REVENUE"}], "debug": True}
-        r = client.post("/api/explorer/shop/query", json=body, headers=h)
+        r = client.post("/api/explorer/shop/sales/query", json=body, headers=h)
         assert r.status_code == 200, r.text
         out = r.json()
         assert out["rows"] == [{"company.NAME": "Corp one", "sum(sales.REVENUE)": 30.5}] and out["groups"] == 1
         assert "sql" not in out                                  # debug SQL is for a superuser
-        assert "sql" in client.post("/api/explorer/shop/query", json=body, headers=_h(client, "admin")).json()
-        assert client.post("/api/explorer/shop/query", json={"rows": [{"field": "sales.NOPE"}]}, headers=h).status_code == 422
-        assert client.post("/api/explorer/shop/query", json={"rows": [{"field": "sales.COMPANY", "bucket": "month"}]}, headers=h).status_code == 422
-        assert client.post("/api/explorer/shop/query", json=body, headers=_h(client, "nobody")).status_code == 403
-        assert client.post("/api/explorer/ghost/query", json=body, headers=_h(client, "admin")).status_code == 404
+        assert "sql" in client.post("/api/explorer/shop/sales/query", json=body, headers=_h(client, "admin")).json()
+        assert client.post("/api/explorer/shop/sales/query", json={"rows": [{"field": "sales.NOPE"}]}, headers=h).status_code == 422
+        assert client.post("/api/explorer/shop/sales/query", json={"rows": [{"field": "sales.COMPANY", "bucket": "month"}]}, headers=h).status_code == 422
+        assert client.post("/api/explorer/shop/sales/query", json=body, headers=_h(client, "nobody")).status_code == 403
+        assert client.post("/api/explorer/ghost/x/query", json=body, headers=_h(client, "admin")).status_code == 404
         # a broken entity: a database error, reported with its text to a superuser
-        r = client.post("/api/explorer/other/query", json={}, headers=_h(client, "admin"))
+        r = client.post("/api/explorer/other/x/query", json={}, headers=_h(client, "admin"))
         assert r.status_code == 502 and "missing_table" in r.text
 
 
@@ -235,38 +235,38 @@ def test_detail_and_calc_routes(env) -> None:
     app, _ = env
     with TestClient(app) as client:
         h = _h(client, "analyst")
-        r = client.post("/api/explorer/shop/detail", json={"columns": ["sales.ID", "company.NAME"], "drill": [{"field": "company.NAME", "value": "Corp one"}]}, headers=h)
+        r = client.post("/api/explorer/shop/sales/detail", json={"columns": ["sales.ID", "company.NAME"], "drill": [{"field": "company.NAME", "value": "Corp one"}]}, headers=h)
         assert r.status_code == 200, r.text
         assert r.json()["total"] == 1 and r.json()["rows"] == [{"sales.ID": 1, "company.NAME": "Corp one"}]
-        r = client.post("/api/explorer/shop/calc/test", json={"calculated": [{"name": "up", "expr": "REVENUE / QTY"}], "name": "up"}, headers=h)
+        r = client.post("/api/explorer/shop/sales/calc/test", json={"calculated": [{"name": "up", "expr": "REVENUE / QTY"}], "name": "up"}, headers=h)
         assert r.status_code == 200, r.text
         assert r.json() == {"name": "up", "type": "number", "kind": "measure", "values": [10.166666666666666]}
-        r = client.post("/api/explorer/shop/calc/test", json={"calculated": [{"name": "up", "expr": "REVENUE +"}], "name": "up"}, headers=h)
+        r = client.post("/api/explorer/shop/sales/calc/test", json={"calculated": [{"name": "up", "expr": "REVENUE +"}], "name": "up"}, headers=h)
         assert r.status_code == 422 and "unexpected" in r.json()["detail"]
-        assert client.post("/api/explorer/shop/detail", json={"columns": ["sales.NOPE"]}, headers=h).status_code == 422
-        assert client.post("/api/explorer/shop/detail", json={}, headers=_h(client, "nobody")).status_code == 403
+        assert client.post("/api/explorer/shop/sales/detail", json={"columns": ["sales.NOPE"]}, headers=h).status_code == 422
+        assert client.post("/api/explorer/shop/sales/detail", json={}, headers=_h(client, "nobody")).status_code == 403
 
 
 def test_saved_analyses_routes(env) -> None:
     app, _ = env
     with TestClient(app) as client:
         ha, hb = _h(client, "analyst"), _h(client, "admin")
-        r = client.put("/api/explorer/shop/saved/analyses", json={"name": "Revenue by company", "definition": {"rows": [{"field": "company.NAME"}]}, "audience": "sales"}, headers=ha)
+        r = client.put("/api/explorer/shop/sales/saved/analyses", json={"name": "Revenue by company", "definition": {"rows": [{"field": "company.NAME"}]}, "audience": "sales"}, headers=ha)
         assert r.status_code == 200, r.text
         item = r.json()["item"]
         assert item["id"] == "revenue-by-company" and item["owner"] == "analyst" and not item["shared"]
-        assert client.get("/api/explorer/shop/saved/analyses", headers=hb).json()["items"] == []     # private to the analyst
-        r = client.put("/api/explorer/shop/saved/analyses", json={"id": item["id"], "name": "Revenue by company", "definition": {}, "shared": True}, headers=ha)
+        assert client.get("/api/explorer/shop/sales/saved/analyses", headers=hb).json()["items"] == []     # private to the analyst
+        r = client.put("/api/explorer/shop/sales/saved/analyses", json={"id": item["id"], "name": "Revenue by company", "definition": {}, "shared": True}, headers=ha)
         assert r.json()["item"]["shared"] and r.json()["item"]["version"] == 2
-        assert [x["id"] for x in client.get("/api/explorer/shop/saved/analyses", headers=hb).json()["items"]] == ["revenue-by-company"]
+        assert [x["id"] for x in client.get("/api/explorer/shop/sales/saved/analyses", headers=hb).json()["items"]] == ["revenue-by-company"]
         # the admin cannot be refused; nobody has no permission; a bad kind is a 404
-        assert client.get("/api/explorer/shop/saved/analyses", headers=_h(client, "nobody")).status_code == 403
-        assert client.get("/api/explorer/shop/saved/things", headers=ha).status_code == 404
-        r = client.put("/api/explorer/shop/saved/dashboards", json={"name": "Home", "definition": {"tiles": [{"analysis": "revenue-by-company", "w": 2, "h": "m"}]}, "shared": True}, headers=hb)
+        assert client.get("/api/explorer/shop/sales/saved/analyses", headers=_h(client, "nobody")).status_code == 403
+        assert client.get("/api/explorer/shop/sales/saved/things", headers=ha).status_code == 404
+        r = client.put("/api/explorer/shop/sales/saved/dashboards", json={"name": "Home", "definition": {"tiles": [{"analysis": "revenue-by-company", "w": 2, "h": "m"}]}, "shared": True}, headers=hb)
         assert r.status_code == 200 and r.json()["item"]["id"] == "home"
-        assert client.delete("/api/explorer/shop/saved/dashboards/home", headers=ha).status_code == 403   # shared by the admin
-        assert client.delete("/api/explorer/shop/saved/dashboards/home", headers=hb).json()["deleted"] is True
-        assert client.delete("/api/explorer/shop/saved/analyses/revenue-by-company", headers=ha).json()["deleted"] is True
+        assert client.delete("/api/explorer/shop/sales/saved/dashboards/home", headers=ha).status_code == 403   # shared by the admin
+        assert client.delete("/api/explorer/shop/sales/saved/dashboards/home", headers=hb).json()["deleted"] is True
+        assert client.delete("/api/explorer/shop/sales/saved/analyses/revenue-by-company", headers=ha).json()["deleted"] is True
 
 
 def test_export_routes(env) -> None:
@@ -276,21 +276,21 @@ def test_export_routes(env) -> None:
     with TestClient(app) as client:
         h = _h(client, "analyst")
         definition = {"entity": "sales", "view": "table", "rows": [{"field": "company.NAME"}], "measures": [{"field": "sales.REVENUE", "agg": "sum"}], "filterRows": [], "sort": [], "limit": 100, "calculated": []}
-        r = client.post("/api/explorer/shop/export", json={"format": "xlsx", "definition": definition, "title": "Revenue by company"}, headers=h)
+        r = client.post("/api/explorer/shop/sales/export", json={"format": "xlsx", "definition": definition, "title": "Revenue by company"}, headers=h)
         assert r.status_code == 200, r.text
         assert r.headers["content-disposition"] == 'attachment; filename="Revenue_by_company.xlsx"'
         wb = load_workbook(io.BytesIO(r.content))
         assert wb.sheetnames == ["Revenue by company"] and wb.active["A3"].value == "Corp one" and wb.active["B3"].value == 30.5   # row 1 = the note
         # a saved analysis + a dashboard of it, by id
-        client.put("/api/explorer/shop/saved/analyses", json={"name": "Rev", "definition": definition, "shared": True}, headers=h)
-        client.put("/api/explorer/shop/saved/dashboards", json={"name": "Board", "definition": {"tiles": [{"analysis": "rev", "w": 2, "h": "m"}, {"analysis": "ghost", "w": 1, "h": "s"}]}, "shared": True}, headers=h)
-        r = client.post("/api/explorer/shop/export", json={"format": "xlsx", "dashboard": "board"}, headers=h)
+        client.put("/api/explorer/shop/sales/saved/analyses", json={"name": "Rev", "definition": definition, "shared": True}, headers=h)
+        client.put("/api/explorer/shop/sales/saved/dashboards", json={"name": "Board", "definition": {"tiles": [{"analysis": "rev", "w": 2, "h": "m"}, {"analysis": "ghost", "w": 1, "h": "s"}]}, "shared": True}, headers=h)
+        r = client.post("/api/explorer/shop/sales/export", json={"format": "xlsx", "dashboard": "board"}, headers=h)
         assert r.status_code == 200 and load_workbook(io.BytesIO(r.content)).sheetnames == ["Rev"]
-        assert client.post("/api/explorer/shop/export", json={"format": "xlsx", "analysis": "nope"}, headers=h).status_code == 404
-        assert client.post("/api/explorer/shop/export", json={"format": "xlsx"}, headers=h).status_code == 422
-        assert client.post("/api/explorer/shop/export", json={"format": "xlsx", "analysis": "rev"}, headers=_h(client, "nobody")).status_code == 403
+        assert client.post("/api/explorer/shop/sales/export", json={"format": "xlsx", "analysis": "nope"}, headers=h).status_code == 404
+        assert client.post("/api/explorer/shop/sales/export", json={"format": "xlsx"}, headers=h).status_code == 422
+        assert client.post("/api/explorer/shop/sales/export", json={"format": "xlsx", "analysis": "rev"}, headers=_h(client, "nobody")).status_code == 403
         # pdf: the reports extra may be missing on this machine
-        r = client.post("/api/explorer/shop/export", json={"format": "pdf", "analysis": "rev", "from": "2026-01-01", "to": "2026-12-31"}, headers=h)
+        r = client.post("/api/explorer/shop/sales/export", json={"format": "pdf", "analysis": "rev", "from": "2026-01-01", "to": "2026-12-31"}, headers=h)
         assert r.status_code in (200, 503)
         if r.status_code == 200:
             assert r.content[:4] == b"%PDF"

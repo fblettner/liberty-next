@@ -56,33 +56,53 @@ async def test_save_share_save_as_delete(views) -> None:
 
 
 @pytest.mark.asyncio
+async def test_migrate_keys_moves_the_old_app_key(views) -> None:
+    from liberty.explorer.store import migrate_keys
+    st = AnalysisStore(views)
+    await st.save("shop", KIND_ANALYSIS, "ann", obj_id=None, name="Old private", definition={})
+    await st.save("shop", KIND_ANALYSIS, "ann", obj_id=None, name="Old shared", definition={}, shared=True)
+    await st.save("shop", KIND_DASHBOARD, "bob", obj_id=None, name="Old board", definition={})
+    f = parse_explorer({"explorer": {"shop": {"m": {"hub": "s", "entities": {"s": {"query": "q"}}}}}})
+    assert await migrate_keys(views, f) == 3
+    assert await st.list("shop", KIND_ANALYSIS, "ann") == []
+    assert [x["name"] for x in await st.list("shop/m", KIND_ANALYSIS, "ann")] == ["Old private", "Old shared"]
+    assert [x["name"] for x in await st.list("shop/m", KIND_DASHBOARD, "bob")] == ["Old board"]
+    assert await migrate_keys(views, f) == 0          # idempotent
+    # two models: ambiguous, nothing moves
+    await st.save("shop", KIND_ANALYSIS, "ann", obj_id=None, name="Again", definition={})
+    two = parse_explorer({"explorer": {"shop": {"m": {"hub": "s", "entities": {"s": {"query": "q"}}}, "n": {"hub": "s", "entities": {"s": {"query": "q"}}}}}})
+    assert await migrate_keys(views, two) == 0
+
+
+@pytest.mark.asyncio
 async def test_sync_bundled_installs_once_and_refreshes_untouched(views) -> None:
-    cfg = {"explorer": {"shop": {"hub": "s", "entities": {"s": {"query": "q"}},
+    cfg = {"explorer": {"shop": {"m": {"hub": "s", "entities": {"s": {"query": "q"}},
         "analyses": {"qty": {"label": "Quantity", "audience": "sales", "version": 1, "definition": {"rows": ["s.QTY"]}}},
-        "dashboards": {"home": {"label": "Home", "definition": {"tiles": [{"analysis": "qty"}]}}}}}}
+        "dashboards": {"home": {"label": "Home", "definition": {"tiles": [{"analysis": "qty"}]}}}}}}}
     f = parse_explorer(cfg)
     assert await sync_bundled(views, f) == {"installed": 2, "refreshed": 0}
     st = AnalysisStore(views)
-    items = await st.list("shop", KIND_ANALYSIS, "ann")
+    shop = "shop/m"
+    items = await st.list(shop, KIND_ANALYSIS, "ann")
     assert items[0]["id"] == "qty" and items[0]["shared"] and items[0]["bundled"] == 1 and items[0]["owner"] == "bundled"
-    assert (await st.list("shop", KIND_DASHBOARD, "ann"))[0]["definition"] == {"tiles": [{"analysis": "qty"}]}
+    assert (await st.list(shop, KIND_DASHBOARD, "ann"))[0]["definition"] == {"tiles": [{"analysis": "qty"}]}
     # same version again: nothing
     assert await sync_bundled(views, f) == {"installed": 0, "refreshed": 0}
     # version 2: the untouched copy is refreshed
-    cfg["explorer"]["shop"]["analyses"]["qty"]["version"] = 2
-    cfg["explorer"]["shop"]["analyses"]["qty"]["definition"] = {"rows": ["s.QTY", "s.CO"]}
+    cfg["explorer"]["shop"]["m"]["analyses"]["qty"]["version"] = 2
+    cfg["explorer"]["shop"]["m"]["analyses"]["qty"]["definition"] = {"rows": ["s.QTY", "s.CO"]}
     assert await sync_bundled(views, parse_explorer(cfg)) == {"installed": 0, "refreshed": 1}
-    assert (await st.list("shop", KIND_ANALYSIS, "ann"))[0]["definition"] == {"rows": ["s.QTY", "s.CO"]}
+    assert (await st.list(shop, KIND_ANALYSIS, "ann"))[0]["definition"] == {"rows": ["s.QTY", "s.CO"]}
     # a user edit drops the marker: version 3 leaves it alone; a deleted copy stays deleted
-    await st.save("shop", KIND_ANALYSIS, "ann", obj_id="qty", name="Quantity (mine)", definition={"rows": []}, shared=True)
-    cfg["explorer"]["shop"]["analyses"]["qty"]["version"] = 3
+    await st.save(shop, KIND_ANALYSIS, "ann", obj_id="qty", name="Quantity (mine)", definition={"rows": []}, shared=True)
+    cfg["explorer"]["shop"]["m"]["analyses"]["qty"]["version"] = 3
     assert await sync_bundled(views, parse_explorer(cfg)) == {"installed": 0, "refreshed": 0}
-    assert (await st.list("shop", KIND_ANALYSIS, "ann"))[0]["name"] == "Quantity (mine)"
-    await st.delete("shop", KIND_DASHBOARD, "root", "home", superuser=True)
+    assert (await st.list(shop, KIND_ANALYSIS, "ann"))[0]["name"] == "Quantity (mine)"
+    await st.delete(shop, KIND_DASHBOARD, "root", "home", superuser=True)
     # a deleted bundled copy stays deleted: the marker remembers it was installed
     assert await sync_bundled(views, parse_explorer(cfg)) == {"installed": 0, "refreshed": 0}
-    assert await st.list("shop", KIND_DASHBOARD, "ann") == []
-    assert [x["name"] for x in await views.list_views(SHARED_USER, KIND_ANALYSIS, "shop")] == ["qty"]
+    assert await st.list(shop, KIND_DASHBOARD, "ann") == []
+    assert [x["name"] for x in await views.list_views(SHARED_USER, KIND_ANALYSIS, shop)] == ["qty"]
     # a brand-new id in the catalogue is still installed
-    cfg["explorer"]["shop"]["analyses"]["rev"] = {"label": "Revenue", "definition": {}}
+    cfg["explorer"]["shop"]["m"]["analyses"]["rev"] = {"label": "Revenue", "definition": {}}
     assert await sync_bundled(views, parse_explorer(cfg)) == {"installed": 1, "refreshed": 0}

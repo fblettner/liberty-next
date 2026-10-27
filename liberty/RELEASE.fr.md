@@ -70,7 +70,8 @@
   `GET /admin/jobs/missed`, `POST /admin/jobs/missed/check`.
 
 **Explorateur de données (première partie) : le modèle**
-- `explorer.toml`, un modèle par app (`[explorer.<app>]`) : une entité **pivot** et les entités
+- `explorer.toml`, plusieurs modèles par app (`[explorer.<app>.<model>]`, un magasin de données chacun ;
+  des tables sans lien entre elles sont des modèles différents) : une entité **pivot** et les entités
   autour, chacune une requête sans paramètre d'un connecteur avec une `cardinality` (une ligne par
   ligne du pivot, ou plusieurs), une `key`, une `default_date`, des `measures` (colonne → agrégat
   par défaut) et des colonnes `hidden` ; les `relations` joignent les entités sur des paires de
@@ -81,7 +82,7 @@
   liste de référence du champ), classés `string` / `number` / `date` / `datetime` / `boolean` et
   dimension ou mesure ; les noms de champs sont en majuscules (`sales.QTY` sur Postgres comme sur
   Oracle, la convention du framework) pour qu'une analyse passe d'un dialecte à l'autre. `GET /api/explorer` liste les modèles accessibles (nouvelle permission
-  `explorer:<app>`), `GET /api/explorer/<app>/model` renvoie le modèle avec ses champs
+  `explorer:<app>:<model>`, `explorer:<app>:*` pour tous), `GET /api/explorer/<app>/<model>/model` renvoie le modèle avec ses champs
   (`?refresh=1` ignore le cache par app, vidé à chaque rechargement) ; une entité en erreur est
   signalée sur le modèle, pas levée. Configuration → Explorateur modifie le modèle : le pivot, les
   entités (l'éditeur d'entité découvre les colonnes de la requête et laisse cocher la clé, les

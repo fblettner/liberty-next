@@ -122,6 +122,26 @@ class UserViewStore:
                 row.payload = payload
                 row.updated_at = _utcnow()
 
+    async def rename_key(self, kind: str, old_key: str, new_key: str) -> int:
+        """Move every user's views of *kind* from *old_key* to *new_key* (a key convention change);
+        returns the number of rows moved. Rows that would collide with an existing row under the
+        new key are left in place."""
+        async with self.session() as s:
+            taken = {
+                (r.username, r.name) for r in (await s.execute(
+                    select(UserView).where(UserView.kind == kind, UserView.view_key == new_key)
+                )).scalars().all()
+            }
+            rows = (await s.execute(select(UserView).where(UserView.kind == kind, UserView.view_key == old_key))).scalars().all()
+            moved = 0
+            for r in rows:
+                if (r.username, r.name) in taken:
+                    continue
+                s.add(UserView(username=r.username, kind=kind, view_key=new_key, name=r.name, payload=dict(r.payload), updated_at=r.updated_at))
+                await s.delete(r)
+                moved += 1
+        return moved
+
     async def delete_view(self, username: str, kind: str, view_key: str, name: str) -> bool:
         """Delete one named view. True if a row was removed."""
         async with self.session() as s:

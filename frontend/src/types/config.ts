@@ -251,10 +251,10 @@ export interface ExplorerModelBody {
   relations?: ExplorerRelationBody[]
   override?: boolean
 }
-/** `GET /admin/config/explorer/parsed` — one model per app. */
+/** `GET /admin/config/explorer/parsed` — the models per app: `{app: {model: body}}`. */
 export interface ExplorerDoc {
   path: string
-  explorer: Record<string, ExplorerModelBody>
+  explorer: Record<string, Record<string, ExplorerModelBody>>
 }
 
 export interface DashboardsDoc {

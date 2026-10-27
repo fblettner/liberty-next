@@ -24,8 +24,9 @@ const Sample = styled.div`display: flex; flex-wrap: wrap; gap: 6px; align-items:
 
 const FUNCTIONS = ['year(d)', 'month(d)', 'day(d)', 'days(from, to)', 'round(x, n)', 'abs(x)', 'coalesce(a, b)', 'upper(s)', 'lower(s)', 'length(s)', 'concat(a, b)']
 
-export function CalcModal({ app, entity, primary, entities, calculated, initial, onSave, onClose }: {
+export function CalcModal({ app, model, entity, primary, entities, calculated, initial, onSave, onClose }: {
   app: string
+  model: string
   entity: string
   primary: string
   entities: ExplorerEntity[]
@@ -63,7 +64,7 @@ export function CalcModal({ app, entity, primary, entities, calculated, initial,
     setTesting(true); setError(null); setTested(null)
     try {
       const others = calculated.filter((c) => c.name !== initial?.name)
-      const r = await api.post<CalcTestResult>(`/api/explorer/${encodeURIComponent(app)}/calc/test`, { entity, calculated: [...others, { name, label: label || undefined, expr }], name })
+      const r = await api.post<CalcTestResult>(`/api/explorer/${encodeURIComponent(app)}/${encodeURIComponent(model)}/calc/test`, { entity, calculated: [...others, { name, label: label || undefined, expr }], name })
       setTested(r)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))

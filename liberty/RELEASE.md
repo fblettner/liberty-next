@@ -60,7 +60,8 @@
   runs one ("Check now"); routes `GET /admin/jobs/missed`, `POST /admin/jobs/missed/check`.
 
 **Data Explorer (first part): the model**
-- `explorer.toml`, one model per app (`[explorer.<app>]`): a **hub** entity and the entities around
+- `explorer.toml`, several models per app (`[explorer.<app>.<model>]` — one data mart each, tables that
+  do not relate are different models): a **hub** entity and the entities around
   it, each a parameterless query of a connector with a `cardinality` (one row per hub row, or
   many), a `key`, a `default_date`, `measures` (column → default aggregate) and `hidden` columns;
   `relations` join entities on column pairs (`on = [["COMPANY", "COMPANY"]]`, any key, one or
@@ -70,7 +71,7 @@
   list), classified as `string` / `number` / `date` / `datetime` / `boolean` and as dimension or
   measure; field names are upper-cased (`sales.QTY` on Postgres as on Oracle, the framework's
   convention) so an analysis moves between dialects. `GET /api/explorer` lists the models the caller may use (new permission
-  `explorer:<app>`), `GET /api/explorer/<app>/model` returns the model with its fields
+  `explorer:<app>:<model>`, `explorer:<app>:*` for all), `GET /api/explorer/<app>/<model>/model` returns the model with its fields
   (`?refresh=1` bypasses the per-app cache, which every reload empties); a broken entity is
   reported on the model, not raised. Settings → Explorer edits the model: the hub, the entities
   (the entity editor discovers the query's columns and lets the operator tick the key, the

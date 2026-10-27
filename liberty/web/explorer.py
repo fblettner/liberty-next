@@ -2,15 +2,16 @@
 
 | Route | Permission | Notes |
 |---|---|---|
-| ``GET /api/explorer`` | authenticated | the models the caller may use (``explorer:{app}``) |
-| ``GET /api/explorer/{app}/model`` | ``explorer:{app}`` | the model with its discovered fields; ``?refresh=1`` bypasses the cache |
-| ``POST /api/explorer/{app}/query`` | ``explorer:{app}`` | an aggregate run (:mod:`liberty.explorer.engine`); ``debug`` adds the SQL for a superuser |
-| ``POST /api/explorer/{app}/detail`` | ``explorer:{app}`` | detail rows, paged; ``drill`` turns an aggregate cell into filters |
-| ``POST /api/explorer/{app}/calc/test`` | ``explorer:{app}`` | compile a calculated field and sample eight values |
-| ``GET/PUT /api/explorer/{app}/saved/{kind}``, ``DELETE …/{id}`` | ``explorer:{app}`` | saved analyses (``analyses``) and dashboards of analyses (``dashboards``): shared + mine |
-| ``POST /api/explorer/{app}/export`` | ``explorer:{app}`` | an analysis (saved or inline) or a dashboard as ``xlsx`` / ``pdf`` (:mod:`liberty.explorer.report`) |
+| ``GET /api/explorer`` | authenticated | the models the caller may use (``explorer:{app}:{model}``) |
+| ``GET /api/explorer/{app}/{model}/model`` | ``explorer:{app}:{model}`` | the model with its discovered fields; ``?refresh=1`` bypasses the cache |
+| ``POST /api/explorer/{app}/{model}/query`` | ``explorer:{app}:{model}`` | an aggregate run (:mod:`liberty.explorer.engine`); ``debug`` adds the SQL for a superuser |
+| ``POST /api/explorer/{app}/{model}/detail`` | ``explorer:{app}:{model}`` | detail rows, paged; ``drill`` turns an aggregate cell into filters |
+| ``POST /api/explorer/{app}/{model}/calc/test`` | ``explorer:{app}:{model}`` | compile a calculated field and sample eight values |
+| ``GET/PUT /api/explorer/{app}/{model}/saved/{kind}``, ``DELETE …/{id}`` | ``explorer:{app}:{model}`` | saved analyses (``analyses``) and dashboards of analyses (``dashboards``): shared + mine |
+| ``POST /api/explorer/{app}/{model}/export`` | ``explorer:{app}:{model}`` | an analysis (saved or inline) or a dashboard as ``xlsx`` / ``pdf`` (:mod:`liberty.explorer.report`) |
 
-The permission is checked before the model lookup (no name enumeration). The fields come
+An app holds several models (data marts); ``explorer:<app>:*`` grants them all. The permission
+is checked before the model lookup (no name enumeration). The fields come
 from :mod:`liberty.explorer.model`, under the caller's row-level scope and language.
 """
 
@@ -61,45 +62,50 @@ Connectors = Annotated[ConnectorRegistry, Depends(get_connectors)]
 Language = Annotated[str | None, Depends(request_language)]
 
 
-def permission_for(app: str) -> str:
-    return f"explorer:{app}"
+def permission_for(app: str, model: str) -> str:
+    return f"explorer:{app}:{model}"
+
+
+def _model_or_404(explorer: ExplorerFile, app: str, model: str) -> Any:
+    m = explorer.get(app, model)
+    if m is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no explorer model {app}/{model}")
+    return m
+
+
+def _saved_key(app: str, model: str) -> str:
+    return f"{app}/{model}"
 
 
 @router.get("/explorer", summary="List explorer models")
 async def list_models(principal: CurrentPrincipal, explorer: Explorer) -> dict[str, Any]:
-    """``{models: [{app, label, description, hub, entities: n}]}`` — only the models the caller
-    holds ``explorer:{app}`` for."""
+    """``{models: [{app, model, label, description, hub, entities: n}]}`` — only the models the
+    caller holds ``explorer:{app}:{model}`` for."""
     out = []
-    for app, m in explorer.explorer.items():
-        if principal.has_permission(permission_for(app)):
-            out.append({"app": app, "label": m.label or app, "description": m.description, "hub": m.hub, "entities": len(m.entities)})
+    for app, mid, m in explorer.items():
+        if principal.has_permission(permission_for(app, mid)):
+            out.append({"app": app, "model": mid, "label": m.label or mid, "description": m.description, "hub": m.hub, "entities": len(m.entities)})
     return {"models": out}
 
 
-@router.get("/explorer/{app}/model", summary="Get an explorer model with its fields")
+@router.get("/explorer/{app}/{model}/model", summary="Get an explorer model with its fields")
 async def get_model(
-    app: str, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors, screens: Screens,
+    app: str, model: str, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors, screens: Screens,
     language: Language, refresh: bool = False,
 ) -> dict[str, Any]:
-    require_permission(principal, permission_for(app))
-    model = explorer.explorer.get(app)
-    if model is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no explorer model for {app!r}")
-    view = await cache.get(connectors, screens, app, model, language=language, refresh=refresh)
+    require_permission(principal, permission_for(app, model))
+    view = await cache.get(connectors, screens, app, _model_or_404(explorer, app, model), language=language, refresh=refresh)
     return view.to_dict()
 
 
 async def _run(
-    app: str, runner: Any, body: Any, principal: Any, explorer: ExplorerFile, cache: ModelCache, connectors: ConnectorRegistry,
+    app: str, model: str, runner: Any, body: Any, principal: Any, explorer: ExplorerFile, cache: ModelCache, connectors: ConnectorRegistry,
     screens: ScreensFile, language: str | None,
 ) -> dict[str, Any]:
     """Permission, model, cached view, then the engine; a request the model cannot serve is a
     422 naming the reason, a database error a 502 (the full text for a superuser)."""
-    require_permission(principal, permission_for(app))
-    model = explorer.explorer.get(app)
-    if model is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no explorer model for {app!r}")
-    view = await cache.get(connectors, screens, app, model, language=language)
+    require_permission(principal, permission_for(app, model))
+    view = await cache.get(connectors, screens, app, _model_or_404(explorer, app, model), language=language)
     try:
         return await runner(
             connectors, screens, view, body, scope=current_scope.get(), debug=getattr(body, "debug", True) and principal.is_superuser,
@@ -115,33 +121,33 @@ async def _run(
         ) from exc
 
 
-@router.post("/explorer/{app}/query", summary="Run an explorer aggregate")
+@router.post("/explorer/{app}/{model}/query", summary="Run an explorer aggregate")
 async def query_model(
-    app: str, body: AggregateRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
+    app: str, model: str, body: AggregateRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
     screens: Screens, language: Language,
 ) -> dict[str, Any]:
     """``{columns, rows, groups, scanned, truncated}`` — see :func:`liberty.explorer.engine.run_aggregate`."""
-    return await _run(app, run_aggregate, body, principal, explorer, cache, connectors, screens, language)
+    return await _run(app, model, run_aggregate, body, principal, explorer, cache, connectors, screens, language)
 
 
-@router.post("/explorer/{app}/detail", summary="Run an explorer detail query")
+@router.post("/explorer/{app}/{model}/detail", summary="Run an explorer detail query")
 async def detail_model(
-    app: str, body: DetailRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
+    app: str, model: str, body: DetailRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
     screens: Screens, language: Language,
 ) -> dict[str, Any]:
     """``{columns, rows, total, page, page_size}`` — the rows behind an aggregate cell (``drill``)
     or any filtered list of the primary entity's rows."""
-    return await _run(app, run_detail, body, principal, explorer, cache, connectors, screens, language)
+    return await _run(app, model, run_detail, body, principal, explorer, cache, connectors, screens, language)
 
 
-@router.post("/explorer/{app}/calc/test", summary="Test a calculated field")
+@router.post("/explorer/{app}/{model}/calc/test", summary="Test a calculated field")
 async def calc_test(
-    app: str, body: CalcTestRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
+    app: str, model: str, body: CalcTestRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
     screens: Screens, language: Language,
 ) -> dict[str, Any]:
     """Compile the named calculated field (declared in ``calculated``) and sample eight values:
     ``{name, type, kind, values}`` — the editor's "Test" before "Save"."""
-    return await _run(app, run_calc_test, body, principal, explorer, cache, connectors, screens, language)
+    return await _run(app, model, run_calc_test, body, principal, explorer, cache, connectors, screens, language)
 
 
 # ── saved analyses + dashboards ───────────────────────────────────────────────
@@ -174,38 +180,35 @@ class SaveBody(BaseModel):
     definition: dict[str, Any] = Field(default_factory=dict)
 
 
-@router.get("/explorer/{app}/saved/{kind}", summary="List saved analyses or dashboards")
-async def list_saved(app: str, kind: str, request: Request, principal: CurrentPrincipal, explorer: Explorer) -> dict[str, Any]:
+@router.get("/explorer/{app}/{model}/saved/{kind}", summary="List saved analyses or dashboards")
+async def list_saved(app: str, model: str, kind: str, request: Request, principal: CurrentPrincipal, explorer: Explorer) -> dict[str, Any]:
     """The shared objects plus the caller's own: ``{items: [{id, name, description, audience,
     owner, shared, bundled, version, updated_at, definition}]}``."""
-    require_permission(principal, permission_for(app))
-    if app not in explorer.explorer:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no explorer model for {app!r}")
-    return {"items": await _saved_store(request).list(app, _kind(kind), principal.username)}
+    require_permission(principal, permission_for(app, model))
+    _model_or_404(explorer, app, model)
+    return {"items": await _saved_store(request).list(_saved_key(app, model), _kind(kind), principal.username)}
 
 
-@router.put("/explorer/{app}/saved/{kind}", summary="Save an analysis or a dashboard")
-async def put_saved(app: str, kind: str, body: SaveBody, request: Request, principal: CurrentPrincipal, explorer: Explorer) -> dict[str, Any]:
+@router.put("/explorer/{app}/{model}/saved/{kind}", summary="Save an analysis or a dashboard")
+async def put_saved(app: str, model: str, kind: str, body: SaveBody, request: Request, principal: CurrentPrincipal, explorer: Explorer) -> dict[str, Any]:
     """Create (no ``id`` or ``as_new``) or replace. Replacing a shared object changes it for
     everyone; the ``bundled`` marker is dropped so a later upgrade leaves the edited copy alone."""
-    require_permission(principal, permission_for(app))
-    if app not in explorer.explorer:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no explorer model for {app!r}")
+    require_permission(principal, permission_for(app, model))
+    _model_or_404(explorer, app, model)
     record = await _saved_store(request).save(
-        app, _kind(kind), principal.username, obj_id=body.id, name=body.name, definition=body.definition,
+        _saved_key(app, model), _kind(kind), principal.username, obj_id=body.id, name=body.name, definition=body.definition,
         description=body.description, audience=body.audience, shared=body.shared, as_new=body.as_new,
     )
     return {"item": record}
 
 
-@router.delete("/explorer/{app}/saved/{kind}/{obj_id}", summary="Delete a saved analysis or dashboard")
-async def delete_saved(app: str, kind: str, obj_id: str, request: Request, principal: CurrentPrincipal, explorer: Explorer) -> dict[str, Any]:
+@router.delete("/explorer/{app}/{model}/saved/{kind}/{obj_id}", summary="Delete a saved analysis or dashboard")
+async def delete_saved(app: str, model: str, kind: str, obj_id: str, request: Request, principal: CurrentPrincipal, explorer: Explorer) -> dict[str, Any]:
     """The owner, or a superuser, deletes; a shared object by someone else is refused (403)."""
-    require_permission(principal, permission_for(app))
-    if app not in explorer.explorer:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no explorer model for {app!r}")
+    require_permission(principal, permission_for(app, model))
+    _model_or_404(explorer, app, model)
     try:
-        deleted = await _saved_store(request).delete(app, _kind(kind), principal.username, obj_id, superuser=principal.is_superuser)
+        deleted = await _saved_store(request).delete(_saved_key(app, model), _kind(kind), principal.username, obj_id, superuser=principal.is_superuser)
     except PermissionError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     return {"deleted": deleted}
@@ -225,35 +228,33 @@ class ExportBody(BaseModel):
     to: date | None = None
 
 
-@router.post("/explorer/{app}/export", summary="Export an analysis or a dashboard")
+@router.post("/explorer/{app}/{model}/export", summary="Export an analysis or a dashboard")
 async def export_model(
-    app: str, body: ExportBody, request: Request, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
+    app: str, model: str, body: ExportBody, request: Request, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
     screens: Screens, language: Language,
 ) -> StreamingResponse:
     """The file (``Content-Disposition: attachment``). A PDF needs the ``reports`` extra (503
     otherwise). The caller's row-level scope applies, as on the page."""
-    require_permission(principal, permission_for(app))
-    model = explorer.explorer.get(app)
-    if model is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no explorer model for {app!r}")
-    view = await cache.get(connectors, screens, app, model, language=language)
+    require_permission(principal, permission_for(app, model))
+    view = await cache.get(connectors, screens, app, _model_or_404(explorer, app, model), language=language)
+    key = _saved_key(app, model)
     items: list[tuple[str, dict[str, Any]]] = []
     title = body.title or ""
     if body.definition is not None:
         items.append((title or "Analysis", body.definition))
     elif body.analysis:
-        a = await _saved_store(request).get(app, KIND_ANALYSIS, principal.username, body.analysis)
+        a = await _saved_store(request).get(key, KIND_ANALYSIS, principal.username, body.analysis)
         if a is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no analysis {body.analysis!r}")
         title = title or a["name"]
         items.append((a["name"], a["definition"]))
     elif body.dashboard:
         store = _saved_store(request)
-        d = await store.get(app, KIND_DASHBOARD, principal.username, body.dashboard)
+        d = await store.get(key, KIND_DASHBOARD, principal.username, body.dashboard)
         if d is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no dashboard {body.dashboard!r}")
         title = title or d["name"]
-        analyses = {a["id"]: a for a in await store.list(app, KIND_ANALYSIS, principal.username)}
+        analyses = {a["id"]: a for a in await store.list(key, KIND_ANALYSIS, principal.username)}
         period = (d["definition"] or {}).get("period")
         for tile in (d["definition"] or {}).get("tiles") or []:
             a = analyses.get(tile.get("analysis"))

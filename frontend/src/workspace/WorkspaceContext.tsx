@@ -58,7 +58,7 @@ interface WorkspaceState {
    *  `call_action` against this. `null` while loading; `{}` when there are none. */
   sharedActions: Record<string, SharedAction> | null
   /** The Data Explorer models the caller may use (`GET /api/explorer`); `null` while loading, `[]` when none. */
-  explorerModels: { app: string; label: string }[] | null
+  explorerModels: { app: string; model: string; label: string }[] | null
   license: LicenseInfo // `full` (licensed connectors loaded) or `restricted` (they weren't); defaults restricted
   error: string | null
   currentApp: string | null // the explicitly picked app; null = "(all apps)"
@@ -119,7 +119,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [menus, setMenus] = useState<MenusByApp | null>(null)
   const [screens, setScreens] = useState<Record<string, ScreenListItem[]> | null>(null)
   const [sharedActions, setSharedActions] = useState<Record<string, SharedAction> | null>(null)
-  const [explorerModels, setExplorerModels] = useState<{ app: string; label: string }[] | null>(null)
+  const [explorerModels, setExplorerModels] = useState<{ app: string; model: string; label: string }[] | null>(null)
   const [dashboards, setDashboards] = useState<DashboardListItem[] | null>(null)
   const [license, setLicense] = useState<LicenseInfo>(RESTRICTED)
   const [error, setError] = useState<string | null>(null)
@@ -152,7 +152,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       api.get<ScreensByApp>('/api/screens').catch((): ScreensByApp => ({ screens: {} })),
       api.get<{ dashboards: DashboardListItem[] }>('/api/dashboards').catch(() => ({ dashboards: [] as DashboardListItem[] })),
       api.get<{ actions: SharedAction[] }>('/api/actions').catch(() => ({ actions: [] as SharedAction[] })),
-      api.get<{ models: { app: string; label: string }[] }>('/api/explorer').catch(() => ({ models: [] as { app: string; label: string }[] })),
+      api.get<{ models: { app: string; model: string; label: string }[] }>('/api/explorer').catch(() => ({ models: [] as { app: string; model: string; label: string }[] })),
     ])
       .then(([c, m, s, d, a, x]) => {
         if (cancelled) return

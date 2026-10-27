@@ -1245,24 +1245,28 @@ async def put_charts_parsed(body: ChartsBody, request: Request, _: Superuser) ->
 
 @router.get("/config/explorer/parsed", summary="Get explorer config")
 async def get_explorer_parsed(request: Request, _: Superuser) -> dict[str, Any]:
-    """The current ``explorer.toml`` parsed — ``{path, explorer: {<app>: model dict}}``; a missing
-    file is an empty set. Relations keep their ``from`` key; entity ids are the table keys."""
+    """The current ``explorer.toml`` parsed — ``{path, explorer: {<app>: {<model>: model dict}}}``;
+    a missing file is an empty set. Relations keep their ``from`` key; entity ids are the table keys."""
     from liberty.explorer import load_explorer
     path = Path(request.app.state.settings.explorer.config_path)
     cfg = load_explorer(path)
-    out = {}
-    for app, m in cfg.explorer.items():
-        d = m.model_dump(by_alias=True, exclude_none=True, exclude_defaults=True, exclude={"id"})
-        d["hub"] = m.hub
-        for eid, e in d.get("entities", {}).items():
-            e.pop("id", None)
-            e.setdefault("query", m.entities[eid].query)
-        out[app] = d
+    out: dict[str, dict[str, Any]] = {}
+    for app, mid, m in cfg.items():
+        out.setdefault(app, {})[mid] = _explorer_model_dump(m)
     return {"path": str(path), "explorer": out}
 
 
+def _explorer_model_dump(m: Any) -> dict[str, Any]:
+    d = m.model_dump(by_alias=True, exclude_none=True, exclude_defaults=True, exclude={"id", "app"})
+    d["hub"] = m.hub
+    for eid, e in d.get("entities", {}).items():
+        e.pop("id", None)
+        e.setdefault("query", m.entities[eid].query)
+    return d
+
+
 class ExplorerBody(BaseModel):
-    explorer: dict[str, dict[str, Any]]
+    explorer: dict[str, dict[str, dict[str, Any]]]
 
 
 @router.put("/config/explorer/parsed", summary="Update explorer config")
@@ -1275,13 +1279,8 @@ async def put_explorer_parsed(body: ExplorerBody, request: Request, _: Superuser
     except (ValidationError, ValueError) as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid explorer config: {exc}") from exc
     normalized: dict[str, Any] = {"explorer": {}}
-    for app, m in validated.explorer.items():
-        d = m.model_dump(by_alias=True, exclude_none=True, exclude_defaults=True, exclude={"id"})
-        d["hub"] = m.hub
-        for eid, e in d.get("entities", {}).items():
-            e.pop("id", None)
-            e.setdefault("query", m.entities[eid].query)
-        normalized["explorer"][app] = d
+    for app, mid, m in validated.items():
+        normalized["explorer"].setdefault(app, {})[mid] = _explorer_model_dump(m)
     import tomli_w
     new_text = tomli_w.dumps(normalized)
     try:

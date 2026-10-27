@@ -149,7 +149,7 @@ class ModelView:
     def to_dict(self) -> dict[str, Any]:
         m = self.model
         return {
-            "app": self.app, "label": m.label or self.app, "description": m.description, "hub": m.hub,
+            "app": self.app, "model": m.id, "label": m.label or m.id, "description": m.description, "hub": m.hub,
             "entities": [ev.to_dict() for ev in self.entities],
             "relations": [{"from": r.from_, "to": r.to, "on": [list(p) for p in r.on]} for r in m.relations],
             "warnings": list(self.warnings),
@@ -237,7 +237,7 @@ class ModelCache:
 
     def __init__(self, ttl: float = CACHE_SECONDS) -> None:
         self._ttl = ttl
-        self._views: dict[tuple[str, str], ModelView] = {}
+        self._views: dict[tuple[str, str, str], ModelView] = {}
         self._lock = asyncio.Lock()
 
     def clear(self) -> None:
@@ -247,7 +247,7 @@ class ModelCache:
         self, connectors: ConnectorRegistry, screens: ScreensFile | None, app: str, model: ExplorerModel, *,
         language: str | None, refresh: bool = False,
     ) -> ModelView:
-        key = (app, language or "")
+        key = (app, model.id, language or "")
         now = time.monotonic()
         cached = self._views.get(key)
         if cached is not None and not refresh and cached.model is model and now - cached.built_at < self._ttl:

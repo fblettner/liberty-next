@@ -7,8 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import * as XLSX from 'xlsx'
-import { Compass, Play, Table2, List, ArrowLeft, Code2, X, Grid3x3, BarChart3, LineChart, PieChart, Gauge, FileSpreadsheet, Save, Copy, Trash2, LayoutDashboard, FlaskConical, Pencil, FileDown } from 'lucide-react'
+import { Compass, Play, Table2, List, ArrowLeft, Code2, X, Grid3x3, BarChart3, LineChart, PieChart, Gauge, Save, Copy, Trash2, LayoutDashboard, FlaskConical, Pencil, FileDown } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { Banner, Button, Centered, Checkbox, Input, PageLayout, SearchSelect, SpinnerRing, useModals, type SearchSelectOption } from '../../common'
@@ -60,6 +59,7 @@ export default function ExplorerPage() {
   const { currentApp } = useWorkspace()
   const [models, setModels] = useState<ExplorerModelSummary[] | null>(null)
   const [app, setApp] = useState<string>('')
+  const [modelId, setModelId] = useState<string>('')
   const [model, setModel] = useState<ExplorerModel | null>(null)
   const [mode, setMode] = useState<Mode>('analyses')
   const [def, setDef] = useState<AnalysisDefinition | null>(null)
@@ -86,28 +86,29 @@ export default function ExplorerPage() {
 
   useEffect(() => {
     api.get<{ models: ExplorerModelSummary[] }>('/api/explorer')
-      .then((r) => { setModels(r.models); setApp((cur) => cur || (r.models[0]?.app ?? '')) })
+      .then((r) => { setModels(r.models); if (r.models[0]) { setApp((cur) => cur || r.models[0].app); setModelId((cur) => cur || r.models[0].model) } })
       .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
   }, [])
   // The app picked in the left navigation drives the model, whenever that app has one.
   useEffect(() => {
-    if (currentApp && models?.some((m) => m.app === currentApp)) setApp(currentApp)
+    const first = currentApp ? models?.find((m) => m.app === currentApp) : undefined
+    if (first) { setApp(first.app); setModelId((cur) => (models?.some((m) => m.app === first.app && m.model === cur) ? cur : first.model)) }
   }, [currentApp, models])
-  const loadSaved = useCallback(async (a: string) => {
+  const loadSaved = useCallback(async (a: string, m: string) => {
     try {
-      const [an, da] = await Promise.all([listSaved<AnalysisDefinition>(a, 'analyses'), listSaved<DashboardDefinition>(a, 'dashboards')])
+      const [an, da] = await Promise.all([listSaved<AnalysisDefinition>(a, m, 'analyses'), listSaved<DashboardDefinition>(a, m, 'dashboards')])
       setAnalyses(an); setDashboards(da)
     } catch { /* the pickers stay empty */ }
   }, [])
   useEffect(() => {
-    if (!app) return
+    if (!app || !modelId) return
     setModel(null); setDef(null); setResult(null); setDetail(null); setDrill(null); setError(null)
     setCurrentAnalysis(null); setCurrentDashboard(null); setDashDef({ period: null, tiles: [] }); setDashEditing(false)
-    api.get<ExplorerModel>(`/api/explorer/${encodeURIComponent(app)}/model`)
+    api.get<ExplorerModel>(`/api/explorer/${encodeURIComponent(app)}/${encodeURIComponent(modelId)}/model`)
       .then((m) => { setModel(m); setDef(emptyDefinition(m.hub)) })
       .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
-    void loadSaved(app)
-  }, [app, loadSaved])
+    void loadSaved(app, modelId)
+  }, [app, modelId, loadSaved])
 
   const entities = useMemo(() => (model ? withCalculated(model, def?.calculated ?? [], calcTypes) : []), [model, def?.calculated, calcTypes])
   const fields = useMemo(() => fieldIndex(entities), [entities])
@@ -126,10 +127,10 @@ export default function ExplorerPage() {
       if (wantDetail) {
         const dr = opts.drill ?? undefined
         const columns = dr ? drillColumns(d, model) : undefined
-        const r = await api.post<DetailResult>(`/api/explorer/${encodeURIComponent(app)}/detail`, buildDetailRequest(d, { drill: dr, columns, page: opts.page ?? 1, pageSize: PAGE_SIZE, debug: !!user?.is_superuser }))
+        const r = await api.post<DetailResult>(`/api/explorer/${encodeURIComponent(app)}/${encodeURIComponent(modelId)}/detail`, buildDetailRequest(d, { drill: dr, columns, page: opts.page ?? 1, pageSize: PAGE_SIZE, debug: !!user?.is_superuser }))
         if (id === runId.current) setDetail(r)
       } else {
-        const r = await api.post<AggregateResult>(`/api/explorer/${encodeURIComponent(app)}/query`, buildAggregateRequest(d, { debug: !!user?.is_superuser }))
+        const r = await api.post<AggregateResult>(`/api/explorer/${encodeURIComponent(app)}/${encodeURIComponent(modelId)}/query`, buildAggregateRequest(d, { debug: !!user?.is_superuser }))
         if (id === runId.current) setResult(r)
       }
     } catch (e) {
@@ -137,7 +138,7 @@ export default function ExplorerPage() {
     } finally {
       if (id === runId.current) setRunning(false)
     }
-  }, [app, model, user?.is_superuser])
+  }, [app, modelId, model, user?.is_superuser])
 
   // Re-run when the query-relevant part of the definition changes (a view switch between
   // table / pivot / chart only redraws). A drill handed over by a dashboard tile is applied here.
@@ -174,15 +175,6 @@ export default function ExplorerPage() {
     setDef({ ...def, calculated: def.calculated.filter((c) => c.name !== name), rows: def.rows.filter((r) => r.field !== key),
       measures: def.measures.filter((m) => m.field !== key), filterRows: def.filterRows.filter((f) => f.field !== key) })
   }
-  const exportTable = () => {
-    const src = (drill || def?.view === 'detail') ? detail : result
-    if (!src) return
-    const head = src.columns.map((c) => (c.kind === 'measure' ? (c.field ? t(`explorer.aggLabel.${c.aggregate}`, { label: c.label }) : t('explorer.rowCount')) : c.label))
-    const ws = XLSX.utils.aoa_to_sheet([head, ...src.rows.map((r) => src.columns.map((c) => r[c.key] ?? null))])
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Explorer')
-    XLSX.writeFile(wb, `${currentAnalysis?.id ?? 'explorer'}.xlsx`)
-  }
   const openRecord = (row: Record<string, unknown>) => {
     if (!def || !model) return
     const ent = model.entities.find((e) => e.id === def.entity)
@@ -203,23 +195,23 @@ export default function ExplorerPage() {
   }
   const saveAnalysis = async (fields: { name: string; description: string; audience: string; shared: boolean }, asNew: boolean) => {
     if (!def) return
-    const item = await saveSaved<AnalysisDefinition>(app, 'analyses', { id: asNew ? null : currentAnalysis?.id, as_new: asNew, name: fields.name, description: fields.description || null, audience: fields.audience || null, shared: fields.shared, definition: def })
+    const item = await saveSaved<AnalysisDefinition>(app, modelId, 'analyses', { id: asNew ? null : currentAnalysis?.id, as_new: asNew, name: fields.name, description: fields.description || null, audience: fields.audience || null, shared: fields.shared, definition: def })
     setCurrentAnalysis(item)
-    await loadSaved(app)
+    await loadSaved(app, modelId)
   }
   const removeAnalysis = async () => {
     if (!currentAnalysis) return
     if (!(await modals.confirm({ title: t('common.delete'), message: t('explorer.deleteSaved', { name: currentAnalysis.name }), variant: 'danger' }))) return
-    try { await deleteSaved(app, 'analyses', currentAnalysis.id); setCurrentAnalysis(null); await loadSaved(app) } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) }
+    try { await deleteSaved(app, modelId, 'analyses', currentAnalysis.id); setCurrentAnalysis(null); await loadSaved(app, modelId) } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) }
   }
   const exportFile = async (format: 'xlsx' | 'pdf') => {
     setError(null)
     try {
       if (mode === 'dashboards') {
         if (!currentDashboard) return
-        await downloadExport(app, { format, dashboard: currentDashboard.id })
+        await downloadExport(app, modelId, { format, dashboard: currentDashboard.id })
       } else if (def) {
-        await downloadExport(app, { format, definition: def, title: currentAnalysis?.name ?? t('explorer.title') })
+        await downloadExport(app, modelId, { format, definition: def, title: currentAnalysis?.name ?? t('explorer.title') })
       }
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
   }
@@ -229,14 +221,14 @@ export default function ExplorerPage() {
     setDashDef(d ? { period: d.definition.period ?? null, tiles: d.definition.tiles ?? [] } : { period: null, tiles: [] })
   }
   const saveDashboard = async (fields: { name: string; description: string; audience: string; shared: boolean }, asNew: boolean) => {
-    const item = await saveSaved<DashboardDefinition>(app, 'dashboards', { id: asNew ? null : currentDashboard?.id, as_new: asNew, name: fields.name, description: fields.description || null, audience: fields.audience || null, shared: fields.shared, definition: dashDef })
+    const item = await saveSaved<DashboardDefinition>(app, modelId, 'dashboards', { id: asNew ? null : currentDashboard?.id, as_new: asNew, name: fields.name, description: fields.description || null, audience: fields.audience || null, shared: fields.shared, definition: dashDef })
     setCurrentDashboard(item); setDashEditing(false)
-    await loadSaved(app)
+    await loadSaved(app, modelId)
   }
   const removeDashboard = async () => {
     if (!currentDashboard) return
     if (!(await modals.confirm({ title: t('common.delete'), message: t('explorer.deleteSaved', { name: currentDashboard.name }), variant: 'danger' }))) return
-    try { await deleteSaved(app, 'dashboards', currentDashboard.id); loadDashboard(null); await loadSaved(app) } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) }
+    try { await deleteSaved(app, modelId, 'dashboards', currentDashboard.id); loadDashboard(null); await loadSaved(app, modelId) } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) }
   }
 
   if (error && !model) return <PageLayout icon={<Compass size={18} />} title={t('explorer.title')}><Banner $tone="error">{error}</Banner></PageLayout>
@@ -290,15 +282,16 @@ export default function ExplorerPage() {
 
   return (
     <PageLayout icon={<Compass size={18} />} title={t('explorer.title')} description={<span>{model.label}{model.description ? ` — ${model.description}` : ''}</span>}
-      headerRight={models && models.length > 1 ? (
-        <div style={{ width: 200 }}><SearchSelect value={app} options={models.map((m) => ({ value: m.app, label: m.label, mono: m.app }))} onChange={setApp} /></div>
+      headerRight={models && models.length > 0 ? (
+        <div style={{ width: 280 }}><SearchSelect value={`${app}/${modelId}`} options={models.map((m) => ({ value: `${m.app}/${m.model}`, label: m.label, mono: `${m.app} · ${m.model}` }))}
+          onChange={(v) => { const [a, m] = v.split('/'); if (a && m) { setApp(a); setModelId(m) } }} /></div>
       ) : undefined}>
       {model.warnings.length > 0 && user?.is_superuser && <Banner $tone="warning" style={{ marginBottom: 8 }}>{model.warnings.join(' · ')}</Banner>}
       {modeBar}
       {mode === 'dashboards' ? (
         <>
           {error && <Banner $tone="error">{error}</Banner>}
-          <DashboardsView app={app} definition={dashDef} analyses={analyses} editing={dashEditing} lang={lang} onChange={setDashDef}
+          <DashboardsView app={app} model={modelId} definition={dashDef} analyses={analyses} editing={dashEditing} lang={lang} onChange={setDashDef}
             onOpenAnalysis={(a, cells) => loadAnalysis(a, cells)} />
         </>
       ) : (
@@ -325,7 +318,6 @@ export default function ExplorerPage() {
               {result && !showingDetail && (
                 <Note>{t('explorer.groupsNote', { groups: result.groups, scanned: result.scanned })}{result.truncated ? ` · ${t('explorer.truncated', { limit: def.limit })}` : ''}{result.scan_truncated ? ` · ${t('explorer.scanTruncated')}` : ''}</Note>
               )}
-              {(def.view === 'table' || showingDetail) && <Button $size="sm" $variant="ghost" onClick={exportTable} title={t('explorer.exportExcel')}><FileSpreadsheet size={13} /></Button>}
               {user?.is_superuser && sql && <Button $size="sm" $variant="ghost" onClick={() => setShowSql((v) => !v)} title="SQL"><Code2 size={13} /></Button>}
               <Button $size="sm" $variant="primary" onClick={() => void run(def, { drill, page })} disabled={running}><Play size={13} /> {t('explorer.run')}</Button>
             </Toolbar>
@@ -376,7 +368,7 @@ export default function ExplorerPage() {
         </Body>
       )}
       {calcEditing !== undefined && (
-        <CalcModal app={app} entity={def.entity} primary={def.entity} entities={entities} calculated={def.calculated} initial={calcEditing} onSave={saveCalc} onClose={() => setCalcEditing(undefined)} />
+        <CalcModal app={app} model={modelId} entity={def.entity} primary={def.entity} entities={entities} calculated={def.calculated} initial={calcEditing} onSave={saveCalc} onClose={() => setCalcEditing(undefined)} />
       )}
       {record && recordEntity && (
         <RecordDialog app={app} entity={recordEntity} row={record.row} onClose={() => setRecord(null)} onSaved={() => void run(def, { drill, page })} />

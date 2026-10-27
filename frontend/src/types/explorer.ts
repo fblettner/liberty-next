@@ -38,6 +38,7 @@ export interface ExplorerEntity {
 
 export interface ExplorerModel {
   app: string
+  model: string
   label: string
   description?: string | null
   hub: string
@@ -46,7 +47,7 @@ export interface ExplorerModel {
   warnings: string[]
 }
 
-export interface ExplorerModelSummary { app: string; label: string; description?: string | null; hub: string; entities: number }
+export interface ExplorerModelSummary { app: string; model: string; label: string; description?: string | null; hub: string; entities: number }
 
 // ── the analysis definition ──────────────────────────────────────────────────
 

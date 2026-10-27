@@ -4,7 +4,7 @@
 // (PUT /admin/config/explorer/parsed + reload). Entities open ExplorerEntityModal.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Plus, Trash2, Edit3, Database, Link2, Save } from 'lucide-react'
+import { Plus, Trash2, Edit3, Database, Link2, Save, Boxes } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Centered, Field, Input, SearchSelect, SpinnerRing, Tag, useModals, type SearchSelectOption } from '../../common'
@@ -16,7 +16,7 @@ import { AddScopeModal } from './AddScopeModal'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
-type Models = Record<string, ExplorerModelBody>
+type Models = Record<string, Record<string, ExplorerModelBody>>   // app → model id → body
 
 const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; height: 100%;`
 const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;`
@@ -46,6 +46,7 @@ export default function ExplorerBuilder() {
   const modals = useModals()
   const { currentApp, connectors } = useWorkspace()
   const [scope, setScope] = useState('')
+  const [modelId, setModelId] = useState('')
   const [doc, setDoc] = useState<Models | null>(null)
   const [saved, setSaved] = useState<Models | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -74,7 +75,9 @@ export default function ExplorerBuilder() {
     return (connectors ?? []).filter((c) => c.type === 'sql' && !have.has(c.name)).map((c) => c.name).sort()
   }, [doc, connectors])
 
-  const model = doc?.[scope]
+  const modelIds = useMemo(() => Object.keys(doc?.[scope] ?? {}).sort(), [doc, scope])
+  useEffect(() => { setModelId((cur) => (cur && modelIds.includes(cur) ? cur : (modelIds[0] ?? ''))) }, [modelIds])
+  const model = modelId ? doc?.[scope]?.[modelId] : undefined
   const columnsOf = useCallback((entityId: string): string[] => {
     const e = model?.entities[entityId]
     return e ? (entityColumns[`${e.connector || scope}.${e.query}`] ?? []) : []
@@ -91,15 +94,19 @@ export default function ExplorerBuilder() {
     }
   }, [model, scope, entityColumns])
   const dirty = JSON.stringify(doc) !== JSON.stringify(saved)
-  const update = (patch: Partial<ExplorerModelBody>) => setDoc((p) => p && p[scope] ? { ...p, [scope]: { ...p[scope], ...patch } } : p)
+  const update = (patch: Partial<ExplorerModelBody>) => setDoc((p) => (p && p[scope]?.[modelId] ? { ...p, [scope]: { ...p[scope], [modelId]: { ...p[scope][modelId], ...patch } } } : p))
   const entityIds = Object.keys(model?.entities ?? {})
   const entityOpts: SearchSelectOption[] = entityIds.map((e) => ({ value: e, label: model?.entities[e]?.label || e, mono: e }))
 
   const persist = async () => {
     if (!doc) return
     setBusy(true); setError(null); setStatus(null)
-    const pruned = Object.fromEntries(Object.entries(doc).filter(([, m]) => Object.keys(m.entities ?? {}).length > 0)
-      .map(([app, m]) => [app, { ...m, relations: (m.relations ?? []).map((r) => ({ ...r, on: (r.on ?? []).filter((p) => p[0] && p[1]) })) }]))
+    const pruned: Models = {}
+    for (const [app, byId] of Object.entries(doc)) {
+      const kept = Object.entries(byId).filter(([, m]) => Object.keys(m.entities ?? {}).length > 0)
+        .map(([id, m]) => [id, { ...m, relations: (m.relations ?? []).map((r) => ({ ...r, on: (r.on ?? []).filter((p) => p[0] && p[1]) })) }] as const)
+      if (kept.length) pruned[app] = Object.fromEntries(kept)
+    }
     try {
       await api.put('/admin/config/explorer/parsed', { explorer: pruned })
       await api.post('/admin/reload')
@@ -123,6 +130,17 @@ export default function ExplorerBuilder() {
     delete entities[id]
     update({ entities, relations: (model.relations ?? []).filter((r) => r.from !== id && r.to !== id), hub: model.hub === id ? (Object.keys(entities)[0] ?? '') : model.hub })
   }
+  const addModel = async () => {
+    const id = (await modals.prompt({ title: t('settings.explorer.addModel'), message: t('settings.explorer.modelPrompt'), defaultValue: '', submitLabel: t('common.ok', 'OK'),
+      validate: (v) => (!/^[A-Za-z0-9_-]+$/.test(v.trim()) ? { error: t('settings.explorer.idChars') } : modelIds.includes(v.trim()) ? { error: t('settings.explorer.idTaken') } : null) }))?.trim()
+    if (!id) return
+    setDoc((p) => ({ ...(p ?? {}), [scope]: { ...(p?.[scope] ?? {}), [id]: { hub: '', entities: {}, relations: [] } } }))
+    setModelId(id)
+  }
+  const removeModel = async () => {
+    if (!modelId || !(await modals.confirm({ title: t('common.delete'), message: t('settings.explorer.deleteModel', { id: modelId }), variant: 'danger' }))) return
+    setDoc((p) => { if (!p) return p; const byId = { ...p[scope] }; delete byId[modelId]; return { ...p, [scope]: byId } })
+  }
   const setRelation = (i: number, patch: Partial<ExplorerRelationBody>) => update({ relations: (model?.relations ?? []).map((r, k) => (k === i ? { ...r, ...patch } : r)) })
 
   if (error && !doc) return <Banner $tone="error">{error}</Banner>
@@ -133,12 +151,20 @@ export default function ExplorerBuilder() {
       <ScopeBar scopes={scopes} value={scope} onChange={setScope} label={t('settings.explorer.app')}
         emptyHint={t('settings.explorer.noScopes')} onAddScope={() => setAddScopeOpen(true)} />
       <Toolbar>
+        <Boxes size={14} style={{ color: colors.text.muted }} />
+        <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.explorer.model')}</span>
+        <div style={{ width: 240 }}>
+          <SearchSelect value={modelId} onChange={setModelId} options={modelIds.map((id) => ({ value: id, label: doc?.[scope]?.[id]?.label || id, mono: id }))} placeholder={t('settings.explorer.noModel')} disabled={!scope} />
+        </div>
+        <Button $variant="ghost" $size="sm" onClick={() => void addModel()} disabled={busy || !scope}><Plus size={13} /> {t('settings.explorer.addModel')}</Button>
+        {modelId && <Button $variant="ghost" $size="sm" onClick={() => void removeModel()} disabled={busy} style={{ color: colors.red.main }}><Trash2 size={13} /> {t('settings.explorer.deleteModelBtn')}</Button>}
+        <span style={{ flex: 1 }} />
         {busy && <SpinnerRing size={14} thickness={2} />}
         {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
         {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
-        <div style={{ flex: 1 }} />
         <Button $variant="primary" $size="sm" onClick={() => void persist()} disabled={busy || !dirty}><Save size={13} /> {t('common.save')}</Button>
       </Toolbar>
+      {scope && modelIds.length === 0 && <Empty>{t('settings.explorer.noModels')}</Empty>}
       {model && (
         <Body>
           <Head>
@@ -217,7 +243,7 @@ export default function ExplorerBuilder() {
       )}
       {addScopeOpen && (
         <AddScopeModal candidates={addCandidates} title={t('settings.explorer.addScope')} emptyHint={t('settings.explorer.addScopeEmpty')}
-          onPick={(c) => { setDoc((p) => ({ ...(p ?? {}), [c]: p?.[c] ?? { hub: '', entities: {}, relations: [] } })); setScope(c); setStatus(null) }}
+          onPick={(c) => { setDoc((p) => ({ ...(p ?? {}), [c]: p?.[c] ?? {} })); setScope(c); setStatus(null) }}
           onClose={() => setAddScopeOpen(false)} />
       )}
     </Shell>

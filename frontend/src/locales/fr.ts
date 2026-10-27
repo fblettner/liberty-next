@@ -711,6 +711,13 @@ const fr: Resources = {
     },
     tabs: { pools: 'Pools', connectors: 'Connecteurs', dictionary: 'Dictionnaire', menus: 'Menus', screens: 'Écrans', charts: 'Graphiques', dashboards: 'Tableaux de bord', explorer: 'Explorateur', theme: 'Thème', app: 'App', reports: 'Rapports', changes: 'Modifications', integrity: 'Intégrité' },
     explorer: {
+      model: 'Modèle',
+      noModel: 'Aucun modèle',
+      noModels: 'Aucun modèle dans cette app. « Ajouter un modèle » démarre un magasin de données : une entité pivot et les entités autour.',
+      addModel: 'Ajouter un modèle',
+      modelPrompt: 'Id du nouveau modèle (lettres, chiffres, « _ » et « - ») :',
+      deleteModel: 'Supprimer le modèle « {{id}} » avec ses entités et relations ?',
+      deleteModelBtn: 'Supprimer le modèle',
       app: 'App',
       noScopes: 'Aucun modèle d\'exploration — « Ajouter » pour choisir une app.',
       addScope: 'Ajouter une app',

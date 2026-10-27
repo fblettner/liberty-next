@@ -1,12 +1,13 @@
-# Data Explorer models — one per app. Copy to explorer.toml (or edit through Settings → Explorer).
+# Data Explorer models — several per app ([explorer.<app>.<model>]: one data mart each; tables that do not
+# relate to each other are different models). Permission: explorer:<app>:<model> (explorer:<app>:* for all). Copy to explorer.toml (or edit through Settings → Explorer).
 # An entity is a parameterless SELECT of a connector; its fields are the query's result columns,
 # labelled and typed through the dictionary and the screen's column hints. No SQL lives here.
 
-[explorer.nomajde]
+[explorer.nomajde.sales]
 label = "Sales"
 hub = "sales"                         # the entity every analysis starts from
 
-[explorer.nomajde.entities.sales]
+[explorer.nomajde.sales.entities.sales]
 label = "Sales"
 query = "fact_sales_get"              # of the app's connector (or set `connector = "..."`)
 screen = "fact_sales"                 # optional: this screen's column hints (labels, formats, hidden)
@@ -15,24 +16,24 @@ default_date = "SOLD_ON"              # the date a period applies to by default
 measures = { QTY = "sum", REVENUE = "sum" }   # sum | avg | min | max | count | count_distinct
 hidden = ["ID", "BATCH_ID"]
 
-[explorer.nomajde.entities.period]
+[explorer.nomajde.sales.entities.period]
 label = "Period"
 query = "period_status_get"
 key = ["PERIOD"]
 cardinality = "one"                   # rows of this entity per hub row: one (a dimension) | many (lines)
 
-[[explorer.nomajde.relations]]        # every entity must reach the hub through relations
+[[explorer.nomajde.sales.relations]]        # every entity must reach the hub through relations
 from = "sales"
 to = "period"
 on = [["PERIOD", "PERIOD"]]           # pairs: a column of `from`, a column of `to`
 
 # Bundled analyses / dashboards: installed once into the saved-views store (shared), refreshed on
 # a `version` bump only while nobody edited the copy; a deleted copy stays deleted.
-[explorer.nomajde.analyses.qty_by_company]
+[explorer.nomajde.sales.analyses.qty_by_company]
 label = "Quantity by company"
 audience = "sales"
 version = 1
-[explorer.nomajde.analyses.qty_by_company.definition]
+[explorer.nomajde.sales.analyses.qty_by_company.definition]
 entity = "sales"
 view = "table"
 rows = [{ field = "sales.COMPANY" }, { field = "sales.SOLD_ON", bucket = "month" }]
@@ -42,8 +43,8 @@ sort = []
 limit = 1000
 calculated = []
 
-[explorer.nomajde.dashboards.sales_home]
+[explorer.nomajde.sales.dashboards.sales_home]
 label = "Sales — home"
 version = 1
-[explorer.nomajde.dashboards.sales_home.definition]
+[explorer.nomajde.sales.dashboards.sales_home.definition]
 tiles = [{ analysis = "qty_by_company", w = 4, h = "m" }]

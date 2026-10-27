@@ -2,11 +2,11 @@
 
 ::
 
-    [explorer.nomajde]
+    [explorer.nomajde.sales]                # one model (a data mart) per [explorer.<app>.<model>]
     label = "Sales"
     hub = "sales"
 
-    [explorer.nomajde.entities.sales]
+    [explorer.nomajde.sales.entities.sales]
     label = "Sales"
     query = "fact_sales_get"            # a parameterless SELECT of the connector (default: the app)
     screen = "fact_sales"               # optional: this screen's column hints (labels, dd, hidden)
@@ -16,11 +16,11 @@
     measures = { QTY = "sum", REVENUE = "sum" }
     hidden = ["SALE_ID"]
 
-    [explorer.nomajde.entities.company]
+    [explorer.nomajde.sales.entities.company]
     query = "dim_company_get"
     key = ["COMPANY"]
 
-    [[explorer.nomajde.relations]]
+    [[explorer.nomajde.sales.relations]]
     from = "sales"
     to = "company"
     on = [["COMPANY", "COMPANY"]]       # pairs: a column of `from`, a column of `to`
@@ -29,6 +29,8 @@ No SQL lives here: an entity is a connector **query** (its ``read_query`` as a s
 use it) and its fields are the query's result columns, labelled and typed through the
 dictionary and the screen's column hints (:mod:`liberty.explorer.model`). Relations join
 entities on column pairs; every entity must reach the hub through them (one or more hops).
+An app may hold several models — tables that do not relate to each other are different data
+marts; the permission is ``explorer:<app>:<model>`` (``explorer:<app>:*`` for all of them).
 """
 
 from __future__ import annotations
@@ -114,7 +116,8 @@ class BundledObject(BaseModel):
 class ExplorerModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    id: str = ""   # injected from the table key (the app)
+    id: str = ""   # injected from the table key (the model id)
+    app: str = ""  # injected from the outer table key
     label: str | None = None
     description: str | None = None
     hub: str = Field(description="The entity every analysis starts from.")
@@ -186,16 +189,27 @@ class ExplorerModel(BaseModel):
 
 
 class ExplorerFile(BaseModel):
+    """``explorer: {app: {model_id: ExplorerModel}}``."""
+
     model_config = ConfigDict(extra="forbid")
 
-    explorer: dict[str, ExplorerModel] = Field(default_factory=dict)
+    explorer: dict[str, dict[str, ExplorerModel]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _inject_ids(self) -> ExplorerFile:
-        for app, m in self.explorer.items():
-            if not m.id:
-                m.id = app
+        for app, models in self.explorer.items():
+            for mid, m in models.items():
+                _check_id(mid, "model")
+                m.id = mid
+                m.app = app
         return self
+
+    def get(self, app: str, model: str) -> ExplorerModel | None:
+        return (self.explorer.get(app) or {}).get(model)
+
+    def items(self) -> list[tuple[str, str, ExplorerModel]]:
+        """``(app, model_id, model)`` for every model."""
+        return [(app, mid, m) for app, models in self.explorer.items() for mid, m in models.items()]
 
 
 def parse_explorer(data: dict[str, Any]) -> ExplorerFile:

@@ -67,7 +67,7 @@ async def env(tmp_path):
         id="sales", label="Sales", read_query="fact_sales_get",
         columns=[ColumnHint(name="SOLD_ON", format="date"), ColumnHint(name="QTY", label="Quantity"), ColumnHint(name="COMPANY", label="Company")],
     )}})
-    model = parse_explorer({"explorer": {"shop": MODEL}}).explorer["shop"]
+    model = parse_explorer({"explorer": {"shop": {"sales": MODEL}}}).explorer["shop"]["sales"]
     view = await build_model_view(registry, screens, "shop", model, language="en")
     assert view.warnings == [], view.warnings
     yield registry, screens, view

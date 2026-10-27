@@ -1,7 +1,7 @@
 """Saved analyses and dashboards of analyses, on the user-views store.
 
 One row per object in ``ly2_user_view``: ``kind`` is ``analysis`` or ``explorer_dashboard``,
-``view_key`` the app, ``name`` the object's id (a slug of its name), ``payload`` the record::
+``view_key`` is ``<app>/<model>``, ``name`` the object's id (a slug of its name), ``payload`` the record::
 
     {id, name, description, audience, owner, shared, bundled, version, updated_at, definition}
 
@@ -126,12 +126,30 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+async def migrate_keys(views: Any, explorer: ExplorerFile) -> int:
+    """Objects saved when a model was the app itself (key ``<app>``) move to ``<app>/<model>``
+    for an app that has exactly one model; returns the rows moved. Idempotent."""
+    moved = 0
+    for app, models in explorer.explorer.items():
+        if len(models) != 1:
+            continue
+        new_key = f"{app}/{next(iter(models))}"
+        for kind in (KIND_ANALYSIS, KIND_DASHBOARD, KIND_MARKER):
+            moved += await views.rename_key(kind, app, new_key)
+    if moved:
+        _log.info("explorer: %d saved object(s) moved to the app/model key", moved)
+    return moved
+
+
 async def sync_bundled(views: Any, explorer: ExplorerFile) -> dict[str, int]:
-    """Apply the bundled catalogue of every model; returns ``{installed, refreshed}``."""
+    """Apply the bundled catalogue of every model; returns ``{installed, refreshed}``. The
+    saved-object keys of the previous convention are migrated first."""
+    await migrate_keys(views, explorer)
     installed = refreshed = 0
-    for app, model in explorer.explorer.items():
+    for app_name, model_id, model in explorer.items():
         if not model.analyses and not model.dashboards:
             continue
+        app = f"{app_name}/{model_id}"
         marker_rows = await views.list_views(SHARED_USER, KIND_MARKER, app)
         marker: dict[str, int] = dict(marker_rows[0]["payload"]) if marker_rows else {}
         changed = False

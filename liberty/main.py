@@ -687,7 +687,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
             "charts": {"total": sum(len(by_id) for by_id in app.state.charts.charts.values())},
             "dashboards": {"total": sum(len(by_id) for by_id in app.state.dashboards.dashboards.values())},
-            "explorer": {"apps": list(app.state.explorer.explorer)},
+            "explorer": {"apps": list(app.state.explorer.explorer), "models": len(app.state.explorer.items())},
             "auth": {
                 "backend": s.auth.backend,
                 **(({"pool": s.auth.pool} if s.auth.backend == "db" else {"toml": str(s.auth.toml_path)})

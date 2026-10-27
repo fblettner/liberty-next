@@ -46,7 +46,7 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
     if (type === 'query') return sqlConns.flatMap((c) => c.queries.map((q) => ({ value: `sql:${c.name}:${q.name}`, label: `${c.name} · ${q.label || q.name}`, mono: `sql:${c.name}:${q.name}` })))
     if (type === 'api') return apiConns.flatMap((c) => c.endpoints.map((e) => ({ value: `api:${c.name}:${e.name}`, label: `${c.name} · ${e.label || e.name}`, mono: `api:${c.name}:${e.name}` })))
     if (type === 'dashboard') return dashboardIds.map((d) => ({ value: `dashboard:${d}`, label: d, mono: `dashboard:${d}` }))
-    if (type === 'explorer') return sqlConns.map((c) => ({ value: `explorer:${c.name}`, label: c.name, mono: `explorer:${c.name}` }))
+    if (type === 'explorer') return sqlConns.map((c) => ({ value: `explorer:${c.name}:*`, label: `${c.name}  (${t('settings.access.allModels', 'all models')})`, mono: `explorer:${c.name}:*` }))
     if (type === 'ai') return [{ value: 'ai:chat', label: t('settings.access.aiChat', 'AI assistant'), mono: 'ai:chat' }]
     return []
   }, [type, sqlConns, apiConns, dashboardIds, t])
@@ -87,7 +87,7 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
           <SearchSelect value={type} onChange={(v) => { setType(v as RuleType); setItem('') }} options={typeOpts} />
         </div>
         <div style={{ minWidth: 240, flex: 1 }}>
-          <SearchSelect value={item} onChange={setItem} options={itemOpts} allowCustom={type === 'pattern' || type === 'query' || type === 'api'}
+          <SearchSelect value={item} onChange={setItem} options={itemOpts} allowCustom={type === 'pattern' || type === 'query' || type === 'api' || type === 'explorer'}
             placeholder={type === 'pattern' ? 'sql:nomasx1:security_*' : t('settings.access.pickItem', 'Pick…')} />
         </div>
         <Button $size="sm" $variant="ghost" onClick={add} disabled={!item.trim()}><Plus size={13} /> {t('settings.access.addRule', 'Add')}</Button>

@@ -10,7 +10,7 @@ const f = (key: string, type: ExplorerField['type'], kind: ExplorerField['kind']
   return { key, entity, name, label: name, type, kind, ...extra }
 }
 const MODEL: ExplorerModel = {
-  app: 'shop', label: 'Shop', hub: 'sales', relations: [], warnings: [],
+  app: 'shop', model: 'sales', label: 'Shop', hub: 'sales', relations: [], warnings: [],
   entities: [
     { id: 'sales', label: 'Sales', query: 'q', key: ['ID'], cardinality: 'one', default_date: 'SOLD_ON',
       fields: [f('sales.ID', 'number'), f('sales.SOLD_ON', 'date'), f('sales.QTY', 'number', 'measure', { aggregate: 'sum' }), f('sales.STATUS', 'string', 'dimension', { rule: { kind: 'enum', values: [] } })] },

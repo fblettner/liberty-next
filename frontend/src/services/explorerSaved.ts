@@ -28,20 +28,20 @@ export type SavedDashboard = SavedItem<DashboardDefinition>
 
 export const TILE_HEIGHT: Record<TileHeight, number> = { s: 240, m: 340, l: 500 }
 
-export async function listSaved<D>(app: string, kind: SavedKind): Promise<SavedItem<D>[]> {
-  const r = await api.get<{ items: SavedItem<D>[] }>(`/api/explorer/${encodeURIComponent(app)}/saved/${kind}`)
+export async function listSaved<D>(app: string, model: string, kind: SavedKind): Promise<SavedItem<D>[]> {
+  const r = await api.get<{ items: SavedItem<D>[] }>(`/api/explorer/${encodeURIComponent(app)}/${encodeURIComponent(model)}/saved/${kind}`)
   return r.items
 }
 
-export async function saveSaved<D>(app: string, kind: SavedKind, body: {
+export async function saveSaved<D>(app: string, model: string, kind: SavedKind, body: {
   id?: string | null; name: string; description?: string | null; audience?: string | null; shared: boolean; as_new?: boolean; definition: D
 }): Promise<SavedItem<D>> {
-  const r = await api.put<{ item: SavedItem<D> }>(`/api/explorer/${encodeURIComponent(app)}/saved/${kind}`, body)
+  const r = await api.put<{ item: SavedItem<D> }>(`/api/explorer/${encodeURIComponent(app)}/${encodeURIComponent(model)}/saved/${kind}`, body)
   return r.item
 }
 
-export async function deleteSaved(app: string, kind: SavedKind, id: string): Promise<boolean> {
-  const r = await api.del<{ deleted: boolean }>(`/api/explorer/${encodeURIComponent(app)}/saved/${kind}/${encodeURIComponent(id)}`)
+export async function deleteSaved(app: string, model: string, kind: SavedKind, id: string): Promise<boolean> {
+  const r = await api.del<{ deleted: boolean }>(`/api/explorer/${encodeURIComponent(app)}/${encodeURIComponent(model)}/saved/${kind}/${encodeURIComponent(id)}`)
   return r.deleted
 }
 
@@ -57,8 +57,8 @@ export function withDashboardPeriod(def: AnalysisDefinition, period: DashboardDe
 }
 
 /** Download an export: an inline definition, a saved analysis or a saved dashboard, as xlsx or pdf. */
-export async function downloadExport(app: string, body: { format: 'xlsx' | 'pdf'; definition?: AnalysisDefinition; analysis?: string; dashboard?: string; title?: string }): Promise<void> {
-  const res = await fetch(`/api/explorer/${encodeURIComponent(app)}/export`, { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+export async function downloadExport(app: string, model: string, body: { format: 'xlsx' | 'pdf'; definition?: AnalysisDefinition; analysis?: string; dashboard?: string; title?: string }): Promise<void> {
+  const res = await fetch(`/api/explorer/${encodeURIComponent(app)}/${encodeURIComponent(model)}/export`, { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   if (!res.ok) {
     let detail = `${res.status}`
     try { detail = (await res.json()).detail ?? detail } catch { /* keep the status */ }

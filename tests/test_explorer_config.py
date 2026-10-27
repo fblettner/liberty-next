@@ -23,9 +23,10 @@ MODEL = {
 
 
 def test_parse_injects_ids_and_forces_hub_cardinality() -> None:
-    f = parse_explorer({"explorer": {"nomajde": {**MODEL, "entities": {**MODEL["entities"], "sales": {**MODEL["entities"]["sales"], "cardinality": "many"}}}}})
-    m = f.explorer["nomajde"]
-    assert m.id == "nomajde" and m.entities["company"].id == "company"
+    f = parse_explorer({"explorer": {"nomajde": {"sales": {**MODEL, "entities": {**MODEL["entities"], "sales": {**MODEL["entities"]["sales"], "cardinality": "many"}}}}}})
+    m = f.explorer["nomajde"]["sales"]
+    assert m.id == "sales" and m.app == "nomajde" and m.entities["company"].id == "company"
+    assert f.get("nomajde", "sales") is m and f.get("nomajde", "nope") is None and [(a, i) for a, i, _ in f.items()] == [("nomajde", "sales")]
     assert m.entities["sales"].cardinality == "one"        # the hub is "one" by definition
     assert m.entities["company"].cardinality == "one"
     assert [(r.from_, r.to) for r in m.path_to_hub("region")] == [("company", "region"), ("sales", "company")]
@@ -46,13 +47,15 @@ def test_parse_injects_ids_and_forces_hub_cardinality() -> None:
 ])
 def test_validation_errors(patch, message) -> None:
     with pytest.raises(ValueError, match=__import__("re").escape(message)):
-        parse_explorer({"explorer": {"a": {**MODEL, **patch}}})
+        parse_explorer({"explorer": {"a": {"m": {**MODEL, **patch}}}})
 
 
 def test_load_missing_file_is_empty(tmp_path) -> None:
     assert load_explorer(tmp_path / "explorer.toml").explorer == {}
-    (tmp_path / "explorer.toml").write_text('[explorer.a]\nhub = "s"\n[explorer.a.entities.s]\nquery = "q"\n', encoding="utf-8")
-    assert list(load_explorer(tmp_path / "explorer.toml").explorer) == ["a"]
+    (tmp_path / "explorer.toml").write_text('[explorer.a.m]\nhub = "s"\n[explorer.a.m.entities.s]\nquery = "q"\n', encoding="utf-8")
+    assert list(load_explorer(tmp_path / "explorer.toml").explorer["a"]) == ["m"]
+    with pytest.raises(ValueError, match="model id"):
+        parse_explorer({"explorer": {"a": {"bad id": {"hub": "s", "entities": {"s": {"query": "q"}}}}}})
 
 
 def test_type_class() -> None:
