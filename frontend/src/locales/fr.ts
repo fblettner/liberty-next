@@ -386,6 +386,11 @@ const fr: Resources = {
     intro: 'Posez des questions sur vos connecteurs et données — ex. « liste les connecteurs, puis exécute liberty.ping ».',
     newConversation: 'nouvelle conversation',
     noResponse: '(pas de réponse)',
+    context: 'Page :',
+    contextFilters: 'filtres : {{count}}',
+    contextRow: 'la ligne cliquée',
+    contextHint: "L'assistant voit ce que vous regardez : l'écran, ses filtres, la ligne cliquée.",
+    contextDrop: "Ne pas envoyer la page à l'assistant",
   },
   reports: {
     title: 'Rapports',

@@ -254,3 +254,26 @@ def test_effort_skipped_for_haiku() -> None:
     a = _assistant([], effort="high")
     assert "output_config" not in a._request_kwargs(model="claude-haiku-4-5")
     assert a._request_kwargs(model="claude-opus-4-7")["output_config"] == {"effort": "high"}
+
+
+def test_page_context_is_a_second_uncached_system_block() -> None:
+    a = _assistant([])
+    assert len(a._request_kwargs(model=None)["system"]) == 1
+    assert len(a._request_kwargs(model=None, context="   ")["system"]) == 1      # blank → nothing added
+    system = a._request_kwargs(model=None, context="app: shop\nscreen: orders")["system"]
+    assert len(system) == 2 and "cache_control" in system[0] and "cache_control" not in system[1]
+    assert system[1]["text"].startswith("<page_context>\napp: shop\nscreen: orders\n</page_context>")
+    # capped: the browser's text never grows the block past CONTEXT_MAX_CHARS
+    from liberty.ai.assistant import CONTEXT_MAX_CHARS
+    big = a._request_kwargs(model=None, context="x" * (CONTEXT_MAX_CHARS * 3))["system"][1]["text"]
+    body = big.split("<page_context>\n", 1)[1].split("\n</page_context>", 1)[0]
+    assert len(body) == CONTEXT_MAX_CHARS and body.endswith("…")
+
+
+@pytest.mark.asyncio
+async def test_page_context_reaches_the_request() -> None:
+    a = _assistant([([_text_delta("ok")], _msg([_text_block("ok")], "end_turn"))])
+    events = [e async for e in a.chat([{"role": "user", "content": "hi"}], context="screen: f0092")]
+    assert events[-1].type == "done"
+    sent = a._client.messages.calls[0]["system"]
+    assert len(sent) == 2 and "screen: f0092" in sent[1]["text"]

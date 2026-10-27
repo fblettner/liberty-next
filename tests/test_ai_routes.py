@@ -104,7 +104,11 @@ class _Stream:
 
 
 class _Messages:
+    def __init__(self):
+        self.calls: list[dict] = []
+
     def stream(self, **kwargs):
+        self.calls.append(kwargs)
         return _Stream("pong")
 
 
@@ -222,3 +226,17 @@ def test_info_reports_ai(app) -> None:
         token = _login(client, "admin", "adminpw")
         body = client.get("/info", headers={"Authorization": f"Bearer {token}"}).json()
         assert body["ai"]["model"] == "claude-opus-4-8"
+
+
+def test_chat_forwards_the_page_context(app) -> None:
+    with TestClient(app) as client:
+        token = _login(client, "admin", "adminpw")
+        _install_fake_assistant(app)
+        r = client.post(
+            "/ai/chat",
+            json={"messages": [{"role": "user", "content": "what is this row?"}], "context": "screen: f0092\ncurrent row: {\"ULUSER\": \"JDE\"}"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200 and [e["type"] for e in _sse_events(r.text)] == ["token", "done"]
+        system = app.state.ai._client.messages.calls[0]["system"]
+        assert len(system) == 2 and "ULUSER" in system[1]["text"] and "cache_control" not in system[1]

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Sparkles, Send, ArrowRight, Check, X, FileEdit, AlertTriangle, Square } from 'lucide-react'
+import { useLocation } from 'react-router-dom'
+import { Sparkles, Send, ArrowRight, Check, X, FileEdit, AlertTriangle, Square, MapPin } from 'lucide-react'
 import { ApiError, api, streamSSE } from '../../api/client'
+import { getPageContext, renderPageContext, subscribePageContext, summarizePageContext, type PageContext } from '../../services/aiContext'
 import type { AiTool, ChatEvent, ChatMessage, Proposal } from '../../types/ai'
 import { PageLayout, Button, Banner, LinkButton, SpinnerRing, Mono, Tag } from '../../common'
 import { Markdown } from '../../common/Markdown'
@@ -131,6 +133,21 @@ const Composer = styled.form`
   align-items: flex-end;
 `
 
+// The page-context chip — what the next message carries about the page the operator is on.
+// The × drops it for this page (it comes back when they move to another one).
+const ContextChip = styled.div`
+  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+  padding: 3px 6px 3px 8px; border-radius: ${radius.xl};
+  border: 1px solid ${colors.blue.border}; background: ${colors.blue.bg}; color: ${colors.text.secondary};
+  font-size: ${fontSize.sm}; font-family: ${fonts.sans}; max-width: 100%;
+  & .name { font-family: ${fonts.mono}; color: ${colors.text.primary}; }
+  & button {
+    display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0;
+    border: 0; border-radius: ${radius.xl}; background: transparent; color: ${colors.text.muted}; cursor: pointer;
+    &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+  }
+`
+
 const InputBox = styled.textarea`
   flex: 1;
   resize: none;
@@ -165,6 +182,14 @@ export default function Chat() {
   const [error, setError] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const historyRef = useRef<ChatMessage[]>([])
+  // The page context (services/aiContext): shown as a chip and sent with each turn while the
+  // operator is still on the page that published it; the chip's × drops it for that page.
+  const location = useLocation()
+  const [pageCtx, setPageCtx] = useState<PageContext | null>(getPageContext)
+  const [droppedPath, setDroppedPath] = useState<string | null>(null)
+  useEffect(() => subscribePageContext(setPageCtx), [])
+  const liveCtx = pageCtx && pageCtx.path === location.pathname && droppedPath !== pageCtx.path ? pageCtx : null
+  const contextText = () => { const c = getPageContext(); return c && c.path === location.pathname && droppedPath !== c.path ? renderPageContext(c) : undefined }
 
   useEffect(() => {
     api
@@ -230,7 +255,7 @@ export default function Chat() {
     const controller = new AbortController()
     abortRef.current = controller
     try {
-      await streamSSE('/ai/chat', { messages: historyRef.current }, (raw) => {
+      await streamSSE('/ai/chat', { messages: historyRef.current, context: contextText() }, (raw) => {
         const ev = raw as ChatEvent
         if (ev.type === 'token') appendAssistant(ev.text ?? '')
         else if (ev.type === 'tool_call') addToolCall(ev.name ?? 'tool', ev.summary ?? '')
@@ -296,7 +321,7 @@ export default function Chat() {
     const controller = new AbortController()
     abortRef.current = controller
     try {
-      await streamSSE('/ai/chat', { messages: historyRef.current }, (raw) => {
+      await streamSSE('/ai/chat', { messages: historyRef.current, context: contextText() }, (raw) => {
         const ev = raw as ChatEvent
         if (ev.type === 'token') appendAssistant(ev.text ?? '')
         else if (ev.type === 'tool_call') addToolCall(ev.name ?? 'tool', ev.summary ?? '')
@@ -408,6 +433,19 @@ export default function Chat() {
           )}
         </Messages>
         {error && <Banner $tone="error">{error}</Banner>}
+        {liveCtx && (() => {
+          const s = summarizePageContext(liveCtx)
+          const parts = [s.filters > 0 ? t('chat.contextFilters', { count: s.filters }) : null, s.hasRow ? t('chat.contextRow') : null].filter(Boolean)
+          return (
+            <ContextChip title={t('chat.contextHint')}>
+              <MapPin size={12} />
+              <span>{t('chat.context')}</span>
+              <span className="name">{s.name}</span>
+              {parts.length > 0 && <span>· {parts.join(' · ')}</span>}
+              <button type="button" onClick={() => setDroppedPath(liveCtx.path)} title={t('chat.contextDrop')}><X size={11} /></button>
+            </ContextChip>
+          )
+        })()}
         <Composer
           onSubmit={(ev) => {
             ev.preventDefault()

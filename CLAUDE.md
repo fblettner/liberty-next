@@ -269,8 +269,8 @@ pages/Explorer/        the Data Explorer page: index (model, the AnalysisDefinit
                        services/explorerSaved.ts (the saved routes, dashboard shape); shapes in types/explorer.ts
 pages/DashboardView/ Chat/ (AiDrawer) Reports/ Notifications/ (the inbox; components/NotificationBell
                        in the header, live via SioContext.subscribeNotifications) ScreenAssistant/ HttpRunner/ Monitoring/ Login/
-services/ types/       no-React helpers (lookups, cells, gridViews, poolSchema, sqlCompletion…) and
-                       the backend response shapes
+services/ types/       no-React helpers (lookups, cells, gridViews, poolSchema, sqlCompletion, aiContext = the
+                       page context the TableView publishes and the chat drawer sends…) and the backend response shapes
 locales/{en,fr}.ts     react-i18next; keys must exist in both (fr is typed against en)
 theme.ts + index.css   the tokens (CSS vars; dark default, .theme-light)
 ```

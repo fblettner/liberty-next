@@ -374,7 +374,7 @@ function columnVisibleNow(c: Column, activeFilters: Record<string, string>): boo
 }
 
 export function ResultTable({
-  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters, screen, addSeed, nestedDialog, renderDetail, embedded, getSubRows, onRowExpand, subRowCount, tableId: tableIdOverride,
+  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters, screen, addSeed, nestedDialog, renderDetail, embedded, getSubRows, onRowExpand, subRowCount, tableId: tableIdOverride, onCurrentRow,
 }: {
   result: QueryResult
   connector: string
@@ -410,6 +410,9 @@ export function ResultTable({
   /** Override the persistence key (else `screen:<app>:<id>` / `sql:<connector>:<query>`). The
    *  summary grid passes a `:summary` suffix so its view state can't collide with the flat table's. */
   tableId?: string
+  /** The row the user last clicked or opened the row menu on — the TableView publishes it as the
+   *  AI assistant's "current row" (services/aiContext). */
+  onCurrentRow?: (row: DataRow) => void
 }) {
   const { t } = useTranslation()
   // Used by the NavigateAction runtime — opens the target TableView via react-router's SPA nav,
@@ -568,8 +571,9 @@ export function ResultTable({
   const editModeRef = useRef(false)
   const openRowMenu = useCallback((row: DataRow, e: React.MouseEvent<HTMLTableRowElement>) => {
     if (rowMenu.length === 0 || editModeRef.current) return
+    onCurrentRow?.(row)
     setMenuState({ row, x: e.clientX, y: e.clientY })
-  }, [rowMenu.length])
+  }, [rowMenu.length, onCurrentRow])
   // Prompt-before-fire plumbing — shared by ``runRowAction`` and ``runScreenAction``. Same
   // imperative-from-async pattern the ScreenDialog uses: the action's ``prompt_fields`` opens a
   // sub-dialog, the resolver returns the entered values (or null on cancel), and the runner
@@ -1813,11 +1817,11 @@ export function ResultTable({
         onRowClick={
           !editMode
             ? rowClickRoute
-              ? (row) => openRouteForRow(row)
+              ? (row) => { onCurrentRow?.(row); openRouteForRow(row) }
               : hasDialog
-                ? (row) => openDialogForRow(row)
+                ? (row) => { onCurrentRow?.(row); openDialogForRow(row) }
                 : hasRowClickProxy
-                  ? (row) => { void openProxyForRow(row) }
+                  ? (row) => { onCurrentRow?.(row); void openProxyForRow(row) }
                   : undefined
             : undefined
         }

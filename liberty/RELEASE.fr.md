@@ -35,6 +35,17 @@
   Traefik ne mentionnent plus `--license-key`, un montage des apps en lecture seule, `admin/admin`
   ni `reset-admin-password`.
 
+**Assistant IA : le contexte de la page (C6)**
+- L'assistant voit maintenant ce que vous regardez. Tant qu'un écran de données est l'onglet
+  actif, le chat joint son contexte à chaque message : l'application, l'écran (connecteur et
+  requête de lecture), les filtres actifs, le nombre et les colonnes des lignes chargées, et la
+  ligne cliquée ou sur laquelle le menu a été ouvert. « Cet écran », « ces lignes » ou « la ligne
+  sélectionnée » se comprennent sans ressaisir de nom ; les requêtes du contexte sont les vraies,
+  l'assistant peut donc les exécuter. Une puce au-dessus de la zone de saisie montre ce qui est
+  envoyé ; sa croix l'écarte pour cette page. Le contexte voyage dans un second bloc système non
+  mis en cache, limité à 4 000 caractères : l'invite et la liste d'outils en cache restent
+  intactes (`POST /ai/chat` accepte un `context` optionnel).
+
 **Installation / mise à jour**
 - **Corrigé : la version du lot d'applications apparaissait comme « non installée » sous Docker.**
   Le wheel est déposé dans le montage `/apps`, pas installé comme paquet dans le conteneur en

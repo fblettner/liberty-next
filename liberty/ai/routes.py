@@ -34,6 +34,9 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1)
     model: str | None = None
+    # What the user is looking at (app / screen / filters / the clicked row), rendered by the
+    # browser; capped server-side to liberty.ai.assistant.CONTEXT_MAX_CHARS. Optional.
+    context: str | None = None
 
 
 def _assistant(request: Request) -> AiAssistant:
@@ -108,7 +111,8 @@ async def chat(
       "messages": [
         {"role": "user", "content": "list connectors then show me 5 rows from security_users"}
       ],
-      "model": "claude-sonnet-4-6"  // optional override; defaults to [ai] model
+      "model": "claude-sonnet-4-6",  // optional override; defaults to [ai] model
+      "context": "app: nomajde\nscreen: f0092 — Users …"  // optional: the page the user is on
     }
     ```
 
@@ -128,7 +132,7 @@ async def chat(
     api_messages = [{"role": m.role, "content": m.content} for m in body.messages]
 
     async def event_stream():
-        async for event in assistant.chat(api_messages, model=body.model):
+        async for event in assistant.chat(api_messages, model=body.model, context=body.context):
             yield f"data: {json.dumps(event.to_dict())}\n\n"
         yield "data: [DONE]\n\n"
 

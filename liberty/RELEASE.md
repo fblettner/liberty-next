@@ -31,6 +31,16 @@
   say what the code does. `release/README.md`, `install.sh` and the Traefik config no longer
   mention `--license-key`, a read-only apps mount, `admin/admin` or `reset-admin-password`.
 
+**AI assistant: the page context (C6)**
+- The assistant now sees what you are looking at. While a data screen is the active tab, the
+  chat carries its context with every message: the app, the screen (connector and read query),
+  the active filters, the loaded rows' count and columns, and the row you last clicked or
+  opened the row menu on. "This screen", "these rows" or "the selected row" resolve without
+  retyping names; the query names in the context are the real ones, so the assistant can run
+  them. A chip above the composer shows what is sent; its × drops it for that page. The context
+  rides as a second, uncached system block capped at 4 000 characters, so the cached prompt and
+  tool list are untouched (`POST /ai/chat` takes an optional `context`).
+
 **Install / upgrade**
 - **Fixed: the apps bundle version read as "not installed" on Docker.** The wheel is materialised
   into the `/apps` mount, not installed as a package in the running container, so `liberty status`,

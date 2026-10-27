@@ -13,6 +13,7 @@ import { PageLayout, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, Spin
 import { colors, radius, fontSize, fonts } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { findMenuLabel } from '../../services/menuLabels'
+import { setPageContext } from '../../services/aiContext'
 import { tabPath } from '../../tabs/TabsContext'
 import type { ScreenDetail } from '../../types/screens'
 import { Meta } from './styled'
@@ -438,6 +439,20 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
   const menuLabel = findMenuLabel(menus, { kind: 'sql', connector, target: query })
   const friendlyName = meta?.description || meta?.label || menuLabel || `${connector}.${query}`
 
+  // The AI assistant's page context: while this tab is the active route, publish what the user
+  // sees — the screen, the active filters, the loaded rows' shape and the row they last clicked —
+  // so the chat drawer can send it along (services/aiContext; the chat renders + caps the text).
+  const [currentRow, setCurrentRow] = useState<Record<string, unknown> | null>(null)
+  useEffect(() => { setCurrentRow(null) }, [result])
+  useEffect(() => {
+    if (!onThisTab) return
+    setPageContext({
+      path: location.pathname, app: screenApp ?? connector, kind: screenId ? 'screen' : 'sql', title: friendlyName,
+      connector, query, screen: screen?.id ?? screenId ?? null, filters: summaryParams,
+      rowCount: result?.rows.length, truncated: result?.truncated, columns: result?.columns.map((c) => c.name), row: currentRow,
+    })
+  }, [onThisTab, location.pathname, screenApp, connector, query, screenId, screen, friendlyName, summaryParams, result, currentRow])
+
   if (metaErr)
     return (
       <PageLayout icon={<TableIcon size={18} />} title={friendlyName}>
@@ -611,6 +626,7 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
                 deleteQuery={screen?.delete_query ?? meta.delete_query ?? null}
                 keyColumns={screen?.key_columns ?? meta.key_columns}
                 onSaved={run}
+                onCurrentRow={setCurrentRow}
                 runControl={runBtn}
                 maxRowsControl={maxRowsField}
                 activeFilters={activeFilters}

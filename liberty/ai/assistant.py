@@ -57,6 +57,11 @@ DEFAULT_SYSTEM_PROMPT = (
     "  e. scaffold_menu_item so the screen is reachable from the sidebar — DONE."
 )
 
+# The page context the browser sends with a turn (what the user is looking at: app, screen,
+# filters, the clicked row) is capped here as well as in the SPA — it is a volatile, UNCACHED
+# second system block, so its size is paid on every request.
+CONTEXT_MAX_CHARS = 4000
+
 # Server-side web_fetch (Anthropic-hosted). GA tool version — no beta header.
 # Restricted to the operator-configured domains; never offered when the list is empty.
 _WEB_FETCH_TYPE = "web_fetch_20260209"
@@ -134,13 +139,18 @@ class AiAssistant:
             })
         return defs
 
-    def _request_kwargs(self, *, model: str | None) -> dict[str, Any]:
+    def _request_kwargs(self, *, model: str | None, context: str | None = None) -> dict[str, Any]:
+        # The stable prompt is the cached block; the page context (changes with every screen the
+        # user opens) comes AFTER it, without cache_control, so it never breaks the cached prefix.
+        system: list[dict[str, Any]] = [{"type": "text", "text": self.system_prompt, "cache_control": {"type": "ephemeral"}}]
+        if context and context.strip():
+            system.append({"type": "text", "text": _context_block(context)})
         kwargs: dict[str, Any] = {
             "model": model or self.settings.model,
             "max_tokens": self.settings.max_tokens,
             # Caching the system block also caches the (stable) tool list, which
             # renders just before it. Message-history caching: not done yet.
-            "system": [{"type": "text", "text": self.system_prompt, "cache_control": {"type": "ephemeral"}}],
+            "system": system,
         }
         defs = self._tool_definitions()
         if defs:
@@ -164,19 +174,21 @@ class AiAssistant:
     # -- the loop ---------------------------------------------------------- #
 
     async def chat(
-        self, messages: list[dict[str, Any]], *, model: str | None = None
+        self, messages: list[dict[str, Any]], *, model: str | None = None, context: str | None = None
     ) -> AsyncIterator[ChatEvent]:
         """Run the agentic loop for *messages*; yield :class:`ChatEvent`s.
 
         *messages* is a standard Messages-API list (``[{"role": "user", "content": ...}]``).
-        It is copied — the caller's list isn't mutated.
+        It is copied — the caller's list isn't mutated. *context* is the page context the
+        browser rendered (see :data:`CONTEXT_MAX_CHARS`); it rides as a second, uncached
+        system block for this call only.
         """
         if self._client is None:
             yield ChatEvent("error", message="Anthropic API key is not configured (set [ai] api_key / ANTHROPIC_API_KEY).")
             return
 
         convo: list[dict[str, Any]] = list(messages)
-        base_kwargs = self._request_kwargs(model=model)
+        base_kwargs = self._request_kwargs(model=model, context=context)
         usage_total = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
 
         for _ in range(max(1, self.settings.max_iterations)):
@@ -253,6 +265,21 @@ class AiAssistant:
 
 def _truncate(text: str, limit: int = 280) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _context_block(context: str) -> str:
+    """The uncached system block carrying the page context: the browser's text (capped) with a
+    short frame telling the model what it is and how far to trust it."""
+    body = context.strip()
+    if len(body) > CONTEXT_MAX_CHARS:
+        body = body[: CONTEXT_MAX_CHARS - 1] + "…"
+    return (
+        "<page_context>\n" + body + "\n</page_context>\n"
+        "The block above describes what the user is looking at in the Liberty UI right now (sent by "
+        "their browser with this message; it may already be stale). Use it to resolve references such "
+        "as \"this screen\", \"these rows\" or \"the selected row\". The connector and query names "
+        "in it are real: you can query them with sql_query. Do not repeat the block back to the user."
+    )
 
 
 # --------------------------------------------------------------------------- #

@@ -384,6 +384,11 @@ const en = {
     intro: 'Ask about your connectors and data — e.g. "list the connectors, then run liberty.ping".',
     newConversation: 'new conversation',
     noResponse: '(no response)',
+    context: 'Page:',
+    contextFilters: 'filters: {{count}}',
+    contextRow: 'the clicked row',
+    contextHint: 'The assistant sees what you are looking at — the screen, its filters, the row you clicked.',
+    contextDrop: 'Do not send the page to the assistant',
   },
   reports: {
     title: 'Reports',
