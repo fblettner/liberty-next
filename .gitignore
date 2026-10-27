@@ -41,7 +41,9 @@ config/dashboards.toml
 /migrated*.toml
 
 # Claude Code per-session runtime state — lock files, recall caches, etc.
-.claude/
+# Claude Code: local settings stay out; the project's skills (.claude/skills/) are shared.
+.claude/*
+!.claude/skills/
 config_backups/
 # Server-managed config snapshot history (liberty.versioning) — lives next to the TOMLs
 config/.versions/

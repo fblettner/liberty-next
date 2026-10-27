@@ -14,6 +14,8 @@ like the other per-app files, edited under Settings → AI)::
 
 Playbooks are step-by-step procedures (Markdown) the assistant loads with ``load_playbook``
 when the user asks how to do something in the application.
+A block keyed ``"*"`` (``[ai."*"]``) is for every application: its starters apply where no
+app block does, its playbooks are listed under the app ``*``.
 The operator's own ``[ai] starters`` in app.toml (keys ``*`` / app / ``app/screen``) are
 merged on top by :func:`merged_starters`, so a customer can override what the app ships."""
 
