@@ -19,6 +19,8 @@ export const colors = {
     primary: 'var(--text-primary, #eef1ff)',
     secondary: 'var(--text-secondary, rgba(238,241,255,0.78))',
     muted: 'var(--text-muted, rgba(238,241,255,0.52))',
+    /** Text on a solid accent background (a selected calendar day, a primary button). */
+    inverse: 'var(--text-inverse, #ffffff)',
   },
 
   blue: {

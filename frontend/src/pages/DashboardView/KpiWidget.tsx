@@ -10,9 +10,9 @@ import { Banner, SpinnerRing } from '../../common'
 import { resolveColumnName, toNumber } from '../../services/chartData'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import type { QueryResult } from '../../types/connectors'
-import type { DashboardFilterWire, KpiWidgetWire } from '../../types/dashboards'
+import type { DashboardFilterWire, DashboardPeriodWire, KpiWidgetWire } from '../../types/dashboards'
 import type { Aggregation } from '../../types/charts'
-import { buildWidgetFilterParams } from './widgetFilters'
+import { buildWidgetFilterParams, buildWidgetPeriodParams, type PeriodSelection } from './widgetFilters'
 import { colors, fontSize, fonts, glass, radius, shadow } from '../../theme'
 
 // Liquid-glass KPI card — backdrop blur over a slightly-translucent base, soft drop shadow, a
@@ -46,9 +46,11 @@ export interface KpiWidgetProps {
   widget: KpiWidgetWire
   filters: DashboardFilterWire[]
   filterValues: Record<string, string>
+  period?: DashboardPeriodWire
+  selection?: PeriodSelection
 }
 
-export function KpiWidget({ widget, filters, filterValues }: KpiWidgetProps) {
+export function KpiWidget({ widget, filters, filterValues, period, selection }: KpiWidgetProps) {
   const { t } = useTranslation()
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -57,8 +59,11 @@ export function KpiWidget({ widget, filters, filterValues }: KpiWidgetProps) {
   // Resolve dashboard filters → URL params via the screen's dd_map (Phase 3 — column dd hints
   // live on the Screen layer now, not the connector describe()).
   const filterParams = useMemo(
-    () => buildWidgetFilterParams(widget.connector, widget.query, filters, filterValues, findScreen),
-    [widget.connector, widget.query, filters, filterValues, findScreen],
+    () => ({
+      ...buildWidgetFilterParams(widget.connector, widget.query, filters, filterValues, findScreen),
+      ...buildWidgetPeriodParams(widget.connector, widget.query, period, selection, findScreen),
+    }),
+    [widget.connector, widget.query, filters, filterValues, period, selection, findScreen],
   )
   const filterParamsKey = JSON.stringify(filterParams)
 

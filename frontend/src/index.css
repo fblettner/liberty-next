@@ -20,6 +20,7 @@
   --text-primary:   #eef1ff;
   --text-secondary: rgba(238,241,255,0.78);
   --text-muted:     rgba(238,241,255,0.52);
+  --text-inverse:   #ffffff;
 
   /* Accent colours */
   --blue-main:      #007AFF;
@@ -84,6 +85,7 @@
   --text-primary:   #1a1a2e;
   --text-secondary: rgba(26,26,46,0.72);
   --text-muted:     rgba(26,26,46,0.48);
+  --text-inverse:   #ffffff;
   --blue-main:      #0062CC;
   --blue-bg:        rgba(0,98,204,0.09);
   --blue-bg-hover:  rgba(0,98,204,0.16);

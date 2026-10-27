@@ -67,6 +67,8 @@ type Kind = 'chart' | 'kpi' | 'table'
  *  recover it from the distinctive fields: a chart has ``spec`` / ``chart``; a KPI has ``column``;
  *  everything else (connector + query) is a table. Normalising on load means the canvas renders a
  *  live preview AND the saved widgets carry ``type`` again (the discriminated union needs it). */
+const PRESET_KEYS = ['thisMonth', 'lastMonth', 'thisQuarter', 'thisYear', 'lastYear', 'last12', 'last30', 'last7', 'today', 'yesterday', 'all']
+
 function widgetType(w: Raw): Kind {
   const tp = sstr(w.type)
   if (tp === 'chart' || tp === 'kpi' || tp === 'table') return tp
@@ -130,6 +132,7 @@ export function DashboardEditorModal({
   // the canvas renders live previews and saved widgets keep their discriminator.
   const [widgets, setWidgets] = useState<Raw[]>(Array.isArray(initial.widgets) ? (initial.widgets as Raw[]).map((w) => ({ ...w, type: widgetType(w) })) : [])
   const [filters, setFilters] = useState<Raw[]>(Array.isArray(initial.filters) ? (initial.filters as Raw[]).map((f) => ({ ...f, options: { ...(f.options as Raw) } })) : [])
+  const [period, setPeriod] = useState<Raw | null>(initial.period && typeof initial.period === 'object' ? { ...(initial.period as Raw), basis: Array.isArray((initial.period as Raw).basis) ? ((initial.period as Raw).basis as Raw[]).map((b) => ({ ...b })) : [] } : null)
   const [editIdx, setEditIdx] = useState<number | null>(null)
   const [newIdx, setNewIdx] = useState<number | null>(null)  // a just-added widget; cancel removes it
   const [error, setError] = useState<string | null>(null)
@@ -164,12 +167,25 @@ export function DashboardEditorModal({
     // it, so we don't write it into the body.
     const cleanFilters = filters.filter((f) => sstr(f.id) && sstr(f.label))
     if (cleanFilters.length) rec.filters = cleanFilters
+    if (period) {
+      const p: Raw = { default: sstr(period.default) || 'thisMonth' }
+      if (sstr(period.column)) p.column = sstr(period.column)
+      if (sstr(period.dd)) p.dd = sstr(period.dd)
+      const basis = ((period.basis as Raw[]) ?? []).filter((b) => sstr(b.value) && sstr(b.label)).map((b) => {
+        const o: Raw = { value: sstr(b.value), label: sstr(b.label) }
+        if (sstr(b.column)) o.column = sstr(b.column)
+        if (sstr(b.dd)) o.dd = sstr(b.dd)
+        return o
+      })
+      if (basis.length) p.basis = basis
+      rec.period = p
+    }
     onSave(id, rec)
   }
 
   // Unsaved-changes guard (Save / Discard / Keep editing) — snapshot the editable state on first
   // render, compare on close. Same dialog the screen visual builder uses.
-  const draftKey = JSON.stringify({ label, description, widgets, filters })
+  const draftKey = JSON.stringify({ label, description, widgets, filters, period })
   const initialKey = useRef<string | null>(null)
   if (initialKey.current === null) initialKey.current = draftKey
   const dirty = draftKey !== initialKey.current
@@ -261,6 +277,52 @@ export function DashboardEditorModal({
               })}
             </Grid>
           )}
+
+          {/* Period — the date range control in the bar; every widget gets PERIOD_FROM / PERIOD_TO
+              (and PREV_*) as binds, and the named date column is range-wrapped server-side. */}
+          <FiltersPanel>
+            <AddBar>
+              <span style={{ fontSize: fontSize.sm, color: colors.text.muted, fontWeight: 600 }}>{t('settings.dash.period', 'Period')}</span>
+              {period
+                ? <Button $size="sm" $variant="ghost" onClick={() => setPeriod(null)}><Trash2 size={13} /> {t('settings.dash.removePeriod', 'Remove the period')}</Button>
+                : <Button $size="sm" $variant="ghost" onClick={() => setPeriod({ default: 'thisMonth', basis: [] })}><Plus size={13} /> {t('settings.dash.addPeriod', 'Add a period')}</Button>}
+            </AddBar>
+            {period && (
+              <>
+                <FilterRow>
+                  <Field label={t('settings.dash.periodDefault', 'Opens on')}>
+                    <SearchSelect value={sstr(period.default) || 'thisMonth'} onChange={(v) => setPeriod({ ...period, default: v })}
+                      options={PRESET_KEYS.map((k) => ({ value: k, label: t(`period.${k}`) }))} />
+                  </Field>
+                  <Field label={t('settings.dash.periodColumn', 'Date column')}>
+                    <Input value={sstr(period.column)} onChange={(e) => setPeriod({ ...period, column: e.target.value })} placeholder="SOLD_ON" />
+                  </Field>
+                  <Field label={t('settings.dash.periodDd', 'or dictionary item')}>
+                    <Input value={sstr(period.dd)} onChange={(e) => setPeriod({ ...period, dd: e.target.value })} placeholder="SALES_DATE" />
+                  </Field>
+                  <span style={{ gridColumn: '1 / -1', fontSize: fontSize.micro, color: colors.text.muted }}>
+                    {t('settings.dash.periodHint', 'Queries receive :PERIOD_FROM / :PERIOD_TO (and :PREV_FROM / :PREV_TO). A widget whose screen carries the date column is also filtered on it without touching its SQL.')}
+                  </span>
+                </FilterRow>
+                <AddBar>
+                  <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.dash.periodBasis', 'Date bases (optional: which date the period applies to)')}</span>
+                  <Button $size="sm" $variant="ghost" onClick={() => setPeriod({ ...period, basis: [...((period.basis as Raw[]) ?? []), { value: '', label: '', column: '', dd: '' }] })}><Plus size={13} /> {t('settings.dash.addBasis', 'Add a basis')}</Button>
+                </AddBar>
+                {((period.basis as Raw[]) ?? []).map((b, i) => {
+                  const patchBasis = (patch: Raw) => setPeriod({ ...period, basis: ((period.basis as Raw[]) ?? []).map((x, j) => (j === i ? { ...x, ...patch } : x)) })
+                  return (
+                    <FilterRow key={i}>
+                      <Field label={t('settings.dash.basisValue', 'Key')}><Input value={sstr(b.value)} onChange={(e) => patchBasis({ value: e.target.value })} placeholder="document" /></Field>
+                      <Field label={t('settings.dash.dLabel', 'Label')}><Input value={sstr(b.label)} onChange={(e) => patchBasis({ label: e.target.value })} placeholder={t('settings.dash.basisLabelPh', 'Document date')} /></Field>
+                      <Field label={t('settings.dash.periodColumn', 'Date column')}><Input value={sstr(b.column)} onChange={(e) => patchBasis({ column: e.target.value })} placeholder="DOC_DATE" /></Field>
+                      <Field label={t('settings.dash.periodDd', 'or dictionary item')}><Input value={sstr(b.dd)} onChange={(e) => patchBasis({ dd: e.target.value })} /></Field>
+                      <CloseBtn onClick={() => setPeriod({ ...period, basis: ((period.basis as Raw[]) ?? []).filter((_, j) => j !== i) })} title={t('common.delete')}><Trash2 size={14} /></CloseBtn>
+                    </FilterRow>
+                  )
+                })}
+              </>
+            )}
+          </FiltersPanel>
 
           {/* Filters — the bar above the live dashboard. Compact form list (id / label /
               dictionary key + the options query that fills the dropdown). */}

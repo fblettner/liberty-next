@@ -12,6 +12,8 @@ import { LayoutDashboard } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Centered, Mono, PageLayout, Stack } from '../../common'
 import type { Dashboard, DashboardFilterWire, DashboardWidget } from '../../types/dashboards'
+import { isPreset, rangeForPreset, type DatePreset, type DateRange } from '../../services/period'
+import type { PeriodSelection } from './widgetFilters'
 import { ChartWidget } from './ChartWidget'
 import { FilterBar } from './FilterBar'
 import { KpiWidget } from './KpiWidget'
@@ -57,6 +59,10 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
   // Filter state: `{[filter.id]: pickedValue}`. Empty string === "all" (no filter). Seeded from
   // `default_value` once when the dashboard loads.
   const [filterValues, setFilterValues] = useState<Record<string, string>>({})
+  // The period: preset + range + basis; seeded from the dashboard's `period.default` on load.
+  const [preset, setPreset] = useState<DatePreset>('thisMonth')
+  const [range, setRange] = useState<DateRange>({ dateFrom: '', dateTo: '' })
+  const [basis, setBasis] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -74,12 +80,18 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
           for (const f of d.filters) if (f.default_value) seeded[f.id] = f.default_value
           setFilterValues(seeded)
         }
+        if (d.period) {
+          const p: DatePreset = isPreset(d.period.default) ? d.period.default : 'thisMonth'
+          setPreset(p); setRange(rangeForPreset(p)); setBasis(d.period.basis?.[0]?.value ?? '')
+        }
       })
       .catch((e) => { if (!cancelled) setError(e instanceof ApiError ? e.message : String(e)) })
     return () => { cancelled = true }
   }, [dashboardId])
 
   const filters = dashboard?.filters ?? []
+  const period = dashboard?.period
+  const selection: PeriodSelection | undefined = period ? { range, basis } : undefined
 
   if (error) return <PageLayout title={dashboardId}><Banner $tone="error">{error}</Banner></PageLayout>
   if (!dashboard) return <Centered />
@@ -91,11 +103,17 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
       description={dashboard.description ? <span>{dashboard.description}</span> : <Mono>{dashboardId}</Mono>}
     >
       <Stack gap={14} style={{ flex: 1, minHeight: 0 }}>
-        {filters.length > 0 && (
+        {(filters.length > 0 || period) && (
           <FilterBar
             filters={filters}
             values={filterValues}
             onChange={(id, value) => setFilterValues((cur) => ({ ...cur, [id]: value }))}
+            period={period ? {
+              preset, range, onChange: (p, r) => { setPreset(p); setRange(r) },
+              basis: period.basis && period.basis.length > 1
+                ? { value: basis, options: period.basis.map((b) => ({ value: b.value, label: b.label })), onChange: setBasis }
+                : undefined,
+            } : undefined}
           />
         )}
         {dashboard.widgets.length === 0 ? (
@@ -103,7 +121,7 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
         ) : (
           <Grid>
             {dashboard.widgets.map((w, i) => (
-              <WidgetCell key={i} widget={w} filters={filters} filterValues={filterValues} />
+              <WidgetCell key={i} widget={w} filters={filters} filterValues={filterValues} period={period} selection={selection} />
             ))}
           </Grid>
         )}
@@ -116,20 +134,23 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
  *  `filters` + `filterValues` thread down so each widget can resolve its own column-by-`dd` and
  *  append URL params on the data fetch. */
 function WidgetCell({
-  widget, filters, filterValues,
+  widget, filters, filterValues, period, selection,
 }: {
   widget: DashboardWidget
   filters: DashboardFilterWire[]
   filterValues: Record<string, string>
+  period?: Dashboard['period']
+  selection?: PeriodSelection
 }) {
+  const common = { filters, filterValues, period, selection }
   return (
     <WidgetFrame $cs={widget.col_span} $rs={widget.row_span}>
       {widget.label && <WidgetTitle>{widget.label}</WidgetTitle>}
       {widget.type === 'chart'
-        ? <ChartWidget widget={widget} filters={filters} filterValues={filterValues} />
+        ? <ChartWidget widget={widget} {...common} />
         : widget.type === 'table'
-        ? <TableWidget widget={widget} filters={filters} filterValues={filterValues} />
-        : <KpiWidget widget={widget} filters={filters} filterValues={filterValues} />}
+        ? <TableWidget widget={widget} {...common} />
+        : <KpiWidget widget={widget} {...common} />}
     </WidgetFrame>
   )
 }

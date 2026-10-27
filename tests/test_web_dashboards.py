@@ -119,6 +119,7 @@ def _dashboards_toml() -> str:
         # Table widgets — one on a readable query, one on `secret_get` (pruned for `user`).
         [dashboards.app1.ops]
         label = "Ops"
+        period = { dd = "SALES_DATE", default = "lastMonth", basis = [{ value = "doc", label = "Document date", dd = "SALES_DATE" }, { value = "paid", label = "Paid on", column = "PAID_ON" }] }
 
           [[dashboards.app1.ops.widgets]]
           type = "table"
@@ -343,3 +344,15 @@ def test_filter_surfaced_when_caller_can_read_options(tmp_path) -> None:
         # nobody: neither → no filter (key omitted), no widgets
         d = client.get("/api/dashboards/app1.ov", headers=_h(client, "nobody")).json()
         assert "filters" not in d and d["widgets"] == []
+
+
+def test_dashboard_period_is_on_the_wire(app) -> None:
+    """A dashboard's period rides in the catalog as declared; a dashboard without one carries no key."""
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        d = client.get("/api/dashboards/app1.ops", headers=h).json()
+        assert d["period"] == {
+            "dd": "SALES_DATE", "default": "lastMonth",
+            "basis": [{"value": "doc", "label": "Document date", "dd": "SALES_DATE"}, {"value": "paid", "label": "Paid on", "column": "PAID_ON"}],
+        }
+        assert "period" not in client.get("/api/dashboards/app1.security_overview", headers=h).json()

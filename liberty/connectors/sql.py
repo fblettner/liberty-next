@@ -25,7 +25,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, AsyncIterator
 
@@ -429,6 +429,9 @@ _TOKEN_RE = re.compile(r"""\{\{\s*([A-Za-z_]\w*)\s*\}\}""")
 # stored SELECT unreadable in a wizard.
 _FILTER_OPS_TEXT = ("contains", "equals", "notEquals", "startsWith", "endsWith")
 _TEXT_FORMATS = {"text", "textarea", "email", "url", "color", "password"}
+# The binds a dashboard period hands every widget query (liberty/dashboards/config.py).
+_PERIOD_BINDS = ("PERIOD_FROM", "PERIOD_TO", "PREV_FROM", "PREV_TO")
+_ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _from_jde_julian(v: Any) -> str | int | None:
@@ -597,8 +600,9 @@ def _filter_sql_type(fmt: str | None, dialect: str) -> str:
     return "VARCHAR2(4000)" if dialect == "oracle" else "VARCHAR(4000)"
 
 
-def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str, *, trim_text: bool = False) -> str:
-    """One filter predicate against ``lib_flt.<name>`` for *op* using a bind named ``:<name>``.
+def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str, *, trim_text: bool = False, bind: str | None = None) -> str:
+    """One filter predicate against ``lib_flt.<name>`` for *op* using a bind named ``:<name>``
+    (or *bind* — the range ops ``gte`` / ``lte`` bind ``<name>_from`` / ``<name>_to``).
 
     Text columns get the operator-aware ``LOWER(col) LIKE LOWER(...)`` family for
     contains/startsWith/endsWith plus ``=`` / ``<>`` for equals/notEquals. Crucially, we
@@ -623,6 +627,12 @@ def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str, *
     """
     text_format = (fmt or "").lower() in _TEXT_FORMATS or fmt is None or fmt == ""
     col_ref = f"TRIM(lib_flt.{name})" if (text_format and trim_text) else f"lib_flt.{name}"
+    b = bind or name
+    if op in ("gte", "lte"):
+        # A range bound (a dashboard period on a date column): typed like the column; a text
+        # date column (ISO strings) compares as text, which orders correctly.
+        rhs = f"CAST(:{b} AS {_filter_sql_type(None, dialect)})" if text_format else f":{b}"
+        return f"{col_ref} {'>=' if op == 'gte' else '<='} {rhs}"
     if text_format:
         # The bind side still casts to a wide VARCHAR — asyncpg can't infer the type of a
         # bind otherwise (Postgres needs the cast to know whether to compare as text vs
@@ -1381,6 +1391,14 @@ class SQLConnector:
             merged.update(params)
         # Bind every :name token the caller didn't supply to SQL NULL.
         bound = {name: merged.get(name) for name in find_bind_params(sql_text)}
+        # The dashboard period binds are dates by contract: asyncpg infers the parameter type from
+        # the column it is compared with and refuses a string for a DATE, so the ISO text the
+        # browser sends becomes a ``date`` here. A query on a text or JDE Julian column converts
+        # the bind itself (``TO_CHAR`` / the Julian helpers) — the raw value is the ISO day.
+        for name in _PERIOD_BINDS:
+            v = bound.get(name)
+            if isinstance(v, str) and _ISO_DAY.match(v):
+                bound[name] = date.fromisoformat(v)
         # Keep explicitly declared params too (a default for a token referenced
         # only inside a string literal would otherwise be dropped — harmless,
         # SQLAlchemy ignores binds it doesn't see).
@@ -1540,7 +1558,22 @@ class SQLConnector:
             return sql_text, params
         active: list[tuple[str, str | None, str, Any]] = []
         active_names: set[str] = set()
+        # (bind name, format, op, coerced) for the range bounds — a column needs no ``filter``
+        # flag for those: ``<COL>_from`` / ``<COL>_to`` come from a dashboard's period, not a
+        # user-typed filter, and bounding a date never widens a result.
+        ranges: list[tuple[str, str, str | None, str, Any]] = []
         for col in column_hints or []:
+            for suffix, op in (("_from", "gte"), ("_to", "lte")):
+                rv = (params or {}).get(f"{col.name}{suffix}")
+                if rv is None or rv == "":
+                    continue
+                rfmt = col.format
+                if rfmt is None and col.dd != "":
+                    entry = self._dict.find_entry(col.dd or col.name, connector=dict_scope or self.name)
+                    if entry is not None and entry.format:
+                        rfmt = entry.format
+                coerced = rv if (rfmt or "").lower() in _TEXT_FORMATS or not rfmt else _coerce_value(rv, rfmt)
+                ranges.append((col.name, f"{col.name}{suffix}", rfmt, op, coerced))
             if not col.filter:
                 continue
             v = (params or {}).get(col.name)
@@ -1586,13 +1619,14 @@ class SQLConnector:
                 coerced = v if (fmt or "").lower() in _TEXT_FORMATS or not fmt else _coerce_value(v, fmt)
                 active.append((name, fmt, "equals", coerced))
                 active_names.add(up)
-        if not active:
+        if not active and not ranges:
             return sql_text, params
         dialect = self._resolve_dialect()
         # Honour the pool's ``trim_strings`` on the filter's text columns too (JDE CHAR(N) is
         # blank-padded — without this a query that doesn't hand-TRIM its SELECT can't be filtered).
         trim_text = self._pools.trim_strings(self.pool_name)
         preds = [_build_filter_predicate(name, fmt, op, dialect, trim_text=trim_text) for name, fmt, op, _ in active]
+        preds += [_build_filter_predicate(name, fmt, op, dialect, trim_text=trim_text, bind=bind) for name, bind, fmt, op, _ in ranges]
         body, order_clause = _split_order_by(sql_text)
         where_clause = " AND ".join(f"({p})" for p in preds)
         out = f"SELECT * FROM (\n{body}\n) lib_flt\nWHERE 1=1 AND {where_clause}"
@@ -1610,6 +1644,8 @@ class SQLConnector:
             if trim_text and isinstance(coerced, str) and ((fmt or "").lower() in _TEXT_FORMATS or not fmt):
                 coerced = coerced.strip()
             new_params[name] = coerced
+        for _name, bind, _fmt, _op, coerced in ranges:
+            new_params[bind] = coerced
         return out, new_params
 
     def _column_meta_map(

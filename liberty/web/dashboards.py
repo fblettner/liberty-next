@@ -182,6 +182,8 @@ def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Prin
     filters = _resolve_filters(dashboard, principal)
     if filters:
         out["filters"] = filters
+    if dashboard.period is not None:
+        out["period"] = dashboard.period.model_dump(mode="json", exclude_none=True)
     return out
 
 

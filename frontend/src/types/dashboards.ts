@@ -63,10 +63,28 @@ export interface DashboardFilterWire {
   options: DashboardFilterOptionsWire
 }
 
+export interface PeriodBasisWire {
+  value: string
+  label: string
+  column?: string
+  dd?: string
+}
+
+/** The dashboard's period (a date range in the bar): every widget gets PERIOD_FROM / PERIOD_TO
+ *  (+ PREV_FROM / PREV_TO, PERIOD_BASIS) as binds; a widget whose screen carries the named
+ *  column / dd is also range-wrapped server-side on it. */
+export interface DashboardPeriodWire {
+  column?: string
+  dd?: string
+  default: string
+  basis?: PeriodBasisWire[]
+}
+
 export interface Dashboard {
   id: string
   label: string
   description?: string | null
+  period?: DashboardPeriodWire
   /** Empty / absent → no filter bar rendered. The backend only includes filters the caller can
    *  read (the options query gates on `sql:<conn>:<query>`). */
   filters?: DashboardFilterWire[]

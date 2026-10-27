@@ -11,8 +11,8 @@ import { Banner, SpinnerRing } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { enumMap, ruleCell } from '../../services/cells'
 import type { Column, QueryResult } from '../../types/connectors'
-import type { DashboardFilterWire, TableWidgetWire } from '../../types/dashboards'
-import { buildWidgetFilterParams } from './widgetFilters'
+import type { DashboardFilterWire, DashboardPeriodWire, TableWidgetWire } from '../../types/dashboards'
+import { buildWidgetFilterParams, buildWidgetPeriodParams, type PeriodSelection } from './widgetFilters'
 import { colors, fontSize, fonts, glass, radius, shadow } from '../../theme'
 
 const Frame = styled.div`
@@ -50,16 +50,21 @@ export interface TableWidgetProps {
   widget: TableWidgetWire
   filters: DashboardFilterWire[]
   filterValues: Record<string, string>
+  period?: DashboardPeriodWire
+  selection?: PeriodSelection
 }
 
-export function TableWidget({ widget, filters, filterValues }: TableWidgetProps) {
+export function TableWidget({ widget, filters, filterValues, period, selection }: TableWidgetProps) {
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const { findScreen } = useWorkspace()
 
   const filterParams = useMemo(
-    () => buildWidgetFilterParams(widget.connector, widget.query, filters, filterValues, findScreen),
-    [widget.connector, widget.query, filters, filterValues, findScreen],
+    () => ({
+      ...buildWidgetFilterParams(widget.connector, widget.query, filters, filterValues, findScreen),
+      ...buildWidgetPeriodParams(widget.connector, widget.query, period, selection, findScreen),
+    }),
+    [widget.connector, widget.query, filters, filterValues, period, selection, findScreen],
   )
   const filterParamsKey = JSON.stringify(filterParams)
 

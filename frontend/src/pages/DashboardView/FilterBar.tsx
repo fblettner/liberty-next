@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { SearchSelect, type SearchSelectOption } from '../../common'
+import { DateRangeFilter, SearchSelect, type DateBasis, type DatePreset, type DateRange, type SearchSelectOption } from '../../common'
 import type { QueryResult } from '../../types/connectors'
 import type { DashboardFilterWire } from '../../types/dashboards'
 import { colors, fontSize, fonts, glass, radius, shadow } from '../../theme'
@@ -72,9 +72,11 @@ export interface FilterBarProps {
   filters: DashboardFilterWire[]
   values: Record<string, string>
   onChange: (id: string, value: string) => void
+  /** The dashboard's period control, when it declares one. */
+  period?: { preset: DatePreset; range: DateRange; onChange: (preset: DatePreset, range: DateRange) => void; basis?: DateBasis }
 }
 
-export function FilterBar({ filters, values, onChange }: FilterBarProps) {
+export function FilterBar({ filters, values, onChange, period }: FilterBarProps) {
   const { t } = useTranslation()
   // One options-map per filter. Each filter loads its own options once; the cache above keeps
   // the same `(connector, query)` pair from refetching across filters / dashboards.
@@ -94,6 +96,12 @@ export function FilterBar({ filters, values, onChange }: FilterBarProps) {
 
   return (
     <Bar>
+      {period && (
+        <Cell style={{ minWidth: 0 }}>
+          <Label>{t('period.label')}</Label>
+          <DateRangeFilter preset={period.preset} range={period.range} onChange={period.onChange} basis={period.basis} />
+        </Cell>
+      )}
       {filters.map((f) => {
         const opts = optionsMap[f.id]
         const loading = opts === undefined

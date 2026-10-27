@@ -186,6 +186,38 @@ class DashboardFilter(BaseModel):
     options: DashboardFilterOptions = Field(description="Where the dropdown's choices come from.")
 
 
+_PRESETS = Literal["all", "today", "yesterday", "last7", "last30", "thisMonth", "lastMonth", "thisQuarter", "thisYear", "lastYear", "last12"]
+
+
+class PeriodBasis(BaseModel):
+    """One date the period can compare against ("Document date", "Activity date"): the result
+    column (or dictionary item) carrying it. The chosen basis rides as the ``PERIOD_BASIS`` bind
+    too, for queries that pick the column themselves."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    value: str = Field(description="Stable key, sent as the PERIOD_BASIS bind.")
+    label: str = Field(description="What the picker shows.")
+    column: str | None = Field(default=None, description="Result column holding this date.")
+    dd: str | None = Field(default=None, description="Dictionary item holding this date (matched through the screens' column hints).")
+
+
+class DashboardPeriod(BaseModel):
+    """The dashboard's period: a date range filter in the bar. Every widget query receives the
+    range as the ``PERIOD_FROM`` / ``PERIOD_TO`` binds (and ``PREV_FROM`` / ``PREV_TO`` for the
+    period before), to use as ``WHERE d BETWEEN :PERIOD_FROM AND :PERIOD_TO``; a query that does
+    not mention them is left alone. When ``column`` or ``dd`` names the date column, a widget
+    whose screen carries it is also wrapped server-side with that range, so a plain query
+    (``SELECT … FROM sales``) is filtered without changing its SQL."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    column: str | None = Field(default=None, description="Result column holding the date every widget filters on.")
+    dd: str | None = Field(default=None, description="Dictionary item holding the date (matched through the screens' column hints).")
+    default: _PRESETS = Field(default="thisMonth", description="The preset the dashboard opens on.")
+    basis: list[PeriodBasis] = Field(default_factory=list, description="Alternative dates to compare against; the first is the default. Empty: ``column`` / ``dd`` is the only axis.")
+
+
 class Dashboard(BaseModel):
     """One ``[dashboards.<scope>.<id>]`` — title + description + the widget list + optional filters.
     Both ``id`` (the inner key) and ``connector`` (the outer *scope* key — the owning app) are
@@ -212,6 +244,7 @@ class Dashboard(BaseModel):
         ),
     )
     widgets: list[Widget] = Field(default_factory=list, description="Widgets, in display order.")
+    period: DashboardPeriod | None = Field(default=None, description="A date range filter in the bar, bound to every widget. Blank: no period.")
     # Upgrade-safety flag — see Screen.override for the full story. Default False.
     override: bool = Field(
         default=False,

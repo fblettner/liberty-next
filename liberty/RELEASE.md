@@ -15,6 +15,21 @@
   only a fresh database.)
 - The upgrade report's "Image tag" no longer shows "-" for an unpinned install.
 
+**Dashboards: a period**
+- A dashboard can carry a `period`: a date range control in its bar, with the usual presets
+  (today, yesterday, last 7 / 30 days, this / last month, this quarter, this / last year, last 12
+  months, all dates), a two-month calendar for a free range, and, when the dashboard lists several
+  date bases ("Document date", "Paid on"), the basis picker. The dashboard opens on
+  `period.default`. Every widget query receives the range as the `:PERIOD_FROM` / `:PERIOD_TO`
+  binds (bound as dates), plus `:PREV_FROM` / `:PREV_TO` for the period before (year to date compares with last year
+  to date, a month with the previous month to date, a whole quarter with the previous quarter,
+  anything else with the same length just before) and `:PERIOD_BASIS`; a query that does not
+  mention them is left alone. When the period names the date column (`column`, or `dd` matched
+  through the screens), a widget whose screen carries it is range-filtered server-side without a
+  change to its SQL — the same wrap the filters use, now with `<COL>_from` / `<COL>_to` bounds on
+  any hinted column. The dashboard editor has a Period block. The date range control and the
+  floating panel are shared components for the lists and the explorer to come.
+
 **nomaflow: `file_load` step — a spreadsheet or CSV into a table, replayable by partition**
 - What the grid's Excel import is not: a load that runs without a person at the keyboard (a
   schedule, a chain of steps) on the volumes a facts table takes, that can be replayed for one

@@ -13,9 +13,9 @@ import { Banner, SpinnerRing } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { ChartCanvas } from '../TableView/ChartCanvas'
 import type { QueryResult } from '../../types/connectors'
-import type { ChartWidgetWire, DashboardFilterWire } from '../../types/dashboards'
+import type { ChartWidgetWire, DashboardFilterWire, DashboardPeriodWire } from '../../types/dashboards'
 import type { ChartSpec } from '../../types/charts'
-import { buildWidgetFilterParams } from './widgetFilters'
+import { buildWidgetFilterParams, buildWidgetPeriodParams, type PeriodSelection } from './widgetFilters'
 import { colors, glass, radius, shadow } from '../../theme'
 
 // Mirrors ChartCanvas's Frame so the loading placeholder looks identical to the loaded chart —
@@ -39,9 +39,11 @@ export interface ChartWidgetProps {
   filters: DashboardFilterWire[]
   /** Current filter selections (`{[filter.id]: pickedValue}`). Empty values = "All", no bind. */
   filterValues: Record<string, string>
+  period?: DashboardPeriodWire
+  selection?: PeriodSelection
 }
 
-export function ChartWidget({ widget, filters, filterValues }: ChartWidgetProps) {
+export function ChartWidget({ widget, filters, filterValues, period, selection }: ChartWidgetProps) {
   const [result, setResult] = useState<QueryResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const { findScreen } = useWorkspace()
@@ -51,8 +53,11 @@ export function ChartWidget({ widget, filters, filterValues }: ChartWidgetProps)
   // lookup walks an indexed Map; cheap enough to ignore the identity of `findScreen` (it
   // stabilises on `screens` only via WorkspaceContext's useCallback).
   const filterParams = useMemo(
-    () => buildWidgetFilterParams(widget.connector, widget.query, filters, filterValues, findScreen),
-    [widget.connector, widget.query, filters, filterValues, findScreen],
+    () => ({
+      ...buildWidgetFilterParams(widget.connector, widget.query, filters, filterValues, findScreen),
+      ...buildWidgetPeriodParams(widget.connector, widget.query, period, selection, findScreen),
+    }),
+    [widget.connector, widget.query, filters, filterValues, period, selection, findScreen],
   )
   // Stable key for the useEffect deps — JSON-stringify the params so object identity changes
   // don't trigger a refetch unless the actual values changed.

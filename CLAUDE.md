@@ -210,9 +210,10 @@ api/client.ts          fetch wrapper: X-Liberty-Lang / X-Liberty-Pool headers, s
                        refresh, streamSSE (AI) and streamNDJSON (SQL rows)
 auth/ workspace/ tabs/ sio/ branding/   the contexts (AuthContext, WorkspaceContext = connectors +
                        menus + screens + license + current app / pool, TabsContext, SioContext)
-common/                shared primitives: Button Card Input SearchSelect Checkbox Tag Banner Spinner
+common/                shared primitives: Button Card Input SearchSelect Checkbox FileInput Tag Banner Spinner
                        PageLayout Modal Modals(useModals) ErrorDetails ErrorBoundary SchemaForm
-                       SchemaNavigator SubNav EditorModalShell; NOT barrelled (heavy): DataTable
+                       SchemaNavigator SubNav EditorModalShell DateRangeFilter (presets + two-month
+                       calendar + date basis; logic in services/period.ts) PortalPanel (fixed popover); NOT barrelled (heavy): DataTable
                        (TanStack grid: virtualized, grouping, filters, edit mode, context menu,
                        saved views), Markdown, SqlEditor (Monaco, lazy), SqlWizardModal, SqlTestRunner
 pages/TableView/       the data screen: index (params, streaming run), ResultTable (grid + bulk edit

@@ -2447,3 +2447,34 @@ async def test_connector_streams_through_thick_adapter(tmp_path) -> None:
     assert [r["name"] for r in rows] == ["a", "b", "c"]       # rows streamed through the adapter
     assert isinstance(events[-1], StreamDone) and events[-1].total == 3
     await pools.dispose()
+
+
+@pytest.mark.asyncio
+async def test_filter_wrap_range_bounds_on_a_hinted_column(pools: PoolRegistry) -> None:
+    """``<COL>_from`` / ``<COL>_to`` (a dashboard period) bound a hinted column with ``>=`` / ``<=``,
+    with or without the ``filter`` flag, typed like the column; a lone bound works too."""
+    q = QueryDef(name="items", sql="SELECT id, name, status FROM item")
+    conn = _connector(pools, q)
+    hints = [ColumnHint(name="id", format="number")]          # no filter flag on purpose
+    assert [r["id"] for r in (await conn.execute("items", {"id_from": "2", "id_to": "3"}, column_hints=hints)).rows] == [2, 3]
+    assert [r["id"] for r in (await conn.execute("items", {"id_from": "3"}, column_hints=hints)).rows] == [3]
+    assert [r["id"] for r in (await conn.execute("items", {"id_to": "1"}, column_hints=hints)).rows] == [1]
+    # a text column bounds as text (ISO dates order correctly that way); blanks are ignored
+    rows = (await conn.execute("items", {"name_from": "b", "name_to": "", "id_from": ""}, column_hints=[ColumnHint(name="name"), ColumnHint(name="id")])).rows
+    assert [r["name"] for r in rows] == ["b", "c"]
+    # the SQL carries the predicates with their own bind names
+    sql, params = conn._apply_filter_wrap("SELECT id, name FROM item", q, {"id_from": "2", "id_to": "3"}, stmt_type="SELECT", column_hints=hints)
+    assert "lib_flt.id >= :id_from" in sql and "lib_flt.id <= :id_to" in sql and params == {"id_from": 2, "id_to": 3}
+
+
+@pytest.mark.asyncio
+async def test_period_binds_are_bound_as_dates(pools: PoolRegistry) -> None:
+    """``:PERIOD_FROM`` & co. arrive as ISO text from the browser and bind as ``date`` objects
+    (asyncpg refuses a string against a DATE column); other binds and non-ISO values pass through."""
+    from datetime import date as _date
+    q = QueryDef(name="p", sql="SELECT :PERIOD_FROM AS a, :PERIOD_TO AS b, :PREV_FROM AS c, :PERIOD_BASIS AS d, :OTHER AS e")
+    conn = _connector(pools, q)
+    bound = conn._build_params(q.sql, q, {"PERIOD_FROM": "2026-10-01", "PERIOD_TO": "2026-10-27", "PREV_FROM": "not-a-date", "PERIOD_BASIS": "doc", "OTHER": "2026-01-01"})
+    assert bound["PERIOD_FROM"] == _date(2026, 10, 1) and bound["PERIOD_TO"] == _date(2026, 10, 27)
+    assert bound["PREV_FROM"] == "not-a-date" and bound["PERIOD_BASIS"] == "doc" and bound["OTHER"] == "2026-01-01"
+    assert bound["PREV_TO"] is None if "PREV_TO" in bound else True

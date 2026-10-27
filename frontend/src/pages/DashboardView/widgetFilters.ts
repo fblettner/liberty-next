@@ -9,8 +9,43 @@
 //
 // Pre-Phase-3 this code walked `meta.columns` on the connector describe(); columns moved to the
 // Screen layer in Phase 3, which left filtering as a no-op until this rewire landed.
-import type { DashboardFilterWire } from '../../types/dashboards'
+import type { DashboardFilterWire, DashboardPeriodWire } from '../../types/dashboards'
 import type { ScreenListItem } from '../../types/screens'
+import { previousPeriod, type DateRange } from '../../services/period'
+
+export interface PeriodSelection {
+  range: DateRange
+  /** The chosen basis value (one of `period.basis[].value`), or '' when the period has no basis list. */
+  basis: string
+}
+
+/** The period's URL params for one widget: the four range binds every query may use, the basis,
+ *  and — when the dashboard names the date column (directly or by dd, resolved through the
+ *  widget's screen) — the `<COL>_from` / `<COL>_to` pair the server range-wraps on. An empty
+ *  range (all dates) sends nothing. */
+export function buildWidgetPeriodParams(
+  connector: string,
+  query: string,
+  period: DashboardPeriodWire | undefined,
+  selection: PeriodSelection | undefined,
+  findScreen: (connector: string, readQuery: string) => ScreenListItem | null,
+): Record<string, string> {
+  if (!period || !selection || !selection.range.dateFrom || !selection.range.dateTo) return {}
+  const { dateFrom, dateTo } = selection.range
+  const prev = previousPeriod(selection.range)
+  const out: Record<string, string> = { PERIOD_FROM: dateFrom, PERIOD_TO: dateTo, PREV_FROM: prev.dateFrom, PREV_TO: prev.dateTo }
+  const basis = (period.basis ?? []).find((b) => b.value === selection.basis) ?? (period.basis ?? [])[0]
+  if (basis) out.PERIOD_BASIS = basis.value
+  // The date column: the chosen basis' own column / dd when it names one, else the period's.
+  const column = basis && (basis.column || basis.dd) ? basis.column : period.column
+  const dd = basis && (basis.column || basis.dd) ? basis.dd : period.dd
+  const col = column ?? (dd ? findScreen(connector, query)?.dd_map?.[dd] ?? null : null)
+  if (col) {
+    out[`${col}_from`] = dateFrom
+    out[`${col}_to`] = dateTo
+  }
+  return out
+}
 
 /** Translate the current filter selections into URL query params for one widget's `(connector,
  *  query)` fetch. Returns an empty object when no filter applies (the widget fetches unfiltered).

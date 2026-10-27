@@ -17,6 +17,23 @@
 - Le rapport de mise à jour n'affiche plus « - » comme étiquette d'image sur une installation non
   épinglée.
 
+**Tableaux de bord : une période**
+- Un tableau de bord peut porter une `period` : un sélecteur de plage de dates dans sa barre, avec
+  les raccourcis habituels (aujourd'hui, hier, 7 / 30 derniers jours, ce mois-ci / mois dernier,
+  ce trimestre, cette année / année dernière, 12 derniers mois, toutes les dates), un calendrier
+  sur deux mois pour une plage libre et, quand le tableau de bord liste plusieurs dates de
+  référence (« Date document », « Payé le »), le choix de la référence. Le tableau de bord s'ouvre
+  sur `period.default`. Chaque requête de widget reçoit la plage dans les liaisons `:PERIOD_FROM`
+  / `:PERIOD_TO` (liées comme des dates), plus `:PREV_FROM` / `:PREV_TO` pour la période précédente (une année à date se
+  compare à l'année précédente à date, un mois au mois précédent à date, un trimestre entier au
+  trimestre précédent, le reste à la même durée juste avant) et `:PERIOD_BASIS` ; une requête qui
+  ne les mentionne pas reste telle quelle. Quand la période nomme la colonne de date (`column`, ou
+  `dd` retrouvé par les écrans), un widget dont l'écran la porte est filtré côté serveur sans
+  toucher à son SQL : l'enveloppe des filtres, avec maintenant des bornes `<COL>_from` /
+  `<COL>_to` sur toute colonne connue. L'éditeur de tableau de bord a un bloc Période. Le sélecteur
+  de plage et le panneau flottant sont des composants partagés, pour les listes et l'explorateur
+  à venir.
+
 **nomaflow : étape `file_load`, un classeur ou un CSV dans une table, rejouable par partition**
 - Ce que l'import Excel de la grille n'est pas : un chargement qui tourne sans personne au clavier
   (une planification, une chaîne d'étapes), sur les volumes d'une table de faits, rejouable pour une
