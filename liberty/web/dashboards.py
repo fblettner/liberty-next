@@ -33,7 +33,7 @@ from liberty.auth.dependencies import CurrentPrincipal
 from liberty.auth.principal import Principal
 from liberty.charts import ChartConfig, ChartsFile
 from liberty.connectors.registry import ConnectorRegistry
-from liberty.dashboards import ChartWidget, Dashboard, DashboardsFile, KpiWidget, TableWidget
+from liberty.dashboards import BarsWidget, ChartWidget, Dashboard, DashboardsFile, KpiWidget, ListWidget, StatWidget, TableWidget
 from liberty.dashboards.report import PeriodPick, dashboard_sections, resolve_column
 from liberty.screens import ScreensFile
 from liberty.web.deps import get_connectors, get_screens, request_language
@@ -73,6 +73,7 @@ def _resolve_chart_widget(w: ChartWidget, charts: ChartsFile, scope: str) -> dic
         return {
             "type": "chart",
             "label": w.label or ref.label,    # inherit the saved chart's label when the widget doesn't override
+            **({"description": w.description} if w.description else {}),
             "col_span": w.col_span,
             "row_span": w.row_span,
             "chart_id": w.chart,              # echo back so the frontend can link out (future)
@@ -85,6 +86,7 @@ def _resolve_chart_widget(w: ChartWidget, charts: ChartsFile, scope: str) -> dic
     return {
         "type": "chart",
         "label": w.label,
+        **({"description": w.description} if w.description else {}),
         "col_span": w.col_span,
         "row_span": w.row_span,
         "connector": w.connector,
@@ -98,6 +100,7 @@ def _resolve_kpi_widget(w: KpiWidget) -> dict[str, Any]:
     return {
         "type": "kpi",
         "label": w.label,
+        **({"description": w.description} if w.description else {}),
         "col_span": w.col_span,
         "row_span": w.row_span,
         "connector": w.connector,
@@ -115,6 +118,7 @@ def _resolve_table_widget(w: TableWidget) -> dict[str, Any]:
     return {
         "type": "table",
         "label": w.label,
+        **({"description": w.description} if w.description else {}),
         "col_span": w.col_span,
         "row_span": w.row_span,
         "connector": w.connector,
@@ -122,6 +126,12 @@ def _resolve_table_widget(w: TableWidget) -> dict[str, Any]:
         "columns": list(w.columns),
         **({"max_rows": w.max_rows} if w.max_rows else {}),
     }
+
+
+def _resolve_plain_widget(w: StatWidget | ListWidget | BarsWidget) -> dict[str, Any]:
+    """The synthesis widgets (stat / list / bars) travel as they are configured: every field is
+    presentation, the frontend formats the first row / the rows itself."""
+    return w.model_dump(mode="json", exclude_none=True)
 
 
 def _widget_query(widget_dict: dict[str, Any]) -> tuple[str, str] | None:
@@ -181,6 +191,8 @@ def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Prin
             wd = _resolve_kpi_widget(w)
         elif isinstance(w, TableWidget):
             wd = _resolve_table_widget(w)
+        elif isinstance(w, (StatWidget, ListWidget, BarsWidget)):
+            wd = _resolve_plain_widget(w)
         else:  # pragma: no cover - guarded by the discriminated union
             continue
         if wd is None:

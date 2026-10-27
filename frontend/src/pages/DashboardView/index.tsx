@@ -21,6 +21,9 @@ import { ChartWidget } from './ChartWidget'
 import { FilterBar } from './FilterBar'
 import { KpiWidget } from './KpiWidget'
 import { TableWidget } from './TableWidget'
+import { StatWidget } from './StatWidget'
+import { ListWidget } from './ListWidget'
+import { BarsWidget } from './BarsWidget'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 // CSS-grid layout: 12 cols on desktop, collapse to 6 on tablet, 1 on mobile so dashboards stay
@@ -49,6 +52,9 @@ const WidgetTitle = styled.div`
   font-size: ${fontSize.micro}; color: ${colors.text.muted};
   font-family: ${fonts.sans}; font-weight: 600; letter-spacing: 0.04em;
   padding: 0 4px; flex-shrink: 0;
+`
+const WidgetSub = styled.span`
+  display: block; font-weight: 400; letter-spacing: 0; text-transform: none; font-size: ${fontSize.micro}; color: ${colors.text.muted}; margin-top: 1px;
 `
 const EmptyState = styled.div`
   color: ${colors.text.muted}; font-size: ${fontSize.sm};
@@ -181,12 +187,21 @@ function WidgetCell({
   const common = { filters, filterValues, period, selection, refreshKey }
   return (
     <WidgetFrame $cs={widget.col_span} $rs={widget.row_span}>
-      {/* a KPI card carries its own label inside (nomaubl's card); the others keep the caption above */}
-      {widget.label && widget.type !== 'kpi' && <WidgetTitle>{widget.label}</WidgetTitle>}
+      {/* a card widget (kpi, stat, list, bars) carries its own title inside (nomaubl's cards); a chart
+          or a table keeps the caption above, with the subtitle under it */}
+      {widget.label && (widget.type === 'chart' || widget.type === 'table') && (
+        <WidgetTitle>{widget.label}{widget.description && <WidgetSub>{widget.description}</WidgetSub>}</WidgetTitle>
+      )}
       {widget.type === 'chart'
         ? <ChartWidget widget={widget} {...common} />
         : widget.type === 'table'
         ? <TableWidget widget={widget} {...common} />
+        : widget.type === 'stat'
+        ? <StatWidget widget={widget} {...common} />
+        : widget.type === 'list'
+        ? <ListWidget widget={widget} {...common} />
+        : widget.type === 'bars'
+        ? <BarsWidget widget={widget} {...common} />
         : <KpiWidget widget={widget} {...common} />}
     </WidgetFrame>
   )

@@ -252,3 +252,23 @@ def test_dashboards_without_filters_default_to_empty() -> None:
     data = {"dashboards": {"s": {"ov": {"label": "Overview", "widgets": []}}}}
     df = parse_dashboards(data)
     assert df.dashboards["s"]["ov"].filters == []
+
+
+def test_parse_synthesis_widgets() -> None:
+    """stat / list / bars — the synthesis-page widgets — parse with their presentation fields; a
+    subtitle (``description``) is accepted on every kind."""
+    f = parse_dashboards({"dashboards": {"c": {"audit": {"label": "Audit", "widgets": [
+        {"type": "stat", "label": "Users", "description": "Declared accounts", "connector": "c", "query": "q", "value_column": "USERS", "format": "integer", "sub": "{ENABLED:integer} enabled · {DISABLED:integer} disabled", "col_span": 3},
+        {"type": "list", "label": "Decisions", "connector": "c", "query": "q", "title_column": "TITLE", "subtitle_column": "HINT", "value_column": "AMOUNT", "format": "currency", "count_column": "N", "count_label": "{n} users", "tone_column": "TONE", "tag_column": "STATUS", "max_rows": 5},
+        {"type": "bars", "label": "Per component", "connector": "c", "query": "q", "label_column": "CPT", "sub_label_column": "CAT", "value_column": "USERS", "share": "max", "note": "Users per licence component."},
+        {"type": "chart", "label": "Trend", "description": "Last 12 months", "connector": "c", "query": "q", "spec": {"type": "bar", "x": "M", "y": ["V"]}},
+    ]}}}})
+    stat, lst, bars, chart = f.dashboards["c"]["audit"].widgets
+    assert stat.type == "stat" and stat.format == "integer" and "{ENABLED:integer}" in (stat.sub or "") and stat.description == "Declared accounts"
+    assert lst.type == "list" and lst.max_rows == 5 and lst.tone_column == "TONE"
+    assert bars.type == "bars" and bars.share == "max" and bars.max_rows == 10
+    assert chart.description == "Last 12 months"
+    with pytest.raises(Exception):  # pydantic ValidationError
+        parse_dashboards({"dashboards": {"c": {"x": {"label": "X", "widgets": [{"type": "stat", "connector": "c", "query": "q"}]}}}})
+    with pytest.raises(Exception):  # pydantic ValidationError
+        parse_dashboards({"dashboards": {"c": {"x": {"label": "X", "widgets": [{"type": "bars", "connector": "c", "query": "q", "label_column": "A", "value_column": "V", "share": "half"}]}}}})

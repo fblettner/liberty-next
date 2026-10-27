@@ -76,6 +76,15 @@
   become cards; the numbers follow the reader's language (`1 234,5` / `1,234.5`); the
   template's own words (cover labels, confidential lines) follow it too. Excel keeps the data
   only.
+- **Synthesis widgets for the dashboards.** Three widget kinds for a synthesis page like
+  nomaubl's billing overview, all configuration: `stat` (a figure card from the query's first
+  row: the value formatted with a unit, a sub line templated over the row — `"{ENABLED:integer}
+  enabled · {DISABLED:integer} disabled"`), `list` (a decision or ranked list: title, subtitle,
+  figure, count, a tone dot ok / warn / error / info, a tag pill) and `bars` (a ranked list with
+  a proportion bar per row, as a share of the total or of the largest). Every widget takes a
+  `description` subtitle. The card widgets carry their title inside the card; the dashboard
+  export shows a stat as a card and a list or bars as a table. The visual editor adds the three
+  kinds with their preview.
 - **A menu link opens the Explorer on one model.** A `page` menu item may target
   `/explorer/<app>/<model>`: the tab opens the Data Explorer on that model (the picker still
   lets the user switch). The apps bundle uses it to put a "Data Explorer" entry in each domain

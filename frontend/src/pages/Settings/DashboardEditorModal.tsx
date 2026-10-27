@@ -6,13 +6,16 @@
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, BarChart3, Hash, Table as TableIcon, LayoutDashboard } from 'lucide-react'
+import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, BarChart3, Hash, Table as TableIcon, LayoutDashboard, List as ListIcon, BarChartHorizontal } from 'lucide-react'
 import { Button, Input, Field, Banner, SearchSelect, useModals, type SearchSelectOption } from '../../common'
 import { EditorModalShell } from '../../common/EditorModalShell'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { ChartWidget } from '../DashboardView/ChartWidget'
 import { KpiWidget } from '../DashboardView/KpiWidget'
 import { TableWidget } from '../DashboardView/TableWidget'
+import { StatWidget } from '../DashboardView/StatWidget'
+import { ListWidget } from '../DashboardView/ListWidget'
+import { BarsWidget } from '../DashboardView/BarsWidget'
 import type { DashboardWidget, ChartWidgetWire, KpiWidgetWire, TableWidgetWire } from '../../types/dashboards'
 import type { SavedChartSpec } from '../../types/charts'
 import { WidgetEditorModal } from './WidgetEditorModal'
@@ -60,7 +63,7 @@ const snum = (v: unknown, d: number) => (typeof v === 'number' ? v : d)
 const sstr = (v: unknown) => (typeof v === 'string' ? v : '')
 
 type ChartsCatalog = Record<string, { label?: string; connector?: string; query?: string; spec?: SavedChartSpec }>
-type Kind = 'chart' | 'kpi' | 'table'
+type Kind = 'chart' | 'kpi' | 'table' | 'stat' | 'list' | 'bars'
 
 /** Infer a widget's kind. The parsed-config endpoint drops the ``type`` discriminator when it
  *  equals the field default (``exclude_defaults``), so a loaded widget often has no ``type`` — we
@@ -71,7 +74,7 @@ const PRESET_KEYS = ['thisMonth', 'lastMonth', 'thisQuarter', 'thisYear', 'lastY
 
 function widgetType(w: Raw): Kind {
   const tp = sstr(w.type)
-  if (tp === 'chart' || tp === 'kpi' || tp === 'table') return tp
+  if (tp === 'chart' || tp === 'kpi' || tp === 'table' || tp === 'stat' || tp === 'list' || tp === 'bars') return tp
   if (w.spec !== undefined || w.chart !== undefined) return 'chart'
   if (w.column !== undefined) return 'kpi'
   return 'table'
@@ -99,10 +102,15 @@ function toWire(w: Raw, charts: ChartsCatalog, scope: string): DashboardWidget |
   }
   // table
   if (!w.connector || !w.query) return null
+  if (kind === 'stat' || kind === 'list' || kind === 'bars') {
+    // the synthesis widgets travel as configured (every field is presentation)
+    if (!w.connector || !w.query) return null
+    return { ...w, type: kind, ...common, connector: sstr(w.connector), query: sstr(w.query), max_rows: snum(w.max_rows, 10) } as unknown as DashboardWidget
+  }
   return { type: 'table', ...common, connector: sstr(w.connector), query: sstr(w.query), columns: Array.isArray(w.columns) ? (w.columns as string[]) : [], ...(w.max_rows ? { max_rows: snum(w.max_rows, 0) } : {}) } as TableWidgetWire
 }
 
-const KIND_ICON = { chart: BarChart3, kpi: Hash, table: TableIcon } as const
+const KIND_ICON = { chart: BarChart3, kpi: Hash, table: TableIcon, stat: Hash, list: ListIcon, bars: BarChartHorizontal } as const
 
 export function DashboardEditorModal({
   initial, scope, chartsCatalog, onSave, onClose,
@@ -146,8 +154,8 @@ export function DashboardEditorModal({
   })
   const del = (i: number) => setWidgets((ws) => ws.filter((_, j) => j !== i))
 
-  const addWidget = (kind: 'chart' | 'kpi' | 'table') => {
-    const w: Raw = { type: kind, col_span: kind === 'kpi' ? 3 : 6, row_span: kind === 'kpi' ? 1 : 2 }
+  const addWidget = (kind: Kind) => {
+    const w: Raw = { type: kind, col_span: kind === 'kpi' || kind === 'stat' ? 3 : kind === 'list' || kind === 'bars' ? 4 : 6, row_span: kind === 'kpi' || kind === 'stat' ? 1 : 2 }
     setWidgets((ws) => { const next = [...ws, w]; setNewIdx(next.length - 1); setEditIdx(next.length - 1); return next })
   }
 
@@ -238,6 +246,9 @@ export function DashboardEditorModal({
             <Button $size="sm" $variant="ghost" onClick={() => addWidget('chart')}><BarChart3 size={13} /> {t('settings.dash.kindChart', 'Chart')}</Button>
             <Button $size="sm" $variant="ghost" onClick={() => addWidget('kpi')}><Hash size={13} /> {t('settings.dash.kindKpi', 'KPI')}</Button>
             <Button $size="sm" $variant="ghost" onClick={() => addWidget('table')}><TableIcon size={13} /> {t('settings.dash.kindTable', 'Table')}</Button>
+            <Button $size="sm" $variant="ghost" onClick={() => addWidget('stat')}><Hash size={13} /> {t('settings.dash.kindStat', 'Figure')}</Button>
+            <Button $size="sm" $variant="ghost" onClick={() => addWidget('list')}><ListIcon size={13} /> {t('settings.dash.kindList', 'List')}</Button>
+            <Button $size="sm" $variant="ghost" onClick={() => addWidget('bars')}><BarChartHorizontal size={13} /> {t('settings.dash.kindBars', 'Bars')}</Button>
           </AddBar>
 
           {widgets.length === 0 ? (
@@ -268,6 +279,9 @@ export function DashboardEditorModal({
                       {wire ? (
                         wire.type === 'chart' ? <ChartWidget widget={wire} filters={[]} filterValues={{}} />
                           : wire.type === 'table' ? <TableWidget widget={wire} filters={[]} filterValues={{}} />
+                          : wire.type === 'stat' ? <StatWidget widget={wire} filters={[]} filterValues={{}} />
+                          : wire.type === 'list' ? <ListWidget widget={wire} filters={[]} filterValues={{}} />
+                          : wire.type === 'bars' ? <BarsWidget widget={wire} filters={[]} filterValues={{}} />
                           : <KpiWidget widget={wire} filters={[]} filterValues={{}} />
                       ) : (
                         <Placeholder><span><Icon size={18} /><br />{t('settings.dash.configurePrompt', 'Click ✎ to configure this {{kind}}', { kind })}</span></Placeholder>

@@ -7,6 +7,8 @@ import type { Aggregation, SavedChartSpec } from './charts'
 
 export interface ChartWidgetWire {
   type: 'chart'
+  /** A subtitle under the title. */
+  description?: string | null
   /** Echoed back when the widget was a reference (`chart = "<id>"` in TOML); absent for inline widgets. */
   chart_id?: string
   /** Resolved label — inherits the saved chart's label when the widget didn't override it. */
@@ -20,6 +22,8 @@ export interface ChartWidgetWire {
 
 export interface KpiWidgetWire {
   type: 'kpi'
+  /** A subtitle under the title. */
+  description?: string | null
   label?: string | null
   col_span: number
   row_span: number
@@ -34,6 +38,8 @@ export interface KpiWidgetWire {
 
 export interface TableWidgetWire {
   type: 'table'
+  /** A subtitle under the title. */
+  description?: string | null
   label?: string | null
   col_span: number
   row_span: number
@@ -45,7 +51,66 @@ export interface TableWidgetWire {
   max_rows?: number
 }
 
-export type DashboardWidget = ChartWidgetWire | KpiWidgetWire | TableWidgetWire
+export type ValueFormat = 'number' | 'integer' | 'currency' | 'percent'
+
+/** A figure card from the query's first row: the value column formatted, a sub line templated
+ *  over the row (`{COLUMN}` / `{COLUMN:format}`). */
+export interface StatWidgetWire {
+  type: 'stat'
+  label?: string | null
+  description?: string | null
+  col_span: number
+  row_span: number
+  connector: string
+  query: string
+  value_column: string
+  format?: ValueFormat
+  unit?: string
+  sub?: string
+}
+
+/** A decision / ranked list: one row per query row with a title, a subtitle, a figure, a count,
+ *  a tone dot and a tag pill. */
+export interface ListWidgetWire {
+  type: 'list'
+  label?: string | null
+  description?: string | null
+  col_span: number
+  row_span: number
+  connector: string
+  query: string
+  title_column: string
+  subtitle_column?: string
+  value_column?: string
+  format?: ValueFormat
+  unit?: string
+  count_column?: string
+  count_label?: string
+  tone_column?: string
+  tag_column?: string
+  max_rows: number
+}
+
+/** A ranked list with a proportion bar per row. */
+export interface BarsWidgetWire {
+  type: 'bars'
+  label?: string | null
+  description?: string | null
+  col_span: number
+  row_span: number
+  connector: string
+  query: string
+  label_column: string
+  sub_label_column?: string
+  value_column: string
+  format?: ValueFormat
+  unit?: string
+  share: 'total' | 'max'
+  note?: string
+  max_rows: number
+}
+
+export type DashboardWidget = ChartWidgetWire | KpiWidgetWire | TableWidgetWire | StatWidgetWire | ListWidgetWire | BarsWidgetWire
 
 export interface DashboardFilterOptionsWire {
   connector: string

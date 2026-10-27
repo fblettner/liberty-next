@@ -15,6 +15,7 @@ the web layer threads its own (permissions, scope, pool, language).
 from __future__ import annotations
 
 import calendar
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -230,6 +231,86 @@ def table_section(title: str, widget: dict[str, Any], result: dict[str, Any], no
     return Section(title, "table", [(c.get("label") or c["name"]) for c in chosen], [[r.get(c["name"]) for c in chosen] for r in rows[:MAX_ROWS]], note=note, truncated=len(rows) > MAX_ROWS)
 
 
+_TEMPLATE = re.compile(r"\{([A-Za-z0-9_]+)(?::([a-z]+))?\}")
+
+
+def format_value(v: Any, fmt: str | None, unit: str | None, lang: str | None) -> str:
+    """A figure as the synthesis widgets show it: ``integer`` / ``number`` / ``currency`` /
+    ``percent`` (a 0–1 ratio), the unit after; text as is."""
+    from liberty.explorer.chart_svg import fmt_number
+    n = _num(v)
+    if n is None:
+        return "" if v is None else str(v)
+    if fmt == "percent":
+        out = f"{fmt_number(n * 100, lang, 1)}\u00a0%"
+    elif fmt == "currency":
+        out = f"{fmt_number(n, lang, 0 if n == int(n) else 2)}\u00a0€"
+    elif fmt == "integer":
+        out = fmt_number(n, lang, 0)
+    else:
+        out = fmt_number(n, lang)
+    return f"{out}\u00a0{unit}" if unit and fmt != "currency" else out
+
+
+def fill_template(template: str, row: dict[str, Any], result: dict[str, Any], lang: str | None) -> str:
+    """``{COLUMN}`` / ``{COLUMN:format}`` placeholders filled from *row* (names resolved to the
+    result's spelling); an unknown column stays as written."""
+    def sub(m: re.Match[str]) -> str:
+        col = resolve_column(result, m.group(1))
+        if col not in row:
+            return m.group(0)
+        return format_value(row[col], m.group(2), None, lang)
+    return _TEMPLATE.sub(sub, template)
+
+
+def stat_card(widget: dict[str, Any], result: dict[str, Any], lang: str | None) -> tuple[str, Any]:
+    """The figure of a stat widget (its first row): ``(label, text)``, the sub line after an
+    em dash when the widget has one."""
+    rows = result.get("rows") or []
+    row = rows[0] if rows else {}
+    col = resolve_column(result, widget.get("value_column") or "")
+    text = format_value(row.get(col), widget.get("format"), widget.get("unit"), lang) if row else ""
+    if widget.get("sub") and row:
+        text = f"{text} — {fill_template(widget['sub'], row, result, lang)}" if text else fill_template(widget["sub"], row, result, lang)
+    return widget.get("label") or widget.get("query") or "", text or None
+
+
+def list_section(title: str, widget: dict[str, Any], result: dict[str, Any], lang: str | None) -> Section:
+    """A list widget as a table: title, subtitle, figure, count, tag — the columns it shows."""
+    rows_in = (result.get("rows") or [])[: widget.get("max_rows") or 10]
+    cols = [("title_column", _label(result, resolve_column(result, widget["title_column"])))]
+    for key, default in (("subtitle_column", ""), ("value_column", ""), ("count_column", ""), ("tag_column", "")):
+        if widget.get(key):
+            cols.append((key, _label(result, resolve_column(result, widget[key])) or default))
+    out: list[list[Any]] = []
+    for r in rows_in:
+        line: list[Any] = []
+        for key, _h in cols:
+            c = resolve_column(result, widget[key])
+            v = r.get(c)
+            if key == "value_column":
+                v = format_value(v, widget.get("format"), widget.get("unit"), lang)
+            elif key == "count_column" and widget.get("count_label") and v is not None:
+                v = widget["count_label"].replace("{n}", format_value(v, "integer", None, lang))
+            line.append(v)
+        out.append(line)
+    return Section(title, "table", [h for _k, h in cols], out)
+
+
+def bars_section(title: str, widget: dict[str, Any], result: dict[str, Any], lang: str | None) -> Section:
+    """A bars widget as a table: label, sub label, figure, share."""
+    rows_in = (result.get("rows") or [])[: widget.get("max_rows") or 10]
+    lc, vc = resolve_column(result, widget["label_column"]), resolve_column(result, widget["value_column"])
+    sc = resolve_column(result, widget["sub_label_column"]) if widget.get("sub_label_column") else None
+    vals = [_num(r.get(vc)) or 0.0 for r in rows_in]
+    base = (sum(vals) if widget.get("share", "total") == "total" else max(vals, default=0.0)) or 0.0
+    headers = [_label(result, lc), *([_label(result, sc)] if sc else []), _label(result, vc), "%"]
+    out = []
+    for r, v in zip(rows_in, vals, strict=True):
+        out.append([r.get(lc), *([r.get(sc)] if sc else []), format_value(r.get(vc), widget.get("format"), widget.get("unit"), lang), format_value(v / base if base else 0.0, "percent", None, lang)])
+    return Section(title, "table", headers, out, note=widget.get("note"))
+
+
 def kpi_section(title: str, cards: list[tuple[str, Any]]) -> Section:
     return Section(title, "kpi", [h for h, _v in cards], [[v for _h, v in cards]])
 
@@ -269,9 +350,16 @@ async def dashboard_sections(
         if w.get("type") == "kpi":
             cards.append((title, kpi_display(kpi_value(res, w.get("column") or "", w.get("aggregation") or "count"), w.get("format"), lang)))
             continue
+        if w.get("type") == "stat":
+            cards.append(stat_card(w, res, lang))
+            continue
         flush()
         if w.get("type") == "chart":
             out.append(chart_section(title, w, res))
+        elif w.get("type") == "list":
+            out.append(list_section(title, w, res, lang))
+        elif w.get("type") == "bars":
+            out.append(bars_section(title, w, res, lang))
         else:
             out.append(table_section(title, w, res))
     flush()

@@ -86,6 +86,16 @@
   digest. Les KPI deviennent des cartes ; les nombres suivent la langue du lecteur (`1 234,5` /
   `1,234.5`), les mots du gabarit (libellés de couverture, mentions de confidentialité) aussi.
   Excel garde les données seules.
+- **Des widgets de synthèse pour les tableaux de bord.** Trois sortes de widgets pour une page
+  de synthèse comme celle de la facturation de nomaubl, en configuration : `stat` (une carte
+  chiffre depuis la première ligne de la requête : la valeur formatée avec une unité, une ligne
+  secondaire gabarit sur la ligne — `"{ENABLED:integer} actifs · {DISABLED:integer}
+  désactivés"`), `list` (une liste de décisions ou un classement : titre, sous-titre, chiffre,
+  compte, un point de tonalité ok / warn / error / info, une pastille) et `bars` (un classement
+  avec une barre de proportion par ligne, part du total ou du plus grand). Chaque widget accepte
+  un sous-titre `description`. Les cartes portent leur titre à l'intérieur ; l'export d'un tableau
+  de bord montre un `stat` en carte, une liste ou des barres en table. L'éditeur visuel ajoute
+  les trois sortes avec leur aperçu.
 - **Un lien de menu ouvre l'Explorateur sur un modèle.** Un élément de menu `page` peut cibler
   `/explorer/<app>/<modèle>` : l'onglet ouvre l'Explorateur de données sur ce modèle (le
   sélecteur permet toujours d'en changer). Le bundle des applications s'en sert pour placer une

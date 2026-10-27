@@ -8,6 +8,9 @@ like any other screen. Slice 3a (this module) ships two widget kinds:
   the same Recharts pipeline the TableView's chart toggle uses.
 * **kpi** — a single big number computed from a query's result: ``aggregation(column)`` over
   every returned row. For "active users · 686" style displays.
+* **table**, **stat**, **list**, **bars** — the rows of a query as a compact grid; a figure card
+  from the first row with a sub line; a decision / ranked list (title, subtitle, figure, count,
+  tone dot, tag); a proportion-bar list. The last three are the synthesis-page widgets.
 
 Each widget claims ``col_span`` × ``row_span`` cells of a 12-column grid; widgets land in
 declaration order. Permission: each widget gates on its underlying query's
@@ -63,6 +66,7 @@ class WidgetBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     label: str | None = Field(default=None, description="Optional title shown above the widget.")
+    description: str | None = Field(default=None, description="A subtitle under the title: what the figure covers (\"Last 12 months, by status\").")
     col_span: int = Field(default=6, ge=1, le=12, description="Width in 12-column grid units (1–12).")
     row_span: int = Field(default=1, ge=1, le=8, description="Height in grid rows (1–8).")
 
@@ -147,7 +151,60 @@ class TableWidget(WidgetBase):
     )
 
 
-Widget = Annotated[Union[ChartWidget, KpiWidget, TableWidget], Field(discriminator="type")]
+ValueFormat = Literal["number", "integer", "currency", "percent"]
+
+
+class StatWidget(WidgetBase):
+    """A figure card the way a synthesis page shows one: the **first row** of the query gives
+    the value (``value_column``, formatted, with a unit) and the sub line — a template over the
+    row's other columns (``"{INVOICES:integer} invoices · {CREDITS:currency}"``). The query
+    aggregates in SQL; the card only presents. Unlike ``kpi`` nothing is aggregated client-side."""
+    type: Literal["stat"] = "stat"
+    connector: str = Field(description="SQL connector for the query.")
+    query: str = Field(description="Read query whose first row carries the figure.")
+    value_column: str = Field(description="The column shown as the big figure.")
+    format: ValueFormat | None = Field(default=None, description="How the figure is formatted: number (default), integer, currency, percent (a ratio 0–1).")
+    unit: str | None = Field(default=None, description="A unit after the figure (\"€\", \"users\").")
+    sub: str | None = Field(default=None, description="The line under the figure: text with ``{COLUMN}`` or ``{COLUMN:format}`` placeholders filled from the same row.")
+
+
+class ListWidget(WidgetBase):
+    """A list of rows the way a synthesis page lists what needs a decision or the figures per
+    company: a title and a subtitle on the left, a value and a count on the right, an optional
+    tone dot (ok / warn / error / info) and an optional tag pill. One row per query row, capped."""
+    type: Literal["list"] = "list"
+    connector: str = Field(description="SQL connector for the query.")
+    query: str = Field(description="Read query whose rows are listed, in its order.")
+    title_column: str = Field(description="The row's title.")
+    subtitle_column: str | None = Field(default=None, description="A muted line under the title (an explanation, a hint).")
+    value_column: str | None = Field(default=None, description="The figure on the right.")
+    format: ValueFormat | None = Field(default=None, description="The figure's format.")
+    unit: str | None = Field(default=None, description="A unit after the figure.")
+    count_column: str | None = Field(default=None, description="A count under the figure.")
+    count_label: str | None = Field(default=None, description="The count's wording, ``{n}`` for the number (\"{n} invoices\"); blank = the number alone.")
+    tone_column: str | None = Field(default=None, description="A column holding ok / warn / error / info: colours the dot and the tag.")
+    tag_column: str | None = Field(default=None, description="A short status shown as a pill under the figure.")
+    max_rows: int = Field(default=10, ge=1, le=100, description="Rows shown.")
+
+
+class BarsWidget(WidgetBase):
+    """A ranked list with a proportion bar per row (\"per transaction type\"): a label, an optional
+    muted sub label, the figure on the right, the bar as the row's share of the total (or of the
+    largest row)."""
+    type: Literal["bars"] = "bars"
+    connector: str = Field(description="SQL connector for the query.")
+    query: str = Field(description="Read query whose rows are listed, in its order.")
+    label_column: str = Field(description="The row's label.")
+    sub_label_column: str | None = Field(default=None, description="A muted word after the label.")
+    value_column: str = Field(description="The figure, and the bar's length.")
+    format: ValueFormat | None = Field(default=None, description="The figure's format.")
+    unit: str | None = Field(default=None, description="A unit after the figure.")
+    share: Literal["total", "max"] = Field(default="total", description="The bar's full width: the sum of the rows (a share) or the largest row (a ranking).")
+    note: str | None = Field(default=None, description="A muted note under the bars.")
+    max_rows: int = Field(default=10, ge=1, le=100, description="Rows shown.")
+
+
+Widget = Annotated[Union[ChartWidget, KpiWidget, TableWidget, StatWidget, ListWidget, BarsWidget], Field(discriminator="type")]
 
 
 class DashboardFilterOptions(BaseModel):

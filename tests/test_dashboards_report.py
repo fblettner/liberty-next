@@ -97,3 +97,18 @@ def test_split_dd_binds_takes_the_reserved_params_out() -> None:
     plain, dd = split_dd_binds({"PERIOD_FROM": "2026-01-01", "_dd_BU_CODE": "B1", "_dd_SALES_DATE_from": "2026-01-01", "_dd_SALES_DATE_to": "2026-01-31", "_dd_": "x"})
     assert plain == {"PERIOD_FROM": "2026-01-01"} and dd == {"BU_CODE": "B1", "SALES_DATE__from": "2026-01-01", "SALES_DATE__to": "2026-01-31"}
     assert split_dd_binds({}) == ({}, {})
+
+
+def test_synthesis_widgets_shape_and_format() -> None:
+    from liberty.dashboards.report import bars_section, fill_template, format_value, list_section, stat_card
+    assert format_value(1234.5, "number", None, "en") == "1,234.5" and format_value(1234, "currency", None, "fr") == "1 234 €"
+    assert format_value(0.256, "percent", None, "en") == "25.6 %" and format_value(12, "integer", "users", "en") == "12 users" and format_value("x", None, None, None) == "x"
+    res = {"columns": [{"name": "title", "label": "Decision"}, {"name": "hint"}, {"name": "amount", "label": "Amount"}, {"name": "n"}, {"name": "tone"}, {"name": "status"}, {"name": "users"}, {"name": "enabled"}],
+           "rows": [{"title": "Dormant", "hint": "No login for 90 days", "amount": 1500, "n": 7, "tone": "warn", "status": "to review", "users": 120, "enabled": 110},
+                    {"title": "Generic", "hint": None, "amount": 0, "n": 2, "tone": "error", "status": "", "users": 120, "enabled": 110}]}
+    assert fill_template("{USERS:integer} users · {ENABLED} on · {NOPE}", res["rows"][0], res, "en") == "120 users · 110 on · {NOPE}"
+    assert stat_card({"label": "Users", "value_column": "USERS", "format": "integer", "sub": "{ENABLED:integer} enabled"}, res, "en") == ("Users", "120 — 110 enabled")
+    s = list_section("Decisions", {"title_column": "TITLE", "subtitle_column": "HINT", "value_column": "AMOUNT", "format": "currency", "count_column": "N", "count_label": "{n} users", "tag_column": "STATUS", "max_rows": 1}, res, "en")
+    assert s.headers == ["Decision", "hint", "Amount", "n", "status"] and s.rows == [["Dormant", "No login for 90 days", "1,500 €", "7 users", "to review"]]
+    b = bars_section("Per component", {"label_column": "TITLE", "value_column": "AMOUNT", "share": "total", "note": "n"}, res, "en")
+    assert b.headers == ["Decision", "Amount", "%"] and b.rows[0] == ["Dormant", "1,500", "100.0 %"] and b.note == "n"
