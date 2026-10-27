@@ -391,6 +391,8 @@ const fr: Resources = {
     contextRow: 'la ligne cliquée',
     contextHint: "L'assistant voit ce que vous regardez : l'écran, ses filtres, la ligne cliquée.",
     contextDrop: "Ne pas envoyer la page à l'assistant",
+    pickModel: 'Modèle',
+    starters: 'Essayez une de ces questions',
   },
   reports: {
     title: 'Rapports',

@@ -294,6 +294,13 @@ class AISettings(BaseModel):
     # Server-side web_fetch (Anthropic-hosted); disabled unless domains are listed
     web_fetch_domains: list[str] = Field(default_factory=list)
     web_fetch_max_uses: int = 5
+    # The chat's model picker: the models a user may choose besides ``model`` (empty → no
+    # picker, ``model`` only). ``POST /ai/chat`` refuses any other id.
+    allowed_models: list[str] = Field(default_factory=list)
+    # Starter questions shown on an empty conversation, keyed by ``*`` (everywhere), an app
+    # (``nomajde``) or an app's screen (``nomajde/f0092``); the most specific key that matches
+    # the page the user is on wins.
+    starters: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class CryptoSettings(BaseModel):

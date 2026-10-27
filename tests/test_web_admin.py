@@ -1748,6 +1748,23 @@ def test_app_parsed_round_trips_the_ui_defaults(env, tmp_path, monkeypatch) -> N
         assert got["default_period"] == "lastMonth" and got["default_page_size"] == 100 and got["dashboard_cache_seconds"] == 0
 
 
+def test_app_parsed_round_trips_the_ai_picker_and_starters(env, tmp_path, monkeypatch) -> None:
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        got = client.get("/admin/config/app/parsed", headers=h).json()
+        assert got["ai"]["allowed_models"] == [] and got["ai"]["starters"] == {}
+        assert {"id": "claude-opus-5-5", "label": "Opus 5.5 (latest)"} in got["choices"]["models"]
+        body = {k: got[k] for k in ("app", "ai", "license", "oidc")}
+        body["ai"] = {**got["ai"], "allowed_models": ["claude-haiku-5-5"], "starters": {"*": ["What can you do?"], "nomajde/f0092": ["Who has no role?", "Users never logged in"]}}
+        r = client.put("/admin/config/app/parsed", json=body, headers=h)
+        assert r.status_code == 200, r.text
+        ai = client.get("/admin/config/app/parsed", headers=h).json()["ai"]
+        assert ai["allowed_models"] == ["claude-haiku-5-5"] and ai["starters"]["nomajde/f0092"] == ["Who has no role?", "Users never logged in"]
+        assert 'nomajde/f0092' in (tmp_path / "app.toml").read_text()
+
+
 def test_app_parsed_notify_section_round_trip_encrypts_the_password(env, tmp_path, monkeypatch) -> None:
     app, _conn_toml, _db_url = env
     monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))

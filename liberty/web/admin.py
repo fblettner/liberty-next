@@ -1655,6 +1655,7 @@ async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dic
 # so comments + ``${VAR}`` references on untouched keys survive a save). Changes do NOT take
 # effect live: app.toml is loaded once at startup. The PUT returns ``requires_restart: true`` to
 # nudge the UI.
+from liberty.ai.catalog import KNOWN_MODELS
 from liberty.config import AISettings, AppSettings, LicenseSettings, OIDCSettings, ReportsBrandingSettings, load_settings, resolve_app_config_path, NotifySettings
 
 
@@ -1667,7 +1668,7 @@ _APP_SAFE_KEYS = {
 _AI_SAFE_KEYS = {
     "enabled", "model", "max_tokens", "max_iterations", "system_prompt", "thinking",
     "effort", "request_timeout", "connector_tools", "api_tool", "scaffold_tools",
-    "allowed_connectors", "web_fetch_domains", "web_fetch_max_uses",
+    "allowed_connectors", "web_fetch_domains", "web_fetch_max_uses", "allowed_models", "starters",
     "api_key",   # sensitive — encrypted on save, masked on GET
 }
 _LICENSE_SAFE_KEYS = {"key"}   # sensitive — encrypted on save, masked on GET
@@ -1691,19 +1692,8 @@ _APP_TOML_SENSITIVE_FIELDS: set[tuple[str, str]] = {
     ("notify", "smtp_password"),
 }
 
-# Canonical Anthropic model list the AppBuilder's Model dropdown offers. Keep ordered
-# best-first within each family so the recommended pick (Opus 4.8) sits at the top. The
-# editor accepts any string saved on disk — if app.toml carries a model that's not in this
-# list (an experimental id, a legacy one), the UI extends the dropdown with that value so
-# the operator's current pick stays visible.
-_AI_MODELS: list[dict[str, str]] = [
-    {"id": "claude-opus-4-8",            "label": "Opus 4.8 (latest, recommended)"},
-    {"id": "claude-opus-4-7",            "label": "Opus 4.7"},
-    {"id": "claude-opus-4-6",            "label": "Opus 4.6"},
-    {"id": "claude-sonnet-4-6",          "label": "Sonnet 4.6"},
-    {"id": "claude-sonnet-4-5",          "label": "Sonnet 4.5"},
-    {"id": "claude-haiku-4-5-20251001",  "label": "Haiku 4.5 (fast, cheap)"},
-]
+# The model catalogue the Model dropdown offers (shared with the chat's picker).
+_AI_MODELS = KNOWN_MODELS
 
 
 def _app_config_path() -> Path:

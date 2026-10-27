@@ -39,3 +39,16 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
 }
+
+export interface AiModel { id: string; label: string }
+
+/** `GET /ai/tools`. */
+export interface AiInfo {
+  available: boolean
+  model: string
+  tools: AiTool[]
+  /** The models the caller may pick (the configured one first); one entry = no picker. */
+  models: AiModel[]
+  /** Starter questions by scope: `*`, an app, or `app/screen`. */
+  starters: Record<string, string[]>
+}

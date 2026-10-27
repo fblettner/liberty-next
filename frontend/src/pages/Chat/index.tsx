@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
 import { Sparkles, Send, ArrowRight, Check, X, FileEdit, AlertTriangle, Square, MapPin } from 'lucide-react'
 import { ApiError, api, streamSSE } from '../../api/client'
+import type { AiInfo, AiModel, ChatEvent, ChatMessage, Proposal } from '../../types/ai'
 import { getPageContext, renderPageContext, subscribePageContext, summarizePageContext, type PageContext } from '../../services/aiContext'
-import type { AiTool, ChatEvent, ChatMessage, Proposal } from '../../types/ai'
-import { PageLayout, Button, Banner, LinkButton, SpinnerRing, Mono, Tag } from '../../common'
+import { loadHistory, loadModel, pickStarters, saveHistory, saveModel, trimHistory } from '../../services/aiChat'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
+import { PageLayout, Button, Banner, LinkButton, SearchSelect, SpinnerRing, Mono, Tag } from '../../common'
 import { Markdown } from '../../common/Markdown'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -125,6 +127,19 @@ const Intro = styled.div`
   margin: auto;
   text-align: center;
   max-width: 520px;
+  display: flex; flex-direction: column; gap: 14px; align-items: center;
+`
+
+// Starter questions — the operator's ``[ai] starters`` for this page; a click sends it.
+const Starters = styled.div`
+  display: flex; flex-direction: column; gap: 6px; align-items: stretch; width: 100%;
+  & .title { font-size: ${fontSize.sm}; color: ${colors.text.muted}; }
+`
+const StarterBtn = styled.button`
+  text-align: left; padding: 8px 12px; border-radius: ${radius.md}; cursor: pointer;
+  border: 1px solid ${colors.border}; background: var(--ghost-bg, ${colors.bg.card}); color: ${colors.text.primary};
+  font-family: ${fonts.sans}; font-size: ${fontSize.sm}; line-height: 1.4;
+  &:hover { border-color: ${colors.blue.border}; background: ${colors.blue.bg}; }
 `
 
 const Composer = styled.form`
@@ -166,12 +181,23 @@ const InputBox = styled.textarea`
   &::placeholder { color: ${colors.text.muted}; }
 `
 
+/** The transcript rebuilt from a persisted history: the message bubbles only (tool lines and
+ *  proposal cards are not kept — the model's view of them lives in the assistant text). */
+function entriesOf(messages: ChatMessage[]): Entry[] {
+  return messages.map((m) => ({ kind: 'msg', role: m.role, text: m.content }))
+}
+
 export default function Chat() {
   const { t } = useTranslation()
+  const { currentApp } = useWorkspace()
   const [available, setAvailable] = useState<boolean | null>(null)
-  const [model, setModel] = useState('')
+  const [defaultModel, setDefaultModel] = useState('')
+  const [models, setModels] = useState<AiModel[]>([])
+  const [starters, setStarters] = useState<Record<string, string[]>>({})
   const [toolNames, setToolNames] = useState<string[]>([])
-  const [entries, setEntries] = useState<Entry[]>([])
+  // The conversation survives the drawer's close and a reload (services/aiChat, last 40 messages).
+  const historyRef = useRef<ChatMessage[]>(loadHistory())
+  const [entries, setEntries] = useState<Entry[]>(() => entriesOf(historyRef.current))
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   // The in-flight /ai/chat stream. Stop (or leaving the page) aborts the fetch — the server
@@ -181,7 +207,10 @@ export default function Chat() {
   useEffect(() => () => abortRef.current?.abort(), [])
   const [error, setError] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const historyRef = useRef<ChatMessage[]>([])
+  // The model picked on this device — only offered when the operator allowed more than one;
+  // a pick that is no longer allowed falls back to the configured model.
+  const [pickedModel, setPickedModel] = useState<string | null>(loadModel)
+  const model = pickedModel && models.some((m) => m.id === pickedModel) ? pickedModel : defaultModel
   // The page context (services/aiContext): shown as a chip and sent with each turn while the
   // operator is still on the page that published it; the chip's × drops it for that page.
   const location = useLocation()
@@ -190,13 +219,18 @@ export default function Chat() {
   useEffect(() => subscribePageContext(setPageCtx), [])
   const liveCtx = pageCtx && pageCtx.path === location.pathname && droppedPath !== pageCtx.path ? pageCtx : null
   const contextText = () => { const c = getPageContext(); return c && c.path === location.pathname && droppedPath !== c.path ? renderPageContext(c) : undefined }
+  // Starters follow the page: its app + screen, else the workspace's app, else "everywhere".
+  const onPage = pageCtx && pageCtx.path === location.pathname ? pageCtx : null
+  const pageStarters = useMemo(() => pickStarters(starters, onPage?.app ?? currentApp, onPage?.screen ?? null), [starters, onPage, currentApp])
 
   useEffect(() => {
     api
-      .get<{ available: boolean; model: string; tools: AiTool[] }>('/ai/tools')
+      .get<AiInfo>('/ai/tools')
       .then((r) => {
         setAvailable(r.available)
-        setModel(r.model)
+        setDefaultModel(r.model)
+        setModels(r.models ?? [])
+        setStarters(r.starters ?? {})
         setToolNames(r.tools.map((x) => x.name))
       })
       .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
@@ -206,14 +240,15 @@ export default function Chat() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
   }, [entries])
 
-  async function send() {
-    const text = input.trim()
-    if (!text || busy) return
-    setInput('')
-    setError(null)
-    setBusy(true)
+  // One turn: the user text goes to the history (and, when ``show``, to the transcript), the
+  // stream fills the assistant bubble. ``show = false`` is the control-plane turn sent after
+  // Apply / Skip on a proposal — the assistant re-reads state and continues; the operator
+  // never typed it, so the transcript does not show it.
+  async function runTurn(text: string, show: boolean) {
+    if (busy) return
+    setError(null); setBusy(true)
     historyRef.current = [...historyRef.current, { role: 'user', content: text }]
-    setEntries((es) => [...es, { kind: 'msg', role: 'user', text }, { kind: 'msg', role: 'assistant', text: '' }])
+    setEntries((es) => [...es, ...(show ? [{ kind: 'msg', role: 'user', text } as Entry] : []), { kind: 'msg', role: 'assistant', text: '' }])
 
     let assistantText = ''
     const appendAssistant = (chunk: string) => {
@@ -255,7 +290,9 @@ export default function Chat() {
     const controller = new AbortController()
     abortRef.current = controller
     try {
-      await streamSSE('/ai/chat', { messages: historyRef.current, context: contextText() }, (raw) => {
+      await streamSSE('/ai/chat', {
+        messages: trimHistory(historyRef.current), context: contextText(), model: model && model !== defaultModel ? model : undefined,
+      }, (raw) => {
         const ev = raw as ChatEvent
         if (ev.type === 'token') appendAssistant(ev.text ?? '')
         else if (ev.type === 'tool_call') addToolCall(ev.name ?? 'tool', ev.summary ?? '')
@@ -271,75 +308,18 @@ export default function Chat() {
       if (err instanceof DOMException && err.name === 'AbortError') appendAssistant(assistantText ? '' : t('chat.stopped'))
       else setError(err instanceof ApiError ? err.message : String(err))
     } finally {
-      historyRef.current = [...historyRef.current, { role: 'assistant', content: assistantText }]
+      historyRef.current = trimHistory([...historyRef.current, { role: 'assistant', content: assistantText }])
+      saveHistory(historyRef.current)
       if (abortRef.current === controller) abortRef.current = null
       setBusy(false)
     }
   }
 
-  // Send a synthetic user turn — used after Apply / Skip on a proposal so the assistant
-  // re-reads state and continues the chain. Same plumbing as `send`, but the input box
-  // doesn't show the message (it's a control-plane turn, not the operator's words).
-  async function sendSynthetic(text: string) {
-    if (busy) return
-    setError(null); setBusy(true)
-    historyRef.current = [...historyRef.current, { role: 'user', content: text }]
-    setEntries((es) => [...es, { kind: 'msg', role: 'assistant', text: '' }])
-    let assistantText = ''
-    const appendAssistant = (chunk: string) => {
-      assistantText += chunk
-      setEntries((es) => {
-        const copy = es.slice()
-        for (let i = copy.length - 1; i >= 0; i--) {
-          const e = copy[i]
-          if (e.kind === 'msg' && e.role === 'assistant') {
-            copy[i] = { kind: 'msg', role: 'assistant', text: assistantText }
-            break
-          }
-        }
-        return copy
-      })
-    }
-    const addToolCall = (name: string, summary: string) =>
-      setEntries((es) => [...es, { kind: 'tool', ok: null, name, callSummary: summary }])
-    const settleToolCall = (name: string, ok: boolean, errorMsg?: string) =>
-      setEntries((es) => {
-        for (let i = es.length - 1; i >= 0; i--) {
-          const e = es[i]
-          if (e.kind === 'tool' && e.ok === null && e.name === name) {
-            const copy = es.slice()
-            copy[i] = { ...e, ok, error: errorMsg }
-            return copy
-          }
-        }
-        return es
-      })
-    const addProposal = (toolName: string, proposal: Proposal) => setEntries((es) => [
-      ...es,
-      { kind: 'proposal', toolName, proposal, state: 'pending' },
-    ])
-    const controller = new AbortController()
-    abortRef.current = controller
-    try {
-      await streamSSE('/ai/chat', { messages: historyRef.current, context: contextText() }, (raw) => {
-        const ev = raw as ChatEvent
-        if (ev.type === 'token') appendAssistant(ev.text ?? '')
-        else if (ev.type === 'tool_call') addToolCall(ev.name ?? 'tool', ev.summary ?? '')
-        else if (ev.type === 'tool_result') settleToolCall(ev.name ?? 'tool', !!ev.ok, ev.ok ? undefined : ev.summary)
-        else if (ev.type === 'proposal' && ev.data) addProposal(ev.name ?? 'tool', ev.data)
-        else if (ev.type === 'error') {
-          setError(ev.message ?? 'error')
-          appendAssistant(assistantText ? '' : t('chat.noResponse'))
-        }
-      }, controller.signal)
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') appendAssistant(assistantText ? '' : t('chat.stopped'))
-      else setError(err instanceof ApiError ? err.message : String(err))
-    } finally {
-      historyRef.current = [...historyRef.current, { role: 'assistant', content: assistantText }]
-      if (abortRef.current === controller) abortRef.current = null
-      setBusy(false)
-    }
+  async function send(preset?: string) {
+    const text = (preset ?? input).trim()
+    if (!text || busy) return
+    setInput('')
+    await runTurn(text, true)
   }
 
   // Mutate a proposal entry's state in place (the operator clicked Apply / Skip on it).
@@ -359,7 +339,7 @@ export default function Chat() {
       )
       updateProposal(proposal, { state: 'applied' })
       // Tell the assistant the apply landed so it moves to the next step in the chain.
-      await sendSynthetic(`Applied: ${toolName} (${r.summary}). Continue with the next step.`)
+      await runTurn(`Applied: ${toolName} (${r.summary}). Continue with the next step.`, false)
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : String(e)
       updateProposal(proposal, { state: 'error', error: msg })
@@ -368,21 +348,24 @@ export default function Chat() {
 
   function skipProposal(toolName: string, proposal: Proposal) {
     updateProposal(proposal, { state: 'skipped' })
-    void sendSynthetic(`Skipped: ${toolName}. Do not retry this step; either move on or wait for new instructions.`)
+    void runTurn(`Skipped: ${toolName}. Do not retry this step; either move on or wait for new instructions.`, false)
   }
 
   function reset() {
     historyRef.current = []
+    saveHistory([])
     setEntries([])
     setError(null)
   }
+
+  const pickModel = (id: string) => { setPickedModel(id); saveModel(id === defaultModel ? null : id) }
 
   const description =
     available === null ? (
       '…'
     ) : available ? (
       <>
-        {t('chat.model')}: <Mono>{model}</Mono> · {t('chat.tools')}: {toolNames.join(', ') || t('common.none')}
+        {t('chat.model')}: <Mono>{model || defaultModel}</Mono> · {t('chat.tools')}: {toolNames.join(', ') || t('common.none')}
       </>
     ) : (
       <span style={{ color: colors.red.main }}>{t('chat.unavailable')}</span>
@@ -394,16 +377,29 @@ export default function Chat() {
       title={t('chat.title')}
       description={description}
       headerRight={
-        entries.length > 0 ? (
-          <HeaderRight>
-            <LinkButton onClick={reset}>{t('chat.newConversation')}</LinkButton>
-          </HeaderRight>
-        ) : undefined
+        <HeaderRight>
+          {models.length > 1 && (
+            <div style={{ minWidth: 150 }} title={t('chat.pickModel')}>
+              <SearchSelect value={model} options={models.map((m) => ({ value: m.id, label: m.label, mono: m.id }))} onChange={(v) => { if (v) pickModel(v) }} disabled={busy} />
+            </div>
+          )}
+          {entries.length > 0 && <LinkButton onClick={reset}>{t('chat.newConversation')}</LinkButton>}
+        </HeaderRight>
       }
     >
       <ChatArea>
         <Messages ref={scrollRef}>
-          {entries.length === 0 && <Intro>{t('chat.intro')}</Intro>}
+          {entries.length === 0 && (
+            <Intro>
+              <span>{t('chat.intro')}</span>
+              {available && pageStarters.length > 0 && (
+                <Starters>
+                  <span className="title">{t('chat.starters')}</span>
+                  {pageStarters.map((q) => <StarterBtn key={q} type="button" onClick={() => void send(q)}>{q}</StarterBtn>)}
+                </Starters>
+              )}
+            </Intro>
+          )}
           {entries.map((e, i) =>
             e.kind === 'tool' ? (
               <ToolLine key={i} $ok={e.ok}>

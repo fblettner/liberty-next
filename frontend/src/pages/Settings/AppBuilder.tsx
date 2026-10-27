@@ -17,6 +17,7 @@ import {
   Banner, Button, Card, Checkbox, Field, Input, PasswordInput, SearchSelect, SpinnerRing, Tag, Textarea,
 } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { AiStartersEditor, ModelsPicker } from './AiStartersEditor'
 
 interface AppSection {
   name: string
@@ -45,6 +46,8 @@ interface AiSection {
   allowed_connectors: string[]
   web_fetch_domains: string[]
   web_fetch_max_uses: number
+  allowed_models: string[]
+  starters: Record<string, string[]>
   /** Plaintext or ``ENC:…`` ciphertext. GET returns the on-disk value verbatim;
    *  PUT round-trips ``ENC:`` unchanged (encrypt() is idempotent), encrypts a
    *  plaintext edit, and writes empty as empty (operator clear). Same pattern
@@ -133,10 +136,6 @@ const PanelHeader = styled.button`
   &:hover { background: ${colors.blue.bg}; }
 `
 const PanelBody = styled.div`padding: 14px; display: flex; flex-direction: column; gap: 12px;`
-const Select = styled.select`
-  height: 32px; padding: 0 8px; border-radius: ${radius.md}; border: 1px solid ${colors.border};
-  background: ${colors.bg.input}; color: ${colors.text.primary}; font-family: ${fonts.sans}; font-size: ${fontSize.base};
-`
 const Hint = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans};`
 const Chips = styled.div`display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 32px;`
 const RowFlex = styled.div`display: flex; gap: 10px; align-items: center; flex-wrap: wrap;`
@@ -159,7 +158,7 @@ const DEFAULTS: {
     enabled: true, model: 'claude-opus-4-8', max_tokens: 8192, max_iterations: 8, system_prompt: '',
     thinking: false, effort: '', request_timeout: 120,
     connector_tools: true, api_tool: false, scaffold_tools: false, allowed_connectors: [],
-    web_fetch_domains: [], web_fetch_max_uses: 5, api_key: '',
+    web_fetch_domains: [], web_fetch_max_uses: 5, allowed_models: [], starters: {}, api_key: '',
   },
   license: { key: '' },
   oidc: {
@@ -375,9 +374,9 @@ export default function AppBuilder() {
             </RowFlex>
             <RowFlex>
               <Field label={t('settings.app.logLevel', 'Log level')}>
-                <Select value={app.log_level} onChange={(e) => setApp({ ...app, log_level: e.target.value })}>
-                  {choices.log_levels.map((l) => <option key={l} value={l}>{l}</option>)}
-                </Select>
+                <div style={{ minWidth: 160 }}>
+                  <SearchSelect value={app.log_level} options={choices.log_levels.map((l) => ({ value: l, label: l }))} onChange={(v) => setApp({ ...app, log_level: v })} />
+                </div>
               </Field>
               <Field label={t('settings.app.defaultLanguage', 'Default language')}>
                 <Input value={app.default_language}
@@ -459,16 +458,18 @@ export default function AppBuilder() {
                     ? choices.models
                     : [{ id: ai.model, label: `${ai.model} (custom)` }, ...choices.models]
                   return (
-                    <Select value={ai.model} onChange={(e) => setAi({ ...ai, model: e.target.value })} style={{ minWidth: 260 }}>
-                      {options.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-                    </Select>
+                    <div style={{ minWidth: 260 }}>
+                      <SearchSelect value={ai.model} options={options.map((m) => ({ value: m.id, label: m.label, mono: m.id }))} allowCustom
+                        onChange={(v) => { if (v) setAi({ ...ai, model: v }) }} />
+                    </div>
                   )
                 })()}
               </Field>
               <Field label={t('settings.app.aiEffort', 'Effort')}>
-                <Select value={ai.effort} onChange={(e) => setAi({ ...ai, effort: e.target.value })}>
-                  {choices.effort_levels.map((l) => <option key={l || '_'} value={l}>{l || '(default)'}</option>)}
-                </Select>
+                <div style={{ minWidth: 140 }}>
+                  <SearchSelect value={ai.effort} options={choices.effort_levels.filter(Boolean).map((l) => ({ value: l, label: l }))}
+                    anyLabel={t('settings.app.aiEffortDefault', '(default)')} onChange={(v) => setAi({ ...ai, effort: v })} />
+                </div>
               </Field>
             </RowFlex>
             <RowFlex>
@@ -506,6 +507,14 @@ export default function AppBuilder() {
                 options={choices.connectors}
                 onChange={(next) => setAi({ ...ai, allowed_connectors: next })}
               />
+            </Field>
+
+            <Hint>{t('settings.app.aiChatHint', 'The chat drawer — what users may pick and the questions it suggests.')}</Hint>
+            <Field label={t('settings.app.aiAllowedModels', 'Models users may pick (empty → the model above only)')}>
+              <ModelsPicker value={ai.allowed_models} models={choices.models} onChange={(next) => setAi({ ...ai, allowed_models: next })} />
+            </Field>
+            <Field label={t('settings.app.aiStarters', 'Starter questions — everywhere, per app, or per app/screen (the most specific wins)')}>
+              <AiStartersEditor value={ai.starters} apps={choices.connectors} onChange={(next) => setAi({ ...ai, starters: next })} />
             </Field>
 
             <Hint>{t('settings.app.aiWebFetch', 'Server-side web fetch (Anthropic-hosted). Disabled until at least one domain is allowed.')}</Hint>
@@ -740,10 +749,9 @@ function ConnectorPicker({ value, options, onChange }: { value: string[]; option
     <Chips>
       {value.map((v) => <Chip key={v} label={v} onRemove={() => remove(v)} />)}
       {remaining.length > 0 && (
-        <Select value={pick} onChange={(e) => add(e.target.value)}>
-          <option value="">+ add…</option>
-          {remaining.map((o) => <option key={o} value={o}>{o}</option>)}
-        </Select>
+        <div style={{ minWidth: 180 }}>
+          <SearchSelect value={pick} options={remaining.map((o) => ({ value: o, label: o }))} placeholder="+ add…" onChange={(v) => add(v)} />
+        </div>
       )}
     </Chips>
   )

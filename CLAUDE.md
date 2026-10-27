@@ -99,8 +99,9 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           form | nested_form | nested_table), actions / row_menu / lifecycle
                           hooks (the Action union incl. chain / if / loop / return), export
   menus/ charts/ dashboards/ actions/   their TOML schemas + loaders
-  ai/                     assistant.py (streaming agentic loop), tools.py, connector_tools.py,
-                          scaffold_tools.py (proposal-only), routes.py (SSE)
+  ai/                     assistant.py (streaming agentic loop; the page context = a 2nd uncached system
+                          block), tools.py, connector_tools.py, scaffold_tools.py (proposal-only), routes.py
+                          (SSE; `/ai/tools` also lists the pickable models + starters), catalog.py (the model list)
   jobs/ (nomaflow)        schema.py (jobs.toml), registry, runner (state machine, retries,
                           cancel), scheduler (APScheduler, single process), recovery, retention,
                           missed.py (missed-schedule check: expected cron instants vs the run
@@ -270,7 +271,8 @@ pages/Explorer/        the Data Explorer page: index (model, the AnalysisDefinit
 pages/DashboardView/ Chat/ (AiDrawer) Reports/ Notifications/ (the inbox; components/NotificationBell
                        in the header, live via SioContext.subscribeNotifications) ScreenAssistant/ HttpRunner/ Monitoring/ Login/
 services/ types/       no-React helpers (lookups, cells, gridViews, poolSchema, sqlCompletion, aiContext = the
-                       page context the TableView publishes and the chat drawer sends…) and the backend response shapes
+                       page context the TableView publishes and the chat drawer sends, aiChat = starters / persisted
+                       history / picked model…) and the backend response shapes
 locales/{en,fr}.ts     react-i18next; keys must exist in both (fr is typed against en)
 theme.ts + index.css   the tokens (CSS vars; dark default, .theme-light)
 ```

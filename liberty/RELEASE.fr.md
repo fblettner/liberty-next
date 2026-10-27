@@ -45,6 +45,16 @@
   envoyé ; sa croix l'écarte pour cette page. Le contexte voyage dans un second bloc système non
   mis en cache, limité à 4 000 caractères : l'invite et la liste d'outils en cache restent
   intactes (`POST /ai/chat` accepte un `context` optionnel).
+- **Questions de départ, choix du modèle, une conversation qui reste.** Configuration → App →
+  Assistant IA gagne `starters` : des questions proposées sur une conversation vide, partout
+  (`*`), par application ou par `app/écran` (le jeu le plus précis pour la page l'emporte ; un
+  clic envoie la question), et `allowed_models` : les modèles qu'un utilisateur peut choisir
+  dans le chat en plus du modèle configuré (le sélecteur n'apparaît que s'il y a un choix ; le
+  serveur refuse tout autre identifiant). La conversation survit maintenant à la fermeture du
+  volet et à un rechargement (les 40 derniers messages, sur cet appareil) ; « nouvelle
+  conversation » l'efface. Les listes de l'éditeur App (modèle, effort, niveau de journal,
+  connecteurs autorisés) sont le sélecteur partagé avec recherche ; la liste des modèles ajoute
+  la famille Claude 5.
 
 **Installation / mise à jour**
 - **Corrigé : la version du lot d'applications apparaissait comme « non installée » sous Docker.**

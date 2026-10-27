@@ -40,6 +40,14 @@
   them. A chip above the composer shows what is sent; its × drops it for that page. The context
   rides as a second, uncached system block capped at 4 000 characters, so the cached prompt and
   tool list are untouched (`POST /ai/chat` takes an optional `context`).
+- **Starter questions, a model picker, a conversation that stays.** Settings → App → AI
+  Assistant gains `starters`: questions shown on an empty conversation, everywhere (`*`), per
+  app or per `app/screen` (the most specific set for the page wins; a click sends the question),
+  and `allowed_models`: the models a user may pick in the chat besides the configured one (the
+  picker shows only when there is a choice; the server refuses any other id). The conversation
+  now survives closing the drawer and a reload (the last 40 messages, on this device); "new
+  conversation" clears it. The App editor's dropdowns (model, effort, log level, the allowed
+  connectors) are the shared searchable select; the model list adds the Claude 5 family.
 
 **Install / upgrade**
 - **Fixed: the apps bundle version read as "not installed" on Docker.** The wheel is materialised

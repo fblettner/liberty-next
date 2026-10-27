@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from liberty.ai.assistant import AiAssistant
+from liberty.ai.catalog import label_for
 from liberty.auth.dependencies import require_permission
 from liberty.auth.principal import Principal
 
@@ -66,6 +67,9 @@ async def tools(
     - ``tools`` — full tool catalogue: connector-tools (``list_connectors`` /
       ``sql_query`` / optionally ``api_call``) and scaffold-tools
       (``introspect_table`` / ``scaffold_*``) when ``[ai] scaffold_tools = true``.
+    - ``models`` — the models the caller may pick (``[ai] model`` first, then
+      ``allowed_models``), with labels; one entry means no picker.
+    - ``starters`` — ``[ai] starters``: the starter questions per ``*`` / app / app/screen.
 
     Useful when wiring the assistant for the first time or after toggling a flag —
     operators can hit this to confirm the runtime saw the change."""
@@ -74,7 +78,17 @@ async def tools(
         "available": assistant.available,
         "model": assistant.settings.model,
         "tools": assistant.tool_catalog(),
+        "models": [{"id": m, "label": label_for(m)} for m in _allowed_models(assistant)],
+        "starters": dict(assistant.settings.starters),
     }
+
+
+def _allowed_models(assistant: AiAssistant) -> list[str]:
+    out = [assistant.settings.model]
+    for m in assistant.settings.allowed_models:
+        if m and m not in out:
+            out.append(m)
+    return out
 
 
 @router.post(
@@ -91,7 +105,7 @@ async def tools(
             ),
             "content": {"text/event-stream": {}},
         },
-        400: {"description": "First message must have ``role = \"user\"``."},
+        400: {"description": "First message must have ``role = \"user\"``, or ``model`` is not an allowed one."},
         401: {"description": "Missing / invalid access token."},
         403: {"description": "Caller lacks ``ai:chat`` permission."},
         404: {"description": "AI assistant is disabled."},
@@ -129,6 +143,8 @@ async def chat(
     assistant = _assistant(request)
     if body.messages[0].role != "user":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="The first message must have role 'user'")
+    if body.model and body.model not in _allowed_models(assistant):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"model {body.model!r} is not allowed — see [ai] allowed_models")
     api_messages = [{"role": m.role, "content": m.content} for m in body.messages]
 
     async def event_stream():

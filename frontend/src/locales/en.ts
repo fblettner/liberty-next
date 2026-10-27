@@ -389,6 +389,8 @@ const en = {
     contextRow: 'the clicked row',
     contextHint: 'The assistant sees what you are looking at — the screen, its filters, the row you clicked.',
     contextDrop: 'Do not send the page to the assistant',
+    pickModel: 'Model',
+    starters: 'Try one of these',
   },
   reports: {
     title: 'Reports',
