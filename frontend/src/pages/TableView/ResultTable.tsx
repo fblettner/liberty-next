@@ -17,7 +17,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import type { ColumnDef, VisibilityState } from '@tanstack/react-table'
 import styled from '@emotion/styled'
 import * as XLSX from 'xlsx'
-import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3, Zap, FileSpreadsheet, Trash2 } from 'lucide-react'
+import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3, Zap, FileSpreadsheet, Trash2, Lock } from 'lucide-react'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { Action, ColumnGroup, PromptField, ScreenDetail } from '../../types/screens'
 import { api, ApiError, authHeaders } from '../../api/client'
@@ -437,6 +437,13 @@ export function ResultTable({
   // gates the Excel/CSV Import button. Undefined screen (ad-hoc SQL run) keeps the old behaviour:
   // editable, not uploadable. Honoured here so a screen migrated as view-only / no-import actually is.
   const canBulkEdit = canEdit && screen?.editable !== false && !readOnly
+  // ``editable_when`` — a row that fails the screen's rule is read-only: its cells stay plain in
+  // edit mode and it cannot be deleted (the server refuses such a write anyway).
+  const editableWhen = screen?.editable_when
+  const rowLocked = useCallback(
+    (row: DataRow) => !!editableWhen?.length && !evalConditions(editableWhen, valuesOf(row)),
+    [editableWhen],
+  )
   const canImport = canInsert && !!screen?.uploadable
   const hasDialog = !!(screen?.dialog && (screen.update_query || screen.insert_query))
   // Dialog state — opens on Add / Edit-row when the screen has a `dialog`. `dlgRow` is the
@@ -1407,8 +1414,11 @@ export function ResultTable({
       // Mirror the dialog's fieldStateOf: static ``disabled`` (or conditional ``disabled_when`` when
       // set, ANDed against the row), THEN the per-mode lock (disable_on_add for a new row,
       // disable_on_edit for an existing one). Any one locks the cell to its read-only display.
+      // The screen's ``editable_when`` locks the whole existing row (a new row is not concerned).
+      const isNew = newRowsRef.current.includes(rowOriginal)
+      if (!isNew && rowLocked(rowOriginal)) return true
       const byRule = c.disabled_when?.length ? evalConditions(c.disabled_when, valuesOf(rowOriginal)) : !!c.disabled
-      const modeLocked = newRowsRef.current.includes(rowOriginal) ? !!c.disable_on_add : !!c.disable_on_edit
+      const modeLocked = isNew ? !!c.disable_on_add : !!c.disable_on_edit
       return byRule || modeLocked
     }
     const out: ColumnDef<DataRow, unknown>[] = []
@@ -1711,15 +1721,19 @@ export function ResultTable({
               {canInsert && !isDel && (
                 <RowXBtn onClick={() => duplicateRow(row)} title={t('table.duplicateRow')}><Copy size={11} /></RowXBtn>
               )}
-              <RowXBtn onClick={() => toggleDelete(row, isNew)} title={isNew ? t('common.cancel') : isDel ? t('common.undo') : t('table.deleteRow')}>
-                <X size={11} />
-              </RowXBtn>
+              {isNew || !rowLocked(row) ? (
+                <RowXBtn onClick={() => toggleDelete(row, isNew)} title={isNew ? t('common.cancel') : isDel ? t('common.undo') : t('table.deleteRow')}>
+                  <X size={11} />
+                </RowXBtn>
+              ) : (
+                <span title={t('table.rowReadOnly', 'Read-only row')} style={{ display: 'inline-flex' }}><Lock size={11} /></span>
+              )}
             </StatusCell>
           )
         },
       },
     ]
-  }, [editMode, dirtyRows, newRows, deleted, selected, toggleDelete, duplicateRow, toggleSelected, canInsert, isGroupRow, t])
+  }, [editMode, dirtyRows, newRows, deleted, selected, toggleDelete, duplicateRow, toggleSelected, canInsert, isGroupRow, rowLocked, t])
 
   const columns = useMemo<ColumnDef<DataRow, unknown>[]>(() => [...editCols, ...dataCols], [editCols, dataCols])
 

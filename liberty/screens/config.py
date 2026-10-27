@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -1175,6 +1176,16 @@ class Screen(BaseModel):
         ),
     )
     editable: bool = Field(default=True, description="Allow inline grid editing on this screen.")
+    editable_when: list[FieldCondition] = Field(
+        default_factory=list,
+        description=(
+            "Row-level read-only rule: an existing row can be changed or deleted only while every "
+            "rule holds on its values (AND) — e.g. ``{field = \"PERIOD_STATUS\", value = [\"open\", "
+            "\"validated\"]}`` keeps closed periods' rows read-only. The grid, the dialog and the "
+            "server all enforce it (a write whose original row fails the rule is refused with 409). "
+            "Inserts are not concerned. Empty: every row is editable."
+        ),
+    )
     uploadable: bool = Field(default=False, description="Show the Excel / CSV import button on this screen.")
     read_only: bool = Field(
         default=False,
@@ -1413,6 +1424,24 @@ class Screen(BaseModel):
                     f"screen {self.id!r}: {defaults} views set ``default`` — only one may be the default",
                 )
         return self
+
+    def is_row_editable(self, values: Mapping[str, Any]) -> bool | None:
+        """Whether a row with these values may be changed under ``editable_when`` — ``True`` with no
+        rules; ``None`` when a rule's field is not among *values* (the caller decides; the write
+        path refuses, since it cannot verify). Keys match case-insensitively, values are compared
+        trimmed (JDE pads codes)."""
+        if not self.editable_when:
+            return True
+        lower = {str(k).lower(): v for k, v in values.items()}
+        for rule in self.editable_when:
+            if rule.field.lower() not in lower:
+                return None
+            live = lower[rule.field.lower()]
+            live_s = "" if live is None else str(live).strip()
+            allowed = rule.value if isinstance(rule.value, list) else [rule.value]
+            if live_s not in {str(v).strip() for v in allowed}:
+                return False
+        return True
 
     def effective_key_columns(self) -> list[str]:
         """The row-identifying columns for this screen. Returns ``key_columns`` when set,

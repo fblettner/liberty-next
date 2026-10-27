@@ -375,6 +375,8 @@ export interface ScreenListItem {
    *  Duplicate, the grid's Add / Delete-selected + inline editing, paste / import, and the same
    *  controls in nested-table editors. Stronger than `disable_add` (which only blocks inserts). */
   read_only?: boolean
+  /** Row-level read-only rule (AND): an existing row can be changed / deleted only while it holds. */
+  editable_when?: FieldCondition[]
   /** Prevent creating NEW records on this screen even when `insert_query` is set (edit/delete of
    *  existing rows stays allowed). Hides the Add button + dialog Add entry, and disables
    *  add-row / duplicate-row / paste / import in the grid bulk-editor. */

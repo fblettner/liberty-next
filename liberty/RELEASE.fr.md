@@ -17,6 +17,16 @@
 - Le rapport de mise à jour n'affiche plus « - » comme étiquette d'image sur une installation non
   épinglée.
 
+**Écrans : `editable_when`, une règle de lecture seule par ligne**
+- Un écran peut dire quand une ligne existante peut être modifiée : `editable_when = [{ field =
+  "PERIOD_STATUS", value = ["open", "validated"] }]` garde en lecture seule les lignes d'une période
+  close. Le mode édition de la grille laisse ces lignes telles quelles et affiche un cadenas à la
+  place de la croix de suppression, la fenêtre de saisie les ouvre en consultation, et le serveur
+  refuse une mise à jour ou une suppression dont la ligne d'origine ne satisfait pas la règle (409),
+  y compris une requête qui omet le champ de la règle. Les nouvelles lignes ne sont pas concernées.
+  Les règles se combinent par ET, les valeurs se comparent sans leurs espaces, comme `disabled_when`.
+  Se règle dans l'onglet Général de l'éditeur d'écran.
+
 **Tableaux de bord : une période**
 - Un tableau de bord peut porter une `period` : un sélecteur de plage de dates dans sa barre, avec
   les raccourcis habituels (aujourd'hui, hier, 7 / 30 derniers jours, ce mois-ci / mois dernier,

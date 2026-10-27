@@ -141,6 +141,7 @@ const fr: Resources = {
     writable: 'modifiable',
   },
   table: {
+    rowReadOnly: 'Ligne en lecture seule',
     writable: 'modifiable',
     runWritableConfirm: 'Exécuter la requête modifiable « {{q}} » ? Cela peut modifier des données.',
     rows_one: '{{count}} ligne',

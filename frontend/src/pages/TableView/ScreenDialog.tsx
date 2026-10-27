@@ -326,9 +326,11 @@ export function ScreenDialog({
   // ``foreignLock`` clears and the form becomes editable — no reopen needed.
   const { lock: heldLock, ownedByMe } = useLockState(lockPayload)
   const foreignLock = heldLock && !ownedByMe ? heldLock : null
-  // A foreign lock OR the screen's own ``read_only`` flag makes the dialog view-only: the same
-  // gate already hides Save / Delete / Duplicate and disables every field input below.
-  const readOnly = foreignLock != null || !!screen.read_only
+  // A foreign lock, the screen's own ``read_only`` flag, or an existing row that fails the
+  // screen's ``editable_when`` rule makes the dialog view-only: the same gate already hides
+  // Save / Delete / Duplicate and disables every field input below.
+  const rowLockedByRule = mode === 'edit' && !!screen.editable_when?.length && !evalConditions(screen.editable_when, row ?? {})
+  const readOnly = foreignLock != null || !!screen.read_only || rowLockedByRule
 
   // Acquire on open / release on close. ``cancelled`` covers a fast close while the ack
   // is still in flight — releases the lock if we happened to win it after unmount.

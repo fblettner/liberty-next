@@ -15,6 +15,14 @@
   only a fresh database.)
 - The upgrade report's "Image tag" no longer shows "-" for an unpinned install.
 
+**Screens: `editable_when`, a row-level read-only rule**
+- A screen can say when an existing row may be changed: `editable_when = [{ field = "PERIOD_STATUS",
+  value = ["open", "validated"] }]` keeps the rows of a closed period read-only. The grid's edit mode
+  leaves such rows plain and shows a lock instead of the delete cross, the dialog opens them view-only,
+  and the server refuses an update or delete whose original row fails the rule (409), including a
+  request that leaves the rule's field out. New rows are not concerned. Rules AND together, values
+  compare trimmed, like `disabled_when`. Set in the screen editor's General tab.
+
 **Dashboards: a period**
 - A dashboard can carry a `period`: a date range control in its bar, with the usual presets
   (today, yesterday, last 7 / 30 days, this / last month, this quarter, this / last year, last 12

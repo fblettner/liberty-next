@@ -277,6 +277,21 @@ async def _run_sql(
     # to the connector's own name when there's no screen AND no action context (a query opened by
     # an AI tool / external caller / dashboard widget — those resolve against the connector scope).
     dict_scope = screen_app if screen is not None else ((action_context or {}).get("app") or None)
+    # ``editable_when``: an update / delete through the screen must target a row the rule allows.
+    # The row's values are the submitted binds — the ``<COL>_ORIGINAL`` ones (what the row held
+    # when it was loaded) over the plain ones; a rule field the caller did not send cannot be
+    # verified and is refused too, so a hand-built request cannot sidestep the rule.
+    if screen is not None and not is_group and slot in ("update", "delete") and screen.editable_when:
+        row = {str(k): v for k, v in (params or {}).items() if not str(k).upper().endswith("_ORIGINAL")}
+        row.update({str(k)[:-9]: v for k, v in (params or {}).items() if str(k).upper().endswith("_ORIGINAL")})
+        ok = screen.is_row_editable(row)
+        if ok is not True:
+            fields = ", ".join(r.field for r in screen.editable_when)
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail=(f"This row is read-only ({fields})" if ok is False
+                        else f"This row cannot be changed: its {fields} value was not sent"),
+            )
     try:
         # ``pool`` (from the ``X-Liberty-Pool`` header) rebinds a multi-pool connector to a
         # different DB instance for this call. The header is a broadcast HINT from the app

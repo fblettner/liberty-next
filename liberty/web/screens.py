@@ -350,6 +350,7 @@ def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, A
         # frontend reads the same result. The Pydantic field stays for explicit overrides.
         "key_columns": screen.effective_key_columns(),
         "editable": screen.editable,
+        "editable_when": [r.model_dump(mode="json") for r in screen.editable_when],
         "uploadable": screen.uploadable,
         "initial_group_by": list(screen.initial_group_by),
         # Tree view config (parent/child/label column names) — None when this

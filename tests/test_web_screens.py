@@ -42,6 +42,15 @@ def _connectors_toml(db_url: str) -> str:
         [[connectors.app1.queries]]
         name = "secret_get"
         sql = "SELECT 1 AS id"
+
+        [[connectors.app1.queries]]
+        name = "periods_get"
+        sql = "SELECT 1 AS id"
+
+        [[connectors.app1.queries]]
+        name = "periods_put"
+        sql = "SELECT 1 AS id"
+        writable = true
         # A cross-pool screen target — same DB pool, different connector name. The screen sets
         # `connector = "external"` so its permission gates on `sql:external:...` not `sql:app1:...`.
         [connectors.external]
@@ -81,6 +90,13 @@ def _screens_toml() -> str:
         read_query = "things_get"
 
         # A screen the "user" role cannot read — its permission is locked behind sql:app1:secret_get
+        [screens.app1.periods]
+        label = "Periods"
+        read_query = "periods_get"
+        update_query = "periods_put"
+        delete_query = "periods_put"
+        editable_when = [{ field = "STATUS", value = ["open", "validated"] }]
+
         [screens.app1.secret]
         label = "Secret"
         read_query = "secret_get"
@@ -135,10 +151,10 @@ def test_list_screens_admin_sees_everything(app) -> None:
         assert r.status_code == 200
         app1 = r.json()["screens"]["app1"]
         ids = [s["id"] for s in app1]
-        assert ids == ["users", "things", "secret"]
+        assert ids == ["users", "things", "periods", "secret"]
         # Effective connector — explicit `connector` wins; same-app screens inherit the app name.
         connectors = {s["id"]: s["connector"] for s in app1}
-        assert connectors == {"users": "app1", "things": "external", "secret": "app1"}
+        assert connectors == {"users": "app1", "things": "external", "periods": "app1", "secret": "app1"}
         users = next(s for s in app1 if s["id"] == "users")
         assert users["label"] == "Users" and users["description"] == "User accounts"
         assert users["read_query"] == "users_get" and users["update_query"] == "users_get"
@@ -469,7 +485,7 @@ def test_screen_columns_absent_when_empty(app) -> None:
 def test_info_reports_screen_apps(app) -> None:
     with TestClient(app) as client:
         info = client.get("/info").json()
-        assert info["screens"] == {"apps": ["app1"], "total": 3}
+        assert info["screens"] == {"apps": ["app1"], "total": 4}
 
 
 def test_reload_rereads_screens(app, tmp_path) -> None:
@@ -480,3 +496,24 @@ def test_reload_rereads_screens(app, tmp_path) -> None:
         r = client.post("/admin/reload", headers=h)
         assert r.status_code == 200 and r.json()["screen_apps"] == []
         assert client.get("/api/screens", headers=h).json()["screens"] == {}
+
+
+def test_editable_when_on_the_wire_and_enforced_on_writes(app) -> None:
+    """The rule rides with the screen; an update / delete through the screen whose original row
+    fails it is refused (409) before any SQL runs; an allowed row goes through; a request that
+    leaves the rule's field out is refused too."""
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        scr = next(s for s in client.get("/api/screens/app1", headers=h).json()["screens"] if s["id"] == "periods")
+        assert scr["editable_when"] == [{"field": "STATUS", "value": ["open", "validated"]}]
+        ok = client.post("/api/sql/app1/periods_put", json={"params": {"ID": 1, "STATUS": "closed", "STATUS_ORIGINAL": "open"}}, headers=h)
+        assert ok.status_code == 200          # the row WAS open when loaded: closing it is allowed
+        r = client.post("/api/sql/app1/periods_put", json={"params": {"ID": 1, "STATUS": "open", "STATUS_ORIGINAL": "closed"}}, headers=h)
+        assert r.status_code == 409 and "read-only (STATUS)" in r.json()["detail"]
+        r = client.post("/api/sql/app1/periods_put", json={"params": {"ID": 1}}, headers=h)
+        assert r.status_code == 409 and "was not sent" in r.json()["detail"]
+        # a plain key (no _ORIGINAL) counts as the row's value — a delete binds those
+        assert client.post("/api/sql/app1/periods_put", json={"params": {"ID": 1, "STATUS": "validated"}}, headers=h).status_code == 200
+        assert client.post("/api/sql/app1/periods_put", json={"params": {"ID": 1, "STATUS": "closed"}}, headers=h).status_code == 409
+        # the read query is not concerned
+        assert client.get("/api/sql/app1/periods_get", headers=h).status_code == 200

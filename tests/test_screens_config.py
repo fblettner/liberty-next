@@ -674,3 +674,25 @@ def test_load_screens_roundtrip(tmp_path) -> None:
     sf = load_screens(f)
     assert list(sf.screens) == ["nomasx1"]
     assert list(sf.screens["nomasx1"]) == ["security_users"]
+
+
+def test_editable_when_rule_and_row_predicate() -> None:
+    sf = parse_screens(tomllib.loads(textwrap.dedent("""
+        [screens.sales.facts]
+        label = "Sales"
+        read_query = "facts_get"
+        update_query = "facts_put"
+        editable_when = [{ field = "PERIOD_STATUS", value = ["open", "validated"] }, { field = "LOCKED", value = "N" }]
+    """)))
+    scr = sf.screens["sales"]["facts"]
+    assert [r.model_dump(mode="json") for r in scr.editable_when] == [{"field": "PERIOD_STATUS", "value": ["open", "validated"]}, {"field": "LOCKED", "value": "N"}]
+    assert scr.is_row_editable({"period_status": "open ", "locked": "N"}) is True      # case-insensitive keys, trimmed values
+    assert scr.is_row_editable({"PERIOD_STATUS": "closed", "LOCKED": "N"}) is False
+    assert scr.is_row_editable({"PERIOD_STATUS": "open", "LOCKED": "Y"}) is False
+    assert scr.is_row_editable({"PERIOD_STATUS": "open"}) is None                     # a rule field is missing
+    plain = parse_screens(tomllib.loads(textwrap.dedent("""
+        [screens.sales.dims]
+        label = "Dims"
+        read_query = "dims_get"
+    """))).screens["sales"]["dims"]
+    assert plain.is_row_editable({}) is True

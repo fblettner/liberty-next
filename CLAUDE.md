@@ -190,7 +190,8 @@ secret in a committed file.
 A connector holds **queries only** (`sql` as a string or a per-dialect map, `params`,
 `writable`). A `Screen` owns everything else: `columns` (ColumnHint: dd / label / format /
 rule / hidden / filter / filter_from / visible_when / key / default…), `read_query` +
-`update_query` / `insert_query` / `delete_query`, `auto_load`, `audit_table`, `max_rows`, the
+`update_query` / `insert_query` / `delete_query`, `auto_load`, `audit_table`, `max_rows`, `editable_when`
+(row-level read-only rule, enforced by the grid, the dialog and the write route), the
 `dialog`, `actions`, `row_menu`, lifecycle hooks (`on_insert` / `on_update` / `on_delete`,
 dialog `on_load` / `on_save` / `on_cancel`), `export`, `summary`. The web layer looks up the
 screen for `(connector, query)` and threads its hints into `SQLConnector.execute()`; a query
