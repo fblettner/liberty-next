@@ -24,8 +24,8 @@ import { colors, fontSize, fonts, glass, radius, shadow } from '../../theme'
 // thin inset highlight (the "specular") on the top edge that fakes a light from above (the macOS
 // look). The card is its own little frosted panel that floats slightly off the page background.
 const Frame = styled.div`
-  flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; align-items: center;
-  gap: 6px; padding: 14px; border: 1px solid ${colors.border}; border-radius: ${radius.lg};
+  flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
+  gap: 8px; padding: 16px 18px; border: 1px solid ${colors.border}; border-radius: ${radius.lg};
   background: ${colors.bg.card};
   ${glass.surface}
   box-shadow: ${shadow.sm}, inset 0 1px 0 rgba(255, 255, 255, 0.08);
@@ -36,15 +36,14 @@ const Frame = styled.div`
 `
 // Big-number sized via `clamp()` so it scales with the card's width — looks reasonable from a
 // 3-col card (~150px wide) up to a full-width KPI (~1200px) without ever overflowing.
+// The card's own caption (nomaubl's KPI card: label, the figure, the detail — all inside).
+const Label = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans}; margin-bottom: 8px;`
 const Value = styled.div`
   font-size: clamp(1.7rem, 4.2vw, 2.4rem); font-weight: 700; font-family: ${fonts.sans};
-  color: ${colors.text.primary}; font-variant-numeric: tabular-nums; line-height: 1.05; text-align: center;
+  color: ${colors.text.primary}; font-variant-numeric: tabular-nums; line-height: 1.05; text-align: left;
   letter-spacing: -0.02em;
 `
-const Sub = styled.div`
-  font-size: ${fontSize.micro}; color: ${colors.text.muted}; font-family: ${fonts.sans};
-  text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; text-align: center;
-`
+const Sub = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans};`
 const Pending = styled.div`color: ${colors.text.muted};`
 const Delta = styled.div<{ $dir: 'up' | 'down' | 'flat' }>`
   display: inline-flex; align-items: center; gap: 6px; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
@@ -142,10 +141,11 @@ export function KpiWidget({ widget, filters, filterValues, period, selection, re
     return col?.label || actualName
   }, [result, widget.column])
 
-  if (error) return <Frame><Banner $tone="error">{error}</Banner></Frame>
-  if (!result) return <Frame><Pending><SpinnerRing size={18} thickness={2} /></Pending></Frame>
+  if (error) return <Frame>{widget.label && <Label>{widget.label}</Label>}<Banner $tone="error">{error}</Banner></Frame>
+  if (!result) return <Frame>{widget.label && <Label>{widget.label}</Label>}<Pending><SpinnerRing size={18} thickness={2} /></Pending></Frame>
   return (
     <Frame>
+      {widget.label && <Label>{widget.label}</Label>}
       <Value>{value === null ? '∅' : formatKpi(value, widget.format, lang)}</Value>
       <Sub>{t(`chart.agg.${widget.aggregation}`)} · {columnLabel}</Sub>
       {delta && prevValue !== null && (

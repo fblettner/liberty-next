@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { HISTORY_MAX, loadHistory, loadModel, pickStarters, saveHistory, saveModel, trimHistory } from './aiChat'
+import { HISTORY_MAX, loadHistory, loadModel, pickStarterGroups, pickStarters, saveHistory, saveModel, trimHistory } from './aiChat'
 import type { ChatMessage } from '../types/ai'
 
 const starters = { '*': ['What can you do?'], nomajde: ['Who has no role?'], 'nomajde/f0092': ['Users never logged in'] }
@@ -37,5 +37,15 @@ describe('aiChat', () => {
     expect(loadModel()).toBe('claude-haiku-5-5')
     saveModel(null)
     expect(loadModel()).toBeNull()
+  })
+})
+
+describe('pickStarterGroups', () => {
+  it('prefers the most specific key with groups, else the flat starters as one group', () => {
+    const groups = { nomajde: [{ label: 'Users', starters: ['a'] }, { label: 'Empty', starters: [] }], 'nomajde/f0092': [{ label: 'This screen', starters: ['b'] }] }
+    expect(pickStarterGroups(groups, starters, 'nomajde', 'f0092')).toEqual([{ label: 'This screen', starters: ['b'] }])
+    expect(pickStarterGroups(groups, starters, 'nomajde', 'f0093')).toEqual([{ label: 'Users', starters: ['a'] }])
+    expect(pickStarterGroups(groups, starters, 'nomasx1', null)).toEqual([{ label: null, starters: ['What can you do?'] }])
+    expect(pickStarterGroups(undefined, undefined, 'x', null)).toEqual([])
   })
 })

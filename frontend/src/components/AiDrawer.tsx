@@ -9,9 +9,7 @@
 // it caps at 100vw so it still fits.
 import { lazy, Suspense } from 'react'
 import styled from '@emotion/styled'
-import { useTranslation } from 'react-i18next'
-import { X } from 'lucide-react'
-import { colors, fontSize, fonts, glass, radius, shadow } from '../theme'
+import { colors, glass, shadow } from '../theme'
 import { Centered } from '../common'
 
 // Lazy-load the Chat page — keeps the drawer's bundle out of the main chunk so the
@@ -37,24 +35,8 @@ const Drawer = styled.aside<{ $open: boolean }>`
   transition: transform 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
 `
 
-const Header = styled.div`
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 12px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0;
-  font-family: ${fonts.sans}; font-size: ${fontSize.md}; font-weight: 600; color: ${colors.text.primary};
-`
-
-const CloseBtn = styled.button`
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px; padding: 0; border: 0; border-radius: ${radius.sm};
-  background: transparent; cursor: pointer; color: ${colors.text.muted};
-  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
-`
-
 const Body = styled.div`
   flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
-  /* The Chat page was built for a full PageLayout — tighten the inherited padding
-     so it fits comfortably in a 420px panel without horizontal scroll. */
-  & > * { padding-left: 8px; padding-right: 8px; }
 `
 
 export interface AiDrawerProps {
@@ -63,25 +45,17 @@ export interface AiDrawerProps {
 }
 
 export default function AiDrawer({ open, onClose }: AiDrawerProps) {
-  const { t } = useTranslation()
   return (
     <>
       <Backdrop $open={open} onClick={onClose} />
       <Drawer $open={open} aria-hidden={!open}>
-        <Header>
-          <span>{t('nav.assistant', 'AI Assistant')}</span>
-          <CloseBtn type="button" onClick={onClose} title={t('common.close', 'Close')}>
-            <X size={16} />
-          </CloseBtn>
-        </Header>
         <Body>
-          {/* Mount the Chat component only when the drawer is open so its state (the
-              session messages, the SSE stream) lives only while the operator is using
-              it. Closing the drawer destroys the conversation — matches the v1 `/chat`
-              page behaviour where navigating away discarded state. */}
+          {/* The Chat owns the drawer's header (title, model, new conversation, close). It mounts
+              only while the drawer is open; the conversation itself is kept by the Chat in
+              localStorage, so closing and reopening resumes it. */}
           {open && (
             <Suspense fallback={<Centered />}>
-              <Chat />
+              <Chat onClose={onClose} />
             </Suspense>
           )}
         </Body>

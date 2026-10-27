@@ -1335,7 +1335,10 @@ async def put_ai_parsed(body: AiBody, request: Request, _: Superuser) -> dict[st
         d: dict[str, Any] = {}
         if block.starters:
             d["starters"] = list(block.starters)
-        screens = {sid: {"starters": list(s.starters)} for sid, s in block.screens.items() if s.starters}
+        if block.groups:
+            d["groups"] = [g.model_dump() for g in block.groups]
+        screens = {sid: {k: v for k, v in (("starters", list(s.starters)), ("groups", [g.model_dump() for g in s.groups])) if v}
+                   for sid, s in block.screens.items() if s.starters or s.groups}
         if screens:
             d["screens"] = screens
         if block.playbooks:

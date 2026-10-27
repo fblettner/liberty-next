@@ -392,6 +392,7 @@ const fr: Resources = {
     contextHint: "L'assistant voit ce que vous regardez : l'écran, ses filtres, la ligne cliquée.",
     contextDrop: "Ne pas envoyer la page à l'assistant",
     pickModel: 'Modèle',
+    greeting: "Bonjour ! Je réponds à partir de la configuration de cette installation et de ses données, et je peux vous guider dans les procédures des applications. Choisissez une suggestion ou posez votre question.",
     toolCalls: "{{count}} appel(s) d'outil",
     toolFailed: '{{count}} en échec',
     starters: 'Essayez une de ces questions',

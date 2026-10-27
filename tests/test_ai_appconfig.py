@@ -42,3 +42,10 @@ def test_merge_entities_are_the_app_blocks() -> None:
     assert set(flat) == {("ai", "nomajde"), ("ai", "nomasx1")}
     assert flat[("ai", "nomajde")]["starters"] == ["Who has no role?"]
     assert resolve_path("ai", "nomajde", "ai.toml") == (["ai"], "nomajde")
+
+
+def test_starter_groups_by_key() -> None:
+    f = parse_ai_config({"ai": {"shop": {"starters": ["flat"], "groups": [{"label": "Sales", "starters": ["a", "b"]}],
+                                         "screens": {"orders": {"groups": [{"label": "Orders", "starters": ["c"]}]}, "items": {"starters": ["d"]}}}}})
+    assert f.starter_groups() == {"shop": [{"label": "Sales", "starters": ["a", "b"]}], "shop/orders": [{"label": "Orders", "starters": ["c"]}]}
+    assert f.starters() == {"shop": ["flat"], "shop/items": ["d"]}

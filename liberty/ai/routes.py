@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from liberty.ai.appconfig import merged_starters
+from liberty.ai.appconfig import AiFile, merged_starters
 from liberty.ai.assistant import AiAssistant
 from liberty.ai.catalog import label_for
 from liberty.auth.dependencies import require_permission
@@ -72,6 +72,8 @@ async def tools(
       ``allowed_models``), with labels; one entry means no picker.
     - ``starters`` — the starter questions per ``*`` / app / app/screen: what the apps
       ship in ``ai.toml``, with the operator's ``[ai] starters`` on top.
+    - ``starter_groups`` — the same keys, the questions under headings (``ai.toml`` ``groups``);
+      the chat shows the headings as pills when a key has them.
 
     Useful when wiring the assistant for the first time or after toggling a flag —
     operators can hit this to confirm the runtime saw the change."""
@@ -82,6 +84,7 @@ async def tools(
         "tools": assistant.tool_catalog(),
         "models": [{"id": m, "label": label_for(m)} for m in _allowed_models(assistant)],
         "starters": merged_starters(getattr(request.app.state, "ai_config", None), assistant.settings.starters),
+        "starter_groups": (getattr(request.app.state, "ai_config", None) or AiFile()).starter_groups(),
     }
 
 

@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
-import { Send, ArrowRight, Check, X, FileEdit, AlertTriangle, Square, MapPin, ChevronRight, ChevronDown } from 'lucide-react'
+import { Send, ArrowRight, Check, X, FileEdit, AlertTriangle, Square, Plus, Sparkles, ChevronRight, ChevronDown } from 'lucide-react'
 import { ApiError, api, streamSSE } from '../../api/client'
-import type { AiInfo, AiModel, ChatEvent, ChatMessage, Proposal } from '../../types/ai'
+import type { AiInfo, AiModel, ChatEvent, ChatMessage, Proposal, StarterGroup } from '../../types/ai'
 import { getPageContext, renderPageContext, subscribePageContext, summarizePageContext, type PageContext } from '../../services/aiContext'
-import { loadHistory, loadModel, pickStarters, saveHistory, saveModel, trimHistory } from '../../services/aiChat'
+import { loadHistory, loadModel, pickStarterGroups, saveHistory, saveModel, trimHistory } from '../../services/aiChat'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
-import { Button, Banner, LinkButton, SearchSelect, SpinnerRing, Mono, Tag } from '../../common'
+import { Button, Banner, SearchSelect, SpinnerRing, Mono, Tag } from '../../common'
 import { Markdown } from '../../common/Markdown'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -23,23 +23,7 @@ type Entry =
   | { kind: 'tool'; ok: boolean | null; name: string; callSummary: string; error?: string }
   | { kind: 'proposal'; toolName: string; proposal: Proposal; state: ProposalState; error?: string }
 
-// The drawer already carries the title; the chat's own top line holds only what is actionable:
-// the model picker (when the operator allowed a choice) and "new conversation".
-const Shell = styled.div`display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 8px 0 10px;`
-const TopBar = styled.div`
-  display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-shrink: 0;
-  padding: 0 2px 8px; font-size: ${fontSize.sm}; color: ${colors.text.muted};
-`
 
-const ChatArea = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  height: 100%;
-  max-width: 840px;
-  margin: 0 auto;
-  width: 100%;
-`
 
 const Messages = styled.div`
   flex: 1;
@@ -48,7 +32,57 @@ const Messages = styled.div`
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 4px 2px;
+  padding: 12px;
+`
+
+// The drawer's chrome (nomaubl's AIChatPanel): a header line — title, the model picker when the
+// operator allowed a choice, "+" for a new conversation, × — a context bar when the page gives one,
+// the messages, the starter headings and chips above the composer.
+const Shell = styled.div`display: flex; flex-direction: column; height: 100%; min-height: 0;`
+const Header = styled.div`
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0;
+  & .title { flex: 1; display: inline-flex; align-items: center; gap: 8px; font-size: ${fontSize.md}; font-weight: 600; color: ${colors.text.primary}; font-family: ${fonts.sans}; white-space: nowrap; }
+`
+const IconBtn = styled.button`
+  display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; flex-shrink: 0;
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: transparent; color: ${colors.text.muted}; cursor: pointer;
+  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+  &:disabled { opacity: 0.5; cursor: default; }
+`
+const ContextBar = styled.div`
+  display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0; min-width: 0;
+  font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans};
+`
+const Unavailable = styled.div`padding: 8px 12px; color: ${colors.red.main}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; border-bottom: 1px solid ${colors.border};`
+const Suggestions = styled.div`display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; flex-shrink: 0;`
+const HeadingRow = styled.div`display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 6px; flex-shrink: 0;`
+const HeadingPill = styled.button<{ $active?: boolean }>`
+  padding: 3px 10px; border-radius: ${radius.xl}; cursor: pointer; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  border: 1px solid ${({ $active }) => ($active ? colors.blue.main : 'transparent')};
+  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
+  color: ${({ $active }) => ($active ? colors.text.primary : colors.text.muted)};
+  &:hover { color: ${colors.text.primary}; }
+`
+const SuggestionChip = styled.button`
+  padding: 6px 12px; border-radius: ${radius.xl}; cursor: pointer; text-align: left;
+  border: 1px solid ${colors.border}; background: var(--ghost-bg, ${colors.bg.card}); color: ${colors.text.secondary};
+  font-size: ${fontSize.sm}; font-family: ${fonts.sans}; line-height: 1.35;
+  &:hover { border-color: ${colors.blue.main}; color: ${colors.blue.main}; }
+`
+const InputBox = styled.textarea`
+  flex: 1; resize: none; min-height: 40px; max-height: 120px; padding: 9px 10px; line-height: 1.4; outline: none;
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; color: ${colors.text.primary};
+  font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  &:focus { border-color: ${colors.blue.main}; }
+  &::placeholder { color: ${colors.text.muted}; }
+`
+const InputArea = styled.div`display: flex; align-items: flex-end; gap: 6px; padding: 10px 12px; border-top: 1px solid ${colors.border}; flex-shrink: 0;`
+const SendBtn = styled.button<{ $active: boolean }>`
+  display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 40px; flex-shrink: 0;
+  border-radius: ${radius.md}; border: 1px solid ${({ $active }) => ($active ? colors.blue.main : colors.border)};
+  cursor: ${({ $active }) => ($active ? 'pointer' : 'default')};
+  background: ${({ $active }) => ($active ? colors.blue.main : colors.bg.input)};
+  color: ${({ $active }) => ($active ? colors.text.inverse : colors.text.muted)};
 `
 
 const Bubble = styled.div<{ $role: 'user' | 'assistant' }>`
@@ -135,74 +169,11 @@ const PayloadPre = styled.pre`
   max-height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-word;
 `
 
-const Intro = styled.div`
-  color: ${colors.text.muted};
-  font-size: ${fontSize.md};
-  margin: auto;
-  text-align: center;
-  max-width: 520px;
-  display: flex; flex-direction: column; gap: 14px; align-items: center;
-`
 
-// Starter questions — the operator's ``[ai] starters`` for this page; a click sends it.
-const Starters = styled.div`
-  display: flex; flex-direction: column; gap: 6px; align-items: stretch; width: 100%;
-  & .title { font-size: ${fontSize.sm}; color: ${colors.text.muted}; }
-`
-const StarterBtn = styled.button`
-  text-align: left; padding: 8px 12px; border-radius: ${radius.md}; cursor: pointer;
-  border: 1px solid ${colors.border}; background: var(--ghost-bg, ${colors.bg.card}); color: ${colors.text.primary};
-  font-family: ${fonts.sans}; font-size: ${fontSize.sm}; line-height: 1.4;
-  &:hover { border-color: ${colors.blue.border}; background: ${colors.blue.bg}; }
-`
 
-const Composer = styled.form`
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
-`
 
-// The follow-up questions the assistant suggested after its last reply; a click sends one.
-const Followups = styled.div`display: flex; flex-wrap: wrap; gap: 6px; align-self: flex-start; max-width: 88%;`
-const FollowupBtn = styled.button`
-  padding: 4px 10px; border-radius: ${radius.xl}; cursor: pointer;
-  border: 1px solid ${colors.blue.border}; background: transparent; color: ${colors.text.secondary};
-  font-family: ${fonts.sans}; font-size: ${fontSize.sm};
-  &:hover { background: ${colors.blue.bg}; color: ${colors.text.primary}; }
-`
 
-// The page-context chip — what the next message carries about the page the operator is on.
-// The × drops it for this page (it comes back when they move to another one).
-const ContextChip = styled.div`
-  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
-  padding: 3px 6px 3px 8px; border-radius: ${radius.xl};
-  border: 1px solid ${colors.blue.border}; background: ${colors.blue.bg}; color: ${colors.text.secondary};
-  font-size: ${fontSize.sm}; font-family: ${fonts.sans}; max-width: 100%;
-  & .name { font-family: ${fonts.mono}; color: ${colors.text.primary}; }
-  & button {
-    display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0;
-    border: 0; border-radius: ${radius.xl}; background: transparent; color: ${colors.text.muted}; cursor: pointer;
-    &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
-  }
-`
 
-const InputBox = styled.textarea`
-  flex: 1;
-  resize: none;
-  min-height: 42px;
-  max-height: 160px;
-  padding: 10px 12px;
-  border-radius: ${radius.md};
-  border: 1px solid ${colors.border};
-  background: ${colors.bg.input};
-  color: ${colors.text.primary};
-  font-size: ${fontSize.md};
-  font-family: ${fonts.sans};
-  line-height: 1.5;
-  outline: none;
-  &:focus { border-color: ${colors.blue.main}; }
-  &::placeholder { color: ${colors.text.muted}; }
-`
 
 /** One fold of consecutive tool entries. */
 function ToolGroup({ items, t }: { items: Extract<Entry, { kind: 'tool' }>[]; t: (k: string, o?: Record<string, unknown>) => string }) {
@@ -246,13 +217,15 @@ function entriesOf(messages: ChatMessage[]): Entry[] {
   return messages.map((m) => ({ kind: 'msg', role: m.role, text: m.content }))
 }
 
-export default function Chat() {
+export default function Chat({ onClose }: { onClose?: () => void }) {
   const { t } = useTranslation()
   const { currentApp } = useWorkspace()
   const [available, setAvailable] = useState<boolean | null>(null)
   const [defaultModel, setDefaultModel] = useState('')
   const [models, setModels] = useState<AiModel[]>([])
   const [starters, setStarters] = useState<Record<string, string[]>>({})
+  const [starterGroups, setStarterGroups] = useState<Record<string, StarterGroup[]>>({})
+  const [heading, setHeading] = useState<number | null>(null)     // the picked heading; null = follow-ups when there are some
   // The conversation survives the drawer's close and a reload (services/aiChat, last 40 messages).
   const historyRef = useRef<ChatMessage[]>(loadHistory())
   const [entries, setEntries] = useState<Entry[]>(() => entriesOf(historyRef.current))
@@ -280,7 +253,11 @@ export default function Chat() {
   const contextText = () => { const c = getPageContext(); return c && c.path === location.pathname && droppedPath !== c.path ? renderPageContext(c) : undefined }
   // Starters follow the page: its app + screen, else the workspace's app, else "everywhere".
   const onPage = pageCtx && pageCtx.path === location.pathname ? pageCtx : null
-  const pageStarters = useMemo(() => pickStarters(starters, onPage?.app ?? currentApp, onPage?.screen ?? null), [starters, onPage, currentApp])
+  const groups = useMemo(() => pickStarterGroups(starterGroups, starters, onPage?.app ?? currentApp, onPage?.screen ?? null), [starterGroups, starters, onPage, currentApp])
+  // Follow-ups proposed by the last answer win over the starters until the operator picks a heading.
+  const showStarters = followups.length === 0 || heading !== null
+  const activeHeading = heading ?? 0
+  const chips = showStarters ? (groups[activeHeading]?.starters ?? []) : followups
 
   useEffect(() => {
     api
@@ -290,6 +267,7 @@ export default function Chat() {
         setDefaultModel(r.model)
         setModels(r.models ?? [])
         setStarters(r.starters ?? {})
+        setStarterGroups(r.starter_groups ?? {})
       })
       .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
   }, [])
@@ -304,7 +282,7 @@ export default function Chat() {
   // never typed it, so the transcript does not show it.
   async function runTurn(text: string, show: boolean) {
     if (busy) return
-    setError(null); setBusy(true); setFollowups([])
+    setError(null); setBusy(true); setFollowups([]); setHeading(null)
     historyRef.current = [...historyRef.current, { role: 'user', content: text }]
     setEntries((es) => [...es, ...(show ? [{ kind: 'msg', role: 'user', text } as Entry] : []), { kind: 'msg', role: 'assistant', text: '' }])
 
@@ -415,6 +393,7 @@ export default function Chat() {
     saveHistory([])
     setEntries([])
     setFollowups([])
+    setHeading(null)
     setError(null)
   }
 
@@ -422,101 +401,92 @@ export default function Chat() {
 
   return (
     <Shell>
-      <TopBar>
-        {available === false && <span style={{ color: colors.red.main, flex: 1, textAlign: 'left' }}>{t('chat.unavailable')}</span>}
+      <Header>
+        <span className="title"><Sparkles size={15} /> {t('chat.title')}</span>
         {models.length > 1 && (
-          <div style={{ minWidth: 150 }} title={t('chat.pickModel')}>
-            <SearchSelect value={model} options={models.map((m) => ({ value: m.id, label: m.label, mono: m.id }))} onChange={(v) => { if (v) pickModel(v) }} disabled={busy} />
+          <div style={{ flex: '0 0 150px' }} title={t('chat.pickModel')}>
+            <SearchSelect value={model} options={models.map((m) => ({ value: m.id, label: m.label }))} onChange={(v) => { if (v) pickModel(v) }} disabled={busy} />
           </div>
         )}
-        {entries.length > 0 && <LinkButton onClick={reset}>{t('chat.newConversation')}</LinkButton>}
-      </TopBar>
-      <ChatArea>
-        <Messages ref={scrollRef}>
-          {entries.length === 0 && (
-            <Intro>
-              <span>{t('chat.intro')}</span>
-              {available && pageStarters.length > 0 && (
-                <Starters>
-                  <span className="title">{t('chat.starters')}</span>
-                  {pageStarters.map((q) => <StarterBtn key={q} type="button" onClick={() => void send(q)}>{q}</StarterBtn>)}
-                </Starters>
-              )}
-            </Intro>
-          )}
-          {foldTools(entries).map((e, i) =>
-            e.kind === 'tools' ? (
-              <ToolGroup key={i} items={e.items} t={t} />
-            ) : e.kind === 'proposal' ? (
-              <ProposalEntry
-                key={i}
-                entry={e}
-                onApply={() => void applyProposal(e.toolName, e.proposal)}
-                onSkip={() => skipProposal(e.toolName, e.proposal)}
-              />
-            ) : e.kind === 'msg' ? (
-              <Bubble key={i} $role={e.role}>
-                {e.text ? (
-                  e.role === 'assistant' ? (
-                    <Markdown>{e.text}</Markdown>
-                  ) : (
-                    e.text
-                  )
+        <IconBtn type="button" onClick={reset} title={t('chat.newConversation')} disabled={busy || entries.length === 0}><Plus size={14} /></IconBtn>
+        {onClose && <IconBtn type="button" onClick={onClose} title={t('common.close', 'Close')}><X size={14} /></IconBtn>}
+      </Header>
+      {available === false && <Unavailable>{t('chat.unavailable')}</Unavailable>}
+      {liveCtx && (() => {
+        const sum = summarizePageContext(liveCtx)
+        const parts = [sum.filters > 0 ? t('chat.contextFilters', { count: sum.filters }) : null, sum.hasRow ? t('chat.contextRow') : null].filter(Boolean)
+        return (
+          <ContextBar title={t('chat.contextHint')}>
+            <span>{t('chat.context')}</span>
+            <Mono>{sum.name}</Mono>
+            {parts.length > 0 && <span>· {parts.join(' · ')}</span>}
+            <span style={{ flex: 1 }} />
+            <IconBtn type="button" onClick={() => setDroppedPath(liveCtx.path)} title={t('chat.contextDrop')} style={{ width: 22, height: 22, border: 0 }}><X size={12} /></IconBtn>
+          </ContextBar>
+        )
+      })()}
+      <Messages ref={scrollRef}>
+        {entries.length === 0 && <Bubble $role="assistant">{t('chat.greeting')}</Bubble>}
+        {foldTools(entries).map((e, i) =>
+          e.kind === 'tools' ? (
+            <ToolGroup key={i} items={e.items} t={t} />
+          ) : e.kind === 'proposal' ? (
+            <ProposalEntry
+              key={i}
+              entry={e}
+              onApply={() => void applyProposal(e.toolName, e.proposal)}
+              onSkip={() => skipProposal(e.toolName, e.proposal)}
+            />
+          ) : e.kind === 'msg' ? (
+            <Bubble key={i} $role={e.role}>
+              {e.text ? (
+                e.role === 'assistant' ? (
+                  <Markdown>{e.text}</Markdown>
                 ) : (
-                  <span style={{ color: colors.text.muted }}>…</span>
-                )}
-              </Bubble>
-            ) : null,
-          )}
-          {!busy && followups.length > 0 && (
-            <Followups>
-              {followups.map((q) => <FollowupBtn key={q} type="button" onClick={() => void send(q)}>{q}</FollowupBtn>)}
-            </Followups>
-          )}
-        </Messages>
+                  e.text
+                )
+              ) : (
+                <span style={{ color: colors.text.muted }}>…</span>
+              )}
+            </Bubble>
+          ) : null,
+        )}
         {error && <Banner $tone="error">{error}</Banner>}
-        {liveCtx && (() => {
-          const s = summarizePageContext(liveCtx)
-          const parts = [s.filters > 0 ? t('chat.contextFilters', { count: s.filters }) : null, s.hasRow ? t('chat.contextRow') : null].filter(Boolean)
-          return (
-            <ContextChip title={t('chat.contextHint')}>
-              <MapPin size={12} />
-              <span>{t('chat.context')}</span>
-              <span className="name">{s.name}</span>
-              {parts.length > 0 && <span>· {parts.join(' · ')}</span>}
-              <button type="button" onClick={() => setDroppedPath(liveCtx.path)} title={t('chat.contextDrop')}><X size={11} /></button>
-            </ContextChip>
-          )
-        })()}
-        <Composer
-          onSubmit={(ev) => {
-            ev.preventDefault()
-            void send()
-          }}
-        >
-          <InputBox
-            value={input}
-            onChange={(ev) => setInput(ev.target.value)}
-            onKeyDown={(ev) => {
-              if (ev.key === 'Enter' && !ev.shiftKey) {
-                ev.preventDefault()
-                void send()
-              }
-            }}
-            placeholder={available ? t('chat.placeholder') : t('chat.placeholderDisabled')}
-            disabled={!available || busy}
-          />
-          {busy ? (
-            <Button type="button" onClick={stop} title={t('chat.stopHint')}>
-              <Square size={12} /> {t('common.stop')}
-            </Button>
-          ) : (
-            <Button $variant="primary" type="submit" disabled={!available || !input.trim()}>
-              <Send size={14} /> {t('common.send')}
-            </Button>
+      </Messages>
+      {!busy && available && (groups.length > 0 || followups.length > 0) && (
+        <>
+          {groups.length > 1 && (
+            <HeadingRow>
+              {groups.map((g, i) => (
+                <HeadingPill key={i} type="button" $active={showStarters && i === activeHeading} onClick={() => setHeading(i)}>{g.label ?? t('chat.starters')}</HeadingPill>
+              ))}
+            </HeadingRow>
           )}
-        </Composer>
-      </ChatArea>
+          <Suggestions>
+            {chips.map((q) => <SuggestionChip key={q} type="button" onClick={() => void send(q)}>{q}</SuggestionChip>)}
+          </Suggestions>
+        </>
+      )}
+      <InputArea>
+        <InputBox
+          value={input}
+          onChange={(ev) => setInput(ev.target.value)}
+          onKeyDown={(ev) => {
+            if (ev.key === 'Enter' && !ev.shiftKey) {
+              ev.preventDefault()
+              void send()
+            }
+          }}
+          placeholder={available ? t('chat.placeholder') : t('chat.placeholderDisabled')}
+          disabled={!available || busy}
+          rows={1}
+        />
+        {busy ? (
+          <SendBtn $active type="button" onClick={stop} title={t('chat.stopHint')} style={{ background: colors.red.bg, color: colors.red.main, borderColor: colors.red.border }}><Square size={13} /></SendBtn>
+        ) : (
+          <SendBtn $active={!!available && !!input.trim()} type="button" onClick={() => void send()} title={t('common.send')}><Send size={14} /></SendBtn>
+        )}
+      </InputArea>
     </Shell>
   )
 }

@@ -66,6 +66,12 @@
   `integrity_checks` (the configuration cross-reference checks). The assistant reads the running
   server instead of guessing when something failed, is late or is missing. Off by default because
   the log can carry what the server logged.
+- **The chat drawer on nomaubl's layout**: a header line (title, the model picker when there is a
+  choice, "+" new conversation, ×), a context line under it when the page gives one, a greeting
+  bubble, and the starter questions as chips above the composer, under headings when the app
+  ships them (`ai.toml` `groups`, per app or per screen); the follow-ups take the chips' place
+  after a reply. The dashboard's KPI card carries its label inside, the figure left-aligned, the
+  detail under it, as nomaubl's.
 - The chat drawer's top line keeps only what is actionable (the model picker when there is a
   choice, "new conversation"); a table in a reply scrolls sideways in a smaller font with each
   figure on one line. The assistant knows today's date (an uncached line with the page context),

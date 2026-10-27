@@ -75,6 +75,13 @@
   la configuration). L'assistant lit le serveur au lieu de deviner quand quelque chose a échoué,
   est en retard ou manque. Désactivés par défaut car le journal peut contenir ce que le serveur
   a consigné.
+- **Le volet de chat sur la mise en page de nomaubl** : une ligne d'en-tête (titre, choix du modèle
+  s'il y en a un, « + » nouvelle conversation, ×), une ligne de contexte dessous quand la page en
+  donne un, une bulle d'accueil, et les questions de départ en puces au-dessus de la saisie, sous
+  des rubriques quand l'application les livre (`groups` d'`ai.toml`, par application ou par
+  écran) ; les relances prennent la place des puces après une réponse. La carte d'indicateur du
+  tableau de bord porte son libellé à l'intérieur, le chiffre aligné à gauche, le détail dessous,
+  comme nomaubl.
 - La ligne de tête du volet de chat ne garde que l'utile (le choix du modèle s'il y en a un,
   « nouvelle conversation ») ; un tableau dans une réponse défile latéralement en police réduite,
   chaque nombre sur une ligne. L'assistant connaît la date du jour (une ligne non mise en cache

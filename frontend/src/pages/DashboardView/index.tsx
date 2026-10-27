@@ -169,7 +169,8 @@ function WidgetCell({
   const common = { filters, filterValues, period, selection, refreshKey }
   return (
     <WidgetFrame $cs={widget.col_span} $rs={widget.row_span}>
-      {widget.label && <WidgetTitle>{widget.label}</WidgetTitle>}
+      {/* a KPI card carries its own label inside (nomaubl's card); the others keep the caption above */}
+      {widget.label && widget.type !== 'kpi' && <WidgetTitle>{widget.label}</WidgetTitle>}
       {widget.type === 'chart'
         ? <ChartWidget widget={widget} {...common} />
         : widget.type === 'table'

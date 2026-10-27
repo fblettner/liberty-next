@@ -390,6 +390,7 @@ const en = {
     contextHint: 'The assistant sees what you are looking at — the screen, its filters, the row you clicked.',
     contextDrop: 'Do not send the page to the assistant',
     pickModel: 'Model',
+    greeting: "Hello! I answer from this installation's configuration and its data, and I can walk you through the applications' procedures. Pick a suggestion or ask your question.",
     toolCalls: '{{count}} tool call(s)',
     toolFailed: '{{count}} failed',
     starters: 'Try one of these',

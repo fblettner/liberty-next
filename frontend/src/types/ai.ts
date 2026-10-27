@@ -52,4 +52,8 @@ export interface AiInfo {
   models: AiModel[]
   /** Starter questions by scope: `*`, an app, or `app/screen`. */
   starters: Record<string, string[]>
+  /** The same keys with the questions under headings (ai.toml `groups`); shown as pills when a key has them. */
+  starter_groups?: Record<string, StarterGroup[]>
 }
+
+export interface StarterGroup { label: string | null; starters: string[] }

@@ -28,10 +28,21 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class StarterGroup(BaseModel):
+    """Starter questions under a heading: the chat shows the headings as pills and the picked
+    heading's questions as chips (nomaubl's domains)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1)
+    starters: list[str] = Field(default_factory=list)
+
+
 class ScreenAi(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     starters: list[str] = Field(default_factory=list, description="Starter questions shown on this screen.")
+    groups: list[StarterGroup] = Field(default_factory=list, description="Starter questions by heading; shown instead of `starters` when set.")
 
 
 class Playbook(BaseModel):
@@ -46,6 +57,7 @@ class AppAi(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     starters: list[str] = Field(default_factory=list, description="Starter questions shown anywhere in this app.")
+    groups: list[StarterGroup] = Field(default_factory=list, description="Starter questions by heading; shown instead of `starters` when set.")
     screens: dict[str, ScreenAi] = Field(default_factory=dict, description="Per-screen starters, keyed by screen id.")
     playbooks: dict[str, Playbook] = Field(default_factory=dict, description="Procedures the assistant can load, keyed by id.")
 
@@ -64,6 +76,17 @@ class AiFile(BaseModel):
             for sid, scr in block.screens.items():
                 if scr.starters:
                     out[f"{app}/{sid}"] = list(scr.starters)
+        return out
+
+    def starter_groups(self) -> dict[str, list[dict[str, Any]]]:
+        """``{app | "app/screen": [{label, starters}, …]}`` — the grouped starters only."""
+        out: dict[str, list[dict[str, Any]]] = {}
+        for app, block in self.ai.items():
+            if block.groups:
+                out[app] = [g.model_dump() for g in block.groups]
+            for sid, scr in block.screens.items():
+                if scr.groups:
+                    out[f"{app}/{sid}"] = [g.model_dump() for g in scr.groups]
         return out
 
     def playbooks(self) -> list[tuple[str, str, Playbook]]:

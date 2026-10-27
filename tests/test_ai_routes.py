@@ -273,7 +273,7 @@ def test_bundled_starters_are_edited_and_merged_under_the_operators(app, tmp_pat
         assert r.status_code == 200, r.text
         text = (tmp_path / "ai.toml").read_text()
         assert "f0093" not in text and 'starters = [\n    "Who has no role?",' in text and "[ai.nomajde.playbooks.create_user]" in text
-        assert client.get("/admin/config/ai/parsed", headers=h).json()["ai"] == {"nomajde": {"starters": ["Who has no role?"], "screens": {"f0092": {"starters": ["Users never logged in"]}},
+        assert client.get("/admin/config/ai/parsed", headers=h).json()["ai"] == {"nomajde": {"starters": ["Who has no role?"], "groups": [], "screens": {"f0092": {"starters": ["Users never logged in"], "groups": []}},
                                                                                          "playbooks": {"create_user": {"title": "Create a user", "description": None, "body": "1. Open Users\n2. Add"}}}}
         assert client.put("/admin/config/ai/parsed", json={"ai": {"nomajde": {"playbook": 1}}}, headers=h).status_code == 422
         # the running server sees it after a reload, with the operator's [ai] starters on top

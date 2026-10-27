@@ -1,7 +1,7 @@
 // The chat drawer's plain logic: which starter questions apply to the page, the model the
 // operator picked on this device, and the conversation kept across drawer open / close and
 // page reloads (localStorage, last HISTORY_MAX messages). No React here.
-import type { ChatMessage } from '../types/ai'
+import type { ChatMessage, StarterGroup } from '../types/ai'
 
 export const HISTORY_MAX = 40
 const HISTORY_KEY = 'liberty.ai.history'
@@ -17,6 +17,20 @@ export function pickStarters(starters: Record<string, string[]> | undefined, app
     if (list && list.length > 0) return list
   }
   return []
+}
+
+/** The starter groups for the page: the most specific key that has GROUPS wins; without any,
+ *  the flat starters of the most specific key become one unnamed group. */
+export function pickStarterGroups(
+  groups: Record<string, StarterGroup[]> | undefined, starters: Record<string, string[]> | undefined, app?: string | null, screen?: string | null,
+): StarterGroup[] {
+  const keys = [app && screen ? `${app}/${screen}` : null, app || null, '*']
+  for (const k of keys) {
+    const list = k && groups ? groups[k] : undefined
+    if (list && list.length > 0) return list.filter((g) => g.starters.length > 0)
+  }
+  const flat = pickStarters(starters, app, screen)
+  return flat.length ? [{ label: null, starters: flat }] : []
 }
 
 export function loadHistory(): ChatMessage[] {

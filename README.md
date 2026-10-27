@@ -6,381 +6,229 @@
 [![Release](https://github.com/fblettner/liberty-next/actions/workflows/release.yml/badge.svg)](https://github.com/fblettner/liberty-next/actions/workflows/release.yml)
 [![Docs](https://img.shields.io/badge/docs-nomana--it.fr-blue)](https://docs.nomana-it.fr/liberty/getting-started/)
 
-**Connector-driven low-code framework.** Configure SQL queries + HTTP endpoints in
-TOML; Liberty derives schemas at query time, serves a React admin UI on the same
-port, surfaces an Anthropic tool-use assistant for natural-language access, and
-wraps everything in a structured-config builder + dependency-aware deployment
-packager.
+**A connector-driven low-code platform for business applications.** You describe your
+data sources, screens, dashboards, jobs and rules in TOML, or build them in the Settings
+editors; Liberty Next runs them: a React workspace, a REST API, a scheduler, a data
+explorer, row-level security and an AI assistant that works on your configuration and
+your data. Nothing is generated and nothing is stored as metadata tables: the form of a
+screen comes from the query it runs, discovered at query time.
 
-Declarative `connectors.toml` / `screens.toml` / `dictionary.toml` / `menus.toml` /
-`charts.toml` / `dashboards.toml` files drive the runtime — schemas derived at query
-time, no code-gen step, every field round-trippable through the structured editors
-at **Settings → \<tab\>**.
+Three applications run on it in production, shipped as a separate licensed bundle:
+**nomasx1** (JD Edwards security, segregation of duties and licence auditing), **nomajde**
+(JD Edwards administration) and **nomaflow** (the ETL and scheduler). A demo application,
+**nomademo** (sales analytics from spreadsheets), shows the whole platform on one case.
 
-## Quick links
+- 📚 Documentation — <https://docs.nomana-it.fr/liberty/getting-started/>
+- 🐳 Image — <https://github.com/fblettner/liberty-next/pkgs/container/liberty-next>
+- 🚀 Deployment (Compose, Swarm, TLS, backups, upgrades) — [`release/`](release/)
+- 📦 Releases — <https://github.com/fblettner/liberty-next/releases> · 🐛 Issues — <https://github.com/fblettner/liberty-next/issues>
 
-- 📚 **Documentation** — <https://docs.nomana-it.fr/liberty/getting-started/>
-- 💻 **Source** — <https://github.com/fblettner/liberty-next>
-- 🐳 **Docker image** — <https://github.com/fblettner/liberty-next/pkgs/container/liberty-next>
-- 🚀 **Deployment configs** (Compose + Swarm + helper scripts) — [`release/`](https://github.com/fblettner/liberty-next/tree/main/release)
-- 🐛 **Issues** — <https://github.com/fblettner/liberty-next/issues>
-- 📦 **Releases** — <https://github.com/fblettner/liberty-next/releases>
+---
+
+## What it does
+
+**Connectors.** SQL pools on PostgreSQL and Oracle (thin driver, optional thick mode for
+network encryption and LOBs over database links) with named queries, tables with their
+read and write statements, schema and dblink placeholders, server-side filters, sequences
+and audit mirrors; API connectors over HTTP with five authentication kinds. Secrets are
+`ENC:` values encrypted at rest or `${ENV}` references, never plain text.
+
+**Screens.** A screen is the business object: the columns and their rules, the filters
+(cascading through lookups), the dialog with its tabs, nested forms and nested tables,
+row actions and toolbar actions (chains of query, confirm, prompt, navigate, notify),
+lifecycle hooks, row-level edit rules, bulk edit, Excel import and workbook export,
+summary, tree and chart views, saved grid views shared or per user, record locks.
+
+**Dictionary, menus, dashboards.** One dictionary of data items (labels in every
+language, formats, enums, lookups, sequences, rules) shared by every screen. Per-app
+menus. Dashboards of KPIs, charts and tables with a filter bar and a period picker,
+compared with the period before.
+
+**Data Explorer.** A model per app (a hub table and its dimensions) explored without SQL:
+rows, measures, filters, a period, pivots, charts, drill to the detail and to the
+screen's dialog, calculated fields, saved analyses and dashboards of analyses, shared or
+private, exported to Excel and PDF. Apps ship analyses as a bundled catalogue.
+
+**nomaflow.** Jobs made of steps: run a query, copy a table between databases,
+load a spreadsheet or a CSV into a table (replacing the partitions the file carries,
+refusing a closed period, checking a control total, reporting the rejected rows),
+call an API, sync from LDAP, run a Python callable, call another job, render a saved
+analysis or a report to Excel or PDF and send it with the run's files attached. Cron
+schedules with presets and parameters, retries, missed-schedule detection, retention,
+a run history with the step detail and the log.
+
+**Notifications.** Rules on screen events, job events and actions deliver to the portal
+inbox (live), by e-mail or through a connector; recipients are users, roles or addresses.
+
+**AI assistant.** An Anthropic-backed assistant in a drawer over every page. It sees what
+you are looking at (the screen, its filters, the row you clicked), knows what the
+installation holds, queries your data read-only, follows the procedures the apps ship
+(playbooks), proposes new queries, dictionary items, screens and menu items that you
+apply with one click, and reads the server's jobs, log and integrity checks when the
+operator allows it. Starter questions per app and screen, follow-up suggestions, a
+model picker, a conversation that stays.
+
+**Access.** Local users or OpenID Connect (any provider), roles with colon-glob
+permissions, superusers, and **row-level data scope**: a role's rules on a dictionary
+item or a column, with values from a user attribute, narrow every query, export,
+explorer, digest and write. Login throttling, rotating refresh tokens.
+
+**Operations.** Every configuration file is edited by a Settings builder, validated,
+snapshotted before each save (version history with diff and restore), hot-reloaded, and
+packaged with its dependencies for deployment to another install. The apps bundle merges
+into the live configuration without clobbering the operator's changes; upgrades are
+journaled with the release notes of each version. Health, readiness, request ids, a
+technical dashboard with the log tail and the connected users.
 
 ---
 
 ## Install
 
-**Full guide:** <https://docs.nomana-it.fr/liberty/getting-started/>
+**Full guide:** <https://docs.nomana-it.fr/liberty/getting-started/> and
+[`release/README.md`](release/README.md).
 
-Three routes — pick what fits.
+### Docker Compose
 
-### Docker Compose (recommended)
-
-Customer hosts only need the `release/` directory — sparse-checkout pulls just that:
+A host needs only the `release/` directory:
 
 ```bash
-# 1. Sparse-clone — downloads ONLY release/ (no liberty/, no frontend/, no .git history of source)
 git clone --depth 1 --filter=blob:none --sparse https://github.com/fblettner/liberty-next.git
-cd liberty-next
-git sparse-checkout set release
-cd release
-
-# 2. One-shot install (interactive picks light vs full; or use a flag)
-./install.sh full
-
-# 3. (Licensed customer) overlay the apps wheel — see release/README.md
-./install-apps.sh /path/to/liberty_apps-X.Y.Z.whl
-# Set the license key after install via Settings → App → License (encrypted at rest in app.toml).
+cd liberty-next && git sparse-checkout set release && cd release
+./install.sh full                     # light = the server + its database; full = + Traefik, pgAdmin, Portainer
+./install-apps.sh /path/to/liberty_apps-X.Y.Z.whl   # licensed customers: the apps bundle
 ```
 
-Upgrade later with [`release/upgrade.sh`](release/upgrade.sh) — it pulls the newest
-image (or `--tag X.Y.Z`), recreates the stack, waits for health, and reports the
-framework + apps version change (also journaled in **Settings → History → Upgrades**).
-
-The full deployment guide (TLS wiring, backups, upgrades, swarm, common ops) lives
-in [`release/README.md`](release/README.md).
+Then `./liberty status | doctor | start | stop | ssl | apps | upgrade | backup | restore | logs`.
+The first boot prints the `admin` password once; the license key is set in
+Settings → App → License (encrypted at rest).
 
 ### PyPI
 
-**Recommended — pipx** (isolates Liberty Next in its own venv; CLI commands stay on
-your PATH; no risk of polluting system Python):
-
 ```bash
-# Install pipx once if you don't have it:
-#   macOS:    brew install pipx && pipx ensurepath
-#   Linux:    sudo apt install pipx && pipx ensurepath
-#                 # or:  python3 -m pip install --user pipx && python3 -m pipx ensurepath
-#   Windows:  py -m pip install --user pipx && py -m pipx ensurepath
-
-# Report rendering (markdown → PDF) uses WeasyPrint — install the system libs
-# it links against. Skip them — and install without the `reports` extra — if you don't
-# need PDF output from /api/reports (markdown output works without them).
-#   macOS:    brew install pango
-#   Debian/Ubuntu:  sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libfontconfig1
-
-pipx install 'liberty-next[all]'   # [all] = reports (PDF) + ldap + alembic extras; plain liberty-next = core only
-liberty-next                      # → API + SPA on http://localhost:8000
-```
-
-This gives you every CLI tool the package ships (`liberty-next`, `liberty-admin`,
-`liberty-connectors`, `liberty-migrate`, `liberty-license`, `liberty-crypto`) on the PATH,
-each one routed through the same isolated venv. Upgrade with `pipx upgrade liberty-next`;
-uninstall cleanly with `pipx uninstall liberty-next` (removes the venv + every shim,
-leaves nothing behind).
-
-**Plain pip** (only when pipx isn't an option — make a venv yourself to avoid breaking
-system packages):
-
-```bash
-python3 -m venv ~/.local/liberty-venv
-~/.local/liberty-venv/bin/pip install 'liberty-next[all]'
-~/.local/liberty-venv/bin/liberty-next
-```
-
-First boot generates an `admin` password and prints it once — capture it from the
-logs, then sign in at <http://localhost:8000>.
-
-### Adding the licensed apps to a pipx install
-
-For Docker, [`release/install-apps.sh`](release/install-apps.sh) handles everything.
-For a pipx install, do it manually:
-
-```bash
-# 1. Inject the apps wheel into the SAME pipx venv as liberty-next
-#    (delivered to licensed customers as liberty_apps-X.Y.Z-py3-none-any.whl):
-pipx inject liberty-next /path/to/liberty_apps-X.Y.Z-py3-none-any.whl
-
-# 2. Persistent secrets — generate ONCE and put in ~/.bashrc / ~/.zshrc.
-#    Both must stay stable across restarts (rotating either breaks every encrypted
-#    secret in app.toml + connectors.toml).
+pipx install 'liberty-next[all]'      # [all] = PDF reports (needs Pango), LDAP, Alembic
 export LIBERTY_JWT_SECRET="$(openssl rand -base64 48 | tr -d '\n=+/')"
 export LIBERTY_MASTER_KEY="$(openssl rand -base64 32 | tr -d '\n=+/')"
-
-# 3. Postgres credentials — used by liberty-admin init-db to seed [pools.default]
-#    AND by deploy-databases to inherit-and-set the nomasx1 / nomajde role passwords.
-#    Skip if you only want SQLite for trial (licensed connectors need real pg).
-export POSTGRES_PASSWORD="your-postgres-superuser-password"
-export POSTGRES_USER=liberty
-export POSTGRES_HOST=localhost
-export POSTGRES_PORT=5432
-export POSTGRES_DB=liberty
-# SQLite fallback (no licensed connectors): export LIBERTY_DB_URL=sqlite+aiosqlite:///./liberty.db
-
-# 4. Materialize the wheel's payload into a writable LIBERTY_APPS_DIR
-mkdir -p ~/.local/share/liberty-next/apps
-liberty-apps install --target ~/.local/share/liberty-next/apps/config
-export LIBERTY_APPS_DIR=~/.local/share/liberty-next/apps/config
-
-# 5. Bootstrap the framework DB + admin user
-psql -h "$POSTGRES_HOST" -U postgres -c "CREATE ROLE $POSTGRES_USER LOGIN SUPERUSER PASSWORD '$POSTGRES_PASSWORD';"
-psql -h "$POSTGRES_HOST" -U postgres -c "CREATE DATABASE $POSTGRES_DB OWNER $POSTGRES_USER;"
-liberty-admin init-db    # seeds [pools.default] + creates 'admin' user, prints password
-
-# 6. Run the install-time jobs (deploy-databases / init-schema / import-reference)
-liberty-admin run-install-jobs
-
-# 7. Start the server
-liberty-next             # API + SPA on http://localhost:8000
-
-# 8. Sign in as admin, then Settings → App → License → Set
-#    (encrypted at rest in app.toml with LIBERTY_MASTER_KEY)
+liberty-admin init-db                 # the auth store + the admin user (prints its password)
+liberty-next                          # API + UI on http://localhost:8000
 ```
 
-Upgrade the apps later by injecting a new wheel + re-running `liberty-apps install`
-(operator-edited TOMLs are preserved; pass `--force-config` to overwrite). License /
-AI api_key / OIDC settings stay in app.toml and survive the upgrade.
+The licensed apps on a pipx install: `pipx inject liberty-next liberty_apps-X.Y.Z.whl`,
+then `liberty-apps install --target <dir>`, `export LIBERTY_APPS_DIR=<dir>` and
+`liberty-admin run-install-jobs`. `liberty-ops` is the Python install's counterpart of the
+Docker `liberty` command (status, doctor, backup, restore, migrate, upgrade, rollback).
 
-### From source (development)
+### From source
 
 ```bash
-git clone https://github.com/fblettner/liberty-next.git
-cd liberty-next
-python3.12 -m venv .venv
-.venv/bin/pip install -e ".[dev]"
-.venv/bin/pytest -v               # 1100+ tests
-./start.sh init-config            # seed config/*.toml from the .example files
-./start.sh init-db                # FIRST RUN: create the auth store + `admin` user (prints password)
-./start.sh                        # build frontend + serve on :8000
-./start.sh dev                    # same, with backend auto-reload
-./start.sh frontend               # Vite HMR dev server on :5173 (pair with `./start.sh api dev`)
+git clone https://github.com/fblettner/liberty-next.git && cd liberty-next
+python3.12 -m venv .venv && .venv/bin/pip install -c requirements.txt -e ".[dev]"
+./start.sh init-db                    # first run
+./start.sh                            # builds the frontend when stale, serves on :8000
+./start.sh dev                        # backend auto-reload · ./start.sh frontend → Vite on :5173
+.venv/bin/pytest -q                   # 1 470 tests, no live database needed
+(cd frontend && npm ci && npm run lint && npm test && npm run build)
 ```
 
 ---
 
-## What you get
+## Configuration
 
-| URL | Purpose |
-|---|---|
-| `/` | React SPA — admin UI (sign-in, workspace tabs, Settings, AI assistant) |
-| `/docs` | **Swagger UI** — interactive API explorer |
-| `/redoc` | **ReDoc** — print-friendly API reference (grouped by tag) |
-| `/openapi.json` | OpenAPI 3 spec — generated from FastAPI routes + Pydantic models |
-| `/api/*` | Public API surface (auth gates per route) |
-| `/admin/*` | Operator-only endpoints — config CRUD, find-usages, packaging, AI scaffold-apply, … |
-| `/info` | Public liveness + counts (connectors / screens / pools) — Docker `HEALTHCHECK` hits this |
-
----
-
-## Configuration in 60 seconds
-
-Eight TOML files under `config/` (or wherever `LIBERTY_APPS_DIR` points). Every file
-is round-trippable through the structured editors at **Settings → \<tab\>**:
+Everything is TOML under `config/`, or under `LIBERTY_APPS_DIR` when the apps bundle is
+installed. Every file has a Pydantic model, a Settings editor, a version history and
+hot reload.
 
 | File | What it carries | Editor |
 |---|---|---|
-| `app.toml` | App-level settings (host / port / log level / AI model / hot-reload) + encrypted secrets (license key, AI api_key, OIDC client_secret) | Settings → App |
-| `connectors.toml` | DB pools + SQL connectors with named queries + API connectors with endpoints | Settings → Pools, Settings → Connectors |
-| `dictionary.toml` | Shared + per-connector field metadata (labels / types / rules / lookups / sequences) | Settings → Dictionary |
-| `screens.toml` | Screen definitions — per-app grids + dialog forms + actions + row menus | Settings → Screens |
-| `charts.toml` | Saved chart specs referenceable from screens + dashboards | Settings → Charts |
-| `dashboards.toml` | Widget grids with shared filters | Settings → Dashboards |
-| `menus.toml` | Per-app navigation trees | Settings → Menus |
-| `jobs.toml` | nomaflow ETL pipelines + scheduled jobs (per-step `op_kwargs`, retry, retention) | Nomaflow → Jobs |
+| `app.toml` | Server, auth, AI, notifications, reports branding, license, OIDC, jobs settings; encrypted secrets | Settings → App |
+| `connectors.toml` | Pools, SQL connectors (tables, queries, sequences, lookups), API connectors | Settings → Pools, Connectors |
+| `dictionary.toml` | Data items: labels, formats, enums, lookups, sequences, rules | Settings → Dictionary |
+| `screens.toml` | Screens: columns, dialogs, actions, hooks, views, exports | Settings → Screens (Visual Designer) |
+| `menus.toml` | Per-app navigation and the app's home | Settings → Menus |
+| `charts.toml` / `dashboards.toml` | Saved charts; dashboards of KPIs, charts and tables with filters and a period | Settings → Charts, Dashboards |
+| `explorer.toml` | Data Explorer models and their bundled analyses and dashboards | Settings → Explorer |
+| `actions.toml` | Shared workflows reused by screens | Settings → Actions |
+| `notifications.toml` | Notification rules on screen, job and action events | Settings → Notifications |
+| `ai.toml` | What the apps ship for the assistant: starter questions and playbooks | Settings → AI |
+| `theme.toml` / `reports.toml` | Branding; operator report templates | Settings → Theme, Reports |
+| `jobs.toml` | nomaflow jobs, schedules, presets, retention and missed-schedule policies | Nomaflow → Jobs |
+| `auth.toml` | Local users and roles (or the database backend) | Settings → Access |
 
-Two secrets stay env-only: `LIBERTY_JWT_SECRET` (signs access / refresh tokens) and
-`LIBERTY_MASTER_KEY` (the AES-256-GCM key that decrypts every `ENC:` value in app.toml +
-connectors.toml). Everything else — license key, Anthropic API key, OIDC client secret,
-pool / API-connector passwords — lives encrypted at rest in TOML and is edited through
-the UI's masked-secret pattern. `${VAR}` / `${VAR:-default}` env references in TOML are
-still expanded at load time for the few values an operator wants to keep externally
-managed.
-
----
-
-## Customer / vendor split
-
-Liberty Next ships as an **open framework**. The customer-facing connectors + screens
-+ dictionaries live in a separate apps repo (`liberty-apps`); the licensed ones
-(nomasx1 / nomajde / nomaflow) are unlocked by an RS256 JWT set via **Settings → App →
-License** (encrypted at rest in app.toml with `LIBERTY_MASTER_KEY`). Without a key
-the framework runs in **restricted** mode — those connectors aren't loaded. Headless
-installs can pre-seed the encrypted value with `liberty-crypto encrypt`.
-
-The **Settings → Package** tab packages selected screens / menu items / dashboards
-plus their full dependency closure (connectors / queries / DD entries / lookups / …)
-into a ZIP for atomic deployment to another install. Each entity carries an
-`override = true` flag operators can flip to mark customer customisations — the
-import-package endpoint's `overwrite` strategy preserves flagged entities so vendor
-upgrades don't clobber customer forks.
+Two secrets stay in the environment: `LIBERTY_JWT_SECRET` and `LIBERTY_MASTER_KEY` (the
+AES-256-GCM key behind every `ENC:` value).
 
 ---
 
-## Upgrade history & release notes
+## Framework and applications
 
-Every config save is versioned (content-addressed snapshots on the persistent config
-volume), and **version changes of the software itself** are journaled too. On startup
-the running container compares its installed version against the last one it recorded
-and writes an `install` / `upgrade` entry — independently for the **framework**
-(`liberty-next`) and the **licensed apps** (`liberty-apps`). So after a `docker compose
-pull` (or [`release/upgrade.sh`](release/upgrade.sh)) you get a dated "7.0.38 → 7.0.39"
-trail, with the apps bundle tracked separately from the framework.
+The framework is open. The applications live in a separate repository and ship as a
+wheel; connectors flagged `licensed = true` load only under an RS256 license key, set in
+Settings → App → License and checked with `liberty-license verify`. Without a key the
+framework runs in restricted mode. An installed bundle is merged into the live
+configuration per entity: new entities are added, untouched ones refreshed, the
+operator's overrides kept.
 
-- **Settings → History** — three toggles: **Files** (per-TOML version history with
-  diff + restore), **Screens** (screen+dependency bundles), and **Upgrades** (the
-  version timeline; selecting an entry renders that version's release notes inline,
-  with a Framework / Apps badge).
-- **Settings → Release notes** — the full changelog, EN + FR (FR falls back to EN),
-  with a per-version table of contents and a Framework / Apps switch.
+Building a new application on the framework is a configuration job, not a project. The
+`nomademo` app is the worked example, and the repository ships a Claude Code skill,
+`/build-app`, that assembles an application from a description of the need.
 
-Release notes ship inside each wheel as `RELEASE.md` / `RELEASE.fr.md` and are served
-by `GET /admin/release-notes`; the version timeline is `GET /admin/upgrades` (both
-superuser-gated). The release workflow guarantees each released version has a
-`## <version> — <date>` section (it inserts a stub + warns when one is missing), so the
-Upgrades detail is never empty.
+---
+
+## Operating it
+
+| URL | Purpose |
+|---|---|
+| `/` | The workspace: sign-in, tabs, Settings, the assistant drawer |
+| `/docs`, `/redoc`, `/openapi.json` | The API reference |
+| `/api/*`, `/admin/*` | The API; the operator endpoints (superuser) |
+| `/health`, `/ready`, `/info` | Liveness, readiness (pool ping), public counts and versions |
+
+Settings → History holds the per-file version history, the screen bundles and the
+upgrade timeline with each version's release notes; Settings → Release notes the full
+changelog in English and French (also in the wheel as `liberty/RELEASE.md` and
+`RELEASE.fr.md`).
 
 ---
 
 ## Releasing
 
-One GitHub Actions workflow, [`release.yml`](.github/workflows/release.yml), publishes
-every release. **It runs automatically on every push to `main`.** No buttons, no tags,
-no manual triggers.
-
-### The flow
-
-```
-develop branch         →  work happens here, push freely, NOTHING triggers
-                         ↓
-                       PR develop → main, merge
-                         ↓
-main branch push       →  release.yml runs:
-                          1. Reads pyproject.toml's version
-                          2. If that version is already tagged → auto-bump patch (7.0.1 → 7.0.2)
-                             Else use as-is (when you manually bumped for a major/minor)
-                          3. Ensures liberty/RELEASE.md has a "## <version>" section
-                             (inserts a dated stub + warns if missing), then commits the
-                             bumped pyproject.toml + RELEASE.md back to main ([skip ci])
-                          4. Builds + pushes multi-arch Docker to ghcr.io as <version> + :latest
-                          5. Publishes sdist + wheel to PyPI
-                          6. Tags v<version> + creates GitHub release with auto-notes
-```
-
-### Version control
-
-- **Bugfix / patch release** (default): just merge to main. Workflow auto-bumps `7.0.1 → 7.0.2`.
-- **Minor release** (`7.0.x → 7.1.0`): bump `version = "7.1.0"` in `pyproject.toml` in any commit before merging. Workflow honours it.
-- **Major release** (`7.x → 8.0.0`): same — bump in pyproject.toml.
-
-### Setting up the repo (one-time)
-
-1. **Branch protection on `main`** (recommended):
-   <https://github.com/fblettner/liberty-next/settings/branches> → add a rule for
-   `main` → require pull request before merging. This forces the develop → main flow.
-
-2. **PyPI token**: <https://pypi.org/manage/account/token/> → create a token
-   (account-scoped first time; scope to `liberty-next` after the first release).
-   Add it as a repo secret:
-   <https://github.com/fblettner/liberty-next/settings/secrets/actions> →
-   Name: `PYPI_API_TOKEN`, Value: `pypi-…`.
-
-3. **Docker image visibility**: after the first push to ghcr.io, the image lands
-   private. Make it public at <https://github.com/fblettner?tab=packages> →
-   liberty-next → Package settings → Change visibility → Public. (One-time.)
-
-### Manual override
-
-The workflow also has a `workflow_dispatch` trigger if you need to re-publish a
-specific version (rebuild after a base-image CVE, etc.). Go to
-<https://github.com/fblettner/liberty-next/actions/workflows/release.yml> →
-Run workflow → optional version input.
-
-### Recovering from a failed publish
-
-- **Pre-publish failure** (build, Docker push) — fix and re-trigger; nothing is consumed.
-- **PyPI publish failure** (the only irreversible step) — the version is burned. Bump
-  `pyproject.toml` to the next version and push again.
-- **Tag push fails with "refusing to allow a GitHub App to create or update workflow …
-  without `workflows` permission"** — this happens *only* on the release right after a
-  `.github/workflows/*` file changed: the `GITHUB_TOKEN` the bot uses can't push a ref
-  that carries a workflow-file change, so the final tag step is rejected (the Docker +
-  PyPI steps already ran — the version is published, just untagged). Fix: push the tag
-  yourself (you have the scope the bot lacks), e.g.
-  `git tag -a v<version> origin/main -m "Release v<version>" && git push origin v<version>`,
-  then draft the GitHub release from that tag. Pushing the tag does **not** re-trigger
-  the workflow (it triggers on `push: branches: [main]`, not tags), and it breaks the
-  cycle so the next release tags normally. To automate even this case, use a PAT with
-  `workflow` scope for the bump/tag push steps instead of `GITHUB_TOKEN`.
+`develop` is the working branch; `main` is release-only. Every push to `develop` and
+every pull request to `main` runs the CI (ruff, pytest, eslint, vitest, the build). A push
+to `main` runs [`release.yml`](.github/workflows/release.yml): it reads the version in
+`pyproject.toml` (and bumps the patch when that version is already tagged), requires a
+real `## <version>` section in `liberty/RELEASE.md`, builds the wheel and the multi-arch
+image, tags, and publishes to PyPI and GitHub. Bump the version in `pyproject.toml` before
+merging for a minor or major release. If the PyPI publish fails, the version is burned:
+bump and push again.
 
 ---
 
 ## Stack
 
-Python 3.12 · FastAPI · SQLAlchemy 2.0 async · asyncpg (PostgreSQL) · oracledb (Oracle,
-thin) · APScheduler (nomaflow ETL + cron) · Anthropic SDK · authlib (OIDC) · argon2 ·
-cryptography (AES-256-GCM) · React 19 + Vite + TypeScript + emotion ·
-TanStack Table · Monaco (SQL editor) · Recharts (visualisation).
-
----
+Python 3.12 · FastAPI · SQLAlchemy 2.0 async · asyncpg · oracledb · Pydantic 2 · PyJWT ·
+authlib · argon2 · APScheduler · python-socketio · tomlkit / tomli-w · openpyxl · WeasyPrint
+(optional) · Anthropic SDK — React 19 · Vite · TypeScript · emotion · react-i18next ·
+TanStack Table · Recharts · Monaco.
 
 ## Repository layout
 
 ```
-config/      app.toml (committed) · {connectors,dictionary,menus,screens,charts,dashboards,auth,jobs}.toml (NOT committed — per-deployment)
-liberty/     main.py · config.py · crypto.py · framework_enums.py · theme.py
-             · RELEASE.md · RELEASE.fr.md  (changelog shipped in the wheel)
-             · {cli,admin_cli,connectors_cli,migrate_cli,crypto_cli,license_cli}.py
-             · connectors/{config,base,db,sql,api,registry,dictionary,introspect}.py
-             · versioning/  config + upgrade-history store (.versions/index.db)
-             · licensing/{__init__.py, public.pem}
-             · menus/config.py · screens/config.py · charts/config.py · dashboards/config.py
-             · auth/{authstore,password,tokens,principal,oidc,dependencies,routes,models,db,service}.py
-             · ai/{tools,connector_tools,scaffold_tools,proposal,assistant,routes}.py
-             · jobs/{schema,registry,db,runner,scheduler,wiring,coercion,triggers,models,steps/}
-             · etl/{operations,…}.py — shared SQL helpers used by nomaflow callables
-             · web/{admin,connectors,menus,screens,charts,dashboards,license,theme,jobs,
-                    access,hot_reload,errors,dependencies,deps,package,package_import,
-                    clone,clone_with_deps,delete_with_deps,rename,export,dictgen,usages}.py
-frontend/    Vite + React 19 + TS — built dist/ served by the backend
-             src/{api,auth,workspace,types,services,common,pages,components,locales}/*
-.github/workflows/  release.yml — auto-publishes Docker (ghcr.io) + PyPI on every push to main
-docker/      entrypoint.sh — runtime config-init (init-db when POSTGRES_PASSWORD set)
-start.sh     run/dev helper (serve | dev | api | build | frontend | init-db | init-config | help)
-release/     deployment configs (Docker Compose light/full/swarm, install.sh, install-apps.sh, upgrade.sh)
-tests/       1100+ tests
+liberty/        the framework: main.py (create_app), runtime.py (the reload path), config.py,
+                connectors/ auth/ screens/ menus/ charts/ dashboards/ actions/ explorer/ ai/
+                jobs/ etl/ reports/ notify/ changesets/ versioning/ userviews/ web/ (the HTTP layer)
+                RELEASE.md · RELEASE.fr.md · the CLIs (cli, admin_cli, ops_cli, migrate_cli, license_cli, crypto_cli)
+frontend/       React 19 + Vite + TypeScript; dist/ is served by the backend
+config/         app.toml and the *.toml.example templates
+release/        Docker Compose layouts, the `liberty` ops command, install / upgrade / backup scripts, Traefik
+docker/         the entrypoint and the vendored Oracle Instant Client
+tests/          pytest, SQLite fixtures, no live database
+.claude/skills/ Claude Code skills shared with the repository (build-app)
 ```
 
----
-
-## Links
-
-- **Docs (getting started, config reference, walkthroughs):** <https://docs.nomana-it.fr/liberty/getting-started/>
-- **GitHub:** <https://github.com/fblettner/liberty-next>
-- **PyPI:** <https://pypi.org/project/liberty-next/>
-- **Docker image:** <https://github.com/fblettner/liberty-next/pkgs/container/liberty-next>
-- **Deployment configs:** [`release/`](release/) (light + full Docker Compose layouts)
-- **API reference:** `https://<your-install>/redoc`
-- **CLI reference:** `liberty-next --help` (also `liberty-admin`, `liberty-license`, `liberty-crypto`)
-- **Working with Claude Code?** See [`CLAUDE.md`](CLAUDE.md)
-- **Documentation site:** <https://docs.nomana-it.fr/liberty/getting-started/>
+See [`CLAUDE.md`](CLAUDE.md) for the map of the code and the rules of the house.
 
 ---
 
 ## License
 
-Open framework: free. Connectors flagged `licensed = true` in `connectors.toml`
-(sold separately, distributed in their own repos) are unlocked by an RS256 JWT
-license key, set via **Settings → App → License** (encrypted at rest in app.toml with
-the install's `LIBERTY_MASTER_KEY`). `nomasx1` and `nomajde` are always-licensed —
-the loader refuses to load them without a covering key regardless of the on-disk
-`licensed` flag. Without a key the framework runs in "restricted" mode. Inspect
-a key with `liberty-license verify`; status at `GET /api/license`.
+The framework is free to use. `nomasx1`, `nomajde` and the other licensed applications
+are sold separately and unlocked by a license key.
