@@ -90,7 +90,7 @@ async def list_models(principal: CurrentPrincipal, explorer: Explorer) -> dict[s
 
 @router.get("/explorer/{app}/{model}/model", summary="Get an explorer model with its fields")
 async def get_model(
-    app: str, model: str, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors, screens: Screens,
+    app: str, model: str, request: Request, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors, screens: Screens,
     language: Language, refresh: bool = False,
 ) -> dict[str, Any]:
     require_permission(principal, permission_for(app, model))
@@ -99,7 +99,7 @@ async def get_model(
 
 
 async def _run(
-    app: str, model: str, runner: Any, body: Any, principal: Any, explorer: ExplorerFile, cache: ModelCache, connectors: ConnectorRegistry,
+    request: Request, app: str, model: str, runner: Any, body: Any, principal: Any, explorer: ExplorerFile, cache: ModelCache, connectors: ConnectorRegistry,
     screens: ScreensFile, language: str | None,
 ) -> dict[str, Any]:
     """Permission, model, cached view, then the engine; a request the model cannot serve is a
@@ -123,31 +123,31 @@ async def _run(
 
 @router.post("/explorer/{app}/{model}/query", summary="Run an explorer aggregate")
 async def query_model(
-    app: str, model: str, body: AggregateRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
+    app: str, model: str, request: Request, body: AggregateRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
     screens: Screens, language: Language,
 ) -> dict[str, Any]:
     """``{columns, rows, groups, scanned, truncated}`` — see :func:`liberty.explorer.engine.run_aggregate`."""
-    return await _run(app, model, run_aggregate, body, principal, explorer, cache, connectors, screens, language)
+    return await _run(request, app, model, run_aggregate, body, principal, explorer, cache, connectors, screens, language)
 
 
 @router.post("/explorer/{app}/{model}/detail", summary="Run an explorer detail query")
 async def detail_model(
-    app: str, model: str, body: DetailRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
+    app: str, model: str, request: Request, body: DetailRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
     screens: Screens, language: Language,
 ) -> dict[str, Any]:
     """``{columns, rows, total, page, page_size}`` — the rows behind an aggregate cell (``drill``)
     or any filtered list of the primary entity's rows."""
-    return await _run(app, model, run_detail, body, principal, explorer, cache, connectors, screens, language)
+    return await _run(request, app, model, run_detail, body, principal, explorer, cache, connectors, screens, language)
 
 
 @router.post("/explorer/{app}/{model}/calc/test", summary="Test a calculated field")
 async def calc_test(
-    app: str, model: str, body: CalcTestRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
+    app: str, model: str, request: Request, body: CalcTestRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
     screens: Screens, language: Language,
 ) -> dict[str, Any]:
     """Compile the named calculated field (declared in ``calculated``) and sample eight values:
     ``{name, type, kind, values}`` — the editor's "Test" before "Save"."""
-    return await _run(app, model, run_calc_test, body, principal, explorer, cache, connectors, screens, language)
+    return await _run(request, app, model, run_calc_test, body, principal, explorer, cache, connectors, screens, language)
 
 
 # ── saved analyses + dashboards ───────────────────────────────────────────────

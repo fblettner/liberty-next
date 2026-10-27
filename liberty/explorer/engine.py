@@ -454,8 +454,13 @@ class _Builder:
             return self._sqls[e]
         ent = self.model.entities[e]
         screen = (self.screens.screens.get(self.app) or {}).get(ent.screen) if (self.screens is not None and ent.screen) else None
-        sql, b = await self.connector_of(e).scoped_select(
-            ent.query, dict(ent.params), column_hints=list(screen.columns) if screen is not None and screen.columns else None,
+        conn = self.connector_of(e)
+        query = ent.query or ""
+        if ent.table_sql is not None:
+            query = f"_explorer_{e}"
+            conn = conn.with_query(query, ent.table_sql)
+        sql, b = await conn.scoped_select(
+            query, dict(ent.params), column_hints=list(screen.columns) if screen is not None and screen.columns else None,
             dictionary_scope=self.app, scope=self.scope,
         )
         for k, v in b.items():

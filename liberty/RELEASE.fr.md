@@ -187,6 +187,21 @@
   seule lecture côté serveur d'une définition enregistrée — les préréglages de période résolus
   comme sur la page, une fenêtre forcée facultative (`from` / `to`) — et `build_sections`, que le
   digest C5 appellera sans écran.
+- **Un modèle à partir d'un préréglage de l'assistant écran.** Le graphe de jointures est
+  déclaré une fois, dans le préréglage (`config/presets/**.toml`, livré avec l'app comme le
+  modèle). Dans Configuration → Explorateur, choisir un préréglage dans l'en-tête du modèle
+  **remplit le modèle** : chaque table du préréglage devient une entité (`SELECT *` sur la table,
+  ou la `query` « colonnes rapides » du préréglage ; l'id est le nom de la table, le connecteur
+  celui du préréglage), la table de base le pivot, les jointures des relations sur des **éléments
+  de données** (`F0101.AN8 = F0111.AN8`) résolues sur les colonnes découvertes : la colonne de ce
+  nom, celle dont c'est l'élément de dictionnaire, ou sur un connecteur à `dd_prefix` celle dont
+  le nom moins le préfixe est cet élément (`ABAN8`, `WWAN8`). Les entités déjà déclarées sont
+  gardées et complétées (la clé, les mesures, la date par défaut, une cardinalité restent les
+  vôtres) ; le résultat est ce qui s'enregistre et l'exécution ne lit que cela. Une entité peut
+  désormais être une `table` (+ `schema`) au lieu d'une requête, et l'éditeur d'entité découvre
+  aussi les colonnes d'une table. Routes `POST /admin/explorer/from-preset`,
+  `POST /admin/explorer/describe-entity` ; le catalogue de l'assistant écran lit les mêmes fichiers
+  par le nouveau chargeur `liberty.presets`.
 
 **Écrans : `editable_when`, une règle de lecture seule par ligne**
 - Un écran peut dire quand une ligne existante peut être modifiée : `editable_when = [{ field =

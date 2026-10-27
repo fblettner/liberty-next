@@ -113,10 +113,14 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
   changesets/             change packages: capture writes, lifecycle, compaction, apply bundle
   versioning/             config snapshot history (.versions/) + upgrade journal
   userviews/              DB-backed saved grid / chart views (shared + per user)
-  explorer/               the Data Explorer (C3): config.py (explorer.toml: hub, entities with cardinality /
-                          key / measures / default_date, relations on column pairs, path_to_hub), model.py
-                          (fields discovered from each entity query's columns + dictionary / screen hints,
-                          type classes, ModelCache per app cleared on reload), engine.py (one
+  presets.py              the Screen Assistant's table presets (config/presets/**.toml): the catalogue loader
+                          shared by the assistant endpoint and the explorer (a model may derive from a preset)
+  explorer/               the Data Explorer (C3): config.py (explorer.toml: hub, entities (a query or a table)
+                          with cardinality / key / measures / default_date, relations on column pairs, an
+                          optional `preset`), model.py (fields discovered from each entity query's columns +
+                          dictionary / screen hints, type classes, materialize_preset = apply_preset + resolve_relations
+                          on data items with dd_prefix (the builder's "apply a preset", POST /admin/explorer/
+                          from-preset), ModelCache per app / model cleared on reload), engine.py (one
                           GROUP BY per request: row sources ≤ one many-side entity, one-side LEFT
                           JOINs, correlated sub-queries / EXISTS for many-side measures / filters,
                           scope per entity via SQLConnector.scoped_select, buckets / merge / sort /

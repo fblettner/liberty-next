@@ -709,6 +709,13 @@ const en = {
     },
     tabs: { pools: 'Pools', connectors: 'Connectors', dictionary: 'Dictionary', menus: 'Menus', screens: 'Screens', charts: 'Charts', dashboards: 'Dashboards', explorer: 'Explorer', theme: 'Theme', app: 'App', reports: 'Reports', changes: 'Changes', integrity: 'Integrity' },
     explorer: {
+      preset: 'Preset (Screen Assistant)',
+      noPreset: 'None',
+      presetNote: 'Filled from the preset "{{preset}}": its tables as entities, its base table as the hub, its joins as relations resolved on the real columns. Edit what you like; pick the preset again to refill.',
+      applyPresetConfirm: 'Fill the model from the preset "{{preset}}"? The entities already here are kept and completed.',
+      presetApplied: 'Preset applied: {{n}} entities.',
+      tableLabel: 'Table',
+      table: 'table',
       model: 'Model',
       noModel: 'No model',
       noModels: 'No model in this app yet. "Add model" starts a data mart: a hub entity and the entities around it.',

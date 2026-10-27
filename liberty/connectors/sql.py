@@ -1304,6 +1304,15 @@ class SQLConnector:
         clone._dialect = None    # re-resolve for the new pool's DB
         return clone
 
+    def with_query(self, name: str, sql: str) -> "SQLConnector":
+        """A view of this connector with one extra **ad-hoc** SELECT *name* → *sql* (the Data
+        Explorer's table entities: ``SELECT * FROM #SCHEMA.X#.F0101``). Same sharing as
+        :meth:`for_pool`; the query exists only on the returned view, so every runtime rule
+        (placeholders, scope wrap, row cap, hints) applies to it as to a named one."""
+        clone = copy.copy(self)
+        clone._queries = {**self._queries, name: QueryDef(name=name, sql=sql)}
+        return clone
+
     # -- introspection ----------------------------------------------------- #
 
     @property

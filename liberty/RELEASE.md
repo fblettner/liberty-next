@@ -165,6 +165,19 @@
   server-side reading of a saved definition — the period presets resolved like the page does, an
   optional forced window (`from` / `to`) — and `build_sections`, which the C5 digest will call
   headlessly.
+- **A model from a Screen Assistant preset.** The join graph is declared once, in the preset
+  (`config/presets/**.toml`, shipped with the app like the model). In Settings → Explorer, picking
+  a preset in the model's header **fills the model**: every preset table becomes an entity
+  (`SELECT *` on the table, or the preset's fast-columns `query`; the id is the table name, the
+  connector the preset's), the base table the hub, the joins relations on **data items**
+  (`F0101.AN8 = F0111.AN8`) resolved on the discovered columns: the column of that name, the one
+  whose dictionary item it is, or on a `dd_prefix` connector the one whose name minus the prefix
+  is it (`ABAN8`, `WWAN8`). Entities already declared are kept and completed (the key, the
+  measures, the default date, a cardinality stay yours); the result is what gets saved and the
+  runtime reads only that. An entity may now be a `table` (+ `schema`) instead of a query, and the
+  entity editor discovers a table's columns too. Routes `POST /admin/explorer/from-preset`,
+  `POST /admin/explorer/describe-entity`; the Screen Assistant's catalogue reads the same files
+  through the new `liberty.presets` loader.
 
 **Screens: `editable_when`, a row-level read-only rule**
 - A screen can say when an existing row may be changed: `editable_when = [{ field = "PERIOD_STATUS",

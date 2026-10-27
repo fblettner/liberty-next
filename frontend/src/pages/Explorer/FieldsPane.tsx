@@ -2,10 +2,10 @@
 // then the Σ measures, a search box. A click adds the field to the analysis (rows or measures by
 // kind), the funnel adds it as a filter, a drag drops it on a shelf. Fields already used are
 // highlighted. The `calc` pseudo-entity holds the calculated fields (new / edit come in part 2).
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ChevronRight, Filter, Hash, Calendar, Type, ToggleLeft, Sigma, Search, Plus, Pencil, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Filter, Hash, Calendar, Type, ToggleLeft, Sigma, Search, Plus, Pencil, Trash2, ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
 import type { ExplorerEntity, ExplorerField } from '../../types/explorer'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -15,6 +15,7 @@ const Pane = styled.div`display: flex; flex-direction: column; min-height: 0; bo
 const SearchBox = styled.div`
   display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid ${colors.border}; color: ${colors.text.muted};
   & input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; &::placeholder { color: ${colors.text.muted}; } }
+  & .all { border: none; background: transparent; color: ${colors.text.muted}; cursor: pointer; display: inline-flex; padding: 2px; &:hover { color: ${colors.text.primary}; } }
 `
 const List = styled.div`flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0;`
 const EntityHead = styled.button`
@@ -32,6 +33,7 @@ const Row = styled.div<{ $used?: boolean }>`
   color: ${({ $used }) => ($used ? colors.blue.main : colors.text.secondary)};
   & .icon { flex-shrink: 0; color: ${colors.text.muted}; }
   & .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .code { flex-shrink: 0; font-family: ${fonts.mono}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; }
   & .funnel { opacity: 0; color: ${colors.text.muted}; border: none; background: transparent; cursor: pointer; padding: 0 2px; display: inline-flex; }
   &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; & .funnel { opacity: 1; } }
 `
@@ -74,6 +76,14 @@ export function FieldsPane({ entities, primary, used, onAdd, onFilter, onPrimary
   const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  // A JDE table has a hundred columns: the pane opens with the analysed entity expanded, the
+  // others collapsed; reset when the model (its entity ids) changes.
+  const idsKey = entities.map((e) => e.id).join('|')
+  useEffect(() => {
+    setCollapsed(Object.fromEntries(entities.filter((e) => e.id !== primary && e.id !== 'calc').map((e) => [e.id, true])))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset on a new model only, not on a primary change
+  }, [idsKey])
+  const setAll = (open: boolean) => setCollapsed(open ? {} : Object.fromEntries(entities.map((e) => [e.id, true])))
   const needle = search.trim().toLowerCase()
   const visible = useMemo(() => entities.map((e) => ({
     e, fields: e.fields.filter((f) => !needle || f.label.toLowerCase().includes(needle) || f.name.toLowerCase().includes(needle)),
@@ -86,7 +96,11 @@ export function FieldsPane({ entities, primary, used, onAdd, onFilter, onPrimary
 
   return (
     <Pane>
-      <SearchBox><Search size={13} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('explorer.searchFields')} /></SearchBox>
+      <SearchBox>
+        <Search size={13} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('explorer.searchFields')} />
+        <button type="button" className="all" title={t('explorer.expandAll')} onClick={() => setAll(true)}><ChevronsUpDown size={13} /></button>
+        <button type="button" className="all" title={t('explorer.collapseAll')} onClick={() => setAll(false)}><ChevronsDownUp size={13} /></button>
+      </SearchBox>
       <List>
         {visible.length === 0 && <Empty>{t('explorer.noFields')}</Empty>}
         {visible.map(({ e, fields }) => {
@@ -105,6 +119,7 @@ export function FieldsPane({ entities, primary, used, onAdd, onFilter, onPrimary
               {open && dims.map((f) => (
                 <Row key={f.key} $used={used.has(f.key)} draggable onDragStart={start(f)} onClick={() => onAdd(f)} title={f.key}>
                   <TypeIcon f={f} /><span className="label">{f.label}</span>
+                  {f.label !== f.name && e.id !== 'calc' && <span className="code">{f.name}</span>}
                   {e.id === 'calc' && <CalcBtns name={f.name} onEdit={onCalcEdit} onDelete={onCalcDelete} />}
                   <button type="button" className="funnel" title={t('explorer.addFilter')} onClick={(ev) => { ev.stopPropagation(); onFilter(f) }}><Filter size={11} /></button>
                 </Row>
@@ -113,6 +128,7 @@ export function FieldsPane({ entities, primary, used, onAdd, onFilter, onPrimary
               {open && meas.map((f) => (
                 <Row key={f.key} $used={used.has(f.key)} draggable onDragStart={start(f)} onClick={() => onAdd(f)} title={f.key}>
                   <TypeIcon f={f} /><span className="label">{f.label}</span>
+                  {f.label !== f.name && e.id !== 'calc' && <span className="code">{f.name}</span>}
                   {e.id === 'calc' && <CalcBtns name={f.name} onEdit={onCalcEdit} onDelete={onCalcDelete} />}
                   <button type="button" className="funnel" title={t('explorer.addFilter')} onClick={(ev) => { ev.stopPropagation(); onFilter(f) }}><Filter size={11} /></button>
                 </Row>

@@ -26,9 +26,11 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
+from pathlib import Path
+
 from liberty.connectors.registry import ConnectorRegistry
 from liberty.connectors.sql import Column
-from liberty.explorer.config import Aggregate, ExplorerEntity, ExplorerModel
+from liberty.explorer.config import Aggregate, ExplorerEntity, ExplorerModel, ExplorerRelation
 from liberty.screens.config import ScreensFile
 
 _log = logging.getLogger(__name__)
@@ -131,11 +133,12 @@ class EntityView:
 
 @dataclass(slots=True)
 class ModelView:
-    model: ExplorerModel
+    model: ExplorerModel            # the effective model: the preset applied, relations resolved
     app: str
     entities: list[EntityView]
     warnings: list[str] = field(default_factory=list)
     built_at: float = 0.0
+    source: ExplorerModel | None = None   # the configured model (the cache's identity)
 
     def field(self, key: str) -> ExplorerField | None:
         ent, _, name = key.partition(".")
@@ -149,7 +152,7 @@ class ModelView:
     def to_dict(self) -> dict[str, Any]:
         m = self.model
         return {
-            "app": self.app, "model": m.id, "label": m.label or m.id, "description": m.description, "hub": m.hub,
+            "app": self.app, "model": m.id, "label": m.label or m.id, "description": m.description, "hub": m.hub, "preset": m.preset,
             "entities": [ev.to_dict() for ev in self.entities],
             "relations": [{"from": r.from_, "to": r.to, "on": [list(p) for p in r.on]} for r in m.relations],
             "warnings": list(self.warnings),
@@ -193,6 +196,39 @@ def fields_from_columns(
     return out, warnings
 
 
+def resolve_dictionary(columns: list[Column], dictionary: Any, connector: str | None, prefix: int, language: str | None) -> None:
+    """Label, format, rule and item of the columns a screen did not hint, from the dictionary —
+    the entry named like the column, else (on a ``dd_prefix`` connector) like the column minus
+    the table prefix (``ABALPH`` → ``ALPH``); the connector's section first, then the shared
+    one. What the screen set is kept."""
+    if dictionary is None:
+        return
+    for col in columns:
+        if col.label is not None and col.dd:
+            continue
+        keys = [col.name, col.name.upper()]
+        if prefix and len(col.name) > prefix:
+            keys += [col.name[prefix:], col.name[prefix:].upper()]
+        entry = key = None
+        for k in keys:
+            entry = dictionary.find_entry(k, connector=connector)
+            if entry is not None:
+                key = k
+                break
+        if entry is None:
+            continue
+        if col.label is None:
+            col.label = entry.label_for(language) or col.label
+        if col.format is None:
+            col.format = entry.format
+        if col.rule is None:
+            try:
+                col.rule = dictionary.resolve_rule(entry, connector=connector, language=language)
+            except Exception:  # noqa: BLE001 — a broken enum / lookup reference is not the explorer's problem
+                col.rule = None
+        col.dd = col.dd or key
+
+
 async def describe_entity(
     connectors: ConnectorRegistry, screens: ScreensFile | None, app: str, entity: ExplorerEntity, *, language: str | None,
 ) -> EntityView:
@@ -208,28 +244,182 @@ async def describe_entity(
             view.error = f"screen {app}.{entity.screen!r} not found"
     try:
         conn = connectors.sql(connector)
+        query = entity.query
+        if entity.table_sql is not None:
+            query = f"_explorer_{entity.id}"
+            conn = conn.with_query(query, entity.table_sql)
         result = await conn.execute(
-            entity.query, dict(entity.params), language=language, max_rows=1,
+            query, dict(entity.params), language=language, max_rows=1,
             column_hints=list(screen.columns) if screen is not None and screen.columns else None,
             dictionary_scope=app,
         )
     except Exception as exc:  # noqa: BLE001 — reported on the entity
-        view.error = f"{connector}.{entity.query}: {exc}"
+        view.error = f"{connector}.{entity.query or entity.table}: {exc}"
         return view
+    resolve_dictionary(result.columns, getattr(connectors, "dictionary", None), conn.name, int(getattr(conn.config, "dd_prefix", 0) or 0), language)
     view.fields, view.warnings = fields_from_columns(entity, result.columns, result.rows[0] if result.rows else None)
     return view
 
 
+PendingRelation = tuple[str, str, list[tuple[str, str]]]   # (from entity, to entity, [(from item, to item)])
+PendingKeys = dict[str, list[str]]                           # entity → the preset's key data items
+
+
+def apply_preset(model: ExplorerModel, preset: dict[str, Any]) -> tuple[ExplorerModel, list[PendingRelation], PendingKeys]:
+    """The model completed by a Screen Assistant preset: every preset table becomes an entity
+    (its id the table name, lower-cased; ``SELECT *`` on the table, or the preset's fast-columns
+    ``query``), the base table the hub unless the model names one, the joins **pending**
+    relations on data items — resolved against the discovered columns by
+    :func:`resolve_relations` — and a table's ``key`` (data items too) the entity key, resolved
+    the same way. An entity the model declares with the same id, or the same ``table``, replaces
+    the derived one (that is where measures and a cardinality go; a key it leaves empty comes
+    from the preset)."""
+    tables = [t for t in preset.get("tables") or [] if isinstance(t, dict) and t.get("name")]
+    by_table = {str(e.table).upper(): eid for eid, e in model.entities.items() if e.table}
+    entities: dict[str, ExplorerEntity] = {}
+    ids: dict[str, str] = {}      # preset table name (upper) → entity id
+    keys: PendingKeys = {}
+    for i, t in enumerate(tables):
+        name = str(t["name"])
+        eid = by_table.get(name.upper()) or name.lower()
+        ids[name.upper()] = eid
+        derived = ExplorerEntity(
+            id=eid, label=name, table=None if t.get("query") else name, schema=None if t.get("query") else t.get("schema"),
+            query=t.get("query"), connector=t.get("query_connector") or preset.get("connector"),
+            cardinality="one" if i == 0 else "many",
+        )
+        declared = model.entities.get(eid)
+        if t.get("key") and not (declared and declared.key):
+            keys[eid] = [str(k) for k in t["key"]]
+        if declared is None:
+            entities[eid] = derived
+            continue
+        # the declared entity completes the derived one: what it leaves unset comes from the preset
+        # (the connector above all — a preset is declared on a connector, the model on an app)
+        fill = {k: getattr(derived, k) for k in ("connector", "query", "table", "schema_", "label") if getattr(declared, k) in (None, "")}
+        if declared.query:
+            fill.pop("table", None); fill.pop("schema_", None)
+        entities[eid] = declared.model_copy(update=fill) if fill else declared
+    for eid, e in model.entities.items():
+        entities.setdefault(eid, e)
+    hub = model.hub or (ids[str(tables[0]["name"]).upper()] if tables else "")
+    pending: list[PendingRelation] = []
+    for t in tables[1:]:
+        pairs: list[tuple[str, str]] = []
+        for on in t.get("on") or []:
+            left, right = str(on.get("left", "")), str(on.get("right", ""))
+            lt, _, li = left.rpartition(".")
+            rt, _, ri = right.rpartition(".")
+            if not (lt and rt and li and ri):
+                continue
+            a, b = ids.get(lt.upper()), ids.get(rt.upper())
+            if a is None or b is None:
+                continue
+            # orient the pair as (this table, the other)
+            this = ids[str(t["name"]).upper()]
+            pairs.append((li, ri) if a == this else (ri, li))
+            other = b if a == this else a
+        if pairs:
+            pending.append((ids[str(t["name"]).upper()], other, pairs))  # noqa: F821 — set in the loop above
+    effective = model.model_copy(update={"hub": hub, "entities": entities, "relations": list(model.relations)})
+    return effective, pending, keys
+
+
+def resolve_column(fields: list[ExplorerField], item: str, prefix: int) -> str | None:
+    """The physical column carrying data item *item*: the field named so, the field whose
+    dictionary item is it, or — on a ``dd_prefix`` connector — the field whose name minus the
+    prefix is it (``ABAN8`` ↔ ``AN8``)."""
+    up = item.upper()
+    for f in fields:
+        if f.name.upper() == up:
+            return f.name
+    for f in fields:
+        if (f.dd or "").upper() == up:
+            return f.name
+    if prefix:
+        for f in fields:
+            if len(f.name) > prefix and f.name[prefix:].upper() == up:
+                return f.name
+    return None
+
+
+def resolve_relations(views: list[EntityView], pending: list[PendingRelation], prefix_of: dict[str, int]) -> tuple[list[ExplorerRelation], list[str]]:
+    fields = {ev.entity.id: ev.fields for ev in views}
+    out: list[ExplorerRelation] = []
+    warnings: list[str] = []
+    for a, b, pairs in pending:
+        on: list[list[str]] = []
+        for ia, ib in pairs:
+            ca = resolve_column(fields.get(a, []), ia, prefix_of.get(a, 0))
+            cb = resolve_column(fields.get(b, []), ib, prefix_of.get(b, 0))
+            if ca is None or cb is None:
+                warnings.append(f"preset join {a}.{ia} = {b}.{ib}: column not found on {'both' if ca is None and cb is None else a if ca is None else b}")
+                continue
+            on.append([ca, cb])
+        if on:
+            out.append(ExplorerRelation(**{"from": a, "to": b, "on": on}))
+    return out, warnings
+
+
+async def materialize_preset(
+    connectors: ConnectorRegistry, screens: ScreensFile | None, app: str, model: ExplorerModel, preset: dict[str, Any], *,
+    language: str | None,
+) -> tuple[ExplorerModel, list[str]]:
+    """The model filled from *preset* — the builder's "apply a preset": the derived entities, the
+    hub, and the joins resolved on the discovered columns (JDE prefixes handled). The result is
+    what gets saved; the runtime never derives anything."""
+    model, pending, keys = apply_preset(model, preset)
+    order = ([model.hub] if model.hub in model.entities else []) + [eid for eid in model.entities if eid != model.hub]
+    views = await asyncio.gather(*(describe_entity(connectors, screens, app, model.entities[eid], language=language) for eid in order))
+    warnings: list[str] = [ev.error for ev in views if ev.error]
+    prefix_of: dict[str, int] = {}
+    for ev in views:
+        try:
+            prefix_of[ev.entity.id] = int(getattr(connectors.sql(ev.entity.connector or app).config, "dd_prefix", 0) or 0)
+        except Exception:  # noqa: BLE001
+            prefix_of[ev.entity.id] = 0
+    fields_of = {ev.entity.id: ev.fields for ev in views}
+    entities = dict(model.entities)
+    for eid, items in keys.items():
+        cols = [resolve_column(fields_of.get(eid, []), item, prefix_of.get(eid, 0)) for item in items]
+        missing = [item for item, c in zip(items, cols, strict=True) if c is None]
+        if missing:
+            warnings.append(f"preset key of {eid}: column not found for {', '.join(missing)}")
+        found = [c for c in cols if c is not None]
+        if found and eid in entities:
+            entities[eid] = entities[eid].model_copy(update={"key": found})
+    model = model.model_copy(update={"entities": entities})
+    resolved, w = resolve_relations(list(views), pending, prefix_of)
+    warnings.extend(w)
+    known = {(r.from_, r.to) for r in model.relations}
+    model = model.model_copy(update={"relations": [*model.relations, *[r for r in resolved if (r.from_, r.to) not in known]]})
+    try:
+        model.check_complete()
+    except ValueError as exc:
+        warnings.append(str(exc))
+    return model, warnings
+
+
 async def build_model_view(
     connectors: ConnectorRegistry, screens: ScreensFile | None, app: str, model: ExplorerModel, *, language: str | None,
+    presets_dir: Path | str | None = None,
 ) -> ModelView:
-    """Every entity described concurrently (they are independent queries)."""
-    order = [model.hub] + [eid for eid in model.entities if eid != model.hub]
-    views = await asyncio.gather(*(describe_entity(connectors, screens, app, model.entities[eid], language=language) for eid in order))
+    """Every entity described concurrently (they are independent queries). *presets_dir* is
+    unused since a preset is materialised into the model at edit time; kept for the callers."""
+    del presets_dir
     warnings: list[str] = []
+    if model.preset and not model.entities:
+        warnings.append(f"the preset {model.preset!r} is named but not applied: the model has no entity")
+    order = ([model.hub] if model.hub in model.entities else []) + [eid for eid in model.entities if eid != model.hub]
+    views = await asyncio.gather(*(describe_entity(connectors, screens, app, model.entities[eid], language=language) for eid in order))
     for ev in views:
         warnings.extend([ev.error] if ev.error else ev.warnings)
-    return ModelView(model=model, app=app, entities=list(views), warnings=warnings, built_at=time.monotonic())
+    if model.preset:
+        try:
+            model.check_complete()
+        except ValueError as exc:
+            warnings.append(str(exc))
+    return ModelView(model=model, app=app, entities=list(views), warnings=warnings, built_at=time.monotonic(), source=model)
 
 
 class ModelCache:
@@ -245,17 +435,17 @@ class ModelCache:
 
     async def get(
         self, connectors: ConnectorRegistry, screens: ScreensFile | None, app: str, model: ExplorerModel, *,
-        language: str | None, refresh: bool = False,
+        language: str | None, refresh: bool = False, presets_dir: Path | str | None = None,
     ) -> ModelView:
         key = (app, model.id, language or "")
         now = time.monotonic()
         cached = self._views.get(key)
-        if cached is not None and not refresh and cached.model is model and now - cached.built_at < self._ttl:
+        if cached is not None and not refresh and cached.source is model and now - cached.built_at < self._ttl:
             return cached
         async with self._lock:
             cached = self._views.get(key)
-            if cached is not None and not refresh and cached.model is model and now - cached.built_at < self._ttl:
+            if cached is not None and not refresh and cached.source is model and now - cached.built_at < self._ttl:
                 return cached
-            view = await build_model_view(connectors, screens, app, model, language=language)
+            view = await build_model_view(connectors, screens, app, model, language=language, presets_dir=presets_dir)
             self._views[key] = view
             return view

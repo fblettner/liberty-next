@@ -21,7 +21,8 @@ type Models = Record<string, Record<string, ExplorerModelBody>>   // app → mod
 const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; height: 100%;`
 const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;`
 const Body = styled.div`flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px;`
-const Head = styled(Card)`display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 12px; padding: 12px 14px;`
+const Head = styled(Card)`display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; padding: 12px 14px;`
+const PresetNote = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans}; padding: 0 2px;`
 const Section = styled(Card)`padding: 10px 14px; display: flex; flex-direction: column; gap: 6px;`
 const SectionHead = styled.div`display: flex; align-items: center; gap: 8px; font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.primary}; & .spacer { flex: 1; }`
 const Item = styled.div`
@@ -44,7 +45,7 @@ const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm};
 export default function ExplorerBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
-  const { currentApp, connectors } = useWorkspace()
+  const { currentApp, connectors, refresh: refreshWorkspace } = useWorkspace()
   const [scope, setScope] = useState('')
   const [modelId, setModelId] = useState('')
   const [doc, setDoc] = useState<Models | null>(null)
@@ -54,6 +55,7 @@ export default function ExplorerBuilder() {
   const [busy, setBusy] = useState(false)
   const [addScopeOpen, setAddScopeOpen] = useState(false)
   const [editing, setEditing] = useState<ExplorerEntityRecord | null | undefined>(undefined)
+  const [presets, setPresets] = useState<{ id: string; label?: string; connector?: string; tables?: { name: string }[] }[]>([])
   // Column names per entity query (`connector.query` → names), discovered once for the relation pickers.
   const [entityColumns, setEntityColumns] = useState<Record<string, string[]>>({})
 
@@ -66,6 +68,12 @@ export default function ExplorerBuilder() {
   useEffect(load, [t])
 
   const scopes = useMemo<ScopeOption[]>(() => Object.keys(doc ?? {}).sort().map((v) => ({ value: v, label: v })), [doc])
+  // Every Screen Assistant preset — a preset is declared on a CONNECTOR (jdedwards), a model on an
+  // APP (nomajde), so no filter: the option shows the preset's connector.
+  useEffect(() => {
+    api.get<{ presets: { id: string; label?: string; connector?: string; tables?: { name: string }[] }[] }>('/admin/assistant/presets')
+      .then((r) => setPresets(r.presets)).catch(() => setPresets([]))
+  }, [])
   useEffect(() => {
     if (!doc) return
     setScope((cur) => (cur && scopes.some((s) => s.value === cur)) ? cur : (currentApp && scopes.some((s) => s.value === currentApp)) ? currentApp : (scopes[0]?.value ?? ''))
@@ -86,7 +94,7 @@ export default function ExplorerBuilder() {
     if (!model) return
     for (const e of Object.values(model.entities)) {
       const k = `${e.connector || scope}.${e.query}`
-      if (!e.query || k in entityColumns) continue
+      if (!e.query || k in entityColumns) continue   // a table entity's columns are discovered by the model, not here
       setEntityColumns((p) => ({ ...p, [k]: [] }))
       api.get<QueryResult>(`/api/sql/${encodeURIComponent(e.connector || scope)}/${encodeURIComponent(e.query)}?_limit=1`)
         .then((r) => setEntityColumns((p) => ({ ...p, [k]: r.columns.map((c) => c.name.toUpperCase()) })))
@@ -96,7 +104,8 @@ export default function ExplorerBuilder() {
   const dirty = JSON.stringify(doc) !== JSON.stringify(saved)
   const update = (patch: Partial<ExplorerModelBody>) => setDoc((p) => (p && p[scope]?.[modelId] ? { ...p, [scope]: { ...p[scope], [modelId]: { ...p[scope][modelId], ...patch } } } : p))
   const entityIds = Object.keys(model?.entities ?? {})
-  const entityOpts: SearchSelectOption[] = entityIds.map((e) => ({ value: e, label: model?.entities[e]?.label || e, mono: e }))
+  const presetTables = useMemo(() => (model?.preset ? (presets.find((p) => p.id === model.preset)?.tables ?? []).map((x) => x.name.toLowerCase()) : []), [model?.preset, presets])
+  const entityOpts: SearchSelectOption[] = [...new Set([...entityIds, ...presetTables])].map((e) => ({ value: e, label: model?.entities[e]?.label || e, mono: e }))
 
   const persist = async () => {
     if (!doc) return
@@ -110,6 +119,7 @@ export default function ExplorerBuilder() {
     try {
       await api.put('/admin/config/explorer/parsed', { explorer: pruned })
       await api.post('/admin/reload')
+      refreshWorkspace()        // the Explorer page's model list comes from the workspace
       setSaved(doc)
       setStatus(t('settings.explorer.saved'))
     } catch (e) {
@@ -136,6 +146,22 @@ export default function ExplorerBuilder() {
     if (!id) return
     setDoc((p) => ({ ...(p ?? {}), [scope]: { ...(p?.[scope] ?? {}), [id]: { hub: '', entities: {}, relations: [] } } }))
     setModelId(id)
+  }
+  /** Picking a preset fills the model: its tables as entities, the base table as hub, its joins as
+   *  relations resolved on the real columns (POST /admin/explorer/from-preset). Entities already
+   *  declared are kept and completed; an existing hub / relations are kept too. */
+  const applyPreset = async (presetId: string) => {
+    if (!model) return
+    if (!presetId) { update({ preset: undefined }); return }
+    if (entityIds.length > 0 && !(await modals.confirm({ title: t('settings.explorer.preset'), message: t('settings.explorer.applyPresetConfirm', { preset: presetId }) }))) return
+    setBusy(true); setError(null); setStatus(null)
+    try {
+      const r = await api.post<{ model: ExplorerModelBody; warnings: string[] }>('/admin/explorer/from-preset', { app: scope, preset: presetId, model })
+      update({ ...r.model, preset: presetId })
+      setStatus(r.warnings.length ? r.warnings.join(' · ') : t('settings.explorer.presetApplied', { n: Object.keys(r.model.entities ?? {}).length }))
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally { setBusy(false) }
   }
   const removeModel = async () => {
     if (!modelId || !(await modals.confirm({ title: t('common.delete'), message: t('settings.explorer.deleteModel', { id: modelId }), variant: 'danger' }))) return
@@ -171,7 +197,12 @@ export default function ExplorerBuilder() {
             <Field label={t('settings.explorer.label')}><Input value={model.label ?? ''} onChange={(e) => update({ label: e.target.value || undefined })} placeholder={scope} /></Field>
             <Field label={t('settings.explorer.hub')}><SearchSelect value={model.hub ?? ''} onChange={(v) => update({ hub: v })} options={entityOpts} placeholder={t('settings.access.pickItem', 'Pick…')} /></Field>
             <Field label={t('settings.explorer.description')}><Input value={model.description ?? ''} onChange={(e) => update({ description: e.target.value || undefined })} /></Field>
+            <Field label={t('settings.explorer.preset')}>
+              <SearchSelect value={model.preset ?? ''} anyLabel={t('settings.explorer.noPreset')} options={presets.map((p) => ({ value: p.id, label: p.label || p.id, mono: `${p.connector ? `${p.connector} · ` : ''}${(p.tables ?? []).map((x) => x.name).join(', ')}` }))}
+                onChange={(v) => void applyPreset(v)} disabled={busy} />
+            </Field>
           </Head>
+          {model.preset && <PresetNote>{t('settings.explorer.presetNote', { preset: model.preset })}</PresetNote>}
           <Section>
             <SectionHead><Database size={14} /> {t('settings.explorer.entities')} <span className="spacer" />
               <Button $variant="ghost" $size="sm" onClick={() => setEditing(null)} disabled={busy}><Plus size={13} /> {t('settings.explorer.addEntity')}</Button>
@@ -180,7 +211,7 @@ export default function ExplorerBuilder() {
             {entityIds.map((id) => {
               const e = model.entities[id]
               const measures = Object.keys(e.measures ?? {})
-              const meta = [`${e.connector || scope}.${e.query}`, e.key?.length ? `${t('settings.explorer.key')}: ${e.key.join(', ')}` : null,
+              const meta = [e.query ? `${e.connector || scope}.${e.query}` : `${t('settings.explorer.table')} ${e.schema ? `${e.schema}.` : ''}${e.table ?? ''}`, e.key?.length ? `${t('settings.explorer.key')}: ${e.key.join(', ')}` : null,
                 measures.length ? `Σ ${measures.join(', ')}` : null, e.default_date ? `${t('settings.explorer.defaultDate')}: ${e.default_date}` : null].filter(Boolean).join(' · ')
               return (
                 <Item key={id} onClick={() => setEditing({ ...e, id })}>

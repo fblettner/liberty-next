@@ -80,15 +80,21 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
     return [...matching, ...rest].map((s) => ({ value: s.id, label: s.label || s.id, mono: s.id }))
   }, [screens, app, query, effConnector])
 
-  // Discover the columns whenever the query changes (one row — the row cap keeps it cheap).
+  // Discover the columns whenever the query changes (one row — the row cap keeps it cheap); a
+  // table entity (from a preset) goes through the model's own discovery.
+  const table = initial?.table
   useEffect(() => {
-    if (!query) { setColumns(null); return }
+    if (!query && !table) { setColumns(null); return }
     let cancelled = false
     setDiscovering(true); setError(null)
-    api.get<QueryResult>(`/api/sql/${encodeURIComponent(effConnector)}/${encodeURIComponent(query)}?_limit=1`)
-      .then((r) => {
+    const fetchCols: Promise<DiscoveredColumn[]> = query
+      ? api.get<QueryResult>(`/api/sql/${encodeURIComponent(effConnector)}/${encodeURIComponent(query)}?_limit=1`)
+        .then((r) => r.columns.map((c) => ({ name: c.name.toUpperCase(), type: c.type ?? null, label: c.label, key: c.key, hidden: c.hidden, format: c.format })))
+      : api.post<{ columns: { name: string; type: string; label?: string; hidden?: boolean; format?: string }[]; error: string | null }>('/admin/explorer/describe-entity', { app, entity: { table, schema: initial?.schema, connector: connector || undefined, screen: screen || undefined } })
+        .then((r) => { if (r.error) throw new Error(r.error); return r.columns.map((c) => ({ name: c.name.toUpperCase(), type: c.type, label: c.label, hidden: c.hidden, format: c.format })) })
+    fetchCols
+      .then((cols) => {
         if (cancelled) return
-        const cols: DiscoveredColumn[] = r.columns.map((c) => ({ name: c.name.toUpperCase(), type: c.type ?? null, label: c.label, key: c.key, hidden: c.hidden, format: c.format }))
         setColumns(cols)
         // A new entity takes its key from the screen's key columns — the screen already knows.
         if (!initial && key.length === 0) {
@@ -100,7 +106,7 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
       .finally(() => { if (!cancelled) setDiscovering(false) })
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the key pre-fill reads the state once, on discovery
-  }, [effConnector, query])
+  }, [effConnector, query, table, app, connector, screen])
 
   const colNames = useMemo(() => new Set((columns ?? []).map((c) => c.name)), [columns])
   // Columns referenced by the record but absent from the discovered list (a renamed query) stay
@@ -113,10 +119,10 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
   const toggle = (list: string[], set: (v: string[]) => void, name: string) => set(list.includes(name) ? list.filter((x) => x !== name) : [...list, name])
 
   const idError = !id.trim() ? t('settings.explorer.idRequired') : !/^[A-Za-z0-9_-]+$/.test(id) ? t('settings.explorer.idChars') : takenIds.includes(id) ? t('settings.explorer.idTaken') : null
-  const canSave = !idError && !!query && dirty
+  const canSave = !idError && (!!query || !!initial?.table) && dirty
 
   const save = () => {
-    const body: ExplorerEntityBody = { query, cardinality }
+    const body: ExplorerEntityBody = { cardinality, ...(query ? { query } : {}), ...(initial?.table ? { table: initial.table, ...(initial.schema ? { schema: initial.schema } : {}) } : {}) }
     if (label.trim()) body.label = label.trim()
     if (description.trim()) body.description = description.trim()
     if (connector && connector !== app) body.connector = connector
@@ -151,8 +157,8 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
           <Field label={t('settings.explorer.connector')}>
             <SearchSelect value={connector} onChange={(v) => { mark(setConnector)(v); setQuery('') }} options={connectorOpts} anyLabel={`${app} (${t('settings.explorer.theApp')})`} />
           </Field>
-          <Field label={t('settings.explorer.query')}>
-            <SearchSelect value={query} onChange={mark(setQuery)} options={queryOpts} placeholder={t('settings.access.pickItem', 'Pick…')} />
+          <Field label={table ? t('settings.explorer.tableLabel') : t('settings.explorer.query')}>
+            {table ? <Input value={`${initial?.schema ? `${initial.schema}.` : ''}${table}`} disabled /> : <SearchSelect value={query} onChange={mark(setQuery)} options={queryOpts} placeholder={t('settings.access.pickItem', 'Pick…')} />}
           </Field>
           <Field label={t('settings.explorer.screen')}>
             <SearchSelect value={screen} onChange={mark(setScreen)} options={screenOpts} anyLabel={t('settings.explorer.noScreen')} />
@@ -167,7 +173,7 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
           <div style={{ fontSize: fontSize.micro, color: colors.text.muted, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
             {t('settings.explorer.columns')} {discovering && <SpinnerRing size={11} thickness={2} />}
           </div>
-          {!query ? <Muted>{t('settings.explorer.pickQueryFirst')}</Muted>
+          {!query && !table ? <Muted>{t('settings.explorer.pickQueryFirst')}</Muted>
             : rows.length === 0 && !discovering ? <Muted>{t('settings.explorer.noColumns')}</Muted>
             : (
               <Table>

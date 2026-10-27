@@ -56,7 +56,7 @@ export default function ExplorerPage() {
   const lang = i18n.language || 'en'
   const { user } = useAuth()
   const modals = useModals()
-  const { currentApp } = useWorkspace()
+  const { currentApp, explorerModels } = useWorkspace()
   const [models, setModels] = useState<ExplorerModelSummary[] | null>(null)
   const [app, setApp] = useState<string>('')
   const [modelId, setModelId] = useState<string>('')
@@ -84,11 +84,15 @@ export default function ExplorerPage() {
   const runId = useRef(0)
   const pendingDrill = useRef<DrillCell[] | null>(null)
 
+  // The model list is the workspace's (refreshed after a Settings save + reload); the first one
+  // is picked when nothing is, and a model that disappeared falls back to the first.
   useEffect(() => {
-    api.get<{ models: ExplorerModelSummary[] }>('/api/explorer')
-      .then((r) => { setModels(r.models); if (r.models[0]) { setApp((cur) => cur || r.models[0].app); setModelId((cur) => cur || r.models[0].model) } })
-      .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
-  }, [])
+    if (!explorerModels) return
+    const list: ExplorerModelSummary[] = explorerModels.map((m) => ({ ...m, hub: '', entities: 0 }))
+    setModels(list)
+    if (list[0] && !list.some((m) => m.app === app && m.model === modelId)) { setApp(list[0].app); setModelId(list[0].model) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- app / modelId are read, not followed
+  }, [explorerModels])
   // The app picked in the left navigation drives the model, whenever that app has one.
   useEffect(() => {
     const first = currentApp ? models?.find((m) => m.app === currentApp) : undefined

@@ -18,6 +18,7 @@ const Table = styled.table`
   & th { position: sticky; top: 0; z-index: 1; background: ${colors.bg.card}; text-align: left; padding: 8px 10px; border-bottom: 1px solid ${colors.border};
          font-size: ${fontSize.micro}; color: ${colors.text.muted}; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; cursor: pointer; user-select: none; }
   & th.num, & td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  & th .code { margin-left: 6px; font-family: ${fonts.mono}; text-transform: none; letter-spacing: 0; color: ${colors.text.muted}; opacity: 0.8; }
   & td { padding: 6px 10px; border-bottom: 1px solid ${colors.border}; color: ${colors.text.primary}; white-space: nowrap; }
   & td.null { color: ${colors.text.muted}; font-style: italic; }
   & tbody tr:hover { background: var(--hover-subtle); }
@@ -80,6 +81,7 @@ export function ResultTable({ columns, rows, lang, onRowClick, paging }: {
                   title={c.key}>
                   {c.kind === 'measure' ? (c.field ? t(`explorer.aggLabel.${c.aggregate}`, { label: c.label }) : t('explorer.rowCount')) : c.label}
                   {c.bucket ? ` · ${t(`explorer.bucket.${c.bucket}`)}` : ''}
+                  {c.field && c.label !== c.field.split('.').pop() && c.entity !== 'calc' && <span className="code">{c.field.split('.').pop()}</span>}
                   {sort?.key === c.key ? (sort.dir === 'asc' ? <ArrowUp size={10} /> : <ArrowDown size={10} />) : null}
                 </th>
               ))}

@@ -711,6 +711,13 @@ const fr: Resources = {
     },
     tabs: { pools: 'Pools', connectors: 'Connecteurs', dictionary: 'Dictionnaire', menus: 'Menus', screens: 'Écrans', charts: 'Graphiques', dashboards: 'Tableaux de bord', explorer: 'Explorateur', theme: 'Thème', app: 'App', reports: 'Rapports', changes: 'Modifications', integrity: 'Intégrité' },
     explorer: {
+      preset: 'Préréglage (assistant écran)',
+      noPreset: 'Aucun',
+      presetNote: 'Rempli depuis le préréglage « {{preset}} » : ses tables en entités, sa table de base en pivot, ses jointures en relations résolues sur les vraies colonnes. Modifiez ce que vous voulez ; choisissez à nouveau le préréglage pour remplir encore.',
+      applyPresetConfirm: 'Remplir le modèle depuis le préréglage « {{preset}} » ? Les entités déjà présentes sont gardées et complétées.',
+      presetApplied: 'Préréglage appliqué : {{n}} entités.',
+      tableLabel: 'Table',
+      table: 'table',
       model: 'Modèle',
       noModel: 'Aucun modèle',
       noModels: 'Aucun modèle dans cette app. « Ajouter un modèle » démarre un magasin de données : une entité pivot et les entités autour.',

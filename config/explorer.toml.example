@@ -22,6 +22,19 @@ query = "period_status_get"
 key = ["PERIOD"]
 cardinality = "one"                   # rows of this entity per hub row: one (a dimension) | many (lines)
 
+# A model may derive its entities and relations from a Screen Assistant preset (config/presets/**.toml,
+# shipped with the app): the preset's tables become entities (SELECT * on each, the base table the hub),
+# its joins on data items become relations resolved on the discovered columns (JDE prefixes handled).
+# Declare an entity with the same `table` to add what the preset does not know: key, measures, date.
+# [explorer.nomajde.address_book]
+# label = "Address Book"
+# preset = "address_book_master"
+# [explorer.nomajde.address_book.entities.f0101]
+# table = "F0101"
+# schema = "#SCHEMA.DTA#"
+# key = ["ABAN8"]
+# default_date = "ABUPMJ"
+
 [[explorer.nomajde.sales.relations]]        # every entity must reach the hub through relations
 from = "sales"
 to = "period"

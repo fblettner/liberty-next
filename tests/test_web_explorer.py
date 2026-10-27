@@ -69,6 +69,25 @@ EXPLORER_TOML = textwrap.dedent("""
     [explorer.other.x.entities.x]
     connector = "shop"
     query = "broken_get"
+
+    [explorer.shop.frompreset]           # a preset named, not applied yet (the builder fills it)
+    label = "From the preset"
+    preset = "shop_sales"
+    """)
+
+PRESETS_TOML = textwrap.dedent("""
+    [[presets]]
+    id = "shop_sales"
+    label = "Sales + company"
+    connector = "shop"
+    [[presets.tables]]
+    name = "fact_sales"
+    key = ["id"]
+    [[presets.tables]]
+    name = "dim_company"
+    join = "LEFT"
+    on = [{ left = "fact_sales.COMPANY", right = "dim_company.COMPANY" }]
+    key = ["COMPANY", "NOPE"]
     """)
 
 SCREENS_TOML = textwrap.dedent("""
@@ -114,6 +133,8 @@ def env(tmp_path):
     (tmp_path / "connectors.toml").write_text(_connectors_toml(db_url))
     (tmp_path / "explorer.toml").write_text(EXPLORER_TOML)
     (tmp_path / "screens.toml").write_text(SCREENS_TOML)
+    (tmp_path / "presets").mkdir()
+    (tmp_path / "presets" / "shop.toml").write_text(PRESETS_TOML)
     _seed(db_url)
     settings = Settings(
         app=AppSettings(static_dir=""),
@@ -136,8 +157,8 @@ def test_list_models_by_permission(env) -> None:
     with TestClient(app) as client:
         assert client.get("/api/explorer").status_code == 401
         admin = client.get("/api/explorer", headers=_h(client, "admin")).json()["models"]
-        assert [(m["app"], m["model"]) for m in admin] == [("shop", "sales"), ("other", "x")] and admin[0]["label"] == "Shop" and admin[0]["entities"] == 2
-        assert [m["app"] for m in client.get("/api/explorer", headers=_h(client, "analyst")).json()["models"]] == ["shop"]
+        assert [(m["app"], m["model"]) for m in admin] == [("shop", "sales"), ("shop", "frompreset"), ("other", "x")] and admin[0]["label"] == "Shop" and admin[0]["entities"] == 2
+        assert [m["model"] for m in client.get("/api/explorer", headers=_h(client, "analyst")).json()["models"]] == ["sales", "frompreset"]
         assert client.get("/api/explorer", headers=_h(client, "nobody")).json()["models"] == []
 
 
@@ -208,7 +229,7 @@ def test_admin_parsed_round_trip(env) -> None:
         assert client.put("/admin/config/explorer/parsed", json=bad, headers=h).status_code == 422
         assert client.get("/admin/config/explorer/parsed", headers=_h(client, "analyst")).status_code == 403
         assert "explorer" in client.get("/admin/config/schema", headers=h).json()
-        assert client.get("/info", headers=h).json()["explorer"] == {"apps": ["shop", "other"], "models": 2}
+        assert client.get("/info", headers=h).json()["explorer"] == {"apps": ["shop", "other"], "models": 3}
 
 
 def test_query_route(env) -> None:
@@ -294,3 +315,39 @@ def test_export_routes(env) -> None:
         assert r.status_code in (200, 503)
         if r.status_code == 200:
             assert r.content[:4] == b"%PDF"
+
+
+def test_model_from_a_preset(env) -> None:
+    """Settings → Explorer applies a preset: the endpoint returns the model filled — the preset's
+    tables as entities (lower-cased ids, SELECT * on each), the base table as hub, the join as a
+    relation resolved on the discovered columns, the declared entity completed — and the model
+    saved that way runs. A model that names a preset but has no entity is only a warning."""
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = client.get("/api/explorer/shop/frompreset/model", headers=h).json()
+        assert body["entities"] == [] and "not applied" in body["warnings"][0]
+        r = client.post("/admin/explorer/from-preset", json={"app": "shop", "preset": "shop_sales", "model": {"entities": {"fact_sales": {"table": "fact_sales", "measures": {"QTY": "sum", "REVENUE": "sum"}}}}}, headers=h)
+        assert r.status_code == 200, r.text
+        filled = r.json()
+        assert filled["warnings"] == ["preset key of dim_company: column not found for NOPE"] and filled["model"]["hub"] == "fact_sales" and filled["model"]["preset"] == "shop_sales"
+        ents = filled["model"]["entities"]
+        # the preset's keys resolved to the real columns (`id` → ID); a missing item is only a warning
+        assert set(ents) == {"fact_sales", "dim_company"} and ents["dim_company"] == {"label": "dim_company", "connector": "shop", "table": "dim_company", "key": ["COMPANY"], "cardinality": "many"}
+        assert ents["fact_sales"]["key"] == ["ID"] and ents["fact_sales"]["connector"] == "shop" and ents["fact_sales"]["table"] == "fact_sales"
+        assert filled["model"]["relations"] == [{"from": "dim_company", "to": "fact_sales", "on": [["COMPANY", "COMPANY"]]}]
+        assert client.post("/admin/explorer/from-preset", json={"app": "shop", "preset": "ghost"}, headers=h).status_code == 404
+        assert client.post("/admin/explorer/from-preset", json={"app": "shop", "preset": "shop_sales"}, headers=_h(client, "analyst")).status_code == 403
+        # a table entity's columns for the editor
+        d = client.post("/admin/explorer/describe-entity", json={"app": "shop", "entity": {"table": "dim_company", "connector": "shop"}}, headers=h).json()
+        assert [c["name"] for c in d["columns"]] == ["COMPANY", "NAME", "REGION"] and d["error"] is None
+        # saved as returned, the model runs
+        doc = client.get("/admin/config/explorer/parsed", headers=h).json()["explorer"]
+        doc["shop"]["frompreset"] = filled["model"]
+        assert client.put("/admin/config/explorer/parsed", json={"explorer": doc}, headers=h).status_code == 200
+        client.post("/admin/reload", headers=h)
+        body = client.get("/api/explorer/shop/frompreset/model", headers=h).json()
+        assert body["hub"] == "fact_sales" and body["warnings"] == [] and {f["name"]: f["kind"] for f in body["entities"][0]["fields"]}["QTY"] == "measure"
+        r = client.post("/api/explorer/shop/frompreset/query", json={"rows": [{"field": "dim_company.NAME"}], "measures": [{"field": "fact_sales.REVENUE"}]}, headers=h)
+        assert r.status_code == 200, r.text
+        assert r.json()["rows"] == [{"dim_company.NAME": "Corp one", "sum(fact_sales.REVENUE)": 30.5}]

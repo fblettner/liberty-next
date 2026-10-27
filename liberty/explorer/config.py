@@ -56,13 +56,15 @@ def _check_id(value: str, what: str) -> str:
 class ExplorerEntity(BaseModel):
     """One entity of the model — a query of a connector, seen as a table of fields."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     id: str = ""   # injected from the table key
     label: str | None = Field(default=None, description="Display label; defaults to the id.")
     description: str | None = None
     connector: str | None = Field(default=None, description="The connector of the query; blank = the app.")
-    query: str = Field(description="A parameterless SELECT of the connector — the entity's rows.")
+    query: str | None = Field(default=None, description="A parameterless SELECT of the connector — the entity's rows.")
+    table: str | None = Field(default=None, description="…or a table (``SELECT *`` on it), as a preset names it.")
+    schema_: str | None = Field(default=None, alias="schema", description="The table's schema (a ``#SCHEMA.X#`` token or a name).")
     screen: str | None = Field(default=None, description="A screen of the app whose column hints label and type the fields.")
     params: dict[str, Any] = Field(default_factory=dict, description="Fixed binds for the query, when it has params.")
     key: list[str] = Field(default_factory=list, description="The columns that identify one row (detail mode, drill).")
@@ -77,6 +79,19 @@ class ExplorerEntity(BaseModel):
     @classmethod
     def _id(cls, v: str) -> str:
         return _check_id(v, "entity") if v else v
+
+    @model_validator(mode="after")
+    def _query_or_table(self) -> ExplorerEntity:
+        if not self.query and not self.table:
+            raise ValueError(f"entity {self.id or '?'}: a query or a table is required")
+        return self
+
+    @property
+    def table_sql(self) -> str | None:
+        """The synthesized SELECT of a table entity (``None`` for a query entity)."""
+        if self.query or not self.table:
+            return None
+        return f"SELECT * FROM {self.schema_ + '.' if self.schema_ else ''}{self.table}"
 
 
 class ExplorerRelation(BaseModel):
@@ -120,7 +135,8 @@ class ExplorerModel(BaseModel):
     app: str = ""  # injected from the outer table key
     label: str | None = None
     description: str | None = None
-    hub: str = Field(description="The entity every analysis starts from.")
+    preset: str | None = Field(default=None, description="The Screen Assistant preset this model was filled from (Settings → Explorer applies it: tables → entities, base table → hub, joins → relations).")
+    hub: str = Field(default="", description="The entity every analysis starts from (the preset's base table when omitted).")
     entities: dict[str, ExplorerEntity] = Field(default_factory=dict)
     relations: list[ExplorerRelation] = Field(default_factory=list)
     analyses: dict[str, BundledObject] = Field(default_factory=dict, description="The bundled analyses, by id.")
@@ -135,6 +151,15 @@ class ExplorerModel(BaseModel):
                 e.id = eid
             elif e.id != eid:
                 raise ValueError(f"entity {eid!r}: id {e.id!r} does not match its key")
+        if self.preset and (not self.entities or not self.hub):
+            # named but not applied yet (the builder fills it, and sets the hub) — nothing to check;
+            # the model view reports it as a warning until then
+            return self
+        self.check_complete()
+        return self
+
+    def check_complete(self) -> None:
+        """The hub exists, every relation names known entities, every entity reaches the hub."""
         if self.hub not in self.entities:
             raise ValueError(f"hub {self.hub!r} is not an entity of the model")
         self.entities[self.hub].cardinality = "one"
@@ -147,7 +172,6 @@ class ExplorerModel(BaseModel):
         unreachable = set(self.entities) - self.reachable(self.hub)
         if unreachable:
             raise ValueError(f"entities not related to the hub {self.hub!r}: {sorted(unreachable)}")
-        return self
 
     def reachable(self, start: str) -> set[str]:
         """The entities joined to *start* through the relations, in either direction."""

@@ -1162,23 +1162,11 @@ async def list_assistant_presets(request: Request, _: Superuser, connector: str 
     table + joins so an operator can start a screen without browsing the schema (e.g. the JDE
     Address Book). Read from TOML under ``<config_dir>/presets/`` (recursively); each file holds a
     ``[[presets]]`` list of ``{id, label, description?, connector?, tables: [{schema?, name, alias?,
-    join?, on?: [{left, right}]}]}`` — the first table is the base, the rest carry a join + ON.
+    join?, on?: [{left, right}], key?: [item…]}]}`` — the first table is the base, the rest carry a
+    join + ON; ``key`` is the table's primary key as data items (the explorer's entity key).
     Filtered by ``connector`` when given (a preset with no ``connector`` matches any)."""
-    base = Path(request.app.state.settings.connectors.config_path).parent / "presets"
-    out: list[dict[str, Any]] = []
-    if base.is_dir():
-        for f in sorted(base.rglob("*.toml")):
-            try:
-                doc = tomllib.loads(f.read_text(encoding="utf-8"))
-            except (tomllib.TOMLDecodeError, OSError, UnicodeDecodeError):
-                continue
-            for p in doc.get("presets", []) or []:
-                if not isinstance(p, dict) or not p.get("id") or not p.get("tables"):
-                    continue
-                if connector and p.get("connector") and p.get("connector") != connector:
-                    continue
-                out.append(p)
-    return {"presets": out}
+    from liberty.presets import load_presets, presets_dir
+    return {"presets": load_presets(presets_dir(request.app.state.settings.connectors.config_path), connector)}
 
 
 @router.get("/config/charts/parsed", summary="Get charts config")
@@ -1243,6 +1231,54 @@ async def put_charts_parsed(body: ChartsBody, request: Request, _: Superuser) ->
     return {"saved": True, "path": str(path)}
 
 
+class FromPresetBody(BaseModel):
+    app: str
+    preset: str
+    # the model being edited — its declared entities are kept and completed
+    model: dict[str, Any] = {}
+
+
+@router.post("/explorer/from-preset", summary="Fill an explorer model from a preset")
+async def explorer_from_preset(body: FromPresetBody, request: Request, _: Superuser) -> dict[str, Any]:
+    """The Settings → Explorer "apply a preset": the preset's tables as entities (the base table
+    the hub), its joins as relations resolved on the discovered columns. Returns the model body
+    to put in the editor + the warnings (a join column not found, a table that does not run)."""
+    from liberty.explorer.config import ExplorerModel
+    from liberty.explorer.model import materialize_preset
+    from liberty.presets import find_preset, presets_dir
+    preset = find_preset(presets_dir(request.app.state.settings.connectors.config_path), body.preset)
+    if preset is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no preset {body.preset!r}")
+    try:
+        model = ExplorerModel.model_validate({**_drop_none(body.model), "preset": body.preset, "id": "draft", "app": body.app})
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid model: {exc}") from exc
+    filled, warnings = await materialize_preset(
+        request.app.state.connectors, getattr(request.app.state, "screens", None), body.app, model, preset,
+        language=request.headers.get("x-liberty-lang"),
+    )
+    return {"model": _explorer_model_dump(filled), "warnings": warnings}
+
+
+class DescribeEntityBody(BaseModel):
+    app: str
+    entity: dict[str, Any]
+
+
+@router.post("/explorer/describe-entity", summary="Discover an explorer entity's columns")
+async def explorer_describe_entity(body: DescribeEntityBody, request: Request, _: Superuser) -> dict[str, Any]:
+    """The entity editor's column list for a **table** entity (a query entity runs the query
+    itself): ``{columns: [{name, type, label, key, hidden, format}], error}``."""
+    from liberty.explorer.config import ExplorerEntity
+    from liberty.explorer.model import describe_entity
+    try:
+        ent = ExplorerEntity.model_validate({**_drop_none(body.entity), "id": body.entity.get("id") or "draft"})
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid entity: {exc}") from exc
+    view = await describe_entity(request.app.state.connectors, getattr(request.app.state, "screens", None), body.app, ent, language=request.headers.get("x-liberty-lang"))
+    return {"columns": [{"name": f.name, "type": f.type, "label": f.label, "hidden": f.hidden, "format": f.format} for f in view.fields], "error": view.error}
+
+
 @router.get("/config/explorer/parsed", summary="Get explorer config")
 async def get_explorer_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     """The current ``explorer.toml`` parsed — ``{path, explorer: {<app>: {<model>: model dict}}}``;
@@ -1261,7 +1297,8 @@ def _explorer_model_dump(m: Any) -> dict[str, Any]:
     d["hub"] = m.hub
     for eid, e in d.get("entities", {}).items():
         e.pop("id", None)
-        e.setdefault("query", m.entities[eid].query)
+        if m.entities[eid].query:
+            e.setdefault("query", m.entities[eid].query)
     return d
 
 

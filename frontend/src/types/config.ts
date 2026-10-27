@@ -232,7 +232,9 @@ export interface ExplorerEntityBody {
   label?: string
   description?: string
   connector?: string
-  query: string
+  query?: string
+  table?: string
+  schema?: string
   screen?: string
   params?: Record<string, unknown>
   key?: string[]
@@ -246,6 +248,7 @@ export interface ExplorerRelationBody { from: string; to: string; on: string[][]
 export interface ExplorerModelBody {
   label?: string
   description?: string
+  preset?: string | null
   hub: string
   entities: Record<string, ExplorerEntityBody>
   relations?: ExplorerRelationBody[]

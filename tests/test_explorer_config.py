@@ -97,3 +97,59 @@ def test_fields_from_columns_classifies_and_warns() -> None:
     # Postgres returns lowercase names: the field keeps the uppercase convention, the config matches
     fields, _ = fields_from_columns(ExplorerEntity(id="s", query="q", measures={"QTY": "sum"}, hidden=["id"]), [Column(name="id", type="int4"), Column(name="qty", type="int4", label="Quantity")])
     assert [(f.key, f.name, f.kind, f.hidden) for f in fields] == [("s.ID", "ID", "dimension", True), ("s.QTY", "QTY", "measure", False)]
+
+
+def test_preset_model_defers_completeness_and_table_entities() -> None:
+    from liberty.explorer.model import apply_preset, resolve_column, resolve_relations, EntityView
+    from liberty.explorer.model import ExplorerField as F
+    # with a preset, no hub and no entity are needed at parse time; an entity may be a table
+    f = parse_explorer({"explorer": {"jde": {"ab": {"preset": "address_book"}}}})
+    assert f.explorer["jde"]["ab"].entities == {}
+    m = parse_explorer({"explorer": {"jde": {"ab": {"preset": "address_book", "hub": "f0101", "entities": {"f0101": {"table": "F0101", "schema": "#SCHEMA.DTA#", "measures": {"ABAT1": "count"}}}}}}}).explorer["jde"]["ab"]
+    # a declared key wins over the preset's
+    _, _, k = apply_preset(parse_explorer({"explorer": {"jde": {"ab": {"preset": "x", "entities": {"f0101": {"table": "F0101", "key": ["ABMCU"]}}}}}}).explorer["jde"]["ab"], {"id": "x", "tables": [{"name": "F0101", "key": ["AN8"]}]})
+    assert k == {}
+    assert m.entities["f0101"].table_sql == "SELECT * FROM #SCHEMA.DTA#.F0101"
+    with pytest.raises(ValueError, match="hub 'x' is not an entity"):
+        parse_explorer({"explorer": {"jde": {"ab": {"preset": "address_book", "hub": "x", "entities": {"f0101": {"table": "F0101"}}}}}})
+    with pytest.raises(ValueError, match="a query or a table is required"):
+        ExplorerEntity(id="x")
+    preset = {"id": "address_book", "connector": "jdedwards", "tables": [
+        {"schema": "#SCHEMA.DTA#", "name": "F0101", "key": ["AN8"]},
+        {"schema": "#SCHEMA.DTA#", "name": "F0111", "join": "LEFT", "on": [{"left": "F0101.AN8", "right": "F0111.AN8"}], "key": ["AN8", "IDLN"]},
+        {"schema": "#SCHEMA.DTA#", "name": "F0115", "join": "LEFT", "on": [{"left": "F0111.AN8", "right": "F0115.AN8"}, {"left": "F0111.IDLN", "right": "F0115.IDLN"}], "query": "f0115_get"},
+    ]}
+    eff, pending, keys = apply_preset(m, preset)
+    assert keys == {"f0101": ["AN8"], "f0111": ["AN8", "IDLN"]}      # resolved to columns by materialize_preset
+    assert eff.hub == "f0101" and set(eff.entities) == {"f0101", "f0111", "f0115"}
+    assert eff.entities["f0101"].measures == {"ABAT1": "count"}            # the declared entity overrides the derived one…
+    assert eff.entities["f0101"].connector == "jdedwards" and eff.entities["f0101"].table == "F0101"   # …and inherits what it left unset
+    assert eff.entities["f0111"].table == "F0111" and eff.entities["f0111"].cardinality == "many" and eff.entities["f0111"].connector == "jdedwards"
+    assert eff.entities["f0115"].query == "f0115_get" and eff.entities["f0115"].table is None
+    assert pending == [("f0111", "f0101", [("AN8", "AN8")]), ("f0115", "f0111", [("AN8", "AN8"), ("IDLN", "IDLN")])]
+    # data items resolve to physical columns: by name, by dictionary item, or minus the prefix
+    fields = [F(key="f0101.ABAN8", entity="f0101", name="ABAN8", label="", type="number", kind="dimension"), F(key="f0101.ABALPH", entity="f0101", name="ABALPH", label="", type="string", kind="dimension", dd="ALPH")]
+    assert resolve_column(fields, "AN8", 2) == "ABAN8" and resolve_column(fields, "ALPH", 0) == "ABALPH" and resolve_column(fields, "ABAN8", 2) == "ABAN8" and resolve_column(fields, "NOPE", 2) is None
+    views = [
+        EntityView(entity=eff.entities["f0101"], fields=fields),
+        EntityView(entity=eff.entities["f0111"], fields=[F(key="f0111.WWAN8", entity="f0111", name="WWAN8", label="", type="number", kind="dimension"), F(key="f0111.WWIDLN", entity="f0111", name="WWIDLN", label="", type="number", kind="dimension")]),
+        EntityView(entity=eff.entities["f0115"], fields=[F(key="f0115.WPAN8", entity="f0115", name="WPAN8", label="", type="number", kind="dimension")]),
+    ]
+    rels, warnings = resolve_relations(views, pending, {"f0101": 2, "f0111": 2, "f0115": 2})
+    assert [(r.from_, r.to, r.on) for r in rels] == [("f0111", "f0101", [["WWAN8", "ABAN8"]]), ("f0115", "f0111", [["WPAN8", "WWAN8"]])]
+    assert warnings == ["preset join f0115.IDLN = f0111.IDLN: column not found on f0115"]
+
+
+def test_resolve_dictionary_labels_unhinted_columns_through_the_prefix() -> None:
+    from liberty.connectors.dictionary import DictionaryEntry, DictionaryFile, DictionarySection
+    from liberty.explorer.model import resolve_dictionary
+    d = DictionaryFile(default_language="en", entries={"ALPH": DictionaryEntry(label="Alpha Name", format="text")},
+                       connectors={"jde": DictionarySection(entries={"AN8": DictionaryEntry(label="Address Number", format="integer"), "ALPH": DictionaryEntry(label="Name (JDE)")})})
+    cols = [Column(name="ABAN8", type="NUMBER"), Column(name="ABALPH", type="NCHAR"), Column(name="ABMCU", type="NCHAR"), Column(name="ABTAX", type="NCHAR", label="Tax id", dd="TAX")]
+    resolve_dictionary(cols, d, "jde", 2, "en")
+    assert (cols[0].label, cols[0].format, cols[0].dd) == ("Address Number", "integer", "AN8")   # the connector's section
+    assert (cols[1].label, cols[1].dd) == ("Name (JDE)", "ALPH")                                   # the connector's wins over the shared
+    assert cols[2].label is None                                                                   # no entry: left alone
+    assert (cols[3].label, cols[3].dd) == ("Tax id", "TAX")                                        # the screen's hint is kept
+    resolve_dictionary([c := Column(name="ABALPH", type="NCHAR")], d, "other", 2, "en")
+    assert c.label == "Alpha Name"                                                                 # the shared entry
