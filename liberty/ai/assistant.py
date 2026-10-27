@@ -21,6 +21,7 @@ import json
 
 from liberty.ai.connector_tools import build_connector_tools
 from liberty.ai.instance_tools import build_instance_tools
+from liberty.ai.ops_tools import build_ops_tools
 from liberty.ai.scaffold_tools import build_scaffold_tools
 from liberty.ai.tools import ToolRegistry
 from liberty.config import AISettings
@@ -46,7 +47,11 @@ DEFAULT_SYSTEM_PROMPT = (
     "6. Playbooks are the procedures the applications ship. When the user asks HOW to do something "
     "in an application, call list_playbooks; if one fits, load_playbook it and follow its steps in "
     "order, telling the user which playbook you follow. If none fits, say so and answer from what "
-    "describe_instance shows.\n\n"
+    "describe_instance shows.\n"
+    "7. When offered, the operations tools read the running server: jobs_status (the scheduled "
+    "jobs, their last and next runs, a job's recent runs with the failing step), server_log (the "
+    "recent log lines) and integrity_checks (broken references in the configuration). Prefer "
+    "them to guessing when the user reports that something failed, is late or is missing.\n\n"
     "Scaffolding tools (introspect_table / scaffold_*): when enabled they let you propose "
     "new connector queries, dictionary entries, screens, and menu items. These tools never "
     "write to disk — they return a Proposal envelope that the user reviews and applies via "
@@ -360,4 +365,6 @@ def build_assistant(
         ))
     if state is not None:
         registry.add(*build_instance_tools(state, allowed=settings.allowed_connectors or None))
+        if settings.ops_tools:
+            registry.add(*build_ops_tools(state))
     return AiAssistant(settings, client=client, tools=registry)

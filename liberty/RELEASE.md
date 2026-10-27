@@ -60,6 +60,12 @@
   screens, dashboards, explorer models, jobs, playbooks), so "where do I find…" is answered from
   the real configuration. A tool result above 60 000 characters is cut with a note asking the
   assistant to narrow the call.
+- **Operations tools** (`[ai] ops_tools`, off by default, a checkbox under App → AI Assistant):
+  `jobs_status` (the nomaflow jobs with schedule, last run and next fire; one job's recent runs
+  with the failing step), `server_log` (the recent log lines, by level and text) and
+  `integrity_checks` (the configuration cross-reference checks). The assistant reads the running
+  server instead of guessing when something failed, is late or is missing. Off by default because
+  the log can carry what the server logged.
 - The chat folds a turn's tool calls into one muted line ("3 tool calls", open to see them); a
   failed call keeps its message visible.
 - Dropdowns: a long code (a model id) is no longer cut short in the list.

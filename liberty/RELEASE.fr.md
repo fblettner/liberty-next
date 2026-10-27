@@ -68,6 +68,13 @@
   (applications, menus, écrans, tableaux de bord, modèles de l'explorateur, tâches, procédures) :
   « où trouver… » se répond d'après la configuration réelle. Un résultat d'outil au-delà de
   60 000 caractères est coupé, avec une note demandant à l'assistant de restreindre l'appel.
+- **Outils d'exploitation** (`[ai] ops_tools`, désactivés par défaut, une case sous App →
+  Assistant IA) : `jobs_status` (les tâches nomaflow avec planification, dernier et prochain
+  passage ; les derniers passages d'une tâche avec l'étape en échec), `server_log` (les lignes
+  de journal récentes, par niveau et texte) et `integrity_checks` (les contrôles de cohérence de
+  la configuration). L'assistant lit le serveur au lieu de deviner quand quelque chose a échoué,
+  est en retard ou manque. Désactivés par défaut car le journal peut contenir ce que le serveur
+  a consigné.
 - Le chat replie les appels d'outils d'un tour en une ligne discrète (« 3 appels d'outil », à
   ouvrir pour les voir) ; un appel en échec garde son message visible.
 - Listes déroulantes : un code long (un identifiant de modèle) n'est plus tronqué dans la liste.

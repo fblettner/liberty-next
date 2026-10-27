@@ -43,6 +43,7 @@ interface AiSection {
   connector_tools: boolean
   api_tool: boolean
   scaffold_tools: boolean
+  ops_tools: boolean
   allowed_connectors: string[]
   web_fetch_domains: string[]
   web_fetch_max_uses: number
@@ -157,7 +158,7 @@ const DEFAULTS: {
   ai: {
     enabled: true, model: 'claude-opus-4-8', max_tokens: 8192, max_iterations: 8, system_prompt: '',
     thinking: false, effort: '', request_timeout: 120,
-    connector_tools: true, api_tool: false, scaffold_tools: false, allowed_connectors: [],
+    connector_tools: true, api_tool: false, scaffold_tools: false, ops_tools: false, allowed_connectors: [],
     web_fetch_domains: [], web_fetch_max_uses: 5, allowed_models: [], starters: {}, api_key: '',
   },
   license: { key: '' },
@@ -500,6 +501,8 @@ export default function AppBuilder() {
               checked={ai.api_tool} onChange={(c) => setAi({ ...ai, api_tool: c })} />
             <Checkbox label={t('settings.app.aiScaffoldTools', 'Scaffold tools (propose new queries / dictionary / screens / menu items — propose-only, never writes directly)')}
               checked={ai.scaffold_tools} onChange={(c) => setAi({ ...ai, scaffold_tools: c })} />
+            <Checkbox label={t('settings.app.aiOpsTools', 'Operations tools (jobs status, the server log tail, the integrity checks — for installations whose chat users are administrators)')}
+              checked={ai.ops_tools} onChange={(c) => setAi({ ...ai, ops_tools: c })} />
 
             <Field label={t('settings.app.aiAllowedConnectors', 'Allowed connectors (empty → all)')}>
               <ConnectorPicker

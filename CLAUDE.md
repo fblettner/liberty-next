@@ -103,7 +103,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           block), tools.py, connector_tools.py, scaffold_tools.py (proposal-only), routes.py
                           (SSE; `/ai/tools` also lists the pickable models + starters), catalog.py (the model list),
                           appconfig.py (ai.toml: what the APPS ship — starters per app / screen, playbooks),
-                          instance_tools.py (describe_instance, list_playbooks / load_playbook: read app.state at call time)
+                          instance_tools.py (describe_instance, list_playbooks / load_playbook: read app.state at call time),
+                          ops_tools.py (jobs_status / server_log / integrity_checks — opt-in `[ai] ops_tools`)
   jobs/ (nomaflow)        schema.py (jobs.toml), registry, runner (state machine, retries,
                           cancel), scheduler (APScheduler, single process), recovery, retention,
                           missed.py (missed-schedule check: expected cron instants vs the run

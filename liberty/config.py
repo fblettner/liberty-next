@@ -290,6 +290,10 @@ class AISettings(BaseModel):
     # mutating files; the chat UI surfaces it as an Apply card that POSTs to
     # /admin/config/apply-proposal. Default OFF — operators opt in deliberately.
     scaffold_tools: bool = False
+    # Operations tools — jobs_status / server_log / integrity_checks (liberty.ai.ops_tools).
+    # Off by default: the log tail can carry what the server logged; enable for an install
+    # whose chat users are administrators.
+    ops_tools: bool = False
     allowed_connectors: list[str] = Field(default_factory=list)  # empty → all
     # Server-side web_fetch (Anthropic-hosted); disabled unless domains are listed
     web_fetch_domains: list[str] = Field(default_factory=list)
