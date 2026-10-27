@@ -32,6 +32,31 @@ cd liberty-next/release
 ./liberty install full --tag 7.0.2 # full stack, pinned to a specific release
 ```
 
+### Hardening since 7.0.58
+
+- The container runs the app as **`liberty` (uid 1000)**, not root. It still starts as root for one
+  thing: fixing the ownership of the config volume and the apps mount (an install created by an
+  older release, files written by the installer), then it drops privileges. `LIBERTY_RUN_AS_ROOT=1`
+  opts out. `docker exec` runs as root unless you pass `-u liberty`; `./liberty` does.
+- **Postgres is published on `127.0.0.1` only** (SSH tunnel for DBeaver). `POSTGRES_BIND=0.0.0.0`
+  in `.env` opens it; firewall it then.
+- The **Traefik dashboard** gets a random password per install (printed once; `./liberty
+  dashboard-password` regenerates it). An install still on the historic default is flagged by
+  `./liberty doctor`.
+- The TLS overlays redirect HTTP → HTTPS and send security headers (`frameDeny`, `nosniff`,
+  referrer policy) on the app.
+- Every `LIBERTY_*` / `POSTGRES_*` / `PGADMIN_*` variable also reads from **`<NAME>_FILE`** (Docker /
+  Swarm / Kubernetes secrets mounted as files): `LIBERTY_MASTER_KEY_FILE=/run/secrets/master_key`.
+- **Logs**: every line carries the request's `X-Request-ID` (echoed in the response, or minted);
+  `[app] log_format = "json"` in `app.toml` emits one JSON object per line for a log shipper.
+- **Reproducible image**: Python dependencies are pinned in `requirements.txt` (a pip-compile lock
+  the image, CI and the dev venv share); base images and the compose services (Postgres, Traefik,
+  pgAdmin, Portainer) are version-pinned and bumped by Dependabot. The release attaches an SBOM and
+  provenance to the image and fails on CRITICAL / HIGH vulnerabilities with a fix (Trivy).
+- The Oracle Instant Client is fetched from Oracle at image build time and checked against a pinned
+  SHA-256 (146 MB of zips left the git tree); a local copy under `docker/instantclient/<arch>/` is
+  used instead for air-gapped builds.
+
 ### The `liberty` command
 
 `release/liberty` is the one entry point for the whole lifecycle — the same shape as

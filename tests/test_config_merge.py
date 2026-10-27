@@ -200,6 +200,21 @@ def test_connectors_without_snapshot_take_vendor_structure_but_keep_secrets() ->
     assert rep.kept_modified == []
 
 
+def test_env_placeholders_are_filled_from_the_live_file() -> None:
+    """The wheel ships install-specific hosts / users as `${VAR}`; a concrete live value wins,
+    a live placeholder is left alone, and a wheel-side `${VAR:-default}` is a real value."""
+    wheel = _toml('[connectors.ais]\ntype = "api"\nbase_url = "${JDE_AIS_URL}"\nverify_ssl = true\nauth_password = ""\n[connectors.x]\ntype = "api"\nbase_url = "${X_URL:-http://x}"\n')
+    live = _toml('[connectors.ais]\ntype = "api"\nbase_url = "https://jde.customer/jderest"\nverify_ssl = false\nauth_password = "ENC:api"\n[connectors.x]\ntype = "api"\nbase_url = "http://real"\n')
+    merged, rep = merge_file("connectors.toml", wheel, live, None)
+    ais = merged["connectors"]["ais"]
+    assert ais["base_url"] == "https://jde.customer/jderest" and ais["auth_password"] == "ENC:api"
+    assert ais["verify_ssl"] is True                       # a real vendor change still lands
+    assert merged["connectors"]["x"]["base_url"] == "${X_URL:-http://x}"   # has a default → vendor value
+    assert rep.secrets_restored == 2
+    merged, _ = merge_file("connectors.toml", wheel, _toml('[connectors.ais]\ntype = "api"\nbase_url = "${OTHER}"\n'), None)
+    assert merged["connectors"]["ais"]["base_url"] == "${JDE_AIS_URL}"   # placeholder vs placeholder → wheel's
+
+
 def test_connectors_blanked_secret_restored_on_refresh() -> None:
     wheel = json.loads(json.dumps(C_WHEEL))
     wheel["connectors"]["ais"]["timeout"] = 30  # a real change on a secret-bearing connector

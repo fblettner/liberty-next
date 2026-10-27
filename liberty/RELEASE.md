@@ -54,6 +54,23 @@
   changed without flagging them"; `--dry-run` prints the plan, and `liberty apps` / `liberty upgrade
   --apps` show it before writing. Entities kept because they changed locally are listed for review.
   (`liberty.config_merge`, shared with Package & Deploy.)
+- **Hardening of the shipped layouts.** The container runs the app as the `liberty` user (uid
+  1000) instead of root — it starts as root only to fix the ownership of the config volume and
+  the apps mount of an older install, then drops privileges (`LIBERTY_RUN_AS_ROOT=1` opts out).
+  Postgres is published on `127.0.0.1` only (`POSTGRES_BIND=0.0.0.0` opens it). The Traefik
+  dashboard gets a random password per install (`liberty dashboard-password` regenerates it;
+  `doctor` flags the historic default). The TLS overlays redirect HTTP to HTTPS and send
+  security headers. Every `LIBERTY_*` / `POSTGRES_*` / `PGADMIN_*` variable also reads from
+  `<NAME>_FILE` (Docker / Swarm / Kubernetes secrets).
+- **Supply chain.** Python dependencies are pinned in `requirements.txt` (a pip-compile lock shared
+  by the image, CI and the dev venv — the lock equals what the 7.0.57 image already ran); base
+  images and the compose services are version-pinned and bumped by Dependabot; the release
+  attaches an SBOM and provenance to the image and runs Trivy (fails on fixable CRITICAL / HIGH).
+  The Oracle Instant Client is fetched from Oracle at image build time against a pinned SHA-256
+  instead of 146 MB of zips in git (a local copy still works for air-gapped builds).
+- **Request ids and JSON logs.** Every response carries `X-Request-ID` (the caller's or a fresh
+  one) and every log line written while handling it carries the same id; `[app] log_format =
+  "json"` emits one JSON object per line.
 - **New `liberty-ops` command for Python installs** (pipx or venv, with or without systemd) — the
   twin of `release/liberty`: `status`, `doctor`, `start` / `stop` / `restart` / `logs`, `backup` /
   `restore` (config dir, apps dir, SQLite file, `pg_dump`), `migrate`, `upgrade [--version X]

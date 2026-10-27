@@ -9,6 +9,7 @@
 #   liberty ssl letsencrypt --domain D --email E      # enable / switch TLS AFTER the install
 #   liberty ssl provided --domain D --cert-dir DIR --cert-file F --key-file K
 #   liberty ssl off                           # back to plain HTTP
+#   liberty dashboard-password                # new random password for the Traefik dashboard (/traefik)
 #   liberty apps <wheel> [--force-config]     # link or refresh the licensed apps
 #   liberty upgrade [--tag X] [--apps <wheel>] [--keep DAYS]   # doctor → backup → pull → recreate → migrations → report → status
 #   liberty rollback [--yes]                  # back to the image + volumes from before the last upgrade
@@ -40,7 +41,7 @@ ok()    { printf "${GREEN}✔${NC} %s\n" "$*"; }
 warn()  { printf "${YELLOW}!${NC} %s\n" "$*"; }
 die()   { printf "${RED}✗${NC} %s\n" "$*" >&2; exit 1; }
 
-usage() { sed -n '3,21p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '3,22p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # ── .env helpers ───────────────────────────────────────────────────────────────
 need_env() { [ -f "$ENV_FILE" ] || die ".env not found in $here — run './liberty install' first."; }
@@ -84,7 +85,17 @@ wait_healthy() {
   return 1
 }
 
-in_container() { docker exec -i "$SERVICE" "$@"; }   # -i: the python heredocs below need stdin forwarded
+# -i: the python heredocs below need stdin forwarded. -u liberty: the app runs as uid 1000 since 7.0.58;
+# a root exec would leave root-owned files in the config volume the app can no longer write. An
+# older image has no such user — probed once per run, root then.
+EXEC_USER=""
+exec_user() {
+  if [ -z "$EXEC_USER" ]; then
+    if docker exec "$SERVICE" id -u liberty >/dev/null 2>&1; then EXEC_USER=liberty; else EXEC_USER=root; fi
+  fi
+  printf '%s' "$EXEC_USER"
+}
+in_container() { docker exec -i -u "$(exec_user)" "$SERVICE" "$@"; }
 ver_fw()   { in_container python -c 'import liberty;print(liberty.__version__)' 2>/dev/null </dev/null || true; }
 ver_apps() { in_container python -c "from importlib.metadata import version;print(version('liberty-apps'))" 2>/dev/null </dev/null || true; }
 health()   { docker inspect --format='{{.State.Health.Status}}' "$SERVICE" 2>/dev/null || echo absent; }
@@ -180,6 +191,13 @@ cmd_doctor() {
     elif [ "${#v}" -lt 32 ]; then fail "$key is ${#v} chars — below the 32 recommended" "rotate carefully: the master key encrypts every ENC: value; the JWT secret logs everyone out";
     else pass "$key set (${#v} chars)"; fi
   done
+  if [ "$(layout_of_chain)" = full ]; then
+    if [ -z "$(env_get TRAEFIK_DASHBOARD_USERS)" ]; then fail "Traefik dashboard still uses the historic default password (no TRAEFIK_DASHBOARD_USERS in .env)" "./liberty dashboard-password"; else pass "Traefik dashboard has a per-install password"; fi
+    case "$(env_get POSTGRES_BIND)" in
+      ""|127.0.0.1|localhost) pass "Postgres published on the loopback only" ;;
+      *) warn "Postgres published on $(env_get POSTGRES_BIND):$(env_get POSTGRES_PORT) — make sure a firewall covers it" ;;
+    esac
+  fi
   case "$(tls_of_chain)" in
     provided)
       local cd; cd="$(env_get CERT_HOST_PATH)"
@@ -244,6 +262,20 @@ cmd_ssl() {
       ;;
     *) die "usage: ./liberty ssl letsencrypt --domain D --email E | ssl provided --domain D --cert-dir DIR --cert-file F --key-file K | ssl off" ;;
   esac
+}
+
+cmd_dashboard_password() {
+  # A new random password for the Traefik dashboard (/traefik): written to .env as an apr1 hash
+  # (TRAEFIK_DASHBOARD_USERS), printed once, traefik recreated to pick it up.
+  need_env; require_docker
+  [ "$(layout_of_chain)" = full ] || die "the Traefik dashboard exists on the full layout only"
+  command -v openssl >/dev/null 2>&1 || die "openssl is needed to hash the password"
+  local pw hash
+  pw="$(openssl rand -base64 24 | tr -d '\n=$+/' | head -c 16)"
+  hash="$(openssl passwd -apr1 "$pw" | sed 's/\$/$$/g')"
+  env_set TRAEFIK_DASHBOARD_USERS "admin:${hash}"
+  compose up -d traefik >/dev/null
+  ok "Traefik dashboard: admin / ${pw}   (shown once — the .env holds only the hash)"
 }
 
 cmd_apps() {
@@ -441,6 +473,7 @@ case "$cmd" in
   doctor)   cmd_doctor ;;
   ssl)      cmd_ssl "$@" ;;
   apps)     cmd_apps "$@" ;;
+  dashboard-password) cmd_dashboard_password ;;
   upgrade)  cmd_upgrade "$@" ;;
   rollback) cmd_rollback "$@" ;;
   backup)   cmd_backup "$@" ;;

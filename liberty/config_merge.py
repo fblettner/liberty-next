@@ -44,6 +44,7 @@ enumeration below.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import tomllib
 from dataclasses import dataclass, field
@@ -177,16 +178,27 @@ def is_overridden(entity: Any) -> bool:
 
 
 # ── secrets ──────────────────────────────────────────────────────────────────────────────────
+_ENV_PLACEHOLDER = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*\}$")  # `${VAR}` with no default: "the install fills this"
+
+
+def is_placeholder(value: Any) -> bool:
+    """``""`` or a bare ``${VAR}`` — what the wheel ships where the install owns the value
+    (a blanked ``ENC:`` secret, a host, a user)."""
+    return isinstance(value, str) and (value == "" or bool(_ENV_PLACEHOLDER.match(value)))
+
+
 def restore_blanked(node: Any, live: Any) -> int:
-    """Where *node* has ``""`` and *live* has a non-empty string at the same path, copy the live
-    value in (the wheel ships ``ENC:`` secrets blanked). Recurses into nested tables, leaves
-    arrays alone (secrets never live in TOML arrays). Returns how many were restored."""
+    """Where *node* holds a placeholder (``""`` or a bare ``${VAR}``) and *live* has a concrete
+    non-placeholder string at the same path, copy the live value in: the wheel ships ``ENC:``
+    secrets blanked and install-specific hosts / users as ``${VAR}`` references, the install
+    owns the real value. Recurses into nested tables, leaves arrays alone (secrets never live
+    in TOML arrays). Returns how many were restored."""
     if not isinstance(node, dict) or not isinstance(live, dict):
         return 0
     n = 0
     for k, v in node.items():
         lv = live.get(k)
-        if isinstance(v, str) and v == "" and isinstance(lv, str) and lv:
+        if is_placeholder(v) and isinstance(lv, str) and lv and not is_placeholder(lv):
             node[k] = lv
             n += 1
         elif isinstance(v, dict) and isinstance(lv, dict):

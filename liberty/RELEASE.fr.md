@@ -68,6 +68,27 @@
   le plan, et `liberty apps` / `liberty upgrade --apps` le montrent avant d'écrire. Les entités
   conservées parce que modifiées localement sont listées pour vérification. (`liberty.config_merge`,
   partagé avec Package & Deploy.)
+- **Durcissement des dispositions livrées.** Le conteneur exécute l'application sous l'utilisateur
+  `liberty` (uid 1000) et non plus root : il démarre en root uniquement pour corriger le
+  propriétaire du volume de configuration et du montage des applications d'une installation
+  antérieure, puis abandonne ses privilèges (`LIBERTY_RUN_AS_ROOT=1` pour l'ancien comportement).
+  Postgres n'est publié que sur `127.0.0.1` (`POSTGRES_BIND=0.0.0.0` l'ouvre). Le tableau de bord
+  Traefik reçoit un mot de passe aléatoire par installation (`liberty dashboard-password` en
+  génère un nouveau ; `doctor` signale l'ancien mot de passe par défaut). Les surcouches TLS
+  redirigent HTTP vers HTTPS et envoient les en-têtes de sécurité. Chaque variable `LIBERTY_*` /
+  `POSTGRES_*` / `PGADMIN_*` se lit aussi depuis `<NOM>_FILE` (secrets Docker / Swarm /
+  Kubernetes).
+- **Chaîne d'approvisionnement.** Les dépendances Python sont figées dans `requirements.txt` (un
+  verrou pip-compile partagé par l'image, l'intégration continue et l'environnement de
+  développement ; il correspond à ce que l'image 7.0.57 exécutait déjà) ; les images de base et
+  les services compose sont épinglés à une version précise et mis à jour par Dependabot ; la
+  publication attache un SBOM et une provenance à l'image et exécute Trivy (échec sur une faille
+  CRITICAL / HIGH corrigeable). Le client Oracle Instant Client est téléchargé chez Oracle à la
+  construction de l'image et vérifié par SHA-256, au lieu de 146 Mo d'archives dans git (une
+  copie locale reste possible pour une construction hors ligne).
+- **Identifiants de requête et journaux JSON.** Chaque réponse porte `X-Request-ID` (celui de
+  l'appelant ou un nouveau) et chaque ligne de journal écrite pendant son traitement porte le
+  même identifiant ; `[app] log_format = "json"` émet un objet JSON par ligne.
 - **Nouvelle commande `liberty-ops` pour les installations Python** (pipx ou venv, avec ou sans
   systemd), pendant de `release/liberty` : `status`, `doctor`, `start` / `stop` / `restart` / `logs`,
   `backup` / `restore` (dossier de configuration, dossier des applications, fichier SQLite,

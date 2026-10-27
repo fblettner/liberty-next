@@ -36,7 +36,7 @@
 
 services:
   traefik:
-    image: traefik:v3.7
+    image: traefik:v3.7.16
     container_name: traefik
     restart: unless-stopped
     # All Traefik static config goes through env vars (TRAEFIK_<UPPER_DOT_TO_UNDER>=value)
@@ -53,6 +53,11 @@ services:
       TRAEFIK_PROVIDERS_FILE_DIRECTORY: "/etc/traefik/dynamic"
       TRAEFIK_PROVIDERS_FILE_WATCH: "true"
       TRAEFIK_ENTRYPOINTS_WEB_ADDRESS: ":80"
+      # Dashboard basic-auth users (`user:$$apr1$$…` — `$` doubled for compose), read by the
+      # traefik-auth middleware in traefik/dynamic/dynamic.yml. install.sh generates a random
+      # password per install; the fallback below is the historic default — `liberty doctor`
+      # flags an install still on it.
+      TRAEFIK_DASHBOARD_USERS: "${TRAEFIK_DASHBOARD_USERS:-admin:$$2y$$05$$LQILPh4NZXEx.ck6BhYbaec/ra38THfFtQ5Rlq2Tw4bMpyEzpGFJq}"
     ports:
       - "${TRAEFIK_HTTP_PORT:-80}:80"
       # - "443:443"          # uncomment when TLS is wired
@@ -119,7 +124,7 @@ services:
       traefik.http.services.liberty-next.loadbalancer.sticky.cookie.name: "liberty_sticky"
 
   pg:
-    image: postgres:16-alpine
+    image: postgres:16.15-alpine
     container_name: liberty-pg
     restart: unless-stopped
     # ─── Performance tuning — assumes ~8 GB host RAM dedicated to Postgres ─────
@@ -198,10 +203,12 @@ services:
     # Expose 5432 to the host only when you need to connect from outside Docker
     # (DBeaver from your laptop, etc.). Comment out otherwise.
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Bound to the host's loopback by default — reach it with an SSH tunnel (DBeaver etc.).
+      # POSTGRES_BIND=0.0.0.0 in .env publishes it on every interface (firewall it yourself).
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
 
   pgadmin:
-    image: dpage/pgadmin4:latest
+    image: dpage/pgadmin4:9.18
     container_name: pgadmin
     restart: unless-stopped
     depends_on:
@@ -230,7 +237,7 @@ services:
       traefik.http.services.pgadmin.loadbalancer.server.port: "80"
 
   portainer:
-    image: portainer/portainer-ce:latest
+    image: portainer/portainer-ce:2.45.3
     container_name: portainer
     restart: unless-stopped
     # Reads the Docker socket to manage containers (same way Portainer always works).

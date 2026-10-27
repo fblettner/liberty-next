@@ -112,6 +112,7 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           installer + Package & Deploy): override / untouched-vs-.bundled snapshot /
                           custom / withdrawn rules, secrets always from the live connectors.toml
   schema_sync.py          create_all + forward-add model columns on the framework's own tables
+  observability.py        X-Request-ID middleware (ASGI), request-id log filter, JSON formatter
   migrations/             v1 → v2 migration + `liberty-migrate diff` (kept for reference)
   sio.py                  Socket.IO: record locks (rooms), technical dashboard, log tail
   web/                    the HTTP layer — see the router table
@@ -236,7 +237,7 @@ Dev: `export LIBERTY_APPS_DIR=$PWD/../liberty-apps/config`.
 ## Run it
 
 ```bash
-python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # dev = every extra + pytest
+python3.12 -m venv .venv && .venv/bin/pip install -c requirements.txt -e ".[dev]"   # the lock = what the image runs
 ./start.sh init-db            # first run: auth store + an `admin` user (prints the password)
 ./start.sh                    # build frontend/dist if stale, serve SPA + API on :8000
 ./start.sh dev                # --reload   ·   ./start.sh frontend → Vite :5173 with API proxy
@@ -279,6 +280,12 @@ python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # dev = every ex
   forward-adding the model columns a live table lacks — and returns the changes, journaled as
   `framework-schema` via `runtime.journal_schema`. Adding a column to a model is therefore enough;
   a rename or type change needs a one-off script. The apps' schemas use Alembic (`liberty-admin migrate`).
+- **Dependencies are locked**: `requirements.txt` is the pip-compile lock of `.[all]` (image, CI and
+  dev venv install with `-c requirements.txt`); refresh it with `pip-compile --extra all
+  --strip-extras --output-file requirements.txt pyproject.toml` and drop the `liberty-next`
+  self-reference line it emits. Base / service images are version-pinned (Dependabot bumps them).
+- **The container runs as uid 1000** (`liberty`): the entrypoint starts as root, fixes the ownership
+  of the mounts, drops privileges; `docker exec -u liberty` for anything that writes.
 - **Optional features fail clearly**: PDF without the `reports` extra → 503 with the install
   hint; `ldap_sync` without `ldap3` → a StepFailed naming the extra.
 - **i18n**: every `t('key')` needs the key in both locale files; ~700 keys still exist only

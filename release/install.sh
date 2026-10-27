@@ -335,6 +335,9 @@ else
   LIBERTY_MASTER_KEY="$(gen_secret 32)"   # always per-install random — no override flag
   POSTGRES_PASSWORD="$(gen_secret 24)"
   PGADMIN_PASSWORD="$(gen_secret 16)"
+  TRAEFIK_DASHBOARD_PASSWORD="$(gen_secret 16)"
+  # apr1 (htpasswd) hash — accepted by Traefik's basicAuth; `$` doubled so compose keeps it literal.
+  TRAEFIK_DASHBOARD_USERS="admin:$(openssl passwd -apr1 "$TRAEFIK_DASHBOARD_PASSWORD" | sed 's/\$/$$/g')"
   # First-boot admin password is NOT written to .env — it's only needed once by init-db.
   # We export it via the shell environment for ``docker compose up`` below so the bootstrap
   # sees it, then show it in the install summary. On re-runs it's gone (intentionally —
@@ -407,6 +410,12 @@ POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 
 PGADMIN_PASSWORD=${PGADMIN_PASSWORD}
 # PGADMIN_EMAIL=admin@liberty.fr
+# Postgres is published on the host's loopback only; POSTGRES_BIND=0.0.0.0 opens it (firewall!).
+# POSTGRES_BIND=127.0.0.1
+
+# Traefik dashboard (/traefik) basic-auth — the password is printed once at install.
+# Regenerate with: ./liberty dashboard-password
+TRAEFIK_DASHBOARD_USERS=${TRAEFIK_DASHBOARD_USERS}
 
 # ── OPTIONAL ───────────────────────────────────────────────────────────────
 # Image tag — which ghcr.io/.../liberty-next:<tag> gets pulled:
@@ -562,6 +571,10 @@ case "$LAYOUT" in
     fi
     echo
     echo "  pgAdmin:        admin@liberty.fr / ${PGADMIN_PASSWORD}"
+    if [ -n "${TRAEFIK_DASHBOARD_PASSWORD:-}" ]; then
+      echo "  Traefik:        admin / ${TRAEFIK_DASHBOARD_PASSWORD}   (dashboard at ${BASE:-http://localhost}/traefik — shown once; ./liberty dashboard-password regenerates)"
+    fi
+    echo "  Postgres:       published on 127.0.0.1:${POSTGRES_PORT:-5432} only (POSTGRES_BIND=0.0.0.0 in .env to open it)"
     POSTGRES_PASSWORD_LINE=$(grep -E '^POSTGRES_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)
     POSTGRES_USER_LINE=$(grep -E '^POSTGRES_USER=' "$ENV_FILE" | cut -d= -f2- || true)
     echo "  Postgres root:  ${POSTGRES_USER_LINE:-liberty} / ${POSTGRES_PASSWORD_LINE}"

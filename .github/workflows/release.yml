@@ -216,6 +216,25 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Supply-chain attestations attached to the image in ghcr.io (inspect with
+          # `docker buildx imagetools inspect <image> --format '{{ json .SBOM }}'`).
+          sbom: true
+          provenance: mode=max
+
+      # ── vulnerability scan of what was just pushed — fails the release on CRITICAL/HIGH
+      #    with a fix available (unfixed ones are reported, not blocking). Runs BEFORE the tag
+      #    and the PyPI publish so a bad image never becomes a release.
+      - name: Scan the image (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/liberty-next:${{ steps.ver.outputs.version }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
 
       # ── tag first: the image is pushed and the tag exists before the irreversible
       #    PyPI publish, so a failure there leaves a tag to re-run from (workflow_dispatch

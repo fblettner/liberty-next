@@ -48,3 +48,7 @@ config/.versions/
 
 # Local working documents (review, plan, ledgers) — never committed to the public repo
 docs/work/
+
+# Oracle Instant Client zips are fetched at image build time (Dockerfile); a local copy here is
+# only for air-gapped builds and must not be committed (146 MB).
+docker/instantclient/*/*.zip

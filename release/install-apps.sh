@@ -112,8 +112,8 @@ WHEEL_NAME="$(basename "$WHEEL_LOCAL")"
 # per-entity merge (liberty.config_merge). Falls back to python:3.12-slim when that image is
 # not available locally and cannot be pulled (whole-file copy, as before).
 if ! docker image inspect "$RUNNER_IMAGE" >/dev/null 2>&1 && ! docker pull -q "$RUNNER_IMAGE" >/dev/null 2>&1; then
-  warn "${RUNNER_IMAGE} not available — using python:3.12-slim (no per-entity config merge)"
-  RUNNER_IMAGE="python:3.12-slim"
+  warn "${RUNNER_IMAGE} not available — using python:3.12.15-slim (no per-entity config merge)"
+  RUNNER_IMAGE="python:3.12.15-slim"
 fi
 docker run --rm --entrypoint bash \
   -v "${WHEEL_DIR}":/wheel:ro \
@@ -123,6 +123,7 @@ docker run --rm --entrypoint bash \
     set -e
     pip install --quiet --no-cache-dir --root-user-action=ignore '/wheel/${WHEEL_NAME}'
     liberty-apps install --target /dest/config ${EXTRA_FLAGS}
+    chown -R 1000:1000 /dest   # the app runs as liberty (uid 1000) and writes here (Settings, .versions/)
   "
 if [ "$DRY_RUN" = "yes" ]; then
   ok "dry run — nothing written (no .env change, no restart, no install jobs)"
@@ -149,6 +150,12 @@ upsert_env() {
   fi
 }
 upsert_env "APPS_HOST_PATH" "$APPS_ABS"
+# The JDE connection values the wheel ships as ${ENV} references — documented, left for the
+# operator (empty = fill them in Settings → Pools / Connectors instead).
+if ! grep -qE '^#? *JDE_DB_URL=' .env; then
+  printf '\n# JD Edwards connection (the apps wheel ships these as ${ENV} references; empty = set them in Settings)\n# JDE_DB_URL=oracle+oracledb://user@host:1521/?service_name=JDEPROD\n# JDE_AIS_URL=https://jde.example.com:7077/jderest/v2\n# JDE_AIS_VERIFY_SSL=true\n' >> .env
+  info "Added the commented JDE_* keys to .env"
+fi
 
 # Append docker-compose.apps.yml to COMPOSE_FILE (colon-separated) so every
 # subsequent ``docker compose <command>`` automatically includes the overlay.

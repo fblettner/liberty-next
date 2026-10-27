@@ -39,15 +39,18 @@ services:
       traefik.http.routers.liberty-next.rule: "Host(`${LIBERTY_DOMAIN}`)"
       traefik.http.routers.liberty-next.entrypoints: "web,websecure"
       traefik.http.routers.liberty-next.tls: "true"
+      traefik.http.routers.liberty-next.middlewares: "https-redirect@file,security-headers@file"
 
   pgadmin:
     labels:
       traefik.http.routers.pgadmin.rule: "Host(`${LIBERTY_DOMAIN}`) && PathPrefix(`/pgadmin`)"
       traefik.http.routers.pgadmin.entrypoints: "web,websecure"
       traefik.http.routers.pgadmin.tls: "true"
+      traefik.http.routers.pgadmin.middlewares: "https-redirect@file"
 
   portainer:
     labels:
       traefik.http.routers.portainer.rule: "Host(`${LIBERTY_DOMAIN}`) && PathPrefix(`/portainer`)"
       traefik.http.routers.portainer.entrypoints: "web,websecure"
       traefik.http.routers.portainer.tls: "true"
+      traefik.http.routers.portainer.middlewares: "https-redirect@file"
