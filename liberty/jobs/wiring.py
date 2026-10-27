@@ -167,6 +167,7 @@ async def build_nomaflow(
     sio_layer: Any | None = None,
     changesets: Any | None = None,
     on_finished: Any | None = None,
+    on_missed: Any | None = None,
 ) -> NomaflowComponents | None:
     """Build the nomaflow stack from a (settings, connectors) pair, or return
     None if the deployment isn't carrying enough to start it.
@@ -267,6 +268,7 @@ async def build_nomaflow(
         registry,
         runner,
         on_dropped_fire=broadcaster.broadcast if broadcaster else None,
+        on_missed=on_missed,
     )
 
     if settings.jobs.enabled:
@@ -344,6 +346,7 @@ async def hot_reload_registry(
     # to the per-job reconciliation above + makes "I changed [meta.retention] in
     # jobs.toml + hit Reload" Just Work without restarting the process.
     scheduler.schedule_retention(new_registry.config.meta.retention)
+    scheduler.schedule_missed_check(new_registry.config.meta.missed)
 
     # Swap the components' registry reference for callers reading
     # app.state.jobs.registry. NB: NomaflowComponents is a regular dataclass

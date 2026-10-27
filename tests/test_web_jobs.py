@@ -457,6 +457,21 @@ def test_get_jobs_parsed_includes_meta_with_defaults(env) -> None:
         # what's actually in effect.
         ret = body["meta"]["retention"]
         assert ret == {"enabled": True, "days": 30, "keep_last_per_job": 100, "sweep_interval_minutes": 60}
+        assert body["meta"]["missed"] == {"enabled": True, "grace_minutes": 10, "check_interval_minutes": 5, "lookback_hours": 24}
+
+
+def test_missed_status_and_check(env) -> None:
+    """GET /admin/jobs/missed shows the policy (+ no report yet); POST …/check runs one pass —
+    nothing is missed on a fresh install (the window opens at the scheduler's start)."""
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = client.get("/admin/jobs/missed", headers=h).json()
+        assert body["policy"]["grace_minutes"] == 10 and body["last_check"] is None
+        report = client.post("/admin/jobs/missed/check", headers=h).json()
+        assert report["missed"] == [] and report["triggers"] == 1
+        assert client.get("/admin/jobs/missed", headers=h).json()["last_check"]["triggers"] == 1
+        assert client.get("/admin/jobs/missed", headers=_h(client, "reader")).status_code == 403
 
 
 def test_put_jobs_parsed_round_trips_meta(env) -> None:

@@ -4,7 +4,7 @@ import type { RunState } from './types'
 
 /** Run-state → Tag tone — the colour of a last-run / step-state badge. */
 export const STATE_TONE: Record<RunState, 'green' | 'red' | 'orange' | 'blue' | 'neutral'> = {
-  SUCCEEDED: 'green', FAILED: 'red', CANCELED: 'orange', RUNNING: 'blue', QUEUED: 'neutral',
+  SUCCEEDED: 'green', FAILED: 'red', CANCELED: 'orange', MISSED: 'red', RUNNING: 'blue', QUEUED: 'neutral',
 }
 
 /** A compact relative-time label — "2h ago" / "in 30m" / "just now". Past and

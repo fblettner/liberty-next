@@ -46,6 +46,18 @@
   action"), the channels, the recipients picked from users and roles or typed as addresses, the
   subject / body / link templates, the action channel's target, and a "Send a test" button that
   dispatches the rule with sample values.
+- **Missed schedules.** The scheduler keeps its cron triggers in memory, so a fire that falls
+  while the server is down is never known, and a fire that lands while the previous run of the
+  same job is still running is skipped: both left a silent hole in the run history. A periodic
+  check (`[meta.missed]` in `jobs.toml`: `enabled`, `grace_minutes` 10, `check_interval_minutes`
+  5, `lookback_hours` 24) now lists the instants each active trigger should have fired since the
+  last check and looks for a run near each one; a gap is recorded as a **`MISSED`** run (visible in
+  the Runs list and as the job's last run; recorded once, a restart never reports it twice) and
+  raised as the new **`missed`** job event for the rules, with the `EXPECTED_AT` placeholder. A
+  dropped concurrent fire is recorded the same way. A manual run started within the grace counts
+  for the fire; a job that never ran is checked from the scheduler's start only. On the Jobs page
+  a "Missed schedules" panel next to the retention one edits the policy, shows the last check and
+  runs one ("Check now"); routes `GET /admin/jobs/missed`, `POST /admin/jobs/missed/check`.
 
 **Screens: `editable_when`, a row-level read-only rule**
 - A screen can say when an existing row may be changed: `editable_when = [{ field = "PERIOD_STATUS",

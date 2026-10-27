@@ -28,6 +28,8 @@ from liberty.jobs.schema import (
     JobAlerts,
     JobRetry,
     JobsFile,
+    MissedPolicy,
+    RetentionPolicy,
     Step,
     StepType,
 )
@@ -61,6 +63,8 @@ __all__ = [
     "JobRunner",
     "JobScheduler",
     "JobsFile",
+    "MissedPolicy",
+    "RetentionPolicy",
     "RunLog",
     "ManualTrigger",
     "HttpStepExecutor",

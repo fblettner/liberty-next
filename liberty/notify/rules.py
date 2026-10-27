@@ -25,10 +25,11 @@
 
 Three trigger kinds: a **screen** event (an insert / update / delete through a screen, with an
 optional ``when`` on the written row — the same ``field`` / ``value`` shape as ``disabled_when``),
-a **job** event (``failure``, ``succeeded``, ``canceled``, ``long_run`` with ``long_run_minutes``),
+a **job** event (``failure``, ``succeeded``, ``canceled``, ``missed`` — a scheduled fire that did
+not run — or ``long_run`` with ``long_run_minutes``),
 or an **action** (a screen's ``send_notification`` step names the rule). Placeholders in subject,
 body and link come from the event: the row's columns and ``USER`` / ``APP`` / ``SCREEN`` / ``EVENT``
-for a screen, ``JOB`` / ``RUN_ID`` / ``STATE`` / ``ERROR`` / ``DURATION_MINUTES`` / ``ROWS`` for a job.
+for a screen, ``JOB`` / ``RUN_ID`` / ``STATE`` / ``ERROR`` / ``DURATION_MINUTES`` / ``ROWS`` / ``EXPECTED_AT`` for a job.
 """
 
 from __future__ import annotations
@@ -41,7 +42,7 @@ from typing import Annotated, Any, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field
 
 ScreenEvent = Literal["insert", "update", "delete"]
-JobEvent = Literal["failure", "succeeded", "canceled", "long_run"]
+JobEvent = Literal["failure", "succeeded", "canceled", "missed", "long_run"]
 Channel = Literal["portal", "email", "action"]
 
 

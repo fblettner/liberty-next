@@ -234,9 +234,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 rows=getattr(run, "rows_affected", None), extra_recipients=extra,
             )
 
+        async def _on_run_missed(job: Any, run: Any, reason: str) -> None:
+            # A scheduled fire that never ran (liberty.jobs.missed) → the ``missed`` job rules.
+            expected = getattr(run, "scheduled_at", None)
+            fire_job_event(
+                getattr(app.state, "notification_rules", None), getattr(app.state, "notify", None),
+                job_id=job.id, run_id=run.id, state="MISSED", error=reason, duration_minutes=None, rows=None,
+                expected_at=expected.isoformat(timespec="minutes") if expected is not None else None,
+            )
+
         app.state.jobs = await build_nomaflow(
             settings, app.state.connectors, sio_layer=sio_layer,
-            changesets=app.state.changesets_db, on_finished=_on_run_finished,
+            changesets=app.state.changesets_db, on_finished=_on_run_finished, on_missed=_on_run_missed,
         )
         # Optional filesystem watcher — when ``[app] hot_reload = true``, edits to the
         # config TOMLs reload the matching subsystem without an explicit Settings →

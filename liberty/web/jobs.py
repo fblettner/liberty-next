@@ -611,6 +611,25 @@ async def get_retention_status(request: Request, _: Superuser) -> dict[str, Any]
     }
 
 
+@router.get("/missed", summary="Get missed-schedule status")
+async def get_missed_status(request: Request, _: Superuser) -> dict[str, Any]:
+    """The ``[meta.missed]`` policy + the last check's report (None until the first check)."""
+    comps = _components(request)
+    last = comps.scheduler.last_missed
+    return {
+        "policy": comps.registry.config.meta.missed.model_dump(),
+        "last_check": last.to_dict() if last is not None else None,
+    }
+
+
+@router.post("/missed/check", summary="Run the missed-schedule check")
+async def run_missed_check(request: Request, _: Superuser) -> dict[str, Any]:
+    """One pass of the missed-fire check with the current policy; returns its report. The gaps
+    it finds are recorded as MISSED runs and raise the ``missed`` job event once."""
+    comps = _components(request)
+    return (await comps.scheduler.check_missed_now()).to_dict()
+
+
 @router.post("/retention/sweep", summary="Run retention sweep")
 async def run_retention_sweep(request: Request, _: Superuser) -> dict[str, Any]:
     """Fire a one-shot retention sweep with the CURRENT policy. Returns the

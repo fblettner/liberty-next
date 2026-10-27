@@ -42,6 +42,11 @@ class RunState(str, Enum):
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
     CANCELED = "CANCELED"
+    # A scheduled fire that never ran (the server was down at the cron instant, or the previous
+    # run was still in flight): recorded by :mod:`liberty.jobs.missed` so the gap shows in the
+    # run history and alerts once. Terminal from birth — ``started_at`` = ``finished_at`` =
+    # the detection time, ``scheduled_at`` = the expected cron instant.
+    MISSED = "MISSED"
 
 
 class TriggerKind(str, Enum):

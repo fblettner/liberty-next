@@ -17,6 +17,7 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 import type { JobSummary, JobsListResponse, JobsParsedResponse, StepConfig } from './types'
 import { STATE_TONE, relative, uploadJobFile } from './util'
 import { RetentionPanel } from './RetentionPanel'
+import { MissedPanel } from './MissedPanel'
 
 const Toolbar = styled.div`
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;
@@ -430,6 +431,7 @@ export default function JobsList() {
           the job list because a sweep may have deleted the latest run row that
           a card was displaying as last_run. */}
       <RetentionPanel onChanged={load} />
+      <MissedPanel onChanged={load} />
       {error && <Banner $tone="error" style={{ marginBottom: 12 }}>{error}</Banner>}
       {sorted == null && !error ? <Centered /> : null}
       {sorted && sorted.length === 0 && (

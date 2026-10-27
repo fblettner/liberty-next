@@ -36,11 +36,12 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from liberty.jobs.missed import MissedReport, OnMissed, check_missed, record_missed
 from liberty.jobs.recovery import mark_orphan_runs_failed
 from liberty.jobs.registry import JobRegistry
 from liberty.jobs.retention import SweepReport, sweep_run_history
 from liberty.jobs.runner import JobRunner
-from liberty.jobs.schema import Job, RetentionPolicy
+from liberty.jobs.schema import Job, MissedPolicy, RetentionPolicy
 from liberty.jobs.triggers import ManualTrigger, ScheduledTrigger
 
 _log = logging.getLogger(__name__)
@@ -86,10 +87,14 @@ class JobScheduler:
         runner: JobRunner,
         *,
         on_dropped_fire: Hook | None = None,
+        on_missed: OnMissed | None = None,
     ) -> None:
         self._registry = registry
         self._runner = runner
         self._on_dropped_fire = on_dropped_fire
+        # ``await on_missed(job, run, reason)`` for every MISSED row this scheduler records —
+        # a dropped concurrent fire, or a gap the periodic check found. Best-effort.
+        self._on_missed = on_missed
         self._scheduler = AsyncIOScheduler()
         self._started = False
         # Tracks in-flight runs by job_id so the §4 "drop concurrent fires" rule
@@ -101,6 +106,12 @@ class JobScheduler:
         # the Nomaflow Retention panel so operators can see "what did the
         # automatic sweep do" without trawling the server log.
         self._last_retention: SweepReport | None = None
+        # Missed-schedule detection (liberty.jobs.missed): per-trigger "checked up to"
+        # instants, the start instant (the window of a job with no history opens here) and
+        # the last report, surfaced by the Nomaflow housekeeping panel.
+        self._missed_watermarks: dict[str, datetime] = {}
+        self._started_at: datetime | None = None
+        self._last_missed: MissedReport | None = None
 
     # -- lifecycle ------------------------------------------------------- #
 
@@ -126,6 +137,8 @@ class JobScheduler:
         # behaviour — operators see the first sweep on time without a startup
         # burst. The policy lives on [meta] in jobs.toml.
         self.schedule_retention(self._registry.config.meta.retention)
+        self._started_at = datetime.now(timezone.utc)
+        self.schedule_missed_check(self._registry.config.meta.missed)
         self._scheduler.start()
         self._started = True
         _log.info(
@@ -165,6 +178,10 @@ class JobScheduler:
                     self._scheduler.remove_job(sj.id)
                 except Exception:  # apscheduler raises JobLookupError; "remove if present"
                     pass
+        # A re-added trigger (changed schedule) starts its missed-fire window afresh at the
+        # next check, not at the old watermark.
+        for key in [k for k in self._missed_watermarks if k == job_id or k.startswith(prefix)]:
+            del self._missed_watermarks[key]
 
     async def fire_now(self, job: Job, *, triggered_by: str) -> None:
         """Manually trigger *job* — synchronous start of a new run.
@@ -292,6 +309,58 @@ class JobScheduler:
         Surfaced by the Nomaflow Retention panel."""
         return self._last_retention
 
+    # -- missed-schedule check ------------------------------------------- #
+
+    _MISSED_JOB_ID = "__nomaflow.missed.check__"
+
+    def schedule_missed_check(self, policy: MissedPolicy) -> None:
+        """Register the recurring missed-fire check (:mod:`liberty.jobs.missed`). Idempotent,
+        same contract as :meth:`schedule_retention`: re-call after a reload, ``enabled =
+        false`` removes the task (the manual :meth:`check_missed_now` still works)."""
+        try:
+            self._scheduler.remove_job(self._MISSED_JOB_ID)
+        except Exception:
+            pass
+        if not policy.enabled:
+            _log.info("nomaflow.missed check disabled via [meta.missed] enabled=false")
+            return
+        snap = policy.model_copy()
+
+        async def _do_check() -> None:
+            try:
+                await self.check_missed_now(snap)
+            except Exception:
+                _log.exception("nomaflow.missed check raised — will retry on next interval")
+
+        self._scheduler.add_job(
+            _do_check,
+            trigger=IntervalTrigger(minutes=policy.check_interval_minutes),
+            id=self._MISSED_JOB_ID,
+            replace_existing=True,
+            misfire_grace_time=None,
+            coalesce=True,
+            max_instances=1,
+        )
+        _log.info(
+            "nomaflow.missed check registered: every %d min, grace %d min, lookback %d h",
+            policy.check_interval_minutes, policy.grace_minutes, policy.lookback_hours,
+        )
+
+    async def check_missed_now(self, policy: MissedPolicy | None = None) -> MissedReport:
+        """One pass of the missed-fire check with *policy* (default: the registry's) — the
+        recurring task and ``POST /admin/jobs/missed/check`` both land here."""
+        policy = policy or self._registry.config.meta.missed
+        self._last_missed = await check_missed(
+            self._runner._db, self._registry, policy,  # noqa: SLF001 — same module-family
+            watermarks=self._missed_watermarks, started_at=self._started_at or datetime.now(timezone.utc),
+            on_missed=self._on_missed,
+        )
+        return self._last_missed
+
+    @property
+    def last_missed(self) -> MissedReport | None:
+        return self._last_missed
+
     # -- internals ------------------------------------------------------ #
 
     # Separator for a schedulable-preset's APScheduler id. ``::`` can't appear in a
@@ -385,6 +454,7 @@ class JobScheduler:
                     )
                 except Exception:  # broadcast failure shouldn't take the scheduler down
                     _log.exception("nomaflow.scheduler dropped-fire hook raised")
+            await self._record_dropped(job, preset_name)
             return
 
         self._in_flight.add(job_id)
@@ -415,6 +485,22 @@ class JobScheduler:
             _log.exception("nomaflow.scheduler %r failed", job_id)
         finally:
             self._in_flight.discard(job_id)
+
+    async def _record_dropped(self, job: Job, preset_name: str | None) -> None:
+        """A dropped fire is a missed one: record the MISSED row for the instant (so the run
+        history shows it and the periodic check does not report it again) and raise the hook."""
+        label = f"preset {preset_name!r} of job {job.id!r}" if preset_name else f"job {job.id!r}"
+        reason = f"missed: the fire of {label} was dropped because the previous run was still running"
+        try:
+            row = await record_missed(self._runner._db, job.id, datetime.now(timezone.utc), reason)  # noqa: SLF001
+        except Exception:
+            _log.exception("nomaflow.scheduler could not record the dropped fire of %r", job.id)
+            return
+        if row is not None and self._on_missed is not None:
+            try:
+                await self._on_missed(job, row, reason)
+            except Exception:  # noqa: BLE001 — best-effort
+                _log.exception("nomaflow.scheduler on_missed hook raised")
 
     # -- introspection (for the future monitoring Screen + tests) ----- #
 

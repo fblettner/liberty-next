@@ -2,7 +2,7 @@
 // liberty/web/admin.py (GET/PUT /admin/config/jobs/parsed). The UI design is
 // docs/NOMAFLOW-UI.md.
 
-export type RunState = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELED'
+export type RunState = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELED' | 'MISSED'
 
 /** The latest run of a job — the `last_run` badge on the Jobs list. */
 export interface JobLastRun {

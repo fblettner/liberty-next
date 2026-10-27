@@ -20,9 +20,15 @@ events = ["update"]                              # insert | update | delete
 when = [{ field = "STATUS", value = "closed" }]  # only when the written row matches (AND)
 
 [notifications.job_failed]
-trigger = { kind = "job", events = ["failure"] } # failure | succeeded | canceled | long_run (+ long_run_minutes); jobs = [...] to narrow
+trigger = { kind = "job", events = ["failure"] } # failure | succeeded | canceled | missed | long_run (+ long_run_minutes); jobs = [...] to narrow
 recipients = ["role:admin"]
-subject = "Job {JOB} failed"                     # JOB, RUN_ID, STATE, ERROR, DURATION_MINUTES, ROWS
+subject = "Job {JOB} failed"                     # JOB, RUN_ID, STATE, ERROR, DURATION_MINUTES, ROWS, EXPECTED_AT
+body = "{ERROR}"
+
+[notifications.job_missed]                      # a scheduled fire that did not run (server down, previous run still running)
+trigger = { kind = "job", events = ["missed"] }
+recipients = ["role:admin"]
+subject = "Job {JOB} did not run at {EXPECTED_AT}"
 body = "{ERROR}"
 
 [notifications.ask_review]

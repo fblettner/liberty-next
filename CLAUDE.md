@@ -103,7 +103,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           scaffold_tools.py (proposal-only), routes.py (SSE)
   jobs/ (nomaflow)        schema.py (jobs.toml), registry, runner (state machine, retries,
                           cancel), scheduler (APScheduler, single process), recovery, retention,
-                          runlog, wiring, steps/{sql_query,sql_copy,http,python,ldap_sync,call_job,
+                          missed.py (missed-schedule check: expected cron instants vs the run
+                          history → MISSED runs + the `missed` job event), runlog, wiring, steps/{sql_query,sql_copy,http,python,ldap_sync,call_job,
                           file_load (xlsx / csv → table, replace_partition in one transaction; the file
                           from `path`, a per-fire upload or a watched folder)}, files.py (the work area:
                           `[jobs] files_dir`, uploads, rejects reports)
@@ -150,7 +151,7 @@ tests/                    pytest (asyncio auto mode); SQLite fixtures; no live D
 | `/api/notifications` `/admin/notify/test` | `web/notifications.py` | my inbox (list, unread count, mark read); a superuser's test send through the dispatcher |
 | `/ai` | `ai/routes.py` | `POST /ai/chat` (SSE), `GET /ai/tools` — perm `ai:chat` |
 | `/admin` | `web/admin.py` (3.3k lines — the config builders' backend), `web/dictgen.py` | reload, `GET /admin/config/schema`, `GET/PUT /admin/config/<section>/parsed`, rename / move / clone / delete-with-deps / find-usages / dependencies / integrity, packages (build / import), versions, AI proposal apply, API test, dictionary scan — **superuser** |
-| `/admin/access` `/admin/jobs` `/admin/changesets` | `web/access.py`, `web/jobs.py`, `web/changesets.py` | roles / permissions, nomaflow jobs + runs + presets + `{job}/upload` / `runs/{id}/files/{name}`, change packages |
+| `/admin/access` `/admin/jobs` `/admin/changesets` | `web/access.py`, `web/jobs.py`, `web/changesets.py` | roles / permissions, nomaflow jobs + runs + presets + `{job}/upload` / `runs/{id}/files/{name}` + `retention` / `missed` policies, change packages |
 | `/socket.io` | `sio.py` | JWT on handshake; locks, dashboard, log rooms |
 
 Row-level scope: a role's `scope` rules (dictionary item `dd` or result `column` → values, from a

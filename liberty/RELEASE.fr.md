@@ -36,7 +36,7 @@
   `field = value` (« STATUS = closed ») ; les marqueurs sont les colonnes de la ligne plus `USER`,
   `APP`, `SCREEN`, `EVENT`. Un **événement de tâche** : `failure`, `succeeded`, `canceled`, ou
   `long_run` avec `long_run_minutes`, pour toutes les tâches ou une liste ; marqueurs `JOB`,
-  `RUN_ID`, `STATE`, `ERROR`, `DURATION_MINUTES`, `ROWS`. Les `alerts.recipients` propres à une
+  `RUN_ID`, `STATE`, `ERROR`, `DURATION_MINUTES`, `ROWS`, `EXPECTED_AT`. Les `alerts.recipients` propres à une
   tâche reçoivent un message d'échec même sans règle. Une **action** : une nouvelle étape
   `send_notification` dans les chaînes d'un écran déclenche la règle côté serveur avec les valeurs
   de la ligne ; seule une règle déclarée `kind = "action"` peut l'être ainsi, et la règle garde ses
@@ -52,6 +52,22 @@
   d'écran »), les canaux, les destinataires choisis parmi les utilisateurs et les rôles ou saisis
   comme adresses, les modèles de sujet / corps / lien, la cible du canal action, et un bouton
   « Envoyer un test » qui diffuse la règle avec des valeurs d'exemple.
+
+- **Planifications manquées.** Le planificateur garde ses déclencheurs cron en mémoire : un tir
+  qui tombe pendant que le serveur est arrêté n'est jamais connu, et un tir qui arrive pendant que
+  l'exécution précédente de la même tâche tourne encore est ignoré ; dans les deux cas l'historique
+  gardait un trou silencieux. Un contrôle périodique (`[meta.missed]` dans `jobs.toml` :
+  `enabled`, `grace_minutes` 10, `check_interval_minutes` 5, `lookback_hours` 24) liste désormais
+  les instants que chaque déclencheur actif aurait dû tirer depuis le dernier contrôle et cherche
+  une exécution près de chacun ; un trou est enregistré comme une exécution **`MISSED`** (visible
+  dans la liste des exécutions et comme dernière exécution de la tâche ; enregistrée une fois, un
+  redémarrage ne la signale jamais deux fois) et remonté comme le nouvel événement de tâche
+  **`missed`** pour les règles, avec le marqueur `EXPECTED_AT`. Un tir concurrent abandonné est
+  enregistré de la même façon. Une exécution manuelle lancée dans la tolérance compte pour le tir ;
+  une tâche qui n'a jamais tourné n'est contrôlée qu'à partir du démarrage du planificateur. Sur la
+  page des tâches, un panneau « Planifications manquées » à côté de la rétention modifie la
+  politique, montre le dernier contrôle et en lance un (« Contrôler maintenant ») ; routes
+  `GET /admin/jobs/missed`, `POST /admin/jobs/missed/check`.
 
 **Écrans : `editable_when`, une règle de lecture seule par ligne**
 - Un écran peut dire quand une ligne existante peut être modifiée : `editable_when = [{ field =

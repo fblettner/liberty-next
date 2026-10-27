@@ -47,6 +47,7 @@ _FINISHED_STATES: tuple[str, ...] = (
     RunState.SUCCEEDED.value,
     RunState.FAILED.value,
     RunState.CANCELED.value,
+    RunState.MISSED.value,
 )
 
 

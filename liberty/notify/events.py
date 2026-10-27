@@ -68,16 +68,19 @@ def fire_screen_event(
 def fire_job_event(
     rules: NotificationsFile | None, dispatcher: Dispatcher | None, *, job_id: str, run_id: str, state: str,
     error: str | None, duration_minutes: float | None, rows: int | None, extra_recipients: list[str] | None = None,
+    expected_at: str | None = None,
 ) -> list[asyncio.Task]:
     """A finished run: ``failure`` / ``succeeded`` / ``canceled`` from the state, plus ``long_run``
-    when a rule's threshold is met. *extra_recipients* (the job's own ``alerts.recipients``)
-    get a plain failure message even without a rule."""
+    when a rule's threshold is met; a ``MISSED`` row (a scheduled fire that never ran) is the
+    ``missed`` event with ``EXPECTED_AT``. *extra_recipients* (the job's own
+    ``alerts.recipients``) get a plain failure message even without a rule."""
     if dispatcher is None:
         return []
-    event = {"FAILED": "failure", "SUCCEEDED": "succeeded", "CANCELED": "canceled"}.get(state, state.lower())
+    event = {"FAILED": "failure", "SUCCEEDED": "succeeded", "CANCELED": "canceled", "MISSED": "missed"}.get(state, state.lower())
     payload = {
         "JOB": job_id, "RUN_ID": run_id, "STATE": state, "ERROR": error or "",
         "DURATION_MINUTES": round(duration_minutes, 1) if duration_minutes is not None else "", "ROWS": rows if rows is not None else "",
+        "EXPECTED_AT": expected_at or "",
     }
     tasks: list[asyncio.Task] = []
     if rules is not None:

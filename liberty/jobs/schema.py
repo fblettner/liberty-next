@@ -502,9 +502,31 @@ class RetentionPolicy(BaseModel):
     )
 
 
+class MissedPolicy(BaseModel):
+    """Missed-schedule detection: every ``check_interval_minutes`` the scheduler lists the cron
+    instants each active trigger should have fired since the last check and looks for a run
+    near each one. An instant with no run (the server was down, or APScheduler skipped the
+    fire because the previous run was still running) is recorded as a ``MISSED`` run — visible
+    in the run history, deduplicated by the ``(job_id, scheduled_at)`` constraint so a restart
+    never alerts twice — and raised as the ``missed`` job event for the notification rules.
+
+    ``grace_minutes`` is how late a fire may start before it counts as missed (a slow
+    scheduler tick, a queued fire). ``lookback_hours`` bounds the first check after a start:
+    the window opens at the job's last recorded run, but never earlier than this.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=True, description="Master toggle for the recurring check.")
+    grace_minutes: int = Field(default=10, ge=1, le=1440, description="A fire may start this late and still count.")
+    check_interval_minutes: int = Field(default=5, ge=1, le=1440, description="How often the check runs.")
+    lookback_hours: int = Field(default=24, ge=1, le=168, description="How far back the first check after a start may look.")
+
+
 class _Meta(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version: int = 1
+    missed: MissedPolicy = Field(default_factory=MissedPolicy)
     # Retention is per-deployment, not per-job — lives on [meta] so it travels with
     # jobs.toml (one source of truth for "everything about how this deployment runs
     # nomaflow"). Defaults to an enabled policy with 30 days / 100 runs / hourly

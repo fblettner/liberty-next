@@ -42,6 +42,11 @@ trigger = { kind = "job", events = ["long_run"], jobs = ["sales-load"], long_run
 recipients = ["user:ann"]
 subject = "{JOB} took {DURATION_MINUTES} min"
 
+[notifications.job_missed]
+trigger = { kind = "job", events = ["missed"] }
+recipients = ["role:admin"]
+subject = "{JOB} did not run at {EXPECTED_AT}"
+
 [notifications.on_demand]
 trigger = { kind = "action" }
 recipients = ["user:bob"]
@@ -56,7 +61,7 @@ subject = "never"
 
 def test_parse_and_match() -> None:
     rules = _rules(RULES)
-    assert set(rules.notifications) == {"period_closed", "any_delete", "job_failed", "slow_sales", "on_demand", "off"}
+    assert set(rules.notifications) == {"period_closed", "any_delete", "job_failed", "slow_sales", "job_missed", "on_demand", "off"}
     t = rules.notifications["period_closed"].trigger
     assert isinstance(t, ScreenTrigger) and t.events == ["update"] and t.when[0].field == "STATUS"
     assert when_holds(t.when, {"status": " closed "}) and not when_holds(t.when, {"STATUS": "open"}) and not when_holds(t.when, {})
@@ -68,6 +73,7 @@ def test_parse_and_match() -> None:
     # job matching
     assert [r for r, _ in rules.for_job("sales-load", "failure")] == ["job_failed"]
     assert rules.for_job("sales-load", "succeeded") == []
+    assert [r for r, _ in rules.for_job("sales-load", "missed")] == ["job_missed"]
     assert [r for r, _ in rules.for_job("sales-load", "long_run", duration_minutes=45)] == ["slow_sales"]
     assert rules.for_job("sales-load", "long_run", duration_minutes=10) == []
     assert rules.for_job("other", "long_run", duration_minutes=45) == []
@@ -111,6 +117,11 @@ async def test_events_dispatch_matching_rules() -> None:
     assert len(tasks) == 1
     await drain()
     assert d.calls[-1]["rule"] == "slow_sales" and d.calls[-1]["payload"]["STATE"] == "SUCCEEDED"
+    # a missed fire: the MISSED state is the "missed" event, with the expected instant
+    tasks = fire_job_event(rules, d, job_id="sales-load", run_id="r3", state="MISSED", error="missed: …", duration_minutes=None, rows=None, expected_at="2026-10-27T02:00+00:00")
+    assert len(tasks) == 1
+    await drain()
+    assert d.calls[-1]["rule"] == "job_missed" and d.calls[-1]["payload"]["EXPECTED_AT"] == "2026-10-27T02:00+00:00"
     # an action rule, awaited; a non-action rule is refused
     report = await fire_action_rule(rules, d, rule_id="on_demand", payload={"PERIOD": "2026-03"}, user="ann")
     assert report is not None and d.calls[-1]["rule"] == "on_demand" and d.calls[-1]["payload"]["USER"] == "ann"
