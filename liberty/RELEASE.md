@@ -66,9 +66,16 @@
   `integrity_checks` (the configuration cross-reference checks). The assistant reads the running
   server instead of guessing when something failed, is late or is missing. Off by default because
   the log can carry what the server logged.
+- **Follow-up chips.** The assistant ends each reply with two or three questions the user is
+  likely to ask next; the chat shows them as chips under the reply (a click sends one) and never
+  shows the marker line the model wrote.
 - The chat folds a turn's tool calls into one muted line ("3 tool calls", open to see them); a
   failed call keeps its message visible.
 - Dropdowns: a long code (a model id) is no longer cut short in the list.
+- Charts: the Y axis shows compact ticks (1.2k, 27.5M) in a wider gutter; a large value was cut
+  on the left ("0000" of "20,000,000"). The tooltip keeps the full number.
+- Data Explorer: a chart in a dashboard tile (and on the page) stayed an empty frame when the
+  layout settled after the chart measured its height; the chart now draws at the measured height.
 - Data Explorer: a table entity's fields now carry their dictionary labels. The items were looked
   up under the data connector (`jdedwards`) while the dictionary files them under the app
   (`nomajde`), as the screens do; and a field with no label showed its lower-cased name next to

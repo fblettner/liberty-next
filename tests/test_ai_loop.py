@@ -277,3 +277,31 @@ async def test_page_context_reaches_the_request() -> None:
     assert events[-1].type == "done"
     sent = a._client.messages.calls[0]["system"]
     assert len(sent) == 2 and "screen: f0092" in sent[1]["text"]
+
+
+def test_followup_splitter_holds_the_marker_line_back() -> None:
+    from liberty.ai.assistant import _FollowupSplitter
+    sp = _FollowupSplitter()
+    shown = "".join(sp.feed(d) for d in ["Here is the answer.\n", "Done.", "\n>", ">> [\"Next step?\", ", "\"Why?\"]"])
+    assert shown == "Here is the answer.\nDone."
+    assert sp.finish() == ("", ["Next step?", "Why?"])
+    # a line that is not valid JSON comes back as text
+    sp = _FollowupSplitter()
+    sp.feed("Hello\n>>> not json")
+    assert sp.finish() == ("\n>>> not json", [])
+    # no marker: a held-back newline is released at the end
+    sp = _FollowupSplitter()
+    out = sp.feed("Plain reply\n")
+    rest, qs = sp.finish()
+    assert out + rest == "Plain reply\n" and qs == []
+    # a marker at the very start of the reply
+    sp = _FollowupSplitter()
+    assert sp.feed('>>> ["Only?"]') == "" and sp.finish() == ("", ["Only?"])
+
+
+@pytest.mark.asyncio
+async def test_followups_become_an_event_and_never_a_token() -> None:
+    a = _assistant([([_text_delta("The job ran.\n>>"), _text_delta('> ["When is the next run?", "Show the log"]')], _msg([_text_block("x")], "end_turn"))])
+    events = await _collect(a)
+    assert [e.type for e in events] == ["token", "followups", "done"]
+    assert events[0].text == "The job ran." and events[1].data == {"questions": ["When is the next run?", "Show the log"]}

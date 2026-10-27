@@ -177,7 +177,13 @@ interface RenderOpts {
 const TICK_STYLE = { fontSize: 11, fill: colors.text.muted }
 const AXIS_LINE = false       // no harsh black axis line — modern dashboards lean on the grid
 const TICK_LINE = false       // ditto for tick marks
-const CHART_MARGIN = { top: 12, right: 12, left: -8, bottom: 0 }  // negative left tightens the YAxis gutter
+const CHART_MARGIN = { top: 12, right: 12, left: 0, bottom: 0 }
+
+// Y-axis ticks in compact form (1.2k, 27.5M, 3.1G): a tick of ten digits does not fit the axis
+// gutter and used to be cut on the left ("0000" of "20,000,000"); the tooltip keeps the full value.
+const compactFormat = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 })
+const formatTick = (v: unknown): string => (typeof v === 'number' && Number.isFinite(v) ? compactFormat.format(v) : String(v ?? ''))
+const Y_AXIS_WIDTH = 56
 
 /** Emit one `<linearGradient>` per series, top → bottom fading from ~85% to ~15% opacity of the
  *  series colour. Used by Bar/Area fills to give the modern soft-block look (instead of flat
@@ -234,11 +240,11 @@ export function renderChart(
   // values match Recharts' conventional "left" / "right" string ids.
   const yAxes = hasRight ? (
     <>
-      <YAxis yAxisId="left"  tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} width={42} orientation="left" />
-      <YAxis yAxisId="right" tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} width={42} orientation="right" />
+      <YAxis yAxisId="left"  tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} width={Y_AXIS_WIDTH} orientation="left" tickFormatter={formatTick} />
+      <YAxis yAxisId="right" tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} width={Y_AXIS_WIDTH} orientation="right" tickFormatter={formatTick} />
     </>
   ) : (
-    <YAxis tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} width={42} />
+    <YAxis tick={TICK_STYLE} axisLine={AXIS_LINE} tickLine={TICK_LINE} width={Y_AXIS_WIDTH} tickFormatter={formatTick} />
   )
 
   if (spec.type === 'pie') {

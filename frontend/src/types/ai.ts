@@ -10,7 +10,7 @@ export interface AiTool {
 
 /** One JSON object per `data:` line on the `/ai/chat` SSE stream. */
 export interface ChatEvent {
-  type: 'token' | 'thinking' | 'tool_call' | 'tool_result' | 'proposal' | 'error' | 'done'
+  type: 'token' | 'thinking' | 'tool_call' | 'tool_result' | 'proposal' | 'followups' | 'error' | 'done'
   text?: string
   name?: string
   input?: Record<string, unknown>
@@ -19,8 +19,9 @@ export interface ChatEvent {
   message?: string
   stop_reason?: string | null
   usage?: Record<string, number>
-  /** Set on `proposal` events — the Proposal envelope emitted by a scaffold tool. */
-  data?: Proposal
+  /** Set on `proposal` events — the Proposal envelope emitted by a scaffold tool — and on
+   *  `followups` events (`{questions: string[]}`). */
+  data?: Proposal | { questions: string[] }
 }
 
 /** What a scaffold tool proposes — rendered as an Apply card in the chat. The kinds match

@@ -1,7 +1,7 @@
 // The chart and KPI views of an aggregate result: the shared ChartCanvas (recharts) fed by
 // shapeChart (x = first dimension, series = second dimension or the measures, Top 10 + Others),
 // or one KPI card per measure with its total.
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ChartCanvas } from '../TableView/ChartCanvas'
@@ -34,6 +34,20 @@ export function ChartView({ result, view, measureKey, seriesKey, stacked, lang, 
   const nf = useMemo(() => new Intl.NumberFormat(lang, { maximumFractionDigits: 2 }), [lang])
   const shaped = useMemo(() => (view === 'kpi' ? null : shapeChart(result, { type: view as ChartType, measure: measureKey, seriesDim: seriesKey, othersLabel: t('explorer.others') })),
     [result, view, measureKey, seriesKey, t])
+  // The chart gets a measured PIXEL height: Recharts' responsive container reads its parent's
+  // height once, and inside a flex column (a dashboard tile, the page) that read lands on 0 while
+  // the layout settles — the canvas then stays empty. Observe the box and pass what it has.
+  const boxRef = useRef<HTMLDivElement | null>(null)
+  const [boxHeight, setBoxHeight] = useState(0)
+  useEffect(() => {
+    const el = boxRef.current
+    if (!el) return
+    const measure = () => setBoxHeight(el.clientHeight)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [view])
   if (view === 'kpi') {
     return (
       <Cards>
@@ -51,8 +65,8 @@ export function ChartView({ result, view, measureKey, seriesKey, stacked, lang, 
   return (
     <Box>
       {shaped.othersLabel && <Note>{t('explorer.othersNote')}</Note>}
-      <div style={{ flex: 1, minHeight: 260 }}>
-        <ChartCanvas result={shaped.result} spec={spec} connector={connector} />
+      <div ref={boxRef} style={{ flex: 1, minHeight: 260 }}>
+        <ChartCanvas result={shaped.result} spec={spec} connector={connector} height={Math.max(200, (boxHeight || 260) - 30)} />
       </div>
     </Box>
   )

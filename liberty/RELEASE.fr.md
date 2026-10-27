@@ -75,9 +75,18 @@
   la configuration). L'assistant lit le serveur au lieu de deviner quand quelque chose a échoué,
   est en retard ou manque. Désactivés par défaut car le journal peut contenir ce que le serveur
   a consigné.
+- **Puces de relance.** L'assistant termine chaque réponse par deux ou trois questions que
+  l'utilisateur posera probablement ensuite ; le chat les affiche en puces sous la réponse (un
+  clic en envoie une) et ne montre jamais la ligne repère écrite par le modèle.
 - Le chat replie les appels d'outils d'un tour en une ligne discrète (« 3 appels d'outil », à
   ouvrir pour les voir) ; un appel en échec garde son message visible.
 - Listes déroulantes : un code long (un identifiant de modèle) n'est plus tronqué dans la liste.
+- Graphiques : l'axe Y affiche des graduations compactes (1,2 k, 27,5 M) dans une gouttière plus
+  large ; une grande valeur était coupée à gauche (« 0000 » de « 20 000 000 »). L'info-bulle garde
+  le nombre complet.
+- Explorateur de données : un graphique dans une tuile de tableau de bord (et sur la page) restait
+  un cadre vide quand la mise en page se stabilisait après la mesure de sa hauteur ; il se dessine
+  maintenant à la hauteur mesurée.
 - Explorateur de données : les champs d'une entité table portent maintenant leurs libellés du
   dictionnaire. Les éléments étaient cherchés sous le connecteur de données (`jdedwards`) alors que
   le dictionnaire les range sous l'application (`nomajde`), comme le font les écrans ; et un champ

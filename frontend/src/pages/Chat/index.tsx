@@ -158,6 +158,15 @@ const Composer = styled.form`
   align-items: flex-end;
 `
 
+// The follow-up questions the assistant suggested after its last reply; a click sends one.
+const Followups = styled.div`display: flex; flex-wrap: wrap; gap: 6px; align-self: flex-start; max-width: 88%;`
+const FollowupBtn = styled.button`
+  padding: 4px 10px; border-radius: ${radius.xl}; cursor: pointer;
+  border: 1px solid ${colors.blue.border}; background: transparent; color: ${colors.text.secondary};
+  font-family: ${fonts.sans}; font-size: ${fontSize.sm};
+  &:hover { background: ${colors.blue.bg}; color: ${colors.text.primary}; }
+`
+
 // The page-context chip — what the next message carries about the page the operator is on.
 // The × drops it for this page (it comes back when they move to another one).
 const ContextChip = styled.div`
@@ -244,6 +253,7 @@ export default function Chat() {
   // The conversation survives the drawer's close and a reload (services/aiChat, last 40 messages).
   const historyRef = useRef<ChatMessage[]>(loadHistory())
   const [entries, setEntries] = useState<Entry[]>(() => entriesOf(historyRef.current))
+  const [followups, setFollowups] = useState<string[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   // The in-flight /ai/chat stream. Stop (or leaving the page) aborts the fetch — the server
@@ -292,7 +302,7 @@ export default function Chat() {
   // never typed it, so the transcript does not show it.
   async function runTurn(text: string, show: boolean) {
     if (busy) return
-    setError(null); setBusy(true)
+    setError(null); setBusy(true); setFollowups([])
     historyRef.current = [...historyRef.current, { role: 'user', content: text }]
     setEntries((es) => [...es, ...(show ? [{ kind: 'msg', role: 'user', text } as Entry] : []), { kind: 'msg', role: 'assistant', text: '' }])
 
@@ -343,7 +353,8 @@ export default function Chat() {
         if (ev.type === 'token') appendAssistant(ev.text ?? '')
         else if (ev.type === 'tool_call') addToolCall(ev.name ?? 'tool', ev.summary ?? '')
         else if (ev.type === 'tool_result') settleToolCall(ev.name ?? 'tool', !!ev.ok, ev.ok ? undefined : ev.summary)
-        else if (ev.type === 'proposal' && ev.data) addProposal(ev.name ?? 'tool', ev.data)
+        else if (ev.type === 'proposal' && ev.data && 'kind' in ev.data) addProposal(ev.name ?? 'tool', ev.data)
+        else if (ev.type === 'followups' && ev.data && 'questions' in ev.data) setFollowups(ev.data.questions)
         else if (ev.type === 'error') {
           setError(ev.message ?? 'error')
           appendAssistant(assistantText ? '' : t('chat.noResponse'))
@@ -401,6 +412,7 @@ export default function Chat() {
     historyRef.current = []
     saveHistory([])
     setEntries([])
+    setFollowups([])
     setError(null)
   }
 
@@ -469,6 +481,11 @@ export default function Chat() {
                 )}
               </Bubble>
             ) : null,
+          )}
+          {!busy && followups.length > 0 && (
+            <Followups>
+              {followups.map((q) => <FollowupBtn key={q} type="button" onClick={() => void send(q)}>{q}</FollowupBtn>)}
+            </Followups>
           )}
         </Messages>
         {error && <Banner $tone="error">{error}</Banner>}

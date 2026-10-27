@@ -51,7 +51,12 @@ DEFAULT_SYSTEM_PROMPT = (
     "7. When offered, the operations tools read the running server: jobs_status (the scheduled "
     "jobs, their last and next runs, a job's recent runs with the failing step), server_log (the "
     "recent log lines) and integrity_checks (broken references in the configuration). Prefer "
-    "them to guessing when the user reports that something failed, is late or is missing.\n\n"
+    "them to guessing when the user reports that something failed, is late or is missing.\n"
+    "8. End every reply with one last line of the form\n"
+    "   >>> [\"a short follow-up question\", \"another one\"]\n"
+    "   — two or three questions the user is likely to ask next, in their language, as a JSON "
+    "list of strings; nothing after that line. Leave the line out when no follow-up makes "
+    "sense (a yes/no answer, an error report).\n\n"
     "Scaffolding tools (introspect_table / scaffold_*): when enabled they let you propose "
     "new connector queries, dictionary entries, screens, and menu items. These tools never "
     "write to disk — they return a Proposal envelope that the user reviews and applies via "
@@ -84,11 +89,65 @@ TOOL_RESULT_MAX_CHARS = 60_000
 _WEB_FETCH_TYPE = "web_fetch_20260209"
 
 
+FOLLOWUP_MARKER = ">>>"
+
+
+class _FollowupSplitter:
+    """Streams the reply's text while holding back the trailing ``>>> [...]`` line (rule 8 of
+    the prompt): the user never sees the marker, the chat gets the questions as chips.
+
+    Text is released up to the last point that can still be the start of a marker line, so a
+    marker split across deltas is caught; at the end of the turn the held part is parsed — a
+    JSON list of strings becomes the follow-ups, anything else is released as text."""
+
+    def __init__(self) -> None:
+        self._buf = ""          # text received but not yet released
+        self._held = False      # the buffer starts at a marker line
+
+    def feed(self, delta: str) -> str:
+        """Return the text to show now."""
+        if self._held:
+            self._buf += delta
+            return ""
+        self._buf += delta
+        i = self._buf.find("\n" + FOLLOWUP_MARKER)
+        if i < 0 and self._buf.startswith(FOLLOWUP_MARKER):
+            i = 0
+        if i >= 0:
+            out, self._buf, self._held = self._buf[:i], self._buf[i:], True
+            return out
+        # hold back a suffix that may be the beginning of "\n>>>"
+        keep = 0
+        probe = "\n" + FOLLOWUP_MARKER
+        for n in range(min(len(self._buf), len(probe) - 1), 0, -1):
+            if probe.startswith(self._buf[-n:]):
+                keep = n
+                break
+        out, self._buf = self._buf[: len(self._buf) - keep], self._buf[len(self._buf) - keep:]
+        return out
+
+    def finish(self) -> tuple[str, list[str]]:
+        """``(remaining text, follow-up questions)`` at the end of the turn."""
+        buf, self._buf, held = self._buf, "", self._held
+        self._held = False
+        if not held:
+            return buf, []
+        line = buf.strip()
+        payload = line[len(FOLLOWUP_MARKER):].strip() if line.startswith(FOLLOWUP_MARKER) else ""
+        try:
+            parsed = json.loads(payload)
+        except ValueError:
+            return buf, []
+        if isinstance(parsed, list) and parsed and all(isinstance(q, str) and q.strip() for q in parsed):
+            return "", [q.strip() for q in parsed][:4]
+        return buf, []
+
+
 @dataclass(slots=True)
 class ChatEvent:
     """One event emitted by :meth:`AiAssistant.chat`."""
 
-    type: str  # token | thinking | tool_call | tool_result | proposal | error | done
+    type: str  # token | thinking | tool_call | tool_result | proposal | followups | error | done
     text: str | None = None
     name: str | None = None
     input: dict[str, Any] | None = None
@@ -209,6 +268,7 @@ class AiAssistant:
         usage_total = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
 
         for _ in range(max(1, self.settings.max_iterations)):
+            splitter = _FollowupSplitter()
             try:
                 async with self._client.messages.stream(messages=convo, **base_kwargs) as stream:
                     async for event in stream:
@@ -218,13 +278,23 @@ class AiAssistant:
                         delta = getattr(event, "delta", None)
                         dtype = getattr(delta, "type", None)
                         if dtype == "text_delta" and getattr(delta, "text", None):
-                            yield ChatEvent("token", text=delta.text)
+                            shown = splitter.feed(delta.text)
+                            if shown:
+                                yield ChatEvent("token", text=shown)
                         elif dtype == "thinking_delta" and getattr(delta, "thinking", None):
                             yield ChatEvent("thinking", text=delta.thinking)
                     final = await stream.get_final_message()
             except Exception as exc:  # network / API error — surface and stop
+                rest, _ = splitter.finish()
+                if rest:
+                    yield ChatEvent("token", text=rest)
                 yield ChatEvent("error", message=f"Anthropic request failed: {type(exc).__name__}: {exc}")
                 return
+            rest, followups = splitter.finish()
+            if rest:
+                yield ChatEvent("token", text=rest)
+            if followups:
+                yield ChatEvent("followups", data={"questions": followups})
 
             self._accumulate(usage_total, getattr(final, "usage", None))
             convo.append({"role": "assistant", "content": final.content})
