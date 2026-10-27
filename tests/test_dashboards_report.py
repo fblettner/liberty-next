@@ -29,13 +29,13 @@ def test_period_and_filter_params_bind_like_the_page() -> None:
     assert p == {"PERIOD_FROM": "2026-09-01", "PERIOD_TO": "2026-09-30", "PREV_FROM": "2026-08-01", "PREV_TO": "2026-08-31", "PERIOD_BASIS": "paid", "PAID_ON_from": "2026-09-01", "PAID_ON_to": "2026-09-30"}
     p = period_params(period, PeriodPick(date(2026, 9, 1), date(2026, 9, 30), "doc"), {"SALES_DATE": "SDATE"})
     assert p["SDATE_from"] == "2026-09-01" and "PAID_ON_from" not in p
-    assert "SDATE_from" not in period_params(period, PeriodPick(date(2026, 9, 1), date(2026, 9, 30), "doc"), None)   # no screen → binds only
+    assert period_params(period, PeriodPick(date(2026, 9, 1), date(2026, 9, 30), "doc"), None)["_dd_SALES_DATE_from"] == "2026-09-01"   # no screen → the item itself
     all_dates = period_params(period, PeriodPick(), None)
     assert all_dates["PERIOD_FROM"] == "0001-01-01" and all_dates["PREV_TO"] == "9999-12-31" and not any(k.endswith("_from") for k in all_dates if k != "PERIOD_FROM" and k != "PREV_FROM")
     assert period_params(None, pick, None) == {} and period_params(period, None, None) == {}
     filters = [{"id": "bu", "label": "Business unit", "dictionary_key": "BU_CODE"}, {"id": "co", "label": "Company", "dictionary_key": "CO"}]
     assert filter_params(filters, {"bu": "B1", "co": ""}, {"BU_CODE": "UNIT", "CO": "COMPANY"}) == {"UNIT": "B1", "UNIT_op": "equals"}
-    assert filter_params(filters, {"bu": "B1"}, None) == {} and filter_params(filters, {"bu": "B1"}, {"OTHER": "X"}) == {}
+    assert filter_params(filters, {"bu": "B1"}, None) == {"_dd_BU_CODE": "B1"} and filter_params(filters, {"bu": "B1"}, {"OTHER": "X"}) == {"_dd_BU_CODE": "B1"}
 
 
 RESULT = {
@@ -90,3 +90,10 @@ async def test_dashboard_sections_group_the_kpis_and_keep_going_on_a_failure() -
     assert sections[0].title == "Chiffres clés" and sections[0].headers == ["Lines", "Quantity"] and sections[0].rows == [[4.0, "14,50 €"]]
     assert sections[1].chart == "pie" and sections[2].rows == [["no such table"]] and sections[3].rows == [[2.5]]
     assert seen[0][2] == {"unit": "A", "unit_op": "equals", "PERIOD_FROM": "2026-02-01", "PERIOD_TO": "2026-02-28", "PREV_FROM": "2026-01-01", "PREV_TO": "2026-01-31", "SOLD_ON_from": "2026-02-01", "SOLD_ON_to": "2026-02-28"}
+
+
+def test_split_dd_binds_takes_the_reserved_params_out() -> None:
+    from liberty.web.connectors import split_dd_binds
+    plain, dd = split_dd_binds({"PERIOD_FROM": "2026-01-01", "_dd_BU_CODE": "B1", "_dd_SALES_DATE_from": "2026-01-01", "_dd_SALES_DATE_to": "2026-01-31", "_dd_": "x"})
+    assert plain == {"PERIOD_FROM": "2026-01-01"} and dd == {"BU_CODE": "B1", "SALES_DATE__from": "2026-01-01", "SALES_DATE__to": "2026-01-31"}
+    assert split_dd_binds({}) == ({}, {})

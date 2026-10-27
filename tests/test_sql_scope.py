@@ -204,3 +204,21 @@ async def test_wrapped_query_keeps_an_alias_qualified_order_by(tmp_path) -> None
         assert [r["amount"] for r in res.rows] == [3, 2]
     finally:
         await pools.dispose()
+
+
+@pytest.mark.asyncio
+async def test_dictionary_binds_filter_a_query_without_a_screen(conn, jde) -> None:
+    """A dashboard filter / period on a bare query: the value comes under the dictionary item and
+    the connector binds it on the column carrying the item — its name (probe path), a hint's
+    dd, or the name minus the dd_prefix — ignoring an item no column carries."""
+    res = await conn.execute("sales_get", dd_binds={"COMPANY": "A"})                 # no hints: probed, same name
+    assert [r["id"] for r in res.rows] == [1, 2]
+    res = await conn.execute("sales_get", dd_binds={"AMOUNT__from": "20", "AMOUNT__to": "30", "NOPE": "x"})   # a range, typed; an unknown item ignored
+    assert [r["id"] for r in res.rows] == [2, 3]
+    res = await conn.execute("sales_get", column_hints=HINTS, dd_binds={"COMPANY_ID": "C"})   # through the hint's dd
+    assert [r["id"] for r in res.rows] == [4]
+    assert len((await conn.execute("sales_get", dd_binds={"COMPANY": ""})).rows) == 4      # a blank pick binds nothing
+    events = [ev async for ev in conn.execute_stream("sales_get", dd_binds={"POLE": "X"})]
+    assert sum(len(ev.rows) for ev in events if isinstance(ev, StreamRows)) == 2
+    res = await jde.execute("ab_get", dd_binds={"CO": "00050"})                        # dd_prefix: ABCO carries CO, blank-padded, TRIMmed
+    assert [r["ABAN8"] for r in res.rows] == [2]

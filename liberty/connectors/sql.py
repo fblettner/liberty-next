@@ -1536,6 +1536,74 @@ class SQLConnector:
             out += f"\nORDER BY {_hoisted_order_by(order_clause)}"
         return out, {**(params or {}), **typed}
 
+    async def _apply_dd_wrap(
+        self, sql_text: str, params: dict[str, Any] | None, *, query_name: str, qdef: QueryDef,
+        stmt_type: str, column_hints: list[ColumnHint] | None, dict_scope: str | None,
+        dd_binds: dict[str, Any] | None,
+    ) -> tuple[str, dict[str, Any] | None]:
+        """**Dictionary binds** — a dashboard's filter or period on a query that has no screen:
+        the page sends the value under the dictionary item (``{"BUSINESS_UNIT_CODE": "B1"}``,
+        ``{"SALES_DATE__from": …, "SALES_DATE__to": …}``) and the connector binds it on the
+        result column carrying the item, found like the data scope finds its columns — the
+        screen hint's ``dd``, the column's own name, or the name minus the connector's
+        ``dd_prefix`` (``ABCO`` → ``CO``), from the hints when one of them carries the item,
+        else from the one-time ``WHERE 1=0`` probe. An item no column carries is ignored (the
+        widget shows everything, as on the page). The first column carrying an item wins; the
+        value is typed by the column's format and TRIMmed like the scope wrap's text columns."""
+        if not dd_binds or stmt_type != "SELECT":
+            return sql_text, params
+        wanted: dict[str, tuple[str, Any]] = {}          # item (lower) → (kind: eq | from | to, value)
+        for key, value in dd_binds.items():
+            if value is None or value == "":
+                continue
+            k = str(key)
+            kind = "eq"
+            for suffix, kk in (("__from", "from"), ("__to", "to")):
+                if k.endswith(suffix):
+                    k, kind = k[: -len(suffix)], kk
+                    break
+            wanted[(k.lower(), kind)] = (k.lower(), value)  # type: ignore[index]
+        if not wanted:
+            return sql_text, params
+        prefix = self.config.dd_prefix
+        hints = {h.name.lower(): h.name for h in column_hints or []}
+        dd_of = {h.name.lower(): (h.dd or h.name) for h in column_hints or [] if h.dd != ""}
+        items = {item for item, _kind in wanted}
+
+        def carrier(columns: dict[str, str], item: str) -> str | None:
+            for low, actual in columns.items():
+                if item in column_items(low, dd_of, prefix):
+                    return actual
+            return None
+
+        columns = hints
+        if any(carrier(hints, item) is None for item in items):
+            probed = await self._discover_columns(query_name, sql_text, qdef, params)
+            columns = {**hints, **{k: v for k, v in probed.items() if k not in hints}}
+        dialect = self._resolve_dialect()
+        trim_text = self._pools.trim_strings(self.pool_name)
+        preds: list[str] = []
+        typed: dict[str, Any] = {}
+        for (item, kind), (_i, value) in wanted.items():
+            col = carrier(columns, item)
+            if col is None:
+                continue
+            fmt = self._effective_format(col, column_hints, dict_scope)
+            is_text = not fmt or fmt.lower() in _TEXT_FORMATS
+            bind = f"LIB_DD_{col.upper()}_{kind.upper()}"
+            col_ref = f"TRIM(lib_dd.{col})" if (trim_text and is_text) else f"lib_dd.{col}"
+            bind_ref = f"CAST(:{bind} AS {_filter_sql_type(None, dialect)})" if is_text else f":{bind}"
+            op = {"eq": "=", "from": ">=", "to": "<="}[kind]
+            preds.append(f"{col_ref} {op} {bind_ref}")
+            typed[bind] = (value.strip() if (trim_text and isinstance(value, str)) else value) if is_text else _coerce_value(value, fmt or "")
+        if not preds:
+            return sql_text, params
+        body, order_clause = _split_order_by(sql_text)
+        out = f"SELECT * FROM (\n{body}\n) lib_dd\nWHERE " + " AND ".join(preds)
+        if order_clause:
+            out += f"\nORDER BY {_hoisted_order_by(order_clause)}"
+        return out, {**(params or {}), **typed}
+
     def _check_write_scope(
         self, query_name: str, params: dict[str, Any] | None, *, column_hints: list[ColumnHint] | None,
         scope: DataScope,
@@ -2218,6 +2286,7 @@ class SQLConnector:
         dry_run: bool = False,
         summary_dims: list[tuple[str, str | None]] | None = None,
         detail_filters: list[tuple[str, str | None, Any]] | None = None,
+        dd_binds: dict[str, Any] | None = None,
     ) -> QueryResult:
         """Run *query_name* with *params*; raises on bad input, returns on success.
 
@@ -2294,6 +2363,11 @@ class SQLConnector:
         sql_text, params = await self._apply_scope_wrap(
             sql_text, params, query_name=query_name, qdef=qdef, stmt_type=stmt_type,
             column_hints=column_hints, dict_scope=dict_scope, scope=scope,
+        )
+        # Dictionary binds (a dashboard's filter / period on a query without a screen).
+        sql_text, params = await self._apply_dd_wrap(
+            sql_text, params, query_name=query_name, qdef=qdef, stmt_type=stmt_type,
+            column_hints=column_hints, dict_scope=dict_scope, dd_binds=dd_binds,
         )
         # Summary (aggregate) wrap — only on SELECT. ``summary_dims`` → parent rows
         # (GROUP BY + COUNT); ``detail_filters`` → the rows of one group (filter wrap already
@@ -2588,6 +2662,7 @@ class SQLConnector:
         column_hints: list[ColumnHint] | None = None, screen_max_rows: int | None = None,
         scope: DataScope | None = None,
         dictionary_scope: str | None = None, chunk_size: int = DEFAULT_CHUNK_SIZE,  # type: ignore[name-defined]
+        dd_binds: dict[str, Any] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Run a **SELECT** query and yield :class:`StreamMeta`, then N :class:`StreamRows`,
         then exactly one :class:`StreamDone`. Server-side cursor under the hood via SQLAlchemy
@@ -2652,6 +2727,10 @@ class SQLConnector:
         sql_text, params = await self._apply_scope_wrap(
             sql_text, params, query_name=query_name, qdef=qdef, stmt_type=stmt_type,
             column_hints=column_hints, dict_scope=dict_scope, scope=scope,
+        )
+        sql_text, params = await self._apply_dd_wrap(
+            sql_text, params, query_name=query_name, qdef=qdef, stmt_type=stmt_type,
+            column_hints=column_hints, dict_scope=dict_scope, dd_binds=dd_binds,
         )
         bound = self._build_params(sql_text, qdef, params)
         bound = self._apply_form_rules(

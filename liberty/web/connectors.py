@@ -227,6 +227,30 @@ def _find_group_for_query(screen: Screen, connector: str, query: str, app: str |
     return None
 
 
+DD_PARAM_PREFIX = "_dd_"
+
+
+def split_dd_binds(params: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Take the **dictionary binds** out of a request's params: ``_dd_<ITEM>`` (equals) and
+    ``_dd_<ITEM>_from`` / ``_dd_<ITEM>_to`` (a range) — what a dashboard sends for a filter or
+    a period its widget has no screen column for. Returns ``(plain params, dd_binds)`` with the
+    binds keyed ``ITEM`` / ``ITEM__from`` / ``ITEM__to`` for :meth:`SQLConnector.execute`."""
+    plain: dict[str, Any] = {}
+    dd: dict[str, Any] = {}
+    for k, v in (params or {}).items():
+        if not str(k).startswith(DD_PARAM_PREFIX):
+            plain[k] = v
+            continue
+        item = str(k)[len(DD_PARAM_PREFIX):]
+        for suffix in ("_from", "_to"):
+            if item.endswith(suffix):
+                item = item[: -len(suffix)] + "_" + suffix
+                break
+        if item:
+            dd[item] = v
+    return plain, dd
+
+
 def _column_hints_for(screen: Screen | None) -> list[ColumnHint] | None:
     """Phase 3 — the SQL connector's runtime helpers (filter wrap / write-time coercion /
     SEQUENCE / result-column hint application) read column metadata from the matching
@@ -260,6 +284,7 @@ async def _run_sql(
     several screens share one ``read_query`` (e.g. a copied F95921 screen with hidden columns
     tweaked): without it, ``_find_screen_for_query`` returns the FIRST match and the copy's hints
     are ignored. The caller (a screen TableView / a nested-table tab) knows its own screen id."""
+    params, dd_binds = split_dd_binds(params)
     screen, slot, screen_app = (None, None, None)
     if screen_hint and screens:
         app_h, sid_h = screen_hint
@@ -318,7 +343,7 @@ async def _run_sql(
             query, params, language=language, max_rows=max_rows, user=user,
             column_hints=column_hints, audit_table=audit_table, screen_max_rows=screen_max_rows,
             dictionary_scope=dict_scope, summary_dims=summary_dims, detail_filters=detail_filters,
-            scope=scope,
+            scope=scope, dd_binds=dd_binds or None,
         )
     except (ConnectorError, ScopeDeniedError) as exc:
         raise http_for_connector_error(exc) from exc
@@ -470,15 +495,18 @@ def _stream_sql_ndjson(
             detail="Streaming is SELECT-only; use POST /api/sql/{c}/{q} for writes.",
         )
 
+    plain, dd_binds = split_dd_binds(params)
+
     async def gen() -> AsyncIterator[bytes]:
         """Render each StreamEvent to a single NDJSON line (UTF-8 bytes, trailing ``\\n``).
         Wraps the connector's async generator with an exception handler so a mid-stream
         failure becomes a terminal ``error`` event instead of a hung connection."""
         try:
             async for ev in conn.execute_stream(
-                query, params, language=language, max_rows=max_rows, user=user,
+                query, plain, language=language, max_rows=max_rows, user=user,
                 column_hints=column_hints, screen_max_rows=screen_max_rows,
                 dictionary_scope=dict_scope, chunk_size=chunk_size or 100, scope=scope,
+                dd_binds=dd_binds or None,
             ):
                 # The three concrete event types render to plain dicts; ``json.dumps`` with
                 # ``default=str`` handles dates / datetimes / Decimals the same way the

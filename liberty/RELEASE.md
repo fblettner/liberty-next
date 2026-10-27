@@ -76,6 +76,13 @@
   become cards; the numbers follow the reader's language (`1 234,5` / `1,234.5`); the
   template's own words (cover labels, confidential lines) follow it too. Excel keeps the data
   only.
+- **Dashboard filters and period on a query without a screen.** A dashboard filter (and the
+  period's date column given as a dictionary item) used to bind only through a widget screen's
+  `dd` map; a widget on a plain query ignored it. The page now sends the pick as a *dictionary
+  bind* (`_dd_<ITEM>`, `_dd_<ITEM>_from` / `_to`) and the SQL connector binds it on the result
+  column carrying the item — found as the data scope finds its columns: a hint's `dd`, the
+  column's own name, or the name minus the connector's `dd_prefix` (`ABCO` → `CO`), from a
+  one-time probe. An item no column carries is ignored, as before. The export does the same.
 - **Dashboards export to Excel and PDF.** A config dashboard (`dashboards.toml`) has Excel and
   PDF buttons in its bar, next to Refresh. The export runs server-side with exactly what the bar
   holds — the filter picks bound through each widget's screen, the period's binds and date range,

@@ -23,6 +23,7 @@ from typing import Any
 from liberty.explorer.report import MAX_ROWS, Section, _minus_months
 
 ALL_DATES = ("0001-01-01", "9999-12-31")
+DD_PARAM_PREFIX = "_dd_"            # a dictionary bind: the server resolves the item (web/connectors.py split_dd_binds)
 EMPTY_LABEL = "(empty)"
 _WORDS = {"en": {"kpis": "Key figures"}, "fr": {"kpis": "Chiffres clés"}}
 
@@ -87,22 +88,27 @@ def period_params(period: dict[str, Any] | None, pick: PeriodPick | None, dd_map
     if col:
         out[f"{col}_from"] = f
         out[f"{col}_to"] = t
+    elif dd:
+        out[f"{DD_PARAM_PREFIX}{dd}_from"] = f
+        out[f"{DD_PARAM_PREFIX}{dd}_to"] = t
     return out
 
 
 def filter_params(filters: list[dict[str, Any]], values: dict[str, str], dd_map: dict[str, str] | None) -> dict[str, str]:
     """The filter bar's picks as binds for one widget (``buildWidgetFilterParams``): a pick binds
-    the widget screen's column carrying the filter's ``dictionary_key``; no screen, no column,
-    no pick → nothing."""
-    if not filters or not dd_map:
-        return {}
+    the widget screen's column carrying the filter's ``dictionary_key``, else goes as a
+    dictionary bind for the server to resolve; no pick → nothing."""
     out: dict[str, str] = {}
-    for f in filters:
+    for f in filters or []:
         v = values.get(f["id"])
-        col = dd_map.get(f["dictionary_key"]) if v else None
+        if not v:
+            continue
+        col = (dd_map or {}).get(f["dictionary_key"])
         if col:
             out[col] = v
             out[f"{col}_op"] = "equals"
+        else:
+            out[f"{DD_PARAM_PREFIX}{f['dictionary_key']}"] = v
     return out
 
 

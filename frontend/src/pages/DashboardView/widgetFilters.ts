@@ -5,7 +5,11 @@
 // plus the `<col>_op=equals` companion the migrated SQL wrappers expect.
 //
 // Widgets whose query has no matching screen — or whose screen has no column with that `dd` —
-// simply skip the filter (no bind emitted) — same behaviour as v1's framework, no SQL surprises.
+// send the pick as a DICTIONARY BIND instead (`_dd_<ITEM>=<value>`, `_dd_<ITEM>_from` / `_to`
+// for the period): the server binds it on the result column carrying the item (its name, the
+// name minus the connector's dd_prefix, or a hint's dd — the way the data scope finds its
+// columns) and ignores it when no column does. So a plain `SELECT … FROM sales` is filtered
+// without a screen, like the scope filters it.
 //
 // Pre-Phase-3 this code walked `meta.columns` on the connector describe(); columns moved to the
 // Screen layer in Phase 3, which left filtering as a no-op until this rewire landed.
@@ -18,6 +22,9 @@ export interface PeriodSelection {
   /** The chosen basis value (one of `period.basis[].value`), or '' when the period has no basis list. */
   basis: string
 }
+
+/** The reserved prefix of a dictionary bind (`liberty/web/connectors.py` `split_dd_binds`). */
+export const DD_PARAM_PREFIX = '_dd_'
 
 /** The widest range: what "All dates" binds, so a query written with BETWEEN :PERIOD_FROM AND
  *  :PERIOD_TO keeps every row instead of comparing with NULL. */
@@ -49,6 +56,9 @@ export function buildWidgetPeriodParams(
   if (col) {
     out[`${col}_from`] = dateFrom
     out[`${col}_to`] = dateTo
+  } else if (dd) {
+    out[`${DD_PARAM_PREFIX}${dd}_from`] = dateFrom
+    out[`${DD_PARAM_PREFIX}${dd}_to`] = dateTo
   }
   return out
 }
@@ -68,17 +78,18 @@ export function buildWidgetFilterParams(
   findScreen: (connector: string, readQuery: string) => ScreenListItem | null,
 ): Record<string, string> {
   if (!filters.length) return {}
-  const screen = findScreen(connector, query)
-  const ddMap = screen?.dd_map
-  if (!ddMap) return {}                                          // no screen / no dd hints → nothing to bind
+  const ddMap = findScreen(connector, query)?.dd_map
   const out: Record<string, string> = {}
   for (const f of filters) {
     const value = filterValues[f.id]
     if (!value) continue                                          // "All" / unset
-    const col = ddMap[f.dictionary_key]
-    if (!col) continue                                            // screen has no column carrying this dd → ignore
-    out[col] = value
-    out[`${col}_op`] = 'equals'                                   // server-side wrapper expects an op
+    const col = ddMap?.[f.dictionary_key]
+    if (col) {
+      out[col] = value
+      out[`${col}_op`] = 'equals'                                 // server-side wrapper expects an op
+    } else {
+      out[`${DD_PARAM_PREFIX}${f.dictionary_key}`] = value        // no screen column: the server resolves the item
+    }
   }
   return out
 }

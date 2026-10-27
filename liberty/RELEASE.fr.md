@@ -86,6 +86,15 @@
   digest. Les KPI deviennent des cartes ; les nombres suivent la langue du lecteur (`1 234,5` /
   `1,234.5`), les mots du gabarit (libellés de couverture, mentions de confidentialité) aussi.
   Excel garde les données seules.
+- **Filtres et période d'un tableau de bord sur une requête sans écran.** Un filtre de tableau
+  de bord (et la colonne de date de la période donnée comme élément du dictionnaire) ne se
+  liait qu'à travers la carte `dd` de l'écran du widget ; un widget sur une requête nue
+  l'ignorait. La page envoie désormais le choix comme *bind de dictionnaire* (`_dd_<ITEM>`,
+  `_dd_<ITEM>_from` / `_to`) et le connecteur SQL le lie sur la colonne du résultat qui porte
+  l'élément — trouvée comme le périmètre de données trouve ses colonnes : le `dd` d'un hint, le
+  nom de la colonne, ou le nom moins le `dd_prefix` du connecteur (`ABCO` → `CO`), par une
+  sonde unique. Un élément qu'aucune colonne ne porte est ignoré, comme avant. L'export fait
+  de même.
 - **Les tableaux de bord s'exportent en Excel et en PDF.** Un tableau de bord de configuration
   (`dashboards.toml`) a des boutons Excel et PDF dans sa barre, à côté d'Actualiser. L'export
   s'exécute côté serveur avec exactement ce que la barre contient — les filtres choisis liés par
