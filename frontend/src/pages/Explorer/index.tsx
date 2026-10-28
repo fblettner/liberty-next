@@ -60,7 +60,7 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
   const lang = i18n.language || 'en'
   const { user } = useAuth()
   const modals = useModals()
-  const { currentApp, explorerModels, menus } = useWorkspace()
+  const { focusApp: currentApp, explorerModels, menus } = useWorkspace()
   const [models, setModels] = useState<ExplorerModelSummary[] | null>(null)
   const [app, setApp] = useState<string>('')
   const [modelId, setModelId] = useState<string>('')

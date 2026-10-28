@@ -113,7 +113,7 @@ const RowAction = styled.span`
 export default function ConnectorsBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
-  const { findScreen, currentApp, menus, refresh: refreshWorkspace } = useWorkspace()
+  const { findScreen, focusApp: currentApp, menus, refresh: refreshWorkspace } = useWorkspace()
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
   // The dictionary is read-only here — we just need its keys (entry ids per scope) to populate
   // the DD_ENTRIES dropdown that drives `ColumnHint.dd` and `FilterDep.source/column`.

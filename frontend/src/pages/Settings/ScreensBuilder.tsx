@@ -75,7 +75,7 @@ const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm};
 export default function ScreensBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
-  const { currentApp, refresh: refreshWorkspace } = useWorkspace()
+  const { focusApp: currentApp, refresh: refreshWorkspace } = useWorkspace()
   // Pre-select via `?app=…&screen=…` on first load (the Connectors → Screens cross-link points
   // here). We consume each query param exactly once: clear it from the URL after applying so a
   // subsequent in-app navigation away + back doesn't re-yank the selection over to the deep-link

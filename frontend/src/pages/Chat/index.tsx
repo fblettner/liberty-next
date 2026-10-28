@@ -219,7 +219,7 @@ function entriesOf(messages: ChatMessage[]): Entry[] {
 
 export default function Chat({ onClose }: { onClose?: () => void }) {
   const { t } = useTranslation()
-  const { currentApp } = useWorkspace()
+  const { focusApp: currentApp } = useWorkspace()
   const [available, setAvailable] = useState<boolean | null>(null)
   const [defaultModel, setDefaultModel] = useState('')
   const [models, setModels] = useState<AiModel[]>([])

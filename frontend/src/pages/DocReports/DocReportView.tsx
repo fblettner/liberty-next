@@ -1,7 +1,7 @@
-// Reports → the documentation reports (C12, superuser): the implementation report (this install) or the
-// technical report (the release). Left, the settings (language, the cover's date label); right, the
-// sections to include with their options; below, the download as PDF or Markdown. Modelled on nomaubl's
-// Reports page.
+// Liberty Next → Documentation reports → one report (C12, superuser): the implementation report (this
+// install) or the technical report (the release). Left, the settings (language, the cover's date label);
+// right, the sections to include with their options; below, the download as PDF or Markdown. Modelled on
+// nomaubl's Reports page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'

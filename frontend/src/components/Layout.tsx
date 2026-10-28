@@ -6,13 +6,14 @@ import { Outlet, useMatch, useNavigate, useLocation } from 'react-router-dom'
 import { isPageTabPath } from '../tabs/pageTabs'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Sun, Moon, LogOut, User, Sparkles, X, Bell, Compass } from 'lucide-react'
+import { Sun, Moon, LogOut, User, Sparkles, X, Bell, Compass, Blocks } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { useTabs } from '../tabs/TabsContext'
 import { LANGUAGE_KEY, type Language } from '../i18n'
 import { useAuth } from '../auth/AuthContext'
 import { installAuthBuiltins } from '../pages/TableView/actionRunner'
 import { useWorkspace } from '../workspace/WorkspaceContext'
+import { isLibertyApp, LIBERTY_APP } from '../services/libertyMenu'
 import { Banner, Centered, ErrorBoundary } from '../common'
 import Sidebar from './Sidebar'
 import ProfileModal from './ProfileModal'
@@ -129,7 +130,11 @@ function readDark(): boolean {
 export default function Layout() {
   const { t, i18n } = useTranslation()
   const { user, logout } = useAuth()
-  const { license, refresh: refreshWorkspace , explorerModels } = useWorkspace()
+  const { license, refresh: refreshWorkspace , explorerModels, apps, currentApp, setCurrentApp, libertyMenu, lastApp } = useWorkspace()
+  // One click between the Liberty Next workspace (the framework's pages) and the last application.
+  const inLiberty = isLibertyApp(currentApp)
+  const backApp = lastApp && apps?.some((a) => a.name === lastApp) ? lastApp : (apps?.[0]?.name ?? null)
+  const switchLiberty = () => { if (!inLiberty) setCurrentApp(LIBERTY_APP); else if (backApp) setCurrentApp(backApp) }
   const { tabs, closeAll } = useTabs()
   const navigate = useNavigate()
   // a configured-but-broken key (expired / bad signature) is worth flagging; "no key" isn't (the open framework)
@@ -273,6 +278,15 @@ export default function Layout() {
         {user && (
           <>
             <Sep />
+            {libertyMenu && (inLiberty ? backApp : true) && (
+              <>
+                <UtilBtn type="button" $active={inLiberty} onClick={switchLiberty}
+                  title={inLiberty ? t('liberty.backTo', { app: backApp }) : t('liberty.open')}>
+                  <Blocks size={14} />
+                </UtilBtn>
+                <Sep />
+              </>
+            )}
             {explorerModels && explorerModels.length > 0 && (
               <>
                 <UtilBtn type="button" title={t('explorer.title')} onClick={() => navigate('/explorer')} $active={pathname === '/explorer'}><Compass size={14} /></UtilBtn>

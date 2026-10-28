@@ -1,14 +1,13 @@
 // Left navigation rail — open, collapsed to its icons, or open on hover (the icon rail keeps its
 // width in the layout and the menu floats over the page while the mouse is on it — nomaubl's auto
 // collapse); the mode is persisted to localStorage.
-// react-router NavLinks with lucide icons. Adapted from nomaubl's Sidebar.
-// When a workspace app is active it leads with that app's menu tree (SidebarMenu),
-// then a divider, then the framework links (Connectors / Assistant / Settings).
+// Adapted from nomaubl's Sidebar.
+// It shows the picked workspace's menu tree (SidebarMenu): an application's, or the Liberty Next
+// workspace's (the framework's pages, superusers — picked like an application).
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { NavLink } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { SlidersHorizontal, Activity, Code2, ChevronLeft, ChevronRight, Wand2, PanelLeftDashed } from 'lucide-react'
+import { ChevronLeft, ChevronRight, PanelLeftDashed } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { resolveApiPath } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -95,64 +94,6 @@ const Items = styled.div`
   }
 `
 
-const Item = styled(NavLink)<{ $collapsed: boolean }>`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-radius: ${radius.md};
-  border: 1px solid transparent;
-  font-size: ${fontSize.base};
-  font-family: ${fonts.sans};
-  color: ${colors.text.secondary};
-  padding: ${({ $collapsed }) => ($collapsed ? '8px 0' : '8px 10px')};
-  justify-content: ${({ $collapsed }) => ($collapsed ? 'center' : 'flex-start')};
-  white-space: nowrap;
-  overflow: hidden;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-  &:hover { color: ${colors.text.primary}; border-color: ${colors.blue.border}; text-decoration: none; }
-  &.active {
-    background: ${colors.blue.bg};
-    border-color: ${colors.blue.border};
-    color: ${colors.text.primary};
-    font-weight: 500;
-  }
-`
-
-// Same look as Item, but a <button> — for framework links that open a MODAL instead of navigating
-// to a route (the Screen Assistant). No active state (it isn't a route).
-const ItemButton = styled.button<{ $collapsed: boolean }>`
-  display: flex; align-items: center; gap: 10px; border-radius: ${radius.md};
-  border: 1px solid transparent; background: transparent; cursor: pointer; width: 100%;
-  font-size: ${fontSize.base}; font-family: ${fonts.sans}; color: ${colors.text.secondary};
-  padding: ${({ $collapsed }) => ($collapsed ? '8px 0' : '8px 10px')};
-  justify-content: ${({ $collapsed }) => ($collapsed ? 'center' : 'flex-start')};
-  white-space: nowrap; overflow: hidden;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-  &:hover { color: ${colors.text.primary}; border-color: ${colors.blue.border}; }
-`
-
-const GroupLabel = styled.div`
-  font-size: ${fontSize.micro};
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.09em;
-  color: ${colors.text.muted};
-  padding: 0 10px 5px;
-  flex-shrink: 0;
-`
-
-// Pinned framework-link bar — Connectors / Assistant / Settings stay reachable
-// while the menu above scrolls. Only rendered when there's an app menu (else
-// the same links live at the top of <Items>).
-const FrameworkBar = styled.div`
-  padding: 8px 8px 0;
-  border-top: 1px solid ${colors.border};
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex-shrink: 0;
-`
-
 const Bottom = styled.div`
   padding: 8px 8px 0;
   border-top: 1px solid ${colors.border};
@@ -176,49 +117,6 @@ const CollapseBtn = styled.button<{ $collapsed: boolean }>`
   transition: color 0.15s, border-color 0.15s;
   &:hover { color: ${colors.text.secondary}; border-color: ${colors.border}; }
 `
-
-// Connectors / Assistant / Settings / API-docs — the framework links. Rendered
-// either at the top of <Items> (no app menu) or in <FrameworkBar> (pinned below
-// a scrolling menu) by Sidebar() below.
-function FrameworkLinks({
-  collapsed, superuser, iconSize, t, onOpenAssistant,
-}: {
-  collapsed: boolean
-  superuser: boolean
-  iconSize: number
-  t: (key: string) => string
-  onOpenAssistant: () => void
-}) {
-  return (
-    <>
-      {/* Only Settings lives here (superusers). The standalone Connectors page was removed
-          (connectors are managed + queried from Settings now); the AI assistant lives in a
-          top-toolbar-toggled right-side drawer; API Docs is a developer-only link at /docs.
-          Everything else is in the per-app menu trees from /api/menus. */}
-      {superuser && (
-        <>
-          <ItemButton type="button" $collapsed={collapsed} title={collapsed ? t('nav.assistant') : undefined} onClick={onOpenAssistant}>
-            <Wand2 size={iconSize} />
-            {!collapsed && t('nav.assistant')}
-          </ItemButton>
-          <Item to="/monitoring" $collapsed={collapsed} title={collapsed ? t('nav.monitoring') : undefined}>
-            <Activity size={iconSize} />
-            {!collapsed && t('nav.monitoring')}
-          </Item>
-          <Item to="/developer" $collapsed={collapsed} title={collapsed ? t('nav.developer') : undefined}>
-            <Code2 size={iconSize} />
-            {!collapsed && t('nav.developer')}
-          </Item>
-          <Item to="/settings" $collapsed={collapsed} title={collapsed ? t('nav.settings') : undefined}>
-            <SlidersHorizontal size={iconSize} />
-            {!collapsed && t('nav.settings')}
-          </Item>
-        </>
-      )}
-    </>
-  )
-}
-
 
 export default function Sidebar() {
   const { t } = useTranslation()
@@ -249,7 +147,6 @@ export default function Sidebar() {
   const onPick = (e: React.MouseEvent) => {
     if (floating && (e.target as HTMLElement).closest('a')) { window.clearTimeout(timer.current); setHover(false) }
   }
-  const iconSize = 16
   const [assistantOpen, setAssistantOpen] = useState(false)
   const openAssistant = () => setAssistantOpen(true)
 
@@ -265,17 +162,13 @@ export default function Sidebar() {
           (it renders null then) so its auto-init effect keeps resolving the current app. */}
       <WorkspaceSelect collapsed={collapsed} />
 
+      {/* The picked workspace's menu: an application's, or Liberty Next's (the framework's pages,
+          superusers) — the framework links no longer take room under the applications' menus. */}
       <Items>
-        {currentMenu && !collapsed
-          ? <SidebarMenu menu={currentMenu} />
-          : <FrameworkLinks collapsed={collapsed} superuser={!!user?.is_superuser} iconSize={iconSize} t={t} onOpenAssistant={openAssistant} />}
+        {currentMenu && !collapsed && (
+          <SidebarMenu menu={currentMenu} onAction={(a) => { if (a === 'assistant') openAssistant() }} />
+        )}
       </Items>
-      {currentMenu && !collapsed && (
-        <FrameworkBar>
-          <GroupLabel>{t('app.title')}</GroupLabel>
-          <FrameworkLinks collapsed={false} superuser={!!user?.is_superuser} iconSize={iconSize} t={t} onOpenAssistant={openAssistant} />
-        </FrameworkBar>
-      )}
 
       <Bottom>
         {/* open ↔ collapsed; "open on hover" is the second switch (shown while the menu is open) */}

@@ -56,7 +56,7 @@ const sstr = (v: unknown) => (typeof v === 'string' ? v : '')
 export default function DashboardsBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
-  const { currentApp, connectors } = useWorkspace()
+  const { focusApp: currentApp, connectors } = useWorkspace()
   const [scope, setScope] = useState<string>('')
   const [doc, setDoc] = useState<Dashboards | null>(null)
   const [charts, setCharts] = useState<ChartsByScope>({})

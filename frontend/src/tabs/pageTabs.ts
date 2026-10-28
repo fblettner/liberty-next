@@ -15,6 +15,7 @@ export const PAGE_TAB_PATHS = [
   '/notifications',
   '/explorer',
   '/developer',
+  '/liberty/reports',
 ] as const
 
 /** The Explorer opened on one model: ``/explorer/<app>/<model>`` (a menu link per model). */

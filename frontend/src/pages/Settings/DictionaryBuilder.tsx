@@ -130,7 +130,7 @@ function setSection(
 export default function DictionaryBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
-  const { currentApp, refresh: refreshWorkspace, connectors: wsConnectors } = useWorkspace()
+  const { focusApp: currentApp, refresh: refreshWorkspace, connectors: wsConnectors } = useWorkspace()
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
   const [dict, setDict] = useState<DictionaryData | null>(null)
   // Read-only — the *Lookups* form's query / value / label dropdowns read from here. We need to know

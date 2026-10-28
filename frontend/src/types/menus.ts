@@ -17,6 +17,9 @@ export interface MenuNode {
    *  frontend route path (page — e.g. `/nomaflow`). */
   target?: string
   params?: Record<string, unknown>
+  /** A leaf that runs something instead of opening a route — the Liberty Next workspace's screen
+   *  assistant (a modal). Never sent by the server. */
+  action?: 'assistant'
 }
 
 export interface AppMenuTree {

@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Table as TableIcon, Globe, Workflow, Play, X, ChevronLeft, ChevronRight, SlidersHorizontal, Activity, CalendarClock, Package, GitCompare, ShieldCheck, FileText, Bell, Compass, Code2 } from 'lucide-react'
+import { Table as TableIcon, Globe, Workflow, Play, X, ChevronLeft, ChevronRight, SlidersHorizontal, Activity, CalendarClock, Package, GitCompare, ShieldCheck, FileText, Bell, Compass, Code2, BookOpen } from 'lucide-react'
 
 // Icon per `page` tab (keyed by route path), so Jobs / Schedule / Package / … stay recognisable.
 const PAGE_ICONS: Record<string, typeof TableIcon> = {
@@ -19,12 +19,14 @@ const PAGE_ICONS: Record<string, typeof TableIcon> = {
   '/notifications': Bell,
   '/explorer': Compass,
   '/developer': Code2,
+  '/liberty/reports': BookOpen,
 }
 import { colors, fontSize, fonts, radius } from '../theme'
 import { useTabs, tabPath, type Tab } from '../tabs/TabsContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
 import { useBranding } from '../branding/BrandingContext'
 import { findMenuLabelWithApp } from '../services/menuLabels'
+import { libertyLabel } from '../services/libertyMenu'
 
 const Bar = styled.div`
   display: flex; align-items: stretch; gap: 4px; padding: 8px 16px 0; flex-shrink: 0;
@@ -102,7 +104,7 @@ const CloseX = styled.span`
 export default function TabStrip() {
   const { t } = useTranslation()
   const { tabs, activeId, setActive, close } = useTabs()
-  const { menus, connectors, findScreenById } = useWorkspace()
+  const { menus, libertyMenu, connectors, findScreenById } = useWorkspace()
   const { appName } = useBranding()
   const navigate = useNavigate()
 
@@ -199,7 +201,7 @@ export default function TabStrip() {
             // Page tabs are menu-driven (type="page"); resolve the leaf's localized label by its
             // route path. Falls back to the last path segment when not found in any menu.
             const hit = findMenuLabelWithApp(menus, { kind: 'page', connector: '', target: tab.target })
-            label = hit?.label ?? (tab.target === '/notifications' ? t('notifications.title') : tab.target === '/explorer' ? t('explorer.title') : tab.target === '/developer' ? t('developer.title') : null) ?? tab.target.split('/').filter(Boolean).pop() ?? tab.target
+            label = hit?.label ?? libertyLabel(libertyMenu, tab.target) ?? (tab.target === '/notifications' ? t('notifications.title') : tab.target === '/explorer' ? t('explorer.title') : tab.target === '/developer' ? t('developer.title') : null) ?? tab.target.split('/').filter(Boolean).pop() ?? tab.target
             appLabel = hit?.appLabel
           } else if (tab.kind === 'screen') {
             // A screen tab IS identified by its screen, so always show the SCREEN's own label —

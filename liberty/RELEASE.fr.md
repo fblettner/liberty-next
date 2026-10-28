@@ -37,8 +37,14 @@
   tableau de bord — lit ses colonnes dans la liste du SELECT de son SQL) (`/admin/dev/data`). Configuration : l'en-tête compte ce
   qui se modifie dans un écran, ce qui reste dans le fichier / l'environnement et ce qui n'est pas
   dans l'interface, et un filtre d'état remplace la case à cocher.
-- Rapports → Rapport d'implémentation et Rapport technique (superutilisateur) : deux cartes au-dessus des rapports des
-  applications, les sections à inclure, la langue, le libellé de date de la page de garde, PDF ou Markdown
+- L'espace Liberty Next (superutilisateur) : les pages du framework ne sont plus listées sous le menu de chaque
+  application — elles forment un espace à part, choisi dans le sélecteur d'applications comme une application ou par le
+  nouveau bouton de la barre du haut (qui ramène à la dernière application). Son menu les regroupe par usage :
+  Construire (assistant d'écrans, configuration), Exploiter (supervision, tâches, intégrité), Déployer (paquet,
+  modifications), Documenter (référence développeur, rapports de documentation). Les éditeurs de configuration
+  s'ouvrent sur la dernière application utilisée.
+- Liberty Next → Documenter → Rapports de documentation (superutilisateur) : le rapport d'implémentation et le rapport
+  technique, choisis par deux cartes ; les sections à inclure, la langue, le libellé de date de la page de garde, PDF ou Markdown
   (`/admin/dev/reports`). Le rapport technique documente la version à partir du code en cours d'exécution
   (architecture, modèle de données, référence de configuration et ses écarts, API avec l'accès de chaque route, lignes
   de commande, paquetage, références dans le code) ; le rapport d'implémentation documente l'installation (composants

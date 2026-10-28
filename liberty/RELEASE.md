@@ -32,8 +32,13 @@
   (a table no screen shows — a dashboard's query — reads its columns from its SQL's select list)
   (`/admin/dev/data`). Configuration: the header counts what is edited in a screen, what stays in
   the file / environment and what is not in the UI, and a status filter replaces the checkbox.
-- Reports → Implementation report and Technical report (superuser): two cards above the applications' reports,
-  the sections to include, the language, the cover's date label, PDF or Markdown (`/admin/dev/reports`). The
+- The Liberty Next workspace (superuser): the framework's pages are no longer listed under every application's menu —
+  they form a workspace of their own, picked in the application switcher like an application or with the new button
+  of the top bar (which returns to the last application). Its menu groups them by purpose: Build (screen assistant,
+  configuration), Operate (monitoring, jobs, integrity), Deploy (package, changes), Document (developer reference,
+  documentation reports). The configuration editors open on the last application used.
+- Liberty Next → Document → Documentation reports (superuser): the implementation report and the technical report,
+  picked from two cards; the sections to include, the language, the cover's date label, PDF or Markdown (`/admin/dev/reports`). The
   technical report documents the release from the running code (architecture, data model, configuration reference
   with its gaps, API with the access of every route, command lines, packaging, code references); the implementation
   report documents this install (enabled components, applications and menus, screens, connectors and pools with their

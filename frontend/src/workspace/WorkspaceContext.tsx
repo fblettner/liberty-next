@@ -19,14 +19,17 @@ import {
   type ReactNode,
 } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { api, ApiError, setCurrentPool as setClientPool } from '../api/client'
 import type { ConnectorMeta } from '../types/connectors'
 import type { AppMenuTree, MenusByApp } from '../types/menus'
 import type { ScreenListItem, ScreensByApp, SharedAction } from '../types/screens'
 import { type LicenseInfo, RESTRICTED } from '../types/license'
 import { useAuth } from '../auth/AuthContext'
+import { isLibertyApp, libertyMenu as buildLibertyMenu } from '../services/libertyMenu'
 
 const APP_KEY = 'liberty.app'
+const LAST_APP_KEY = 'liberty.lastApp'  // the last application picked — where the Liberty Next switch returns
 const POOL_KEY = 'liberty.poolByApp'  // { [app]: pool } — the picked pool per app (multi-environment)
 
 function readPoolByApp(): Record<string, string> {
@@ -64,6 +67,13 @@ interface WorkspaceState {
   currentApp: string | null // the explicitly picked app; null = "(all apps)"
   currentMenu: AppMenuTree | null // the menu the Sidebar shows (the picked app's, or — with one app — that one's)
   setCurrentApp: (name: string | null) => void
+  /** The Liberty Next workspace's menu (the framework's pages) — superusers only, else null. */
+  libertyMenu: AppMenuTree | null
+  /** The last application picked (never the Liberty Next workspace) — where its switch returns. */
+  lastApp: string | null
+  /** The application the editors and the assistant open on: the picked one, or — while the Liberty
+   *  Next workspace is picked — the last application. */
+  focusApp: string | null
   /** Bumped on every explicit app pick (the switcher) — the tabs close on it when the operator asked. */
   appSwitches: number
   /** The pools the current app can run against (union of the >1-pool connectors its screens use).
@@ -117,6 +127,9 @@ function writeApp(name: string | null): void {
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { user, ready } = useAuth()
   const navigate = useNavigate()
+  const { t } = useTranslation()
+  const superuser = !!user?.is_superuser
+  const libertyMenu = useMemo(() => (superuser ? buildLibertyMenu(t) : null), [superuser, t])
   const [connectors, setConnectors] = useState<ConnectorMeta[] | null>(null)
   const [menus, setMenus] = useState<MenusByApp | null>(null)
   const [screens, setScreens] = useState<Record<string, ScreenListItem[]> | null>(null)
@@ -180,7 +193,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const appNames = menus ? Object.keys(menus).filter((a) => menus[a].show_in_switcher !== false) : []
     return appNames.length ? connectors.filter((c) => appNames.includes(c.name)) : (menus && Object.keys(menus).length ? [] : connectors)
   }, [connectors, menus])
-  const isApp = useCallback((name: string) => !!apps?.some((a) => a.name === name), [apps])
+  const isApp = useCallback((name: string) => (isLibertyApp(name) ? superuser : !!apps?.some((a) => a.name === name)), [apps, superuser])
 
   // If the remembered app isn't (or no longer is) a pickable app, drop it.
   useEffect(() => {
@@ -197,6 +210,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // clearer, and a borrowed query still opens fine, it just doesn't hijack the switcher.)
 
   const [appSwitches, setAppSwitches] = useState(0)
+  const [lastApp, setLastApp] = useState<string | null>(() => {
+    try { return localStorage.getItem(LAST_APP_KEY) } catch { return null }
+  })
+  useEffect(() => {
+    if (!currentApp || isLibertyApp(currentApp)) return
+    setLastApp(currentApp)
+    try { localStorage.setItem(LAST_APP_KEY, currentApp) } catch { /* ignore — non-fatal */ }
+  }, [currentApp])
   const setCurrentApp = useCallback((name: string | null) => {
     setCurrentAppState(name)
     writeApp(name)
@@ -258,12 +279,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // every request. Runs whenever the app or its pick changes.
   useEffect(() => { setClientPool(currentPool) }, [currentPool])
 
+  const focusApp = isLibertyApp(currentApp) ? lastApp : currentApp
+
   // With exactly one app there's no picker, so the Sidebar follows it implicitly.
   const currentMenu = useMemo<AppMenuTree | null>(() => {
+    if (isLibertyApp(currentApp)) return libertyMenu
     if (!menus) return null
     const app = currentApp ?? (apps?.length === 1 ? apps[0].name : null)
     return (app && menus[app]) || null
-  }, [menus, apps, currentApp])
+  }, [menus, apps, currentApp, libertyMenu])
 
   // A connector + read_query → ScreenListItem lookup. The map is rebuilt only when `screens` changes
   // (login, reload, refresh); same connector + same read query under several apps is ambiguous → null
@@ -300,8 +324,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   )
 
   const value = useMemo<WorkspaceState>(
-    () => ({ connectors, apps, menus, screens, dashboards, sharedActions, explorerModels, license, error, currentApp, currentMenu, setCurrentApp, currentPoolOptions, currentPool, setCurrentPool, refresh, findScreen, findScreenById, appSwitches }),
-    [connectors, apps, menus, screens, dashboards, sharedActions, explorerModels, license, error, currentApp, currentMenu, setCurrentApp, currentPoolOptions, currentPool, setCurrentPool, refresh, findScreen, findScreenById, appSwitches],
+    () => ({ connectors, apps, menus, screens, dashboards, sharedActions, explorerModels, license, error, currentApp, currentMenu, setCurrentApp, libertyMenu, lastApp, focusApp, currentPoolOptions, currentPool, setCurrentPool, refresh, findScreen, findScreenById, appSwitches }),
+    [connectors, apps, menus, screens, dashboards, sharedActions, explorerModels, license, error, currentApp, currentMenu, setCurrentApp, libertyMenu, lastApp, focusApp, currentPoolOptions, currentPool, setCurrentPool, refresh, findScreen, findScreenById, appSwitches],
   )
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
 }

@@ -45,7 +45,7 @@ const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm};
 export default function ExplorerBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
-  const { currentApp, connectors, refresh: refreshWorkspace } = useWorkspace()
+  const { focusApp: currentApp, connectors, refresh: refreshWorkspace } = useWorkspace()
   const [scope, setScope] = useState('')
   const [modelId, setModelId] = useState('')
   const [doc, setDoc] = useState<Models | null>(null)

@@ -34,7 +34,7 @@ const PoolLabel = styled.span`
 `
 
 export default function WorkspaceSelect({ collapsed = false }: { collapsed?: boolean }) {
-  const { apps, currentApp, setCurrentApp, currentPoolOptions, currentPool, setCurrentPool } = useWorkspace()
+  const { apps, currentApp, setCurrentApp, libertyMenu, currentPoolOptions, currentPool, setCurrentPool } = useWorkspace()
   // Auto-init when apps loaded but no app picked yet — drops the "(all apps)" middle state
   // so the picker always reflects a real app (the operator picks across apps, never "none").
   // Runs even when collapsed (component stays mounted) so the current app always resolves.
@@ -45,7 +45,9 @@ export default function WorkspaceSelect({ collapsed = false }: { collapsed?: boo
   }, [apps, currentApp, setCurrentApp])
 
   if (collapsed) return null
-  const showApps = !!apps && apps.length >= 2
+  // the Liberty Next workspace (superusers) is picked like an application, listed after them
+  const options = [...(apps ?? []).map((c) => ({ value: c.name, label: c.name })), ...(libertyMenu ? [{ value: libertyMenu.app, label: libertyMenu.label }] : [])]
+  const showApps = !!apps && options.length >= 2
   const showPools = currentPoolOptions.length > 1  // the app spans >1 pool → offer a picker
   if (!showApps && !showPools) return null
 
@@ -57,7 +59,7 @@ export default function WorkspaceSelect({ collapsed = false }: { collapsed?: boo
           // Always switch to a real app — there's no "no selection" option anymore,
           // so v is always a valid app name (never empty string).
           onChange={(v) => { if (v) setCurrentApp(v) }}
-          options={apps!.map((c) => ({ value: c.name, label: c.name }))}
+          options={options}
         />
       )}
       {showPools && (

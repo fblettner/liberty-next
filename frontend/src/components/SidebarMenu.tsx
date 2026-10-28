@@ -61,10 +61,14 @@ import {
   User,
   UserCheck,
   Users,
+  Wand2,
+  GitCompare,
   type LucideIcon,
 } from 'lucide-react'
 import { colors, fontSize, fonts, radius } from '../theme'
 import type { AppMenuTree, MenuNode } from '../types/menus'
+
+type OnAction = (action: NonNullable<MenuNode['action']>) => void
 
 const ICONS: Record<string, LucideIcon> = {
   activity: Activity, alert: AlertCircle, barchart: BarChart3, bell: Bell,
@@ -77,7 +81,7 @@ const ICONS: Record<string, LucideIcon> = {
   user: User, usercheck: UserCheck, users: Users,
   play: Play, upload: Upload, refreshcw: RefreshCw,
   layoutdashboard: LayoutDashboard, compass: Compass, filebarchart: FileBarChart, code: Code2,
-  rocket: Rocket, receipt: Receipt, book: BookOpen, shieldcheck: ShieldCheck, shieldalert: ShieldAlert, wrench: Wrench,
+  rocket: Rocket, receipt: Receipt, wand: Wand2, gitcompare: GitCompare, book: BookOpen, shieldcheck: ShieldCheck, shieldalert: ShieldAlert, wrench: Wrench,
 }
 export function iconFor(name: string | undefined): LucideIcon | null {
   return name ? (ICONS[name.toLowerCase().replace(/[^a-z0-9]/g, '')] ?? null) : null
@@ -147,6 +151,16 @@ const Leaf = styled(NavLink)`
   }
 `
 
+const ActionLeaf = styled.button`
+  ${rowBase}
+  background: none;
+  cursor: pointer;
+  color: ${colors.text.muted};
+  padding: 7px 8px 7px ${CHEVRON_W + 8}px;
+  & svg { flex-shrink: 0; opacity: 0.65; }
+  &:hover { color: ${colors.text.primary}; border-color: ${colors.blue.border}; }
+`
+
 const DeadLeaf = styled.span`
   ${rowBase}
   color: ${colors.text.muted};
@@ -194,7 +208,7 @@ function NodeIcon({ node, fallback }: { node: MenuNode; fallback?: ComponentType
   return Icon ? <Icon size={14} /> : null
 }
 
-function Node({ node, openIds, app }: { node: MenuNode; openIds: Set<string>; app: string }) {
+function Node({ node, openIds, app, onAction }: { node: MenuNode; openIds: Set<string>; app: string; onAction?: OnAction }) {
   const [open, setOpen] = useState(() => openIds.has(node.id))  // collapsed by default; the path to the active screen auto-opens
   if (node.items) {
     const Chev = open ? ChevronDown : ChevronRight
@@ -207,7 +221,7 @@ function Node({ node, openIds, app }: { node: MenuNode; openIds: Set<string>; ap
         </FolderRow>
         {open && (
           <ChildrenWrap>
-            {node.items.map((c) => <Node key={c.id} node={c} openIds={openIds} app={app} />)}
+            {node.items.map((c) => <Node key={c.id} node={c} openIds={openIds} app={app} onAction={onAction} />)}
           </ChildrenWrap>
         )}
       </>
@@ -220,6 +234,7 @@ function Node({ node, openIds, app }: { node: MenuNode; openIds: Set<string>; ap
       <LeafLabel>{node.label}</LeafLabel>
     </>
   )
+  if (node.action && onAction) return <ActionLeaf type="button" title={node.label} onClick={() => onAction(node.action!)}>{inner}</ActionLeaf>
   return to ? (
     <Leaf to={to} end title={node.label}>{inner}</Leaf>
   ) : (
@@ -227,7 +242,7 @@ function Node({ node, openIds, app }: { node: MenuNode; openIds: Set<string>; ap
   )
 }
 
-export default function SidebarMenu({ menu }: { menu: AppMenuTree }) {
+export default function SidebarMenu({ menu, onAction }: { menu: AppMenuTree; onAction?: OnAction }) {
   const { pathname } = useLocation()
   const openIds = useMemo(() => ancestorsOfActive(menu.items, pathname, menu.app), [menu, pathname])
   if (menu.items.length === 0) return null
@@ -235,7 +250,7 @@ export default function SidebarMenu({ menu }: { menu: AppMenuTree }) {
     <>
       <SectionLabel title={menu.label}>{menu.label}</SectionLabel>
       {menu.items.map((node) => (
-        <Node key={node.id} node={node} openIds={openIds} app={menu.app} />
+        <Node key={node.id} node={node} openIds={openIds} app={menu.app} onAction={onAction} />
       ))}
     </>
   )

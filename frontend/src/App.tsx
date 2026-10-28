@@ -94,6 +94,8 @@ export default function App() {
         <Route path="settings" element={<TabRoute kind="settings" />} />
         <Route path="monitoring" element={<TabRoute kind="monitoring" />} />
         <Route path="developer" element={<TabRoute kind="page" />} />
+        {/* the Liberty Next workspace's own pages (superuser) */}
+        <Route path="liberty/reports" element={<TabRoute kind="page" />} />
         {/* nomaflow feature area — Jobs / Schedule / Package / Changes / Integrity open as `page`
             tabs (TabHost renders them); only the Job editor is a direct Outlet page. */}
         <Route path="nomaflow" element={<TabRoute kind="page" />} />

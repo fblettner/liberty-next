@@ -197,7 +197,7 @@ export default function MenusBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
   // Aliased — this component already has a local ``currentApp`` (the selected app's menu tree).
-  const { currentApp: workspaceApp } = useWorkspace()
+  const { focusApp: workspaceApp } = useWorkspace()
   const [schemas, setSchemas] = useState<ConfigSchemas | null>(null)
   // Read-only — the inspector's CONNECTOR / TARGET dropdowns pull from here. Loaded alongside
   // the menus + schema so the framework-enum augmentation can offer real query / endpoint names.

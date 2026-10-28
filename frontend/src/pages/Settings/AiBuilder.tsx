@@ -42,7 +42,7 @@ const Item = styled.div`
 export default function AiBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
-  const { currentApp, connectors } = useWorkspace()
+  const { focusApp: currentApp, connectors } = useWorkspace()
   const [scope, setScope] = useState('')
   const [editing, setEditing] = useState<(PlaybookBody & { id: string }) | null | undefined>(undefined)
   const [doc, setDoc] = useState<Record<string, AppAiBody> | null>(null)

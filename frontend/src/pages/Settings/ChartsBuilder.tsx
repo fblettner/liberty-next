@@ -54,7 +54,7 @@ const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm};
 export default function ChartsBuilder() {
   const { t } = useTranslation()
   const modals = useModals()
-  const { currentApp, connectors } = useWorkspace()
+  const { focusApp: currentApp, connectors } = useWorkspace()
   const [scope, setScope] = useState<string>('')
   const [doc, setDoc] = useState<Charts | null>(null)
   const [filter, setFilter] = useState('')
