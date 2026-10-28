@@ -64,6 +64,10 @@
   nomaflow menu pages show only to who holds view (or a menu allow), and the nomaflow application appears in the picker
   with its connector (`sql:nomaflow:*`). Editing jobs is a strong grant: their steps run SQL and allow-listed Python
   without row scope. The Run-with-parameters dialog reads only the job run (`GET /admin/jobs/{id}/definition`).
+- Module catalogues (catalogue v2, step 1): a `[[modules]]` block beside the presets describes a whole application
+  module — one screen per table with its key, grid columns, dialog tabs and detail tabs (the child screen and the key
+  it inherits), and the menu folder — columns named by data item, the JDE prefix resolved later from the live schema
+  (`liberty/modules.py`: model, loader, validation of the detail graph). Applying a module comes next.
 
 ## 7.0.64 — unreleased
 

@@ -13,6 +13,9 @@ A preset carrying ``app`` + ``explorer = true`` ships a Data Explorer model by d
 (``explorer.<app>.<preset id>``, see :func:`liberty.explorer.config.add_preset_models`): a table's
 ``label`` is then its entity label and ``cardinality = "one"`` marks a lookup joined to the base
 (the default for a joined table is ``many``).
+
+The same files carry the **module catalogues** (``[[modules]]``, catalogue v2): a whole module's
+screens, detail tabs and menu — see :mod:`liberty.modules`.
 """
 
 from __future__ import annotations

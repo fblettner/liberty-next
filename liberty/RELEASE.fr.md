@@ -75,6 +75,11 @@
   connecteur (`sql:nomaflow:*`). Modifier les tâches est un droit fort : leurs étapes exécutent du SQL et du Python
   autorisé sans restriction de lignes. La fenêtre « Lancer avec paramètres » ne lit que la tâche lancée
   (`GET /admin/jobs/{id}/definition`).
+- Catalogues de modules (catalogue v2, étape 1) : un bloc `[[modules]]` à côté des presets décrit un module
+  d'application entier — un écran par table avec sa clé, ses colonnes de grille, ses onglets de dialogue et ses onglets
+  de détail (l'écran enfant et la clé qu'il hérite), et le dossier de menu — colonnes nommées par élément de données, le
+  préfixe JDE résolu plus tard depuis le schéma réel (`liberty/modules.py` : modèle, chargement, validation du graphe
+  des détails). L'application d'un module suit.
 
 ## 7.0.64 — non publiée
 
