@@ -18,6 +18,7 @@ import type { Dashboard, DashboardFilterWire, DashboardWidget, LinksWidgetWire, 
 import { isPreset, rangeForPreset, type DatePreset, type DateRange } from '../../services/period'
 import type { PeriodSelection } from './widgetFilters'
 import { ChartWidget } from './ChartWidget'
+import { JobsWidget } from './JobsWidget'
 import { FilterBar } from './FilterBar'
 import { KpiWidget } from './KpiWidget'
 import { TableWidget } from './TableWidget'
@@ -218,6 +219,8 @@ function WidgetCell({
         ? <TextWidget widget={widget} />
         : widget.type === 'links'
         ? <LinksWidget widget={widget} />
+        : widget.type === 'jobs'
+        ? <JobsWidget widget={widget} refreshKey={refreshKey} />
         : <KpiWidget widget={widget} {...common} />}
     </WidgetFrame>
   )

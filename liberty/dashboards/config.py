@@ -247,7 +247,17 @@ class LinksWidget(WidgetBase):
     columns: int = Field(default=1, ge=1, le=4, description="Links per row inside the card.")
 
 
-Widget = Annotated[Union[ChartWidget, KpiWidget, TableWidget, StatWidget, ListWidget, BarsWidget, TextWidget, LinksWidget], Field(discriminator="type")]
+class JobsWidget(WidgetBase):
+    """The nomaflow jobs at a glance, with their controls: per job the next fire (or "paused"), the
+    schedule in words, the last run's state, and Run now / Pause / Resume. The controls are the
+    superuser's (``/admin/jobs``): the widget is dropped for anyone else."""
+    type: Literal["jobs"] = "jobs"
+    jobs: list[str] = Field(default_factory=list, description="The job ids, in this order; empty = every job with a schedule (its own or a preset's), soonest first.")
+    tags: list[str] = Field(default_factory=list, description="Only the jobs carrying one of these tags (with `jobs` empty).")
+    max_rows: int = Field(default=12, ge=1, le=100, description="Rows shown.")
+
+
+Widget = Annotated[Union[ChartWidget, KpiWidget, TableWidget, StatWidget, ListWidget, BarsWidget, TextWidget, LinksWidget, JobsWidget], Field(discriminator="type")]
 
 
 class DashboardFilterOptions(BaseModel):

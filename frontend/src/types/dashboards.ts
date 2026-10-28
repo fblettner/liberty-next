@@ -135,7 +135,19 @@ export interface LinksWidgetWire {
   links: LinkWire[]
 }
 
-export type DashboardWidget = ChartWidgetWire | KpiWidgetWire | TableWidgetWire | StatWidgetWire | ListWidgetWire | BarsWidgetWire | TextWidgetWire | LinksWidgetWire
+/** nomaflow jobs with Run / Pause / Resume — superusers only (the server drops it otherwise). */
+export interface JobsWidgetWire {
+  type: 'jobs'
+  label?: string | null
+  description?: string | null
+  col_span: number
+  row_span: number
+  jobs?: string[]
+  tags?: string[]
+  max_rows?: number
+}
+
+export type DashboardWidget = ChartWidgetWire | KpiWidgetWire | TableWidgetWire | StatWidgetWire | ListWidgetWire | BarsWidgetWire | TextWidgetWire | LinksWidgetWire | JobsWidgetWire
 
 export interface DashboardFilterOptionsWire {
   connector: string

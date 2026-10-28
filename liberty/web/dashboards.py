@@ -33,7 +33,7 @@ from liberty.auth.dependencies import CurrentPrincipal
 from liberty.auth.principal import Principal
 from liberty.charts import ChartConfig, ChartsFile
 from liberty.connectors.registry import ConnectorRegistry
-from liberty.dashboards import BarsWidget, ChartWidget, Dashboard, DashboardsFile, KpiWidget, ListWidget, StatWidget, TextWidget, LinksWidget, TableWidget
+from liberty.dashboards import BarsWidget, ChartWidget, Dashboard, DashboardsFile, JobsWidget, KpiWidget, ListWidget, StatWidget, TextWidget, LinksWidget, TableWidget
 from liberty.dashboards.report import PeriodPick, dashboard_sections, resolve_column
 from liberty.screens import ScreensFile
 from liberty.web.deps import get_connectors, get_screens, request_language
@@ -215,6 +215,10 @@ def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Prin
             wd = _resolve_plain_widget(w)
         elif isinstance(w, (TextWidget, LinksWidget)):
             wd = _resolve_static_widget(w, dashboard.connector, language)
+        elif isinstance(w, JobsWidget):
+            if not principal.is_superuser:
+                continue             # its data and controls are /admin/jobs — superuser only
+            wd = w.model_dump(mode="json", exclude_none=True, exclude={"l"})
         else:  # pragma: no cover - guarded by the discriminated union
             continue
         if wd is None:

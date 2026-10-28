@@ -1273,3 +1273,25 @@ def test_for_each_from_the_admin_run_dialog(env) -> None:
                 break
             time.sleep(0.05)
         assert [k["apps_id"] for k in RECORDED_PER_STEP] == [2, 3]
+
+
+def test_pause_and_resume_a_job(env) -> None:
+    """``POST /admin/jobs/{id}/enabled``: the one job's ``enabled`` in jobs.toml (the rest of
+    the file kept), the live registry and its trigger follow without a reload; the listing shows
+    it; a bad body / an unknown job / a non-superuser are refused."""
+    app, jobs_toml = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        before = jobs_toml.read_text()
+        r = client.post("/admin/jobs/ping/enabled", json={"enabled": False}, headers=h)
+        assert r.status_code == 200 and r.json() == {"job_id": "ping", "enabled": False, "next_run": None}, r.text
+        after = jobs_toml.read_text()
+        assert "enabled = false" in after and len(after.splitlines()) == len(before.splitlines()) + 1   # one line added
+        assert 'description = "Trivial cron job"' in after                     # the rest of the file kept
+        ping = next(j for j in client.get("/admin/jobs", headers=h).json()["jobs"] if j["id"] == "ping")
+        assert ping["enabled"] is False and not ping.get("next_run")
+        r = client.post("/admin/jobs/ping/enabled", json={"enabled": True}, headers=h)
+        assert r.status_code == 200 and r.json()["enabled"] is True and r.json()["next_run"]
+        assert client.post("/admin/jobs/ping/enabled", json={"enabled": "no"}, headers=h).status_code == 422
+        assert client.post("/admin/jobs/ghost/enabled", json={"enabled": True}, headers=h).status_code == 404
+        assert client.post("/admin/jobs/ping/enabled", json={"enabled": True}, headers=_h(client, "loader")).status_code == 403

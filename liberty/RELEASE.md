@@ -50,6 +50,12 @@
 - Dashboards: chart and table widgets carry their title and description inside their card, like
   the other widgets.
 - nomaflow: a reload no longer leaves the "All" of a per-value run on the previous connectors.
+- Dashboards: a `jobs` widget — the nomaflow jobs (the ids listed, or every scheduled job, by
+  tag) with the next fire or "paused", the schedule in words, the last state, and Run now /
+  Pause / Resume. Superusers only (dropped for anyone else); the dashboard editor offers it.
+- nomaflow: pausing or resuming a job (`POST /admin/jobs/{id}/enabled`) edits that job in
+  jobs.toml and re-registers its schedule, without a full reload; the Jobs page uses it too. The
+  job editor's Alerts block is laid out on a grid again.
 
 ## 7.0.60 — unreleased
 

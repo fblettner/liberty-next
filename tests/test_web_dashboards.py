@@ -107,6 +107,22 @@ def _dashboards_toml() -> str:
           compare_previous = true
           col_span = 3
 
+        # The nomaflow controls: a jobs widget (superuser only) beside a readable chart.
+        [dashboards.app1.runs_panel]
+        label = "Runs"
+
+          [[dashboards.app1.runs_panel.widgets]]
+          type = "jobs"
+          label = "Jobs"
+          tags = ["main"]
+          max_rows = 5
+          col_span = 6
+
+          [[dashboards.app1.runs_panel.widgets]]
+          type = "chart"
+          chart = "users_per_app"
+          col_span = 6
+
         # A second dashboard that references a chart that DOESN'T exist — should drop the widget
         # with a warning and surface the dashboard with empty widgets.
         [dashboards.app1.orphan]
@@ -264,8 +280,8 @@ def test_dashboards_require_auth(app) -> None:
 def test_info_reports_dashboards(app) -> None:
     with TestClient(app) as client:
         info = client.get("/info").json()
-        # security_overview + orphan + ops
-        assert info["dashboards"] == {"total": 3}
+        # security_overview + runs_panel + orphan + ops
+        assert info["dashboards"] == {"total": 4}
 
 
 def test_reload_rereads_dashboards(app, tmp_path) -> None:
@@ -447,3 +463,14 @@ def test_dashboard_texts_follow_the_request_language(tmp_path) -> None:
         assert fr["widgets"][1]["label"] == "Utilisateurs" and "l" not in fr["widgets"][1]
         listed = client.get("/api/dashboards", headers={**h, "X-Liberty-Lang": "fr-FR"}).json()["dashboards"]
         assert next(d for d in listed if d["id"] == "app1.synth")["label"] == "Synthèse"
+
+
+def test_jobs_widget_is_for_superusers(app) -> None:
+    """A ``jobs`` widget (Run / Pause / Resume over /admin/jobs) travels as configured to a
+    superuser and is dropped for anyone else — the rest of the dashboard stays."""
+    with TestClient(app) as client:
+        admin = next(d for d in client.get("/api/dashboards", headers=_h(client, "admin")).json()["dashboards"] if d["id"] == "app1.runs_panel")
+        jobs = next(w for w in admin["widgets"] if w["type"] == "jobs")
+        assert jobs["tags"] == ["main"] and jobs["max_rows"] == 5 and jobs["label"] == "Jobs"
+        user = next(d for d in client.get("/api/dashboards", headers=_h(client, "user")).json()["dashboards"] if d["id"] == "app1.runs_panel")
+        assert [w["type"] for w in user["widgets"]] == ["chart"]

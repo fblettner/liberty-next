@@ -348,6 +348,7 @@ const fr: Resources = {
     all: 'Toutes les dates',
   },
   dashboard: {
+    jobs: { paused: 'En pause', pause: 'Mettre la planification en pause', resume: 'Reprendre la planification' },
     empty: 'Aucun widget lisible sur ce tableau de bord pour le moment.',
     refresh: 'Actualiser',
     updatedAt: 'Mis à jour à {{time}}',
@@ -2463,6 +2464,10 @@ const fr: Resources = {
       kindBars: 'Barres',
       kindText: 'Texte',
       kindLinks: 'Liens',
+      kindJobs: 'Tâches',
+      jobIds: 'Tâches (ids, dans l\'ordre)',
+      jobIdsHint: 'vide = toutes les tâches planifiées',
+      jobTags: 'Seulement ces étiquettes',
       markdown: 'Texte (Markdown)',
       markdownHint: 'À quoi sert cette page, comment la lire… Titres, listes et liens sont acceptés.',
       linkColumns: 'Liens par ligne',

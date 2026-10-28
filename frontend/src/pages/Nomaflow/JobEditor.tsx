@@ -568,7 +568,7 @@ export default function JobEditor() {
             />
             {job.alerts && (
               <Grid>
-                <FieldWrap>
+                <FieldWrap $full>
                   <Checkbox
                     checked={job.alerts.on_failure}
                     onChange={(checked) => patch({ alerts: { ...job.alerts!, on_failure: checked } })}

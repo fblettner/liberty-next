@@ -41,6 +41,14 @@ class JobRegistry:
         """All jobs, in file order."""
         return list(self._jobs.values())
 
+    def replace(self, job: Job) -> None:
+        """Swap one job in place (same id) — the pause / resume route updates the live registry
+        without a full reload; the file order is kept."""
+        if job.id not in self._jobs:
+            raise UnknownJobError(job.id)
+        self._jobs[job.id] = job
+        self._config.jobs = [job if j.id == job.id else j for j in self._config.jobs]
+
     def get(self, job_id: str) -> Job:
         try:
             return self._jobs[job_id]

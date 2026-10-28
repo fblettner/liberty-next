@@ -346,6 +346,7 @@ const en = {
     all: 'All dates',
   },
   dashboard: {
+    jobs: { paused: 'Paused', pause: 'Pause the schedule', resume: 'Resume the schedule' },
     empty: 'No widgets you can read on this dashboard yet.',
     refresh: 'Refresh',
     updatedAt: 'Updated at {{time}}',
@@ -2470,6 +2471,10 @@ const en = {
       kindBars: 'Bars',
       kindText: 'Text',
       kindLinks: 'Links',
+      kindJobs: 'Jobs',
+      jobIds: 'Jobs (ids, in order)',
+      jobIdsHint: 'empty = every scheduled job',
+      jobTags: 'Only these tags',
       markdown: 'Text (Markdown)',
       markdownHint: 'What this page is for, how to read it… Headings, lists and links are allowed.',
       linkColumns: 'Links per row',

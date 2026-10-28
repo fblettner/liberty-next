@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { X, BarChart3, Hash, Table as TableIcon, List as ListIcon, BarChartHorizontal, FileText, Link2, Plus, Trash2 } from 'lucide-react'
+import { X, BarChart3, Hash, Table as TableIcon, List as ListIcon, BarChartHorizontal, FileText, Link2, Plus, Trash2, Workflow } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Checkbox, Field, Input, SearchSelect, SpinnerRing, Tag, Textarea, useModals, type SearchSelectOption } from '../../common'
 import { EditorModalShell } from '../../common/EditorModalShell'
@@ -20,15 +20,16 @@ import { TextWidget } from '../DashboardView/TextWidget'
 import { LinksWidget } from '../DashboardView/LinksWidget'
 import { MENU_ICON_NAMES, iconFor } from '../../components/SidebarMenu'
 import { ListWidget } from '../DashboardView/ListWidget'
+import { JobsWidget } from '../DashboardView/JobsWidget'
 import { BarsWidget } from '../DashboardView/BarsWidget'
 import type { QueryResult } from '../../types/connectors'
 import type { ChartSpec, SavedChartSpec } from '../../types/charts'
 import { AGGREGATIONS, defaultChartSpec, fromSavedSpec, toSavedSpec } from '../../types/charts'
-import type { BarsWidgetWire, KpiWidgetWire, ListWidgetWire, StatWidgetWire, TableWidgetWire, ValueFormat, TextWidgetWire, LinksWidgetWire, LinkWire } from '../../types/dashboards'
+import type { BarsWidgetWire, KpiWidgetWire, ListWidgetWire, StatWidgetWire, TableWidgetWire, ValueFormat, TextWidgetWire, LinksWidgetWire, LinkWire, JobsWidgetWire } from '../../types/dashboards'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 const PREVIEW_LIMIT = 1000
-export type WidgetKind = 'chart' | 'kpi' | 'table' | 'stat' | 'list' | 'bars' | 'text' | 'links'
+export type WidgetKind = 'chart' | 'kpi' | 'table' | 'stat' | 'list' | 'bars' | 'text' | 'links' | 'jobs'
 
 const KindBar = styled.div`display: flex; gap: 6px; flex-wrap: wrap;`
 const KindBtn = styled.button<{ $active?: boolean }>`
@@ -100,6 +101,9 @@ export function WidgetEditorModal({
   const setP = (k: string, v: string) => setPlain((cur) => ({ ...cur, [k]: v }))
   // text / links (no query behind them)
   const [markdown, setMarkdown] = useState(str(initial.markdown))
+  // jobs: the ids (in order) or the tags, comma-separated
+  const [jobIds, setJobIds] = useState<string>(Array.isArray(initial.jobs) ? (initial.jobs as string[]).join(', ') : '')
+  const [jobTags, setJobTags] = useState<string>(Array.isArray(initial.tags) ? (initial.tags as string[]).join(', ') : '')
   const [links, setLinks] = useState<LinkWire[]>(Array.isArray(initial.links) ? (initial.links as LinkWire[]).map((l) => ({ ...l })) : [])
   const [linkColumns, setLinkColumns] = useState(num(initial.columns, 1))
   const setLink = (i: number, patch: Partial<LinkWire>) => setLinks((cur) => cur.map((l, j) => (j === i ? { ...l, ...patch } : l)))
@@ -174,6 +178,13 @@ export function WidgetEditorModal({
       }))
       if (!clean.length || clean.some((l) => !!l.menu === !!l.url || (l.url && !l.label))) return setError(t('settings.dash.errLinks'))
       base.links = clean; base.columns = linkColumns
+    } else if (kind === 'jobs') {
+      const ids = jobIds.split(',').map((s) => s.trim()).filter(Boolean)
+      const tags = jobTags.split(',').map((s) => s.trim()).filter(Boolean)
+      if (ids.length) base.jobs = ids
+      if (tags.length) base.tags = tags
+      const mr = parseInt(maxRows, 10)
+      if (Number.isFinite(mr) && mr > 0) base.max_rows = mr
     } else if (kind === 'stat') {
       if (!connector || !query) return setError(t('settings.dash.errConnQuery'))
       if (!plain.value_column) return setError(t('settings.dash.errValueColumn'))
@@ -253,6 +264,11 @@ export function WidgetEditorModal({
   const textPreview: TextWidgetWire | null = kind === 'text' && markdown.trim()
     ? { type: 'text', label: label || null, description: description || null, col_span: colSpan, row_span: rowSpan, markdown }
     : null
+  const jobsPreview: JobsWidgetWire | null = kind === 'jobs'
+    ? { type: 'jobs', label: label || null, description: description || null, col_span: colSpan, row_span: rowSpan,
+        jobs: jobIds.split(',').map((s) => s.trim()).filter(Boolean), tags: jobTags.split(',').map((s) => s.trim()).filter(Boolean),
+        ...(parseInt(maxRows, 10) > 0 ? { max_rows: parseInt(maxRows, 10) } : {}) }
+    : null
   const linksPreview: LinksWidgetWire | null = kind === 'links' && links.length
     ? { type: 'links', label: label || null, description: description || null, col_span: colSpan, row_span: rowSpan, app: scope, columns: linkColumns, links }
     : null
@@ -279,6 +295,7 @@ export function WidgetEditorModal({
             <KindBtn $active={kind === 'bars'} onClick={() => setKind('bars')}><BarChartHorizontal size={14} /> {t('settings.dash.kindBars')}</KindBtn>
             <KindBtn $active={kind === 'text'} onClick={() => setKind('text')}><FileText size={14} /> {t('settings.dash.kindText')}</KindBtn>
             <KindBtn $active={kind === 'links'} onClick={() => setKind('links')}><Link2 size={14} /> {t('settings.dash.kindLinks')}</KindBtn>
+            <KindBtn $active={kind === 'jobs'} onClick={() => setKind('jobs')}><Workflow size={14} /> {t('settings.dash.kindJobs')}</KindBtn>
           </KindBar>
 
           <Grid3>
@@ -304,6 +321,25 @@ export function WidgetEditorModal({
               <PreviewWrap>
                 {textPreview ? <div style={{ flex: 1, minHeight: 0, display: 'flex' }}><TextWidget widget={textPreview} /></div>
                   : <Msg>{t('settings.dash.errMarkdown')}</Msg>}
+              </PreviewWrap>
+            </>
+          )}
+
+          {kind === 'jobs' && (
+            <>
+              <Grid3>
+                <Field label={t('settings.dash.jobIds')}>
+                  <Input value={jobIds} onChange={(e) => setJobIds(e.target.value)} placeholder={t('settings.dash.jobIdsHint')} />
+                </Field>
+                <Field label={t('settings.dash.jobTags')}>
+                  <Input value={jobTags} onChange={(e) => setJobTags(e.target.value)} placeholder="main, nomasx1" />
+                </Field>
+                <Field label={t('settings.dash.maxRows')}>
+                  <Input type="number" min={1} value={maxRows} onChange={(e) => setMaxRows(e.target.value)} placeholder="12" />
+                </Field>
+              </Grid3>
+              <PreviewWrap>
+                {jobsPreview && <div style={{ flex: 1, minHeight: 0, display: 'flex' }}><JobsWidget widget={jobsPreview} /></div>}
               </PreviewWrap>
             </>
           )}

@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, BarChart3, Hash, Table as TableIcon, LayoutDashboard, List as ListIcon, BarChartHorizontal, FileText, Link2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, BarChart3, Hash, Table as TableIcon, LayoutDashboard, List as ListIcon, BarChartHorizontal, FileText, Link2, Workflow } from 'lucide-react'
 import { Button, Input, Field, Banner, SearchSelect, useModals, type SearchSelectOption } from '../../common'
 import { api } from '../../api/client'
 import type { QueryResult } from '../../types/connectors'
@@ -17,10 +17,11 @@ import { KpiWidget } from '../DashboardView/KpiWidget'
 import { TableWidget } from '../DashboardView/TableWidget'
 import { TextWidget } from '../DashboardView/TextWidget'
 import { LinksWidget } from '../DashboardView/LinksWidget'
+import { JobsWidget } from '../DashboardView/JobsWidget'
 import { StatWidget } from '../DashboardView/StatWidget'
 import { ListWidget } from '../DashboardView/ListWidget'
 import { BarsWidget } from '../DashboardView/BarsWidget'
-import type { DashboardWidget, ChartWidgetWire, KpiWidgetWire, TableWidgetWire, TextWidgetWire, LinksWidgetWire, LinkWire } from '../../types/dashboards'
+import type { DashboardWidget, ChartWidgetWire, KpiWidgetWire, TableWidgetWire, TextWidgetWire, LinksWidgetWire, LinkWire, JobsWidgetWire } from '../../types/dashboards'
 import type { SavedChartSpec } from '../../types/charts'
 import { WidgetEditorModal } from './WidgetEditorModal'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -71,7 +72,7 @@ const snum = (v: unknown, d: number) => (typeof v === 'number' ? v : d)
 const sstr = (v: unknown) => (typeof v === 'string' ? v : '')
 
 type ChartsCatalog = Record<string, { label?: string; connector?: string; query?: string; spec?: SavedChartSpec }>
-type Kind = 'chart' | 'kpi' | 'table' | 'stat' | 'list' | 'bars' | 'text' | 'links'
+type Kind = 'chart' | 'kpi' | 'table' | 'stat' | 'list' | 'bars' | 'text' | 'links' | 'jobs'
 
 /** Infer a widget's kind. The parsed-config endpoint drops the ``type`` discriminator when it
  *  equals the field default (``exclude_defaults``), so a loaded widget often has no ``type`` — we
@@ -82,7 +83,7 @@ const PRESET_KEYS = ['thisMonth', 'lastMonth', 'thisQuarter', 'thisYear', 'lastY
 
 function widgetType(w: Raw): Kind {
   const tp = sstr(w.type)
-  if (tp === 'chart' || tp === 'kpi' || tp === 'table' || tp === 'stat' || tp === 'list' || tp === 'bars' || tp === 'text' || tp === 'links') return tp
+  if (tp === 'chart' || tp === 'kpi' || tp === 'table' || tp === 'stat' || tp === 'list' || tp === 'bars' || tp === 'text' || tp === 'links' || tp === 'jobs') return tp
   if (typeof w.markdown === 'string') return 'text'
   if (Array.isArray(w.links)) return 'links'
   if (w.spec !== undefined || w.chart !== undefined) return 'chart'
@@ -115,6 +116,7 @@ function toWire(w: Raw, charts: ChartsCatalog, scope: string): DashboardWidget |
     const links = Array.isArray(w.links) ? (w.links as LinkWire[]) : []
     return { type: 'links', ...common, description: sstr(w.description) || null, app: scope, columns: snum(w.columns, 1), links } as LinksWidgetWire
   }
+  if (kind === 'jobs') return { ...w, type: 'jobs', ...common, description: sstr(w.description) || null } as unknown as JobsWidgetWire
   // table
   if (!w.connector || !w.query) return null
   if (kind === 'stat' || kind === 'list' || kind === 'bars') {
@@ -125,7 +127,7 @@ function toWire(w: Raw, charts: ChartsCatalog, scope: string): DashboardWidget |
   return { type: 'table', ...common, connector: sstr(w.connector), query: sstr(w.query), columns: Array.isArray(w.columns) ? (w.columns as string[]) : [], ...(w.max_rows ? { max_rows: snum(w.max_rows, 0) } : {}) } as TableWidgetWire
 }
 
-const KIND_ICON = { chart: BarChart3, kpi: Hash, table: TableIcon, stat: Hash, list: ListIcon, bars: BarChartHorizontal, text: FileText, links: Link2 } as const
+const KIND_ICON = { chart: BarChart3, kpi: Hash, table: TableIcon, stat: Hash, list: ListIcon, bars: BarChartHorizontal, text: FileText, links: Link2, jobs: Workflow } as const
 
 export function DashboardEditorModal({
   initial, scope, chartsCatalog, onSave, onClose,
@@ -296,6 +298,7 @@ export function DashboardEditorModal({
             <Button $size="sm" $variant="ghost" onClick={() => addWidget('bars')}><BarChartHorizontal size={13} /> {t('settings.dash.kindBars')}</Button>
             <Button $size="sm" $variant="ghost" onClick={() => addWidget('text')}><FileText size={13} /> {t('settings.dash.kindText')}</Button>
             <Button $size="sm" $variant="ghost" onClick={() => addWidget('links')}><Link2 size={13} /> {t('settings.dash.kindLinks')}</Button>
+            <Button $size="sm" $variant="ghost" onClick={() => addWidget('jobs')}><Workflow size={13} /> {t('settings.dash.kindJobs')}</Button>
           </AddBar>
 
           {widgets.length === 0 ? (
@@ -331,6 +334,7 @@ export function DashboardEditorModal({
                           : wire.type === 'bars' ? <BarsWidget widget={wire} filters={[]} filterValues={{}} />
                           : wire.type === 'text' ? <TextWidget widget={wire} />
                           : wire.type === 'links' ? <LinksWidget widget={wire} />
+                          : wire.type === 'jobs' ? <JobsWidget widget={wire} />
                           : <KpiWidget widget={wire} filters={[]} filterValues={{}} />
                       ) : (
                         <Placeholder><span><Icon size={18} /><br />{t('settings.dash.configurePrompt', { kind })}</span></Placeholder>

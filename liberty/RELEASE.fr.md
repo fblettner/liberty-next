@@ -62,6 +62,13 @@
   carte, comme les autres widgets.
 - nomaflow : un rechargement ne laisse plus le « Tout » d'une exécution par valeur sur les
   connecteurs précédents.
+- Tableaux de bord : un widget `jobs` — les tâches nomaflow (les ids listés, ou toutes les tâches
+  planifiées, par étiquette) avec la prochaine exécution ou « en pause », la planification en
+  clair, le dernier état, et Exécuter / Pause / Reprendre. Réservé aux super-utilisateurs (retiré
+  pour les autres) ; l'éditeur de tableau de bord le propose.
+- nomaflow : mettre en pause ou reprendre une tâche (`POST /admin/jobs/{id}/enabled`) modifie
+  cette tâche dans jobs.toml et réenregistre sa planification, sans rechargement complet ; la page
+  Tâches l'utilise aussi. Le bloc Alertes de l'éditeur de tâche est de nouveau aligné.
 
 ## 7.0.60 — non publiée
 

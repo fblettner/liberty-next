@@ -281,11 +281,8 @@ export default function JobsList() {
   const toggleEnabled = useCallback(async (job: JobSummary) => {
     setBusyId(job.id); setError(null)
     try {
-      const parsed = await api.get<JobsParsedResponse>('/admin/config/jobs/parsed')
-      const next = parsed.jobs.map((j) =>
-        j.id === job.id ? { ...j, enabled: !job.enabled } : j)
-      await api.put('/admin/config/jobs/parsed', { jobs: next })
-      await api.post('/admin/reload')
+      // the one job's ``enabled`` + its triggers, no full reload (POST /admin/jobs/{id}/enabled)
+      await api.post(`/admin/jobs/${encodeURIComponent(job.id)}/enabled`, { enabled: !job.enabled })
       load()
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))

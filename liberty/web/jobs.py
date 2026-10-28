@@ -418,6 +418,46 @@ async def _run_file_response(request: Request, run_id: str, name: str, *, job_id
     return FileResponse(path, filename=name, media_type="text/csv" if path.suffix == ".csv" else "application/octet-stream")
 
 
+@router.post("/{job_id}/enabled", summary="Pause or resume a job")
+async def set_job_enabled(job_id: str, request: Request, principal: Superuser, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    """``{enabled: bool}`` — pause (``false``) or resume a job's own schedule: the one job's
+    ``enabled`` in ``jobs.toml`` (tomlkit, comments kept, snapshotted first), then the live
+    registry and the job's triggers — no full reload. The job's scheduled presets are not
+    touched (they fire on their own switches). Returns the job's next fire."""
+    import tomllib
+
+    import tomlkit
+
+    from liberty.jobs import JobsFile
+    from liberty.web.admin import _snapshot_config
+
+    enabled = body.get("enabled") if isinstance(body, dict) else None
+    if not isinstance(enabled, bool):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="`enabled` must be true or false")
+    comps = _components(request)
+    try:
+        job = comps.registry.get(job_id)
+    except UnknownJobError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"unknown job {job_id!r}") from None
+    path = Path(request.app.state.settings.jobs.config_path)
+    doc = tomlkit.parse(path.read_text(encoding="utf-8"))
+    entry = next((j for j in doc.get("jobs", []) if j.get("id") == job_id), None)
+    if entry is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=f"{job_id!r} is not in {path.name} (reload first)")
+    entry["enabled"] = enabled
+    new_text = tomlkit.dumps(doc)
+    JobsFile.model_validate(tomllib.loads(new_text))
+    _snapshot_config(request, path)
+    path.write_text(new_text, encoding="utf-8")
+    updated = job.model_copy(update={"enabled": enabled})
+    comps.registry.replace(updated)
+    comps.scheduler.remove_job(job_id)
+    comps.scheduler.add_job(updated)
+    _log.info("nomaflow job %s %s by %s", job_id, "resumed" if enabled else "paused", principal.username)
+    nxt = comps.scheduler.next_fire_times.get(job_id)
+    return {"job_id": job_id, "enabled": enabled, "next_run": nxt.isoformat() if nxt else None}
+
+
 @router.post("/runs/{run_id}/cancel", summary="Cancel job run")
 async def cancel_run(run_id: str, request: Request, principal: Superuser) -> dict[str, Any]:
     """Request cancellation of an in-flight run.
