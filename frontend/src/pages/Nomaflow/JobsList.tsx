@@ -9,13 +9,18 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock, ChevronDown, ChevronRight, Copy, Download, Trash2, Search } from 'lucide-react'
+import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock, ChevronDown, ChevronRight, Copy, Download, Trash2, Search, Star } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { PageLayout, Button, Banner, Centered, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, FileInput, Input, Select, SearchSelect, type SearchSelectOption, useModals } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { JobSummary, JobsListResponse, JobsParsedResponse, StepConfig } from './types'
 import { STATE_TONE, relative, uploadJobFile } from './util'
+import { applyPresetState } from './presetState'
+
+/** The tag that puts a job in the "Main jobs" group at the top of the list. */
+const MAIN_TAG = 'main'
+const MAIN_GROUP = '\u0000main'
 import { RetentionPanel } from './RetentionPanel'
 import { MissedPanel } from './MissedPanel'
 
@@ -405,8 +410,11 @@ export default function JobsList() {
   }, [jobs, q, status, appFilter, tagFilter, appOf])
   const groups = useMemo(() => {
     const m = new Map<string, JobSummary[]>()
-    for (const j of sorted ?? []) { const a = appOf(j); m.set(a, [...(m.get(a) ?? []), j]) }
-    return [...m.entries()].sort(([a], [b]) => (a === 'framework' ? 1 : b === 'framework' ? -1 : a.localeCompare(b)))
+    // A job tagged `main` (the collect-all, the scheduled reports…) goes in the "Main jobs" group
+    // on top instead of its application's group; the application filter still applies to it.
+    for (const j of sorted ?? []) { const a = j.tags.includes(MAIN_TAG) ? MAIN_GROUP : appOf(j); m.set(a, [...(m.get(a) ?? []), j]) }
+    const rank = (a: string) => (a === MAIN_GROUP ? 0 : a === 'framework' ? 2 : 1)
+    return [...m.entries()].sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
   }, [sorted, appOf])
   const appOptions = useMemo<SearchSelectOption[]>(() => [...new Set((jobs ?? []).map(appOf))].map((a) => ({ value: a, label: a === 'framework' ? t('nomaflow.jobs.framework') : a })), [jobs, appOf, t])
   const filtersOn = !!(q || status || appFilter || tagFilter)
@@ -486,7 +494,7 @@ export default function JobsList() {
               <Group key={app}>
                 <GroupHead type="button" onClick={() => setCollapsed((c) => { const n = new Set(c); if (n.has(app)) n.delete(app); else n.add(app); return n })}>
                   {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  {app === 'framework' ? t('nomaflow.jobs.framework') : app}
+                  {app === MAIN_GROUP ? <><Star size={13} /> {t('nomaflow.jobs.mainJobs')}</> : app === 'framework' ? t('nomaflow.jobs.framework') : app}
                   <span className="n">{list.length}</span>
                 </GroupHead>
                 {open && list.map((job) => {
@@ -605,8 +613,8 @@ function RunWithParamsModal({
    *  picked a value DIFFERENT from this saved default. */
   jobLogLevel: 'WARNING' | 'INFO' | 'DEBUG'
   /** Named presets saved on the job — surfaced as a dropdown above the form.
-   *  Empty array hides the dropdown. Picking a preset layers its values onto
-   *  the modal state (acts like the operator typed them by hand). */
+   *  Empty array hides the dropdown. Picking a preset resets the dialog to the
+   *  job's saved values, then applies the preset (presetState.ts). */
   presets: import('./types').JobPreset[]
   onCancel: () => void
   onSubmit: (body: {
@@ -688,37 +696,22 @@ function RunWithParamsModal({
   }
 
   // ── presets ────────────────────────────────────────────────────────────
-  // Apply a preset by layering its values onto the modal state. The preset
-  // captures the operator's intent at save time; any field it sets (params,
-  // op_kwargs, step_enabled, log_level) overlays the current modal value,
-  // any field it doesn't set is left untouched (so picking a preset that
-  // only flips log_level doesn't clobber the operator's in-progress kwarg
-  // edits). The modal stays editable after — operators can pick a preset
-  // then tweak from there.
+  // Picking a preset resets the dialog to the job's saved values, then applies the preset
+  // (presetState.ts) — the same reading the scheduler and the user's page make of it. The
+  // dialog stays editable after; "(none)" goes back to the saved values.
   const [selectedPreset, setSelectedPreset] = useState<string>('')
   const [savePresetBusy, setSavePresetBusy] = useState(false)
   const [savePresetError, setSavePresetError] = useState<string | null>(null)
   const applyPreset = (presetName: string) => {
     setSelectedPreset(presetName)
-    if (!presetName) return
-    const p = presets.find((pr) => pr.name === presetName)
-    if (!p) return
-    if (p.log_level) setLogLevel(p.log_level)
-    if (p.params && Object.keys(p.params).length > 0) {
-      setParamValues((prev) => ({ ...prev, ...p.params }))
-    }
-    if (p.op_kwargs) {
-      setStepValues((prev) => {
-        const next = { ...prev }
-        for (const [stepName, kw] of Object.entries(p.op_kwargs ?? {})) {
-          next[stepName] = { ...(next[stepName] ?? {}), ...kw }
-        }
-        return next
-      })
-    }
-    if (p.step_enabled) {
-      setStepEnabled((prev) => ({ ...prev, ...p.step_enabled }))
-    }
+    const next = applyPresetState(
+      { params: { ...jobParams }, stepValues: initialStepKwargs, stepEnabled: initialStepEnabled, logLevel: jobLogLevel },
+      presetName ? presets.find((pr) => pr.name === presetName) : null,
+    )
+    setParamValues(next.params)
+    setStepValues(next.stepValues)
+    setStepEnabled(next.stepEnabled)
+    setLogLevel(next.logLevel)
   }
   const handleSavePreset = async () => {
     const rawName = await modals.prompt({

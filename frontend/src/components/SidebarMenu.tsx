@@ -220,7 +220,7 @@ function Node({ node, openIds, app }: { node: MenuNode; openIds: Set<string>; ap
     </>
   )
   return to ? (
-    <Leaf to={to} title={node.label}>{inner}</Leaf>
+    <Leaf to={to} end title={node.label}>{inner}</Leaf>
   ) : (
     <DeadLeaf title={node.label}>{inner}</DeadLeaf>
   )

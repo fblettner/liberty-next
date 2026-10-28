@@ -6,6 +6,7 @@
 //
 // Dashboards have no connector — match on the dashboard id alone.
 import type { MenuNode, MenusByApp } from '../types/menus'
+import { jobTarget } from './menuPath'
 
 interface ScreenKey {
   kind: 'sql' | 'screen' | 'http' | 'dashboard' | 'page' | 'job'
@@ -17,7 +18,7 @@ interface ScreenKey {
 function walk(nodes: MenuNode[], appName: string, key: ScreenKey): string | undefined {
   const wantType = key.kind === 'sql' ? 'query' : key.kind === 'http' ? 'endpoint' : key.kind === 'screen' ? 'screen' : key.kind === 'page' ? 'page' : key.kind === 'job' ? 'job' : 'dashboard'
   for (const n of nodes) {
-    if (n.type === wantType && n.target === key.target) {
+    if (n.type === wantType && (key.kind === 'job' ? jobTarget(n) : n.target) === key.target) {
       // Dashboard + page leaves have no connector — match on target alone. A screen leaf is scoped
       // to its menu app (the tab's `connector` carries that app). Others must agree on the resolved
       // connector (the menu defaults `connector` to the app name when blank).

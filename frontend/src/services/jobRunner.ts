@@ -39,8 +39,9 @@ export async function uploadFile(jobId: string, file: File): Promise<{ name: str
   return res.json() as Promise<{ name: string; path: string; size: number }>
 }
 
-export function runJob(jobId: string, files: Record<string, string>, params: Record<string, string> = {}): Promise<{ run_id: string }> {
-  return api.post(`/api/jobs/${enc(jobId)}/run`, { files, params })
+/** ``preset`` — one of the job's presets the menu item pins (its params / step toggles apply). */
+export function runJob(jobId: string, files: Record<string, string>, params: Record<string, string> = {}, preset: string | null = null): Promise<{ run_id: string }> {
+  return api.post(`/api/jobs/${enc(jobId)}/run`, preset ? { files, params, preset } : { files, params })
 }
 
 /** The files a run left (today the file_load rejects report) are named ``<run id>-…``: the log

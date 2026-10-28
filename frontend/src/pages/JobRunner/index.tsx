@@ -10,6 +10,7 @@ import { ApiError } from '../../api/client'
 import { Banner, Button, Centered, FileInput, Input, PageLayout, SearchSelect, SpinnerRing, Tag } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { findMenuLabel } from '../../services/menuLabels'
+import { splitJobTarget } from '../../services/menuPath'
 import { downloadRunFile, durationOf, filesInLog, getJob, getRun, isActive, runJob, uploadFile, type JobRunDetail, type JobRunRow, type UserJob } from '../../services/jobRunner'
 import { STATE_TONE, relative } from '../Nomaflow/util'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -36,8 +37,9 @@ const Runs = styled.table`
 `
 const Err = styled.span`color: ${colors.red.main};`
 
-export default function JobRunner({ jobId }: { jobId: string }) {
+export default function JobRunner({ jobId: target }: { jobId: string }) {
   const { t } = useTranslation()
+  const { jobId, preset } = splitJobTarget(target)
   const { menus } = useWorkspace()
   const [job, setJob] = useState<UserJob | null>(null)
   const [runs, setRuns] = useState<JobRunRow[]>([])
@@ -49,7 +51,7 @@ export default function JobRunner({ jobId }: { jobId: string }) {
   const [detail, setDetail] = useState<JobRunDetail | null>(null)
   const logRef = useRef<HTMLPreElement | null>(null)
 
-  const title = useMemo(() => findMenuLabel(menus, { kind: 'job', connector: '', target: jobId }) ?? jobId, [menus, jobId])
+  const title = useMemo(() => findMenuLabel(menus, { kind: 'job', connector: '', target }) ?? (preset ? `${jobId} · ${preset}` : jobId), [menus, target, jobId, preset])
 
   const loadJob = useCallback(async () => {
     try {
@@ -95,7 +97,7 @@ export default function JobRunner({ jobId }: { jobId: string }) {
         if (f) paths[u.step] = (await uploadFile(jobId, f)).path
       }
       setBusy('run')
-      const r = await runJob(jobId, paths, params)
+      const r = await runJob(jobId, paths, params, preset)
       setFiles({})
       setPicked(r.run_id)
       await loadJob()

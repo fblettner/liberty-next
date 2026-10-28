@@ -365,6 +365,151 @@ def merge_file(
     return merged, rep
 
 
+# ── nomaflow jobs (plugins/<app>/jobs.toml) ──────────────────────────────────────────────────
+# A job mixes what the vendor owns (the steps, what they call, the description, tags, the user
+# parameters) with what the operator sets from the Jobs page (whether and when it runs). Merging
+# the job as one entity would let a schedule block every product fix to its steps, so the merge is
+# per field: the vendor part is refreshed like any entity, the operator fields stay the operator's.
+JOB_OPERATOR_FIELDS = ("enabled", "schedule", "timezone", "presets", "alerts", "retry", "log_level", "timeout_seconds")
+
+
+def _job_vendor_part(job: dict[str, Any]) -> dict[str, Any]:
+    out = {k: v for k, v in job.items() if k not in JOB_OPERATOR_FIELDS and k not in ("params", "override")}
+    out["params"] = sorted((job.get("params") or {}).keys())  # the vendor owns which params exist
+    return out
+
+
+def _three_way(key: str, wheel: dict[str, Any], live: dict[str, Any], prev: dict[str, Any] | None) -> tuple[bool, Any]:
+    """The operator's value of *key*: ``(present, value)``. With the previous shipment on record,
+    the live value wins only where the operator changed it (else the vendor's new value lands);
+    without one, whatever the live file has wins."""
+    if prev is not None and live.get(key) == prev.get(key):
+        return key in wheel, wheel.get(key)
+    return key in live, live.get(key)
+
+
+def _merge_job(wheel: dict[str, Any], live: dict[str, Any], prev: dict[str, Any] | None) -> tuple[dict[str, Any], list[str]]:
+    """The wheel's job with the operator's fields and parameter values kept. Returns the job and
+    the notes (operator fields kept, preset entries dropped because their step is gone)."""
+    out = {k: v for k, v in wheel.items() if k not in JOB_OPERATOR_FIELDS}
+    kept: list[str] = []
+    for f in JOB_OPERATOR_FIELDS:
+        present, value = _three_way(f, wheel, live, prev)
+        if present:
+            out[f] = value
+        if present and value != wheel.get(f) or not present and f in wheel:
+            kept.append(f)
+    w_params, l_params = wheel.get("params") or {}, live.get("params") or {}
+    p_params = (prev.get("params") or {}) if prev is not None else None
+    params: dict[str, Any] = {}
+    for k in w_params:
+        present, value = _three_way(k, w_params, l_params, p_params)
+        params[k] = value if present else w_params[k]
+        if params[k] != w_params[k]:
+            kept.append(f"params.{k}")
+    if params:
+        out["params"] = params
+    notes = [f"kept your {', '.join(kept)}"] if kept else []
+    steps = {st.get("name") for st in wheel.get("steps") or [] if isinstance(st, dict)}
+    for pr in out.get("presets") or []:
+        for key in ("step_enabled", "op_kwargs"):
+            gone = [n for n in (pr.get(key) or {}) if n not in steps]
+            for n in gone:
+                del pr[key][n]
+            if gone:
+                notes.append(f"preset {pr.get('name')!r}: dropped {key} of removed step(s) {', '.join(gone)}")
+    return out, notes
+
+
+def merge_jobs(
+    wheel: dict[str, Any], live: dict[str, Any] | None, bundled_prev: dict[str, Any] | None,
+    *, filename: str = "jobs.toml", force_vendor: bool = False,
+) -> tuple[dict[str, Any], FileMergeReport]:
+    """Merge a shipped ``jobs.toml`` into the live one. Per job (keyed by ``id``):
+
+    - new in the wheel → added; ``override = true`` on the live job → kept as is;
+    - in both → the wheel's job with the operator's fields kept (:data:`JOB_OPERATOR_FIELDS`, and
+      the values of the params the wheel still declares); if the operator also edited the vendor
+      part (steps…) since the previous shipment, the job is kept and reported (``force_vendor``
+      takes the wheel's) — without a previous shipment on record the wheel's vendor part wins,
+      as the whole-file copy always did;
+    - withdrawn by the vendor → removed when its vendor part is untouched, kept and reported when
+      edited; a job the vendor never shipped (no previous shipment, or absent from it) is the
+      operator's own and kept.
+
+    ``[meta]`` (retention / missed-run policies) is the operator's: the live one wins. The jobs
+    come out in the wheel's order, the operator's own after them."""
+    rep = FileMergeReport(file=filename, had_snapshot=bundled_prev is not None)
+    w_jobs = [j for j in wheel.get("jobs") or [] if isinstance(j, dict) and j.get("id")]
+    if live is None:
+        rep.added += [_label("job", j["id"]) for j in w_jobs]
+        return json.loads(json.dumps(wheel, default=str)), rep
+    live = json.loads(json.dumps(live, default=str))
+    l_by = {j["id"]: j for j in live.get("jobs") or [] if isinstance(j, dict) and j.get("id")}
+    p_by = {j["id"]: j for j in (bundled_prev or {}).get("jobs") or [] if isinstance(j, dict) and j.get("id")}
+    w_ids = {j["id"] for j in w_jobs}
+    out_jobs: list[dict[str, Any]] = []
+    for w in w_jobs:
+        jid, label = w["id"], _label("job", w["id"])
+        lv = l_by.get(jid)
+        if lv is None:
+            out_jobs.append(w)
+            rep.added.append(label)
+            continue
+        if lv.get("override") is True:
+            out_jobs.append(lv)
+            rep.kept_override.append(label)
+            continue
+        pv = p_by.get(jid) if bundled_prev is not None else None
+        vendor_edited = pv is not None and _job_vendor_part(lv) != _job_vendor_part(pv) and _job_vendor_part(lv) != _job_vendor_part(w)
+        if vendor_edited and not force_vendor:
+            out_jobs.append(lv)
+            rep.kept_modified.append(label)
+            continue
+        merged, notes = _merge_job(w, lv, pv)
+        out_jobs.append(merged)
+        rep.notes += [f"{jid}: {n}" for n in notes]
+        if _same(merged, lv):
+            rep.unchanged += 1
+        else:
+            (rep.refreshed_forced if vendor_edited else rep.refreshed).append(label)
+    for jid, lv in l_by.items():
+        if jid in w_ids:
+            continue
+        label = _label("job", jid)
+        pv = p_by.get(jid)
+        if pv is None:
+            out_jobs.append(lv)
+            rep.kept_custom.append(label)
+        elif lv.get("override") is not True and _job_vendor_part(lv) == _job_vendor_part(pv):
+            rep.removed.append(label)
+        else:
+            out_jobs.append(lv)
+            rep.kept_withdrawn.append(label)
+    merged_doc = {k: v for k, v in live.items() if k != "jobs"}
+    for k, v in wheel.items():
+        if k != "jobs" and k not in merged_doc:
+            merged_doc[k] = v
+    merged_doc["jobs"] = out_jobs
+    return merged_doc, rep
+
+
+def merge_jobs_file(wheel_path: Path, live_doc: dict[str, Any] | None, dst: Path, snapshot: Path,
+                    *, force_vendor: bool = False, dry_run: bool = False) -> FileMergeReport:
+    """File-level :func:`merge_jobs` for the apps installer: *live_doc* is the operator's jobs file
+    read BEFORE the plugin package was replaced, *snapshot* the previous shipment's copy (under
+    ``<config>/.bundled/``). Writes the merged file to *dst* and records the shipment in
+    *snapshot* (unless *dry_run*)."""
+    wheel = _load_toml(wheel_path) or {}
+    merged, rep = merge_jobs(wheel, live_doc, _load_toml(snapshot), filename=str(dst.name), force_vendor=force_vendor)
+    if not dry_run:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text(tomli_w.dumps(merged, multiline_strings=True), encoding="utf-8")
+        snapshot.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(wheel_path, snapshot)
+    return rep
+
+
 def _menu_items(doc: dict[str, Any], kind: str, item_id: str, value: Any | None) -> None:
     """Set (``value``) or remove (``None``) one ``[[menus.<app>.items]]`` entry by id, appending
     new items at the end so the operator's ordering is kept."""

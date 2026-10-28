@@ -377,3 +377,83 @@ def test_invalid_live_toml_is_reported_not_crashed(tmp_path: Path) -> None:
     rep = merge_config_dir(wheel, live)
     assert rep.errors and "screens.toml" in rep.errors[0] and rep.files == []
     assert (live / "screens.toml").read_text() == "this is = not toml ["
+
+
+# ── nomaflow jobs ────────────────────────────────────────────────────────────────────────────
+def _job(jid: str, steps: list[str], **kw) -> dict:
+    return {"id": jid, "steps": [{"type": "python", "name": n, "callable": "m:f"} for n in steps], **kw}
+
+
+def test_jobs_operator_fields_survive_a_product_change() -> None:
+    """The operator scheduled and enabled a job and set its application; the product adds a step:
+    the step lands, the schedule / enabled / preset / param value stay, a new param comes in."""
+    from liberty.config_merge import merge_jobs
+    prev = {"jobs": [_job("collect", ["A"], enabled=False, params={"apps_id": 1})]}
+    live = {"meta": {"retention": {"days": 7}}, "jobs": [_job(
+        "collect", ["A"], enabled=True, schedule="0 2 * * *", params={"apps_id": 3},
+        presets=[{"name": "p", "step_enabled": {"A": False}}])]}
+    wheel = {"meta": {"retention": {"days": 30}}, "jobs": [_job("collect", ["A", "B"], enabled=False, params={"apps_id": 1, "lang": "fr"})]}
+    merged, rep = merge_jobs(wheel, live, prev)
+    j = merged["jobs"][0]
+    assert [s["name"] for s in j["steps"]] == ["A", "B"]
+    assert j["enabled"] is True and j["schedule"] == "0 2 * * *" and j["presets"] == [{"name": "p", "step_enabled": {"A": False}}]
+    assert j["params"] == {"apps_id": 3, "lang": "fr"}
+    assert merged["meta"] == {"retention": {"days": 7}}                    # the live policies win
+    assert rep.refreshed == ["job: collect"] and any("kept your" in n for n in rep.notes)
+
+
+def test_jobs_vendor_defaults_move_when_the_operator_never_touched_them() -> None:
+    from liberty.config_merge import merge_jobs
+    prev = {"jobs": [_job("r", ["A"], schedule="0 6 1 * *")]}
+    live = {"jobs": [_job("r", ["A"], schedule="0 6 1 * *")]}
+    wheel = {"jobs": [_job("r", ["A"], schedule="0 7 1 * *")]}
+    merged, _ = merge_jobs(wheel, live, prev)
+    assert merged["jobs"][0]["schedule"] == "0 7 1 * *"
+
+
+def test_jobs_withdrawn_custom_override_and_edited_steps() -> None:
+    from liberty.config_merge import merge_jobs
+    prev = {"jobs": [_job("old", ["A"]), _job("edited", ["A"]), _job("forked", ["A"])]}
+    live = {"jobs": [
+        _job("old", ["A"], schedule="*/5 * * * *"),            # withdrawn, only scheduled → removed
+        _job("edited", ["A", "MINE"]),                          # operator changed the steps → kept
+        _job("forked", ["X"], override=True),                   # the operator's fork → kept
+        _job("mine", ["A"]),                                    # never shipped → custom, kept
+    ]}
+    wheel = {"jobs": [_job("edited", ["A", "B"]), _job("forked", ["A", "B"]), _job("new", ["A"])]}
+    merged, rep = merge_jobs(wheel, live, prev)
+    ids = [j["id"] for j in merged["jobs"]]
+    assert ids == ["edited", "forked", "new", "mine"]
+    assert rep.removed == ["job: old"] and rep.kept_modified == ["job: edited"]
+    assert rep.kept_override == ["job: forked"] and rep.kept_custom == ["job: mine"] and rep.added == ["job: new"]
+    forced, frep = merge_jobs(wheel, live, prev, force_vendor=True)
+    assert [s["name"] for s in forced["jobs"][0]["steps"]] == ["A", "B"] and frep.refreshed_forced == ["job: edited"]
+
+
+def test_jobs_without_a_previous_shipment_and_presets_of_removed_steps() -> None:
+    """First upgrade with this merge: no snapshot. The live operator fields still win, the steps
+    come from the wheel, a job absent from the wheel is kept (it may be the operator's), and a
+    preset entry naming a step that no longer exists is dropped (the job would not load)."""
+    from liberty.config_merge import merge_jobs
+    live = {"jobs": [_job("c", ["A", "GONE"], schedule="0 1 * * *", presets=[{"name": "p", "step_enabled": {"GONE": False, "A": True}}]), _job("legacy", ["A"])]}
+    wheel = {"jobs": [_job("c", ["A", "B"])]}
+    merged, rep = merge_jobs(wheel, live, None)
+    c = merged["jobs"][0]
+    assert [s["name"] for s in c["steps"]] == ["A", "B"] and c["schedule"] == "0 1 * * *"
+    assert c["presets"] == [{"name": "p", "step_enabled": {"A": True}}]
+    assert rep.kept_custom == ["job: legacy"] and any("removed step" in n for n in rep.notes)
+
+
+def test_jobs_file_merge_writes_and_snapshots(tmp_path: Path) -> None:
+    from liberty.config_merge import merge_jobs_file
+    from liberty.jobs.schema import JobsFile
+    wheel = tmp_path / "wheel.toml"
+    wheel.write_text(tomli_w.dumps({"jobs": [_job("c", ["A", "B"])]}))
+    dst, snap = tmp_path / "live" / "jobs.toml", tmp_path / ".bundled" / "jobs.toml"
+    rep = merge_jobs_file(wheel, {"jobs": [_job("c", ["A"], schedule="0 1 * * *")]}, dst, snap)
+    doc = tomllib.loads(dst.read_text())
+    JobsFile.model_validate(doc)
+    assert doc["jobs"][0]["schedule"] == "0 1 * * *" and snap.read_bytes() == wheel.read_bytes() and rep.refreshed
+    dry = tmp_path / "dry" / "jobs.toml"
+    merge_jobs_file(wheel, None, dry, tmp_path / "dry-snap.toml", dry_run=True)
+    assert not dry.exists()

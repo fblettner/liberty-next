@@ -148,6 +148,15 @@ callable = "tests.test_web_jobs:_record_kwargs"
 name = "apps_id"
 label = "Application"
 choices_from = "query:db/answer:ANSWER:ANSWER"
+[[jobs.steps]]
+type = "python"
+name = "extra"
+callable = "tests.test_web_jobs:_record_kwargs"
+op_kwargs = { part = "extra" }
+[[jobs.presets]]
+name = "Echo only"
+params = { apps_id = 42 }
+step_enabled = { extra = false }
 
 [[jobs]]
 id = "shared-params"
@@ -1154,3 +1163,30 @@ def test_job_level_param_with_query_choices(env) -> None:
                 break
             time.sleep(0.05)
         assert d["run"]["state"] == "SUCCEEDED" and RECORDED_KWARGS.get("apps_id") == 42
+
+
+def test_user_run_with_a_preset(env) -> None:
+    """A menu item may pin one of the job's presets: the user's run applies its params and step
+    toggles (the skipped step does not run), the user's own picks still win, and an unknown preset
+    is refused."""
+    import time
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "loader")
+        assert client.post("/api/jobs/pick-app/run", json={"preset": "nope"}, headers=h).status_code == 422
+
+        def fire(body: dict) -> list[dict]:
+            RECORDED_PER_STEP.clear()
+            r = client.post("/api/jobs/pick-app/run", json=body, headers=h)
+            assert r.status_code == 200, r.text
+            for _ in range(100):
+                d = client.get(f"/api/jobs/pick-app/runs/{r.json()['run_id']}", headers=h).json()
+                if d["run"]["state"] not in ("QUEUED", "RUNNING"):
+                    break
+                time.sleep(0.05)
+            assert d["run"]["state"] == "SUCCEEDED", d
+            return list(RECORDED_PER_STEP)
+
+        assert [k.get("part") for k in fire({})] == [None, "extra"]          # no preset: both steps
+        ran = fire({"preset": "Echo only"})
+        assert len(ran) == 1 and ran[0]["apps_id"] == 42                     # extra skipped, preset's apps_id

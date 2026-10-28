@@ -481,6 +481,10 @@ class Job(BaseModel):
     # Typical usage: deploy-databases (1) → init-db (2) → init-schema (3) →
     # import-reference (4). One-shot bootstrap of a fresh deployment.
     install_step: int | None = Field(default=None, ge=1)
+    # The operator's fork: an apps upgrade leaves this job exactly as saved (see
+    # liberty.config_merge.merge_jobs — without it, the steps are refreshed from the product and
+    # only the operator's fields — enabled, schedule, presets, … — are kept).
+    override: bool = False
 
     @field_validator("timezone")
     @classmethod

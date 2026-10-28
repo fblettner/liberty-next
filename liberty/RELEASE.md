@@ -12,6 +12,18 @@
 - nomaflow: the jobs list is searchable (id, description, tag), filtered by application, status
   and tag (kept per browser), grouped by application with collapsible groups, one line per job
   with icon actions.
+- Jobs: a `job` menu item can pin one of the job's presets (`params = { preset = "…" }`); the
+  user's page runs it with that preset's parameters and step switches.
+- nomaflow: the Schedule page lists the upcoming runs day by day with the schedule in words
+  ("every day at 03:00"), then the schedules switched off; the jobs run by hand only are folded
+  away. No more "Back to jobs" button. The sidebar no longer highlights Jobs on the Schedule page.
+- nomaflow: picking a preset in "Run with parameters" starts from the job's saved values, as the
+  scheduler does; it no longer keeps the steps the previous preset switched off. Jobs tagged
+  `main` are listed first, in a "Main jobs" group.
+- Config merge: `merge_jobs` / `merge_jobs_file` merge a shipped `jobs.toml` per job — the
+  product's steps refreshed, the operator's fields (enabled, schedule, timezone, presets, alerts,
+  retry, log level, timeout, parameter values) kept; a job gets an `override` flag. Used by the
+  apps installer.
 
 ## 7.0.60 — unreleased
 

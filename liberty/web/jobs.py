@@ -775,18 +775,27 @@ async def user_run(job_id: str, request: Request, principal: CurrentPrincipal, b
     """Fire the job for the user: ``{files: {<step>: <uploaded path>}, params: {<name>: <value>}}``
     hands each ``file_load`` step its file (a path this job's upload returned — nothing else is
     accepted) and the declared ``user_params`` their values (a value outside a param's choices
-    is refused; a blank value is "not set"). No other per-fire override exists on this side."""
+    is refused; a blank value is "not set"). ``preset`` names one of the job's presets (a menu item
+    pins it): its params, step kwargs, step toggles and log level apply under the user's picks.
+    No other per-fire override exists on this side."""
     from liberty.jobs.files import job_dir
     comps, job = _user_job(request, job_id, principal)
     if job_id in comps.scheduler.in_flight_job_ids:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="the job is already running")
     steps = {u["step"] for u in _upload_steps(job)}
     overrides: dict[str, dict[str, Any]] = {}
+    preset = None
+    preset_name = (body or {}).get("preset")
+    if preset_name:
+        preset = next((pr for pr in job.presets if pr.name == preset_name), None)
+        if preset is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"{preset_name!r} is not a preset of this job")
+        overrides = {s: dict(kw) for s, kw in preset.op_kwargs.items()}
     params = (body or {}).get("params") or {}
     if not isinstance(params, dict):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="`params` must be an object of `{name: value}`")
     declared = {p["name"]: p for p in await _user_params(request, job, None)}
-    job_level: dict[str, Any] = {}
+    job_level: dict[str, Any] = dict(preset.params) if preset else {}
     for name, value in params.items():
         p = declared.get(name)
         if p is None:
@@ -815,8 +824,12 @@ async def user_run(job_id: str, request: Request, principal: CurrentPrincipal, b
         if uploads not in p.parents or not p.is_file():
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"{step!r}: upload the file first")
         overrides.setdefault(step, {})["file"] = str(p)
-    _log.info("nomaflow.user fire job=%s triggered_by=%s overrides=%s", job_id, principal.username, {s: sorted(k) for s, k in overrides.items()} or None)
-    run_id = await comps.scheduler.fire_now_async(job, triggered_by=principal.username, op_kwargs_overrides=overrides or None, params_override=job_level or None)
+    _log.info("nomaflow.user fire job=%s preset=%s triggered_by=%s overrides=%s", job_id, preset.name if preset else None, principal.username, {s: sorted(k) for s, k in overrides.items()} or None)
+    run_id = await comps.scheduler.fire_now_async(
+        job, triggered_by=principal.username, op_kwargs_overrides=overrides or None, params_override=job_level or None,
+        step_enabled_overrides=dict(preset.step_enabled) if preset and preset.step_enabled else None,
+        log_level=preset.log_level if preset else None,
+    )
     return {"job_id": job_id, "run_id": run_id, "triggered_by": principal.username, "status": "queued"}
 
 

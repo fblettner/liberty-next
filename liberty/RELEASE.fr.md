@@ -14,6 +14,22 @@
 - nomaflow : la liste des tâches se cherche (id, description, étiquette), se filtre par
   application, statut et étiquette (mémorisés par navigateur), se groupe par application en
   groupes repliables, une ligne par tâche avec des actions en icônes.
+- Tâches : un élément de menu `job` peut fixer un des préréglages de la tâche
+  (`params = { preset = "…" }`) ; la page de l'utilisateur la lance avec les paramètres et les
+  étapes de ce préréglage.
+- nomaflow : la page Planning montre les prochaines exécutions jour par jour, la planification en
+  clair (« chaque jour à 03:00 »), puis les planifications désactivées ; les tâches lancées à la
+  main uniquement sont repliées. Plus de bouton « Retour aux tâches ». La barre latérale ne
+  surligne plus Tâches sur la page Planning.
+- nomaflow : choisir un préréglage dans « Exécuter avec paramètres » part des valeurs enregistrées
+  de la tâche, comme le planificateur ; il ne garde plus les étapes désactivées par le préréglage
+  précédent. Les tâches étiquetées `main` sont listées en premier, dans un groupe « Tâches
+  principales ».
+- Fusion de configuration : `merge_jobs` / `merge_jobs_file` fusionnent un `jobs.toml` livré
+  tâche par tâche — étapes du produit mises à jour, champs de l'opérateur (activation,
+  planification, fuseau, préréglages, alertes, reprises, niveau de log, délai, valeurs de
+  paramètres) conservés ; une tâche reçoit un indicateur `override`. Utilisé par l'installateur
+  des applications.
 
 ## 7.0.60 — non publiée
 

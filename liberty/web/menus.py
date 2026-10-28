@@ -20,6 +20,8 @@ Hot-reloaded together with ``connectors.toml`` via ``POST /admin/reload``.
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -139,7 +141,10 @@ def _home_path(app: str, app_menu: AppMenu, home: str | None, *, keep) -> str | 
     if target.type == "dashboard":
         return f"/dashboard/{target.target}"
     if target.type == "job":
-        return f"/job/{target.target}"
+        # A pinned preset rides in the tab target as ``<job>::<preset>`` (``::`` is not legal in a
+        # job id) — the frontend's menuPath.jobTarget builds the same.
+        preset = target.params.get("preset")
+        return f"/job/{quote(f'{target.target}::{preset}' if preset else target.target, safe='')}"
     if target.type == "screen":
         # A screen home opens the dedicated screen route — resolved to its specific screen id.
         return f"/screen/{app}/{target.target}"
