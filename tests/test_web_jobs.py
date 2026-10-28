@@ -490,6 +490,34 @@ def test_put_jobs_parsed_drops_null_fields(env) -> None:
         assert back["steps"][0]["constants"] == {"period": "2026-03"} and "watch_dir" not in back["steps"][0] or back["steps"][0].get("watch_dir") is None
 
 
+def test_put_jobs_parsed_rewrites_only_the_changed_job(env, monkeypatch) -> None:
+    """The builder sends every job loaded with ``${…}`` resolved: a job left unchanged keeps its text
+    on disk (comments, ``${…}``), the edited one gets its references back — saving one job used to
+    write the server's paths into every other job (the apps' shipped jobs.toml)."""
+    app, jobs_toml = env
+    monkeypatch.setenv("SAMPLES_DIR", "/srv/one-server")
+    jobs_toml.write_text(
+        "# a hand comment\n"
+        "[[jobs]]\nid = \"keep\"\n# keep me\n"
+        "[[jobs.steps]]\ntype = \"file_load\"\nname = \"load\"\npath = \"${SAMPLES_DIR}/items.xlsx\"\n"
+        "target = { connector = \"db\", table = \"t\" }\n\n"
+        "[[jobs]]\nid = \"edit\"\nschedule = \"0 5 * * *\"\n"
+        "[[jobs.steps]]\ntype = \"file_load\"\nname = \"load\"\npath = \"${SAMPLES_DIR}/sales.xlsx\"\n"
+        "target = { connector = \"db\", table = \"t\" }\n"
+    )
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        jobs = client.get("/admin/config/jobs/parsed", headers=h).json()["jobs"]
+        assert jobs[0]["steps"][0]["path"] == "/srv/one-server/items.xlsx"       # the builder sees them resolved
+        jobs[1]["schedule"] = "0 6 * * *"
+        r = client.put("/admin/config/jobs/parsed", json={"jobs": jobs}, headers=h)
+        assert r.status_code == 200, r.text
+    text = jobs_toml.read_text()
+    assert "/srv/one-server" not in text
+    assert "# keep me" in text and 'target = { connector = "db", table = "t" }' in text   # untouched, as written
+    assert 'path = "${SAMPLES_DIR}/sales.xlsx"' in text and 'schedule = "0 6 * * *"' in text
+
+
 def test_put_jobs_parsed_rejects_invalid(env) -> None:
     """A job with an unknown step type → 422, file untouched."""
     app, jobs_toml = env

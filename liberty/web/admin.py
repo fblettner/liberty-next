@@ -1777,6 +1777,53 @@ def _drop_none(value: Any) -> Any:
         return [_drop_none(v) if v is not None else "" for v in value]
     return value
 
+def _restore_env_refs(new: Any, raw: Any) -> Any:
+    """*new* (a job as the builder sends it — loaded with ``${…}`` resolved) with each value that
+    equals the resolution of the file's ``${…}`` reference at the same place put back as that
+    reference, so a save does not write one server's paths into a shipped file. Lists of named
+    entries (steps, params) pair by ``name``, other lists by position."""
+    from liberty.config import substitute_env
+
+    if isinstance(raw, str) and isinstance(new, str):
+        return raw if "${" in raw and substitute_env(raw) == new else new
+    if isinstance(new, dict) and isinstance(raw, dict):
+        return {k: _restore_env_refs(v, raw.get(k)) for k, v in new.items()}
+    if isinstance(new, list) and isinstance(raw, list):
+        named = all(isinstance(x, dict) and "name" in x for x in raw)
+        by_name = {x["name"]: x for x in raw} if named else {}
+        return [_restore_env_refs(v, by_name.get(v.get("name")) if named and isinstance(v, dict) else (raw[i] if i < len(raw) else None))
+                for i, v in enumerate(new)]
+    return new
+
+
+def _merge_jobs(doc: Any, text: str, path: Path, submitted: list[dict[str, Any]]) -> Any:
+    """The ``jobs`` array to write: a submitted job identical to what the file loads to keeps its
+    table as it is on disk (text, comments, ``${…}`` references, ``step_defaults``); a changed or new
+    job is written from the submission with its ``${…}`` references restored. Order, additions and
+    deletions follow the submission."""
+    from liberty.jobs import load_jobs
+    from liberty.jobs.registry import _merge_step_defaults
+    from liberty.jobs.schema import Job
+
+    old_tables = {str(t.get("id")): t for t in (doc.get("jobs") or [])}
+    raw_jobs: dict[str, dict[str, Any]] = {}
+    for j in (tomllib.loads(text).get("jobs") or []) if text.strip() else []:
+        j = dict(j)
+        defaults = j.pop("step_defaults", None)
+        if defaults:
+            j["steps"] = [_merge_step_defaults(defaults, st) for st in j.get("steps", [])]
+        raw_jobs[str(j.get("id"))] = j
+    loaded = {j.id: j for j in load_jobs(path).jobs()} if path.exists() else {}
+    out = tomlkit.aot()
+    for job in submitted:
+        jid = str(job.get("id"))
+        if jid in old_tables and jid in loaded and Job.model_validate(_drop_none(job)) == loaded[jid]:
+            out.append(old_tables[jid])
+        else:
+            out.append(_drop_none(_restore_env_refs(job, raw_jobs.get(jid))))
+    return out
+
+
 @router.put("/config/jobs/parsed", summary="Update jobs config")
 async def put_jobs_parsed(body: JobsBody, request: Request, principal: JobsEditor) -> dict[str, object]:
     """Validate the submitted jobs (+ optional meta) against :class:`liberty.jobs.JobsFile`,
@@ -1785,8 +1832,9 @@ async def put_jobs_parsed(body: JobsBody, request: Request, principal: JobsEdito
     ``POST /admin/reload`` afterwards to apply.
 
     The body carries already-expanded steps (no ``step_defaults``); ``Job``'s ``extra="forbid"``
-    rejects a stray ``step_defaults`` key. Saving therefore normalises a hand-authored
-    ``step_defaults`` block away — the documented behaviour (NOMAFLOW-UI.md §4).
+    rejects a stray ``step_defaults`` key. Saving a job therefore normalises its hand-authored
+    ``step_defaults`` block away (NOMAFLOW-UI.md §4); the jobs left unchanged keep their text as it
+    is on disk, ``${…}`` references included (``_merge_jobs``).
 
     ``meta`` is optional: when present it REPLACES the file's existing ``[meta]`` block
     (so retention edits land); when absent the existing block is preserved. The JobEditor
@@ -1811,9 +1859,10 @@ async def put_jobs_parsed(body: JobsBody, request: Request, principal: JobsEdito
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
     if body.jobs:
-        # TOML has no null: a builder clearing a field sends ``null`` — drop such keys (the
-        # model's default takes over on reload) instead of letting tomlkit refuse the save.
-        doc["jobs"] = _drop_none(body.jobs)
+        # Only the jobs that changed are rewritten (``_merge_jobs``): the builder sends every job
+        # loaded with ``${…}`` resolved, and writing them all back put one server's paths in the file.
+        # TOML has no null: a cleared field (``null``) is dropped — the model's default takes over.
+        doc["jobs"] = _merge_jobs(doc, text, path, body.jobs)
     elif "jobs" in doc:
         del doc["jobs"]
     # Replace the [meta] block when one was submitted. Assigning a plain dict lets

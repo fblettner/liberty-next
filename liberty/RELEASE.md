@@ -111,6 +111,10 @@
   live on save. An address the install did not set leaves no URL (refused, never opened as a local path).
 - Module catalogues: a screen's `row_menu` (as in screens.toml); an `open_url`'s `{ITEM}` placeholder names a data item
   and becomes the physical column (`{AN8}` → `{ABAN8}`).
+- nomaflow job editor: saving a job rewrites only the jobs that changed. The editor receives every job with its
+  `${…}` references resolved, and a save wrote them all back — one server's paths (`${LIBERTY_APPS_DIR}/…` turned into
+  `/srv/…`) landed in every other job of the file; the unchanged jobs now keep their text as it is on disk (comments,
+  `${…}`, `step_defaults`), and the edited job gets its `${…}` references back where the value still matches.
 
 ## 7.0.64 — unreleased
 

@@ -133,6 +133,11 @@
   aucune URL (refusée, jamais ouverte comme chemin local).
 - Catalogues de modules : le `row_menu` d'un écran (comme dans screens.toml) ; un paramètre `{ÉLÉMENT}` d'un `open_url`
   nomme un élément de données et devient la colonne physique (`{AN8}` → `{ABAN8}`).
+- Éditeur de jobs nomaflow : enregistrer un job ne réécrit que les jobs modifiés. L'éditeur reçoit chaque job avec
+  ses références `${…}` résolues, et un enregistrement les réécrivait toutes — les chemins d'un serveur
+  (`${LIBERTY_APPS_DIR}/…` devenu `/srv/…`) se retrouvaient dans tous les autres jobs du fichier ; les jobs inchangés
+  gardent maintenant leur texte tel qu'il est sur disque (commentaires, `${…}`, `step_defaults`), et le job modifié
+  retrouve ses références `${…}` là où la valeur correspond encore.
 
 ## 7.0.64 — non publiée
 
