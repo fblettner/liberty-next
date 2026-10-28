@@ -27,6 +27,20 @@
   `dictionary_data_items_for_table_get` now emits `jdenumber` / `jdedate` / `integer` types,
   the decimals, the size and the justify rule next to the UDC lookup rule.
 
+**Jobs for users: a menu item that runs a job and shows its log**
+- Menu item type `job` (target = the nomaflow job id, permission `job:<id>`, `!job:<id>` hides
+  it): the leaf opens the job's own page — the description, one file picker per `file_load`
+  step, Run, the run's log followed live, the previous runs with their state, duration and
+  files. Routes under `/api/jobs/{id}` (the job, upload, run with the uploaded files only, a
+  run's detail and files); nothing else of the nomaflow control plane is exposed. Settings →
+  Menus offers the jobs as targets; Settings → Access has a Job rule family.
+- The apps ship the menus: nomademo gets an Import folder (items, companies, a month of sales,
+  refresh periods), nomasx1 a Jobs folder (collect security, collect licences), nomajde a Jobs
+  folder (the two security re-merges).
+- The nomaflow Overview dashboard takes a period (last 7 days by default): the figures, the
+  runs per day, what needs attention, the runs and durations per job and the recent runs
+  follow it; "In flight" stays live.
+
 ## 7.0.59 — unreleased
 
 **Fixes from the documentation review (2026-10-27)**

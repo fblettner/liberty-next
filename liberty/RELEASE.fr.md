@@ -32,6 +32,22 @@
   types `jdenumber` / `jdedate` / `integer`, les décimales, la taille et la règle de justification
   à côté de la règle de recherche UDC.
 
+**Des tâches pour les utilisateurs : un élément de menu qui lance une tâche et montre son journal**
+- Type d'élément de menu `job` (cible = l'identifiant de la tâche nomaflow, permission
+  `job:<id>`, `!job:<id>` le masque) : la feuille ouvre la page de la tâche — la description, un
+  sélecteur de fichier par étape `file_load`, Lancer, le journal suivi en direct, les exécutions
+  précédentes avec leur état, leur durée et leurs fichiers. Routes sous `/api/jobs/{id}` (la
+  tâche, l'envoi de fichier, le lancement avec les seuls fichiers envoyés, le détail et les
+  fichiers d'une exécution) ; rien d'autre du plan de contrôle nomaflow n'est exposé.
+  Paramètres → Menus propose les tâches comme cibles ; Paramètres → Accès a une famille de
+  règles Tâche.
+- Les applications livrent les menus : nomademo reçoit un dossier Import (articles, sociétés,
+  un mois de ventes, recalcul des périodes), nomasx1 un dossier Tâches (collecte sécurité,
+  collecte licences), nomajde un dossier Tâches (les deux refusions de sécurité).
+- Le tableau de bord Vue d'ensemble de nomaflow prend une période (7 derniers jours par
+  défaut) : les chiffres, les exécutions par jour, ce qui demande attention, les exécutions et
+  durées par tâche et les exécutions récentes la suivent ; « En cours » reste en direct.
+
 ## 7.0.59 — non publiée
 
 **Corrections issues de la revue de documentation (27/10/2026)**

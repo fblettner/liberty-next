@@ -11,6 +11,7 @@ from liberty.web.dashboards import router as dashboards_router
 from liberty.web.explorer import router as explorer_router
 from liberty.web.export import router as export_router
 from liberty.web.jobs import router as jobs_router
+from liberty.web.jobs import user_router as user_jobs_router
 from liberty.web.license import router as license_router
 from liberty.web.menus import router as menus_router
 from liberty.web.plugins import router as plugins_router
@@ -32,6 +33,7 @@ __all__ = [
     "explorer_router",
     "export_router",
     "jobs_router",
+    "user_jobs_router",
     "license_router",
     "menus_router",
     "plugins_router",

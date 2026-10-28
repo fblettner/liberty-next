@@ -206,7 +206,7 @@ export default function Layout() {
     refreshWorkspace()
   }
 
-  // a `/sql/...`, `/http/...`, `/dashboard/...`, `/nomaflow/runs/:id`, or `/settings` route → show
+  // a `/sql/...`, `/http/...`, `/dashboard/...`, `/job/...`, `/nomaflow/runs/:id`, or `/settings` route → show
   // the tab host (and the matching tab is active); a framework route → show its page through
   // <Outlet/>, with the tab host hidden underneath. (all useMatch calls must run unconditionally —
   // Rules of Hooks). nomaflow run detail + Settings are hosted as workspace tabs so they sit in the
@@ -216,13 +216,14 @@ export default function Layout() {
   const screenMatch = useMatch('/screen/:connector/:target')
   const httpMatch = useMatch('/http/:connector/:target')
   const dashboardMatch = useMatch('/dashboard/:target')
+  const jobMatch = useMatch('/job/:target')
   const nomaflowRunMatch = useMatch('/nomaflow/runs/:runId')
   const settingsMatch = useMatch('/settings')
   const monitoringMatch = useMatch('/monitoring')
   // `page` tabs (nomaflow Jobs/Schedule/Package/Changes/Integrity, Reports) render through TabHost
   // too — so their routes count as "on a tab route" and the Outlet stays empty.
   const pageTabMatch = isPageTabPath(pathname)
-  const onTabRoute = !!(sqlMatch || screenMatch || httpMatch || dashboardMatch || nomaflowRunMatch || settingsMatch || monitoringMatch || pageTabMatch)
+  const onTabRoute = !!(sqlMatch || screenMatch || httpMatch || dashboardMatch || jobMatch || nomaflowRunMatch || settingsMatch || monitoringMatch || pageTabMatch)
 
   return (
     <Shell>

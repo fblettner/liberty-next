@@ -47,7 +47,7 @@ function TabRoute({ kind }: { kind: TabKind }) {
       openOrActivate({ kind, connector: "", target: "" });
     } else if (kind === "nomaflow_run" && runId) {
       openOrActivate({ kind, connector: "", target: runId });
-    } else if (kind === "dashboard" && target) {
+    } else if ((kind === "dashboard" || kind === "job") && target) {
       openOrActivate({ kind, connector: "", target });
     } else if (connector && target) {
       openOrActivate({ kind, connector, target });
@@ -89,6 +89,8 @@ export default function App() {
         <Route path="screen/:connector/:target" element={<TabRoute kind="screen" />} />
         <Route path="http/:connector/:target" element={<TabRoute kind="http" />} />
         <Route path="dashboard/:target" element={<TabRoute kind="dashboard" />} />
+        {/* A nomaflow job for the user to run (a `job` menu item) — its own tab kind. */}
+        <Route path="job/:target" element={<TabRoute kind="job" />} />
         <Route path="settings" element={<TabRoute kind="settings" />} />
         <Route path="monitoring" element={<TabRoute kind="monitoring" />} />
         {/* nomaflow feature area — Jobs / Schedule / Package / Changes / Integrity open as `page`

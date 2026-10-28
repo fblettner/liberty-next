@@ -70,7 +70,7 @@ export interface MenuItem {
   label: string
   l?: Record<string, string>
   icon?: string
-  type?: 'screen' | 'query' | 'endpoint' | 'dashboard' | 'page'
+  type?: 'screen' | 'query' | 'endpoint' | 'dashboard' | 'page' | 'job'
   connector?: string
   target?: string
   params?: Record<string, unknown>

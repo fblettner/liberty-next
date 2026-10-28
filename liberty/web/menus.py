@@ -99,6 +99,13 @@ def _keeper(principal: Principal, dashboards: DashboardsFile, app: str, screens:
             # A page leaf points at a frontend route; the route enforces its own auth. Only the
             # roles filter + the menu deny (both above) gate it here.
             return True
+        if item.type == "job":
+            # A job leaf opens the job for the user to run: ``job:<id>`` (or a menu allow) shows
+            # it, ``!job:<id>`` hides it. The user routes check the same permission.
+            jid = item.target or ""
+            if principal.is_denied(f"job:{jid}"):
+                return False
+            return principal.has_permission(f"job:{jid}") or principal.has_permission(menu_perm)
         if item.type == "screen":
             # A screen leaf's target is a screen id — resolve it to the screen's read query and
             # gate on that (same ``sql:<connector>:<read_query>`` the screen catalog uses). When
@@ -131,6 +138,8 @@ def _home_path(app: str, app_menu: AppMenu, home: str | None, *, keep) -> str | 
         return None
     if target.type == "dashboard":
         return f"/dashboard/{target.target}"
+    if target.type == "job":
+        return f"/job/{target.target}"
     if target.type == "screen":
         # A screen home opens the dedicated screen route — resolved to its specific screen id.
         return f"/screen/{app}/{target.target}"

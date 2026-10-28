@@ -128,3 +128,18 @@ def test_load_and_parse_menus_roundtrip(tmp_path) -> None:
         parse_menus({"menus": {"x": {"bogus": 1}}})
     with pytest.raises(Exception):
         parse_menus(tomllib.loads("[menus.x]\nitems = [{ id = 'a', label = 'A', type = 'frame', target = 't' }]"))
+
+
+def test_job_leaf_type() -> None:
+    """A ``job`` leaf targets a nomaflow job id, carries no connector, and is emitted connector-less
+    like a dashboard leaf."""
+    from liberty.menus.config import AppMenu, MenuItem, build_menu_tree
+    import pytest as _pytest
+    it = MenuItem(id="imp", label="Items file", type="job", target="nomademo-load-items")
+    assert it.type == "job" and it.target == "nomademo-load-items"
+    with _pytest.raises(ValueError, match="must not carry a `connector`"):
+        MenuItem(id="imp", label="x", type="job", target="j", connector="nomademo")
+    with _pytest.raises(ValueError, match="needs a `target`"):
+        MenuItem(id="imp", label="x", type="job")
+    tree = build_menu_tree(AppMenu(label="demo", items=[it]), app="nomademo", language=None, keep=lambda item, connector: True)
+    assert tree[0]["type"] == "job" and tree[0]["target"] == "nomademo-load-items" and "connector" not in tree[0]

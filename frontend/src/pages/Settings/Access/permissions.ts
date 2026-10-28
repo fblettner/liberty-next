@@ -32,6 +32,7 @@ export const isLeaf = (n: MenuNode): boolean => !!n.type && !!n.target
 export function targetPermission(app: string, item: MenuItemRaw, screens: Record<string, ScreenRef[]>): string | null {
   if (!item.type || !item.target) return null
   if (item.type === 'dashboard') return `dashboard:${item.target}`
+  if (item.type === 'job') return `job:${item.target}`
   if (item.type === 'page') return null
   if (item.type === 'screen') {
     const scr = (screens[app] ?? []).find((s) => s.id === item.target)

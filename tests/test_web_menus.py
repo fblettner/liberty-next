@@ -66,6 +66,12 @@ def _menus_toml() -> str:
         target = "roles_get"
 
         [[menus.app1.items]]
+        id = "import"
+        label = "Import"
+        type = "job"
+        target = "load-items"
+
+        [[menus.app1.items]]
         id = "security.secret"
         parent = "security"
         label = "Secret"
@@ -89,8 +95,12 @@ def _seed(db_url: str) -> None:
             await svc.get_or_create_role("admin", permissions=["*"])
             # "user" can see users_get + roles_get on app1 but not secret_get
             await svc.get_or_create_role("user", permissions=["sql:app1:users_get", "sql:app1:roles_get"])
+            await svc.get_or_create_role("loader", permissions=["job:load-items"])
+            await svc.get_or_create_role("denied", permissions=["*", "!job:load-items"])
             await svc.create_user("admin", password="adminpw", is_superuser=True, roles=["admin"])
             await svc.create_user("user", password="userpw", roles=["user"])
+            await svc.create_user("loader", password="loaderpw", roles=["loader"])
+            await svc.create_user("denied", password="deniedpw", roles=["denied"])
             await svc.create_user("nobody", password="nobodypw")
         await pools.dispose()
 
@@ -129,7 +139,7 @@ def test_menus_full_for_admin_and_localized(app) -> None:
         assert [c["target"] for c in sec["items"]] == ["users_get", "roles_get", "secret_get"]
         assert all(c["connector"] == "app1" for c in sec["items"])
         # the empty folder collapses away
-        assert [n["id"] for n in app1["items"]] == ["security"]
+        assert [n["id"] for n in app1["items"]] == ["security", "import"]
         # X-Liberty-Lang switches the labels
         fr = client.get("/api/menus", headers={**_h(client, "admin"), "X-Liberty-Lang": "fr"}).json()["menus"]["app1"]
         assert fr["items"][0]["label"] == "Sécurité"
@@ -308,3 +318,18 @@ def test_app_menu_home_path_resolves_to_dashboard_route(tmp_path) -> None:
         assert tree["home_path"] == "/dashboard/app1.overview"
         # Pointing ``home`` at a missing item id fails parse — covered separately by the
         # ``AppMenu._check`` validator (raises ValueError on load_menus / parse_menus).
+
+
+def test_job_leaf_visible_with_its_permission_only(app) -> None:
+    """A ``job`` leaf shows for ``job:<id>`` (or a menu allow), hides on ``!job:<id>``; the admin
+    sees it; a user without it does not."""
+    with TestClient(app) as client:
+        def tops(user: str) -> list[str]:
+            menus = client.get("/api/menus", headers=_h(client, user)).json()["menus"]
+            return [it["id"] for it in menus.get("app1", {}).get("items", [])]
+        assert "import" in tops("admin")
+        assert tops("loader") == ["import"]
+        assert "import" not in tops("user")
+        assert "import" not in tops("denied")
+        leaf = next(it for it in client.get("/api/menus", headers=_h(client, "loader")).json()["menus"]["app1"]["items"] if it["id"] == "import")
+        assert leaf["type"] == "job" and leaf["target"] == "load-items" and "connector" not in leaf

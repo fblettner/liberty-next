@@ -110,6 +110,19 @@ op_kwargs = { target_connector = "default", apps_id = 10 }
 # test_job_level_params_* tests. Two steps to verify the merge applies to each
 # independently and that step.op_kwargs win on conflict.
 [[jobs]]
+id = "load-file"
+description = "A user-run import: the file the user uploads feeds the load step."
+[[jobs.steps]]
+type = "file_load"
+name = "load"
+target = { connector = "db", table = "imported" }
+sheet = "Items"
+[[jobs.steps]]
+type = "python"
+name = "after"
+callable = "tests.test_web_jobs:_record_kwargs"
+
+[[jobs]]
 id = "shared-params"
 description = "Job-level params merged under every step's op_kwargs (step wins on conflict)."
 params = { apps_id = 99, source_connector = "src_default" }
@@ -175,6 +188,8 @@ def _seed_db(db_url: str) -> None:
             await svc.get_or_create_role("admin", permissions=["*"])
             await svc.create_user("admin", password="adminpw", is_superuser=True, roles=["admin"])
             await svc.create_user("reader", password="readerpw")
+            await svc.get_or_create_role("loader", permissions=["job:load-file", "job:manual-only"])
+            await svc.create_user("loader", password="loaderpw", roles=["loader"])
         await pools.dispose()
     asyncio.run(go())
 
@@ -225,7 +240,7 @@ def test_list_jobs_returns_catalogue_with_operational_flags(env) -> None:
         assert r.status_code == 200
         body = r.json()
         ids = {j["id"]: j for j in body["jobs"]}
-        assert set(ids) == {"ping", "manual-only", "disabled", "echo-kwargs", "shared-params"}
+        assert set(ids) == {"ping", "manual-only", "disabled", "echo-kwargs", "load-file", "shared-params"}
         # Only the enabled+scheduled job is registered with the scheduler
         assert ids["ping"]["registered_with_scheduler"] is True
         assert ids["manual-only"]["registered_with_scheduler"] is False
@@ -365,7 +380,7 @@ def test_get_jobs_parsed_returns_catalogue(env) -> None:
         body = r.json()
         assert body["path"].endswith("jobs.toml")
         ids = {j["id"] for j in body["jobs"]}
-        assert ids == {"ping", "manual-only", "disabled", "echo-kwargs", "shared-params"}
+        assert ids == {"ping", "manual-only", "disabled", "echo-kwargs", "load-file", "shared-params"}
 
 
 def test_get_jobs_parsed_requires_superuser(env) -> None:
@@ -941,7 +956,7 @@ def test_admin_reload_includes_nomaflow_state(env) -> None:
         assert "nomaflow" in body
         nf = body["nomaflow"]
         assert nf["enabled"] is True
-        assert set(nf["jobs"]) == {"ping", "manual-only", "disabled", "echo-kwargs", "shared-params"}
+        assert set(nf["jobs"]) == {"ping", "manual-only", "disabled", "echo-kwargs", "load-file", "shared-params"}
         assert nf["scheduled_jobs"] == ["ping"]
 
 
@@ -1035,3 +1050,48 @@ def test_upload_and_download_run_file(env, tmp_path) -> None:
         assert client.get(f"/admin/jobs/runs/{run_id}/files/..%2F{report.name}", headers=h).status_code == 404
         assert client.get(f"/admin/jobs/runs/no-such-run/files/{report.name}", headers=h).status_code == 404
         assert client.get(f"/admin/jobs/runs/{run_id}/files/{report.name}", headers=_h(client, "reader")).status_code == 403
+
+
+def test_user_job_routes(env) -> None:
+    """``/api/jobs``: the job for its ``job:<id>`` holder (uploads = the file_load steps, the run
+    history), the upload, the run with the uploaded file, the run detail with its log; a user
+    without the permission gets 403 before any lookup, an unknown job 404, a foreign path 422."""
+    import time
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "loader")
+        assert client.get("/api/jobs/load-file", headers=_h(client, "reader")).status_code == 403
+        assert client.get("/api/jobs/ghost", headers=h).status_code == 403          # no permission → no enumeration
+        assert client.get("/api/jobs/ping", headers=h).status_code == 403
+        assert client.get("/api/jobs/ghost", headers=_h(client, "admin")).status_code == 404
+        r = client.get("/api/jobs/load-file", headers=h)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["job"]["id"] == "load-file" and body["job"]["uploads"] == [{"step": "load", "sheet": "Items", "path": None, "watch_dir": None}]
+        assert body["runs"] == [] and body["job"]["in_flight"] is False
+        # the file must be uploaded through this job (a path elsewhere is refused)
+        assert client.post("/api/jobs/load-file/run", json={"files": {"load": "/etc/passwd"}}, headers=h).status_code == 422
+        assert client.post("/api/jobs/load-file/run", json={"files": {"nope": "x"}}, headers=h).status_code == 422
+        up = client.post("/api/jobs/load-file/upload", files={"file": ("items.csv", b"code,name\nA,Alpha\n", "text/csv")}, headers=h)
+        assert up.status_code == 200, up.text
+        assert up.json()["name"].endswith("-items.csv")
+        assert client.post("/api/jobs/load-file/upload", files={"file": ("x.exe", b"MZ", "application/octet-stream")}, headers=h).status_code == 400
+        r = client.post("/api/jobs/load-file/run", json={"files": {"load": up.json()["path"]}}, headers=h)
+        assert r.status_code == 200, r.text
+        run_id = r.json()["run_id"]
+        d: dict = {}
+        for _ in range(100):
+            d = client.get(f"/api/jobs/load-file/runs/{run_id}", headers=h).json()
+            if d["run"]["state"] not in ("QUEUED", "RUNNING"):
+                break
+            time.sleep(0.05)
+        assert d["run"]["id"] == run_id and d["run"]["triggered_by"] == "loader" and "overrides" not in d and isinstance(d["logs"], str)
+        assert [s["step_name"] for s in d["steps"]][:1] == ["load"]
+        # the history lists it; another job's run is not reachable through this job
+        runs = client.get("/api/jobs/load-file", headers=h).json()["runs"]
+        assert [x["id"] for x in runs] == [run_id]
+        assert client.get(f"/api/jobs/manual-only/runs/{run_id}", headers=h).status_code == 404
+        assert client.get(f"/api/jobs/load-file/runs/{run_id}/files/{run_id}-nope.csv", headers=h).status_code == 404
+        # a plain manual job runs without files
+        r = client.post("/api/jobs/manual-only/run", json={}, headers=h)
+        assert r.status_code == 200, r.text

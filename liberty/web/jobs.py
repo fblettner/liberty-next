@@ -24,13 +24,14 @@ the brief JSON the reload endpoint returns (a couple of fields, no envelope).
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from datetime import datetime
 from datetime import timezone as dt_timezone
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 
-from liberty.auth.dependencies import require_superuser
+from liberty.auth.dependencies import CurrentPrincipal, require_superuser
 from liberty.auth.principal import Principal
 from liberty.jobs import (
     JobRegistry,
@@ -42,6 +43,10 @@ from liberty.jobs import (
 _log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin/jobs", tags=["admin", "jobs"])
+# The user-facing side (``/api/jobs``): a job a menu item of type ``job`` opens, for a user who
+# holds ``job:<id>`` — run it (a file per ``file_load`` step), follow the run's log, download its
+# files. Everything else (parameters, step toggles, cancel, the catalogue) stays on ``/admin``.
+user_router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
 Superuser = Annotated[Principal, Depends(require_superuser)]
 
@@ -344,15 +349,20 @@ async def upload_job_file(job_id: str, request: Request, principal: Superuser) -
     ``file_load`` step to read on the next fire: the Run-with-parameters modal uploads first,
     then fires with ``op_kwargs[<step>] = {"file": <path>}``. Superuser only; the name is
     sanitised and time-stamped, the size capped by ``[jobs] max_upload_mb``."""
-    from starlette.datastructures import UploadFile
-
-    from liberty.jobs.files import UPLOAD_SUFFIXES, upload_target
-
     comps = _components(request)
     try:
         comps.registry.get(job_id)
     except UnknownJobError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"unknown job {job_id!r}") from None
+    return await _store_upload(request, job_id, principal)
+
+
+async def _store_upload(request: Request, job_id: str, principal: Principal) -> dict[str, Any]:
+    """The upload itself (the caller checked the job and the permission)."""
+    from starlette.datastructures import UploadFile
+
+    from liberty.jobs.files import UPLOAD_SUFFIXES, upload_target
+
     settings = request.app.state.settings
     limit = settings.jobs.max_upload_mb * 1024 * 1024
     declared = request.headers.get("content-length")
@@ -385,6 +395,11 @@ async def download_run_file(run_id: str, name: str, request: Request, _: Superus
     """A file a step left in the job's work area for this run — today the ``file_load``
     rejects report (``<run>-<step>-rejects.csv``). The name must be a plain file name of that
     run; anything else is a 404."""
+    return await _run_file_response(request, run_id, name)
+
+
+async def _run_file_response(request: Request, run_id: str, name: str, *, job_id: str | None = None):
+    """A run's file as a download; with *job_id* the run must belong to that job (the user routes)."""
     from fastapi.responses import FileResponse
     from sqlalchemy import select
 
@@ -394,7 +409,7 @@ async def download_run_file(run_id: str, name: str, request: Request, _: Superus
     comps = _components(request)
     async with comps.db.session() as s:
         row = (await s.execute(select(JobRun).where(JobRun.id == run_id))).scalar_one_or_none()
-    if row is None:
+    if row is None or (job_id is not None and row.job_id != job_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"unknown run {run_id!r}")
     path = run_file(request.app.state.settings, row.job_id, name) if name.startswith(run_id) else None
     if path is None:
@@ -468,6 +483,11 @@ async def get_run_detail(run_id: str, request: Request, _: Superuser) -> dict[st
     so a poll mid-step (even a *hung* step) sees the latest lines — and from
     the durable ``nomaflow_run_logs`` row once the run has finished. The
     runner flushes buffer → DB at finalize, so exactly one of the two has it."""
+    return await _run_detail(request, run_id)
+
+
+async def _run_detail(request: Request, run_id: str, *, job_id: str | None = None) -> dict[str, Any]:
+    """``{run, steps, logs, overrides}``; with *job_id* the run must belong to that job."""
     import json
     from sqlalchemy import select
     from liberty.jobs.models import JobRun, RunLog, RunOverrides, StepRun, StepRunExtras
@@ -476,7 +496,7 @@ async def get_run_detail(run_id: str, request: Request, _: Superuser) -> dict[st
     comps = _components(request)
     async with comps.db.session() as session:
         run = await session.get(JobRun, run_id)
-        if run is None:
+        if run is None or (job_id is not None and run.job_id != job_id):
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no run {run_id!r}")
         steps = (await session.execute(
             select(StepRun)
@@ -643,3 +663,94 @@ async def run_retention_sweep(request: Request, _: Superuser) -> dict[str, Any]:
     policy = comps.registry.config.meta.retention
     report = await comps.scheduler.run_retention_now(policy)
     return report.to_dict()
+
+
+# ── the user side: ``/api/jobs`` ─────────────────────────────────────────────────────────────
+def _user_job(request: Request, job_id: str, principal: Principal):
+    """The job behind a user call: ``job:<id>`` checked BEFORE the registry lookup (no id
+    enumeration), then the job or a 404."""
+    from liberty.web.deps import require_permission
+    require_permission(principal, f"job:{job_id}")
+    comps = _components(request)
+    try:
+        return comps, comps.registry.get(job_id)
+    except UnknownJobError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+def _upload_steps(job) -> list[dict[str, Any]]:
+    """The ``file_load`` steps a user feeds a file to (one upload per step and run)."""
+    out: list[dict[str, Any]] = []
+    for s in job.steps:
+        if getattr(s.type, "value", s.type) != "file_load" or not s.enabled:
+            continue
+        out.append({"step": s.name, "sheet": s.sheet, "path": s.path, "watch_dir": s.watch_dir})
+    return out
+
+
+async def _runs_of_job(db, job_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    from sqlalchemy import desc, select
+    from liberty.jobs.models import JobRun
+    stmt = select(JobRun).where(JobRun.job_id == job_id).order_by(desc(JobRun.started_at)).limit(limit)
+    async with db.session() as session:
+        return [_run_dict(r) for r in (await session.execute(stmt)).scalars().all()]
+
+
+@user_router.get("/{job_id}", summary="A job for the user to run")
+async def user_get_job(job_id: str, request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
+    """``{job: {id, description, uploads, in_flight}, runs: [the last 20]}`` — what the job page
+    shows: the description, one file picker per ``file_load`` step, the run history."""
+    comps, job = _user_job(request, job_id, principal)
+    runs = await _runs_of_job(comps.db, job_id)
+    in_flight = job_id in comps.scheduler.in_flight_job_ids or any(r["state"] in ("RUNNING", "QUEUED") for r in runs)
+    return {
+        "job": {"id": job.id, "description": job.description, "tags": list(job.tags), "uploads": _upload_steps(job), "in_flight": in_flight},
+        "runs": runs,
+    }
+
+
+@user_router.post("/{job_id}/upload", summary="Upload a file for a run")
+async def user_upload(job_id: str, request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
+    _user_job(request, job_id, principal)
+    return await _store_upload(request, job_id, principal)
+
+
+@user_router.post("/{job_id}/run", summary="Run the job")
+async def user_run(job_id: str, request: Request, principal: CurrentPrincipal, body: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+    """Fire the job for the user: ``{files: {<step>: <uploaded path>}}`` hands each
+    ``file_load`` step its file (a path this job's upload returned — nothing else is
+    accepted). No other per-fire override exists on this side."""
+    from liberty.jobs.files import job_dir
+    comps, job = _user_job(request, job_id, principal)
+    if job_id in comps.scheduler.in_flight_job_ids:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="the job is already running")
+    steps = {u["step"] for u in _upload_steps(job)}
+    overrides: dict[str, dict[str, Any]] = {}
+    files = (body or {}).get("files") or {}
+    if not isinstance(files, dict):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="`files` must be an object of `{step: path}`")
+    uploads = (job_dir(request.app.state.settings, job_id) / "uploads").resolve()
+    for step, path in files.items():
+        if step not in steps:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"{step!r} is not a file step of this job")
+        p = Path(str(path)).resolve()
+        if uploads not in p.parents or not p.is_file():
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"{step!r}: upload the file first")
+        overrides[step] = {"file": str(p)}
+    _log.info("nomaflow.user fire job=%s triggered_by=%s files=%s", job_id, principal.username, sorted(overrides) or None)
+    run_id = await comps.scheduler.fire_now_async(job, triggered_by=principal.username, op_kwargs_overrides=overrides or None)
+    return {"job_id": job_id, "run_id": run_id, "triggered_by": principal.username, "status": "queued"}
+
+
+@user_router.get("/{job_id}/runs/{run_id}", summary="A run of the job with its log")
+async def user_run_detail(job_id: str, run_id: str, request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
+    _user_job(request, job_id, principal)
+    out = await _run_detail(request, run_id, job_id=job_id)
+    out.pop("overrides", None)
+    return out
+
+
+@user_router.get("/{job_id}/runs/{run_id}/files/{name}", summary="Download a run's file")
+async def user_run_file(job_id: str, run_id: str, name: str, request: Request, principal: CurrentPrincipal):
+    _user_job(request, job_id, principal)
+    return await _run_file_response(request, run_id, name, job_id=job_id)

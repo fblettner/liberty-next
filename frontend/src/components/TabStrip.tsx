@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Table as TableIcon, Globe, Workflow, X, ChevronLeft, ChevronRight, SlidersHorizontal, Activity, CalendarClock, Package, GitCompare, ShieldCheck, FileText, Bell, Compass } from 'lucide-react'
+import { Table as TableIcon, Globe, Workflow, Play, X, ChevronLeft, ChevronRight, SlidersHorizontal, Activity, CalendarClock, Package, GitCompare, ShieldCheck, FileText, Bell, Compass } from 'lucide-react'
 
 // Icon per `page` tab (keyed by route path), so Jobs / Schedule / Package / … stay recognisable.
 const PAGE_ICONS: Record<string, typeof TableIcon> = {
@@ -177,6 +177,7 @@ export default function TabStrip() {
           const Icon =
             tab.kind === 'http' ? Globe :
             tab.kind === 'nomaflow_run' ? Workflow :
+            tab.kind === 'job' ? Play :
             tab.kind === 'settings' ? SlidersHorizontal :
             tab.kind === 'monitoring' ? Activity :
             tab.kind === 'page' ? (PAGE_ICONS[tab.target] ?? (tab.target.startsWith('/explorer/') ? Compass : FileText)) :
@@ -209,7 +210,7 @@ export default function TabStrip() {
             label = scr?.label ?? hit?.label ?? tab.target
             appLabel = scr?.app ?? hit?.appLabel
           } else {
-            const hit = findMenuLabelWithApp(menus, tab as { kind: 'sql' | 'http' | 'dashboard'; connector: string; target: string })
+            const hit = findMenuLabelWithApp(menus, tab as { kind: 'sql' | 'http' | 'dashboard' | 'job'; connector: string; target: string })
             // sql / http: menu label first; but a drill-navigate to a query that isn't in any menu
             // would otherwise show the raw query name — fall back to the query's friendly label.
             const cm = (connectors ?? []).find((c) => c.name === tab.connector)

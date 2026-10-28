@@ -1,10 +1,11 @@
 // The rules the menu tree doesn't express: a whole connector, a single query, an API endpoint,
 // a dashboard reached outside the menus, the AI assistant, or a raw pattern for experts.
 // Shown as chips (green allow / red deny) with the same add row the chip editor had, minus menus.
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Ban, Check, Plus, X } from 'lucide-react'
+import { api } from '../../../api/client'
 import { Button, SearchSelect, type SearchSelectOption } from '../../../common'
 import { useWorkspace } from '../../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../../theme'
@@ -27,7 +28,7 @@ const SegBtn = styled.button<{ $active?: boolean; $tone?: 'allow' | 'deny' }>`
 `
 const AddRow = styled.div`display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px;`
 
-type RuleType = 'connector' | 'query' | 'api' | 'dashboard' | 'explorer' | 'ai' | 'pattern'
+type RuleType = 'connector' | 'query' | 'api' | 'dashboard' | 'explorer' | 'job' | 'ai' | 'pattern'
 
 interface Props { value: string[]; onChange: (next: string[]) => void; dashboardIds: string[] }
 
@@ -39,6 +40,9 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
   const [item, setItem] = useState('')
 
   const sqlConns = useMemo(() => (connectors ?? []).filter((c) => c.type === 'sql'), [connectors])
+  // The nomaflow jobs a ``job:<id>`` rule names (non-fatal: nomaflow may be off).
+  const [jobIds, setJobIds] = useState<string[]>([])
+  useEffect(() => { api.get<{ jobs: { id: string }[] }>('/admin/jobs').then((r) => setJobIds(r.jobs.map((j) => j.id))).catch(() => setJobIds([])) }, [])
   const apiConns = useMemo(() => (connectors ?? []).filter((c) => c.type === 'api'), [connectors])
 
   const itemOpts = useMemo<SearchSelectOption[]>(() => {
@@ -47,9 +51,10 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
     if (type === 'api') return apiConns.flatMap((c) => c.endpoints.map((e) => ({ value: `api:${c.name}:${e.name}`, label: `${c.name} · ${e.label || e.name}`, mono: `api:${c.name}:${e.name}` })))
     if (type === 'dashboard') return dashboardIds.map((d) => ({ value: `dashboard:${d}`, label: d, mono: `dashboard:${d}` }))
     if (type === 'explorer') return sqlConns.map((c) => ({ value: `explorer:${c.name}:*`, label: `${c.name}  (${t('settings.access.allModels')})`, mono: `explorer:${c.name}:*` }))
+    if (type === 'job') return jobIds.map((j) => ({ value: `job:${j}`, label: j, mono: `job:${j}` }))
     if (type === 'ai') return [{ value: 'ai:chat', label: t('settings.access.aiChat'), mono: 'ai:chat' }]
     return []
-  }, [type, sqlConns, apiConns, dashboardIds, t])
+  }, [type, sqlConns, apiConns, dashboardIds, jobIds, t])
 
   const add = () => {
     const core = item.trim().replace(/^!/, '')
@@ -65,6 +70,7 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
     { value: 'api', label: t('settings.access.tApi') },
     { value: 'dashboard', label: t('settings.access.tDashboard') },
     { value: 'explorer', label: t('settings.access.tExplorer') },
+    { value: 'job', label: t('settings.access.tJob') },
     { value: 'ai', label: t('settings.access.tAi') },
     { value: 'pattern', label: t('settings.access.tPattern') },
   ]
@@ -87,7 +93,7 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
           <SearchSelect value={type} onChange={(v) => { setType(v as RuleType); setItem('') }} options={typeOpts} />
         </div>
         <div style={{ minWidth: 240, flex: 1 }}>
-          <SearchSelect sort value={item} onChange={setItem} options={itemOpts} allowCustom={type === 'pattern' || type === 'query' || type === 'api' || type === 'explorer'}
+          <SearchSelect sort value={item} onChange={setItem} options={itemOpts} allowCustom={type === 'pattern' || type === 'query' || type === 'api' || type === 'explorer' || type === 'job'}
             placeholder={type === 'pattern' ? 'sql:nomasx1:security_*' : t('settings.access.pickItem')} />
         </div>
         <Button $size="sm" $variant="ghost" onClick={add} disabled={!item.trim()}><Plus size={13} /> {t('settings.access.addRule')}</Button>

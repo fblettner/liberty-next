@@ -19,7 +19,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 // Package / Changes / Integrity, the Reports list) as a tab, so clicking a page menu item opens a
 // tab instead of replacing the active tab's content. The tab's ``target`` IS the route path; the
 // path → component map lives in TabHost (see src/tabs/pageTabs.ts for the shared path set).
-export type TabKind = 'sql' | 'screen' | 'http' | 'dashboard' | 'nomaflow_run' | 'settings' | 'monitoring' | 'page'
+export type TabKind = 'sql' | 'screen' | 'http' | 'dashboard' | 'nomaflow_run' | 'settings' | 'monitoring' | 'page' | 'job'
 export interface Tab {
   id: string // `${kind}:${connector}:${target}` — stable, so opening the same screen reactivates it
   kind: TabKind
@@ -40,6 +40,8 @@ export function tabPath(t: Pick<Tab, 'kind' | 'connector' | 'target'>): string {
   if (t.kind === 'page') return t.target
   // Dashboards / nomaflow_run have no connector segment in the URL — just /<base>/<id>.
   if (t.kind === 'dashboard') return `/dashboard/${encodeURIComponent(t.target)}`
+  // A job tab: the job id (a menu item of type ``job``), run from its own page.
+  if (t.kind === 'job') return `/job/${encodeURIComponent(t.target)}`
   if (t.kind === 'nomaflow_run') return `/nomaflow/runs/${encodeURIComponent(t.target)}`
   return `/${t.kind}/${encodeURIComponent(t.connector)}/${encodeURIComponent(t.target)}`
 }

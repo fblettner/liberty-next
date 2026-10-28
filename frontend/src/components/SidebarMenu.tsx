@@ -28,6 +28,9 @@ import {
   Database,
   FileText,
   Filter,
+  Play,
+  RefreshCw,
+  Upload,
   Folder,
   Globe,
   Grid3x3,
@@ -61,6 +64,7 @@ const ICONS: Record<string, LucideIcon> = {
   network: Network, package: Package, search: Search, settings: Settings,
   shield: Shield, table: Table, tag: Tag, trendingup: TrendingUp,
   user: User, usercheck: UserCheck, users: Users,
+  play: Play, upload: Upload, refreshcw: RefreshCw,
 }
 export function iconFor(name: string | undefined): LucideIcon | null {
   return name ? (ICONS[name.toLowerCase().replace(/[^a-z0-9]/g, '')] ?? null) : null
@@ -158,6 +162,8 @@ function leafPath(node: MenuNode, app: string): string | null {
   const t = encodeURIComponent(node.target)
   // Dashboards have no connector segment — the catalog is flat (keyed by id).
   if (node.type === 'dashboard') return `/dashboard/${t}`
+  // A job leaf opens the job's own page (run it, follow the log).
+  if (node.type === 'job') return `/job/${t}`
   // A `page` leaf's target IS the route — navigate straight to it (e.g. /nomaflow).
   // No connector, no encoding (it's a path, not an identifier). See NOMAFLOW-UI.md §2.
   if (node.type === 'page') return node.target

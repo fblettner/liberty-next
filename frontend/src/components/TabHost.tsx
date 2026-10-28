@@ -15,6 +15,7 @@ const TableView = lazy(() => import('../pages/TableView'))
 const HttpRunner = lazy(() => import('../pages/HttpRunner'))
 const DashboardView = lazy(() => import('../pages/DashboardView'))
 const NomaflowRunDetail = lazy(() => import('../pages/Nomaflow/RunDetail'))
+const JobRunner = lazy(() => import('../pages/JobRunner'))
 const Settings = lazy(() => import('../pages/Settings'))
 const Monitoring = lazy(() => import('../pages/Monitoring'))
 
@@ -74,6 +75,8 @@ export default function TabHost({ hidden }: { hidden: boolean }) {
                 <DashboardView dashboardId={tab.target} />
               ) : tab.kind === 'nomaflow_run' ? (
                 <NomaflowRunDetail runId={tab.target} />
+              ) : tab.kind === 'job' ? (
+                <JobRunner jobId={tab.target} />
               ) : tab.kind === 'settings' ? (
                 <Settings />
               ) : tab.kind === 'monitoring' ? (

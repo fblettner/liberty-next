@@ -205,6 +205,7 @@ export default function MenusBuilder() {
   // Designed screens, by app → id → screen. Feeds the target dropdown for ``screen`` menu items.
   const [screens, setScreens] = useState<ScreensDoc['screens'] | null>(null)
   const [dashboards, setDashboards] = useState<DashboardsDoc['dashboards'] | null>(null)
+  const [jobs, setJobs] = useState<{ id: string; description?: string | null }[]>([])
   const [apps, setApps] = useState<AppsMap | null>(null)
   const [original, setOriginal] = useState('')
   const [selApp, setSelApp] = useState<string | null>(null)
@@ -229,12 +230,15 @@ export default function MenusBuilder() {
       api.get<ScreensDoc>('/admin/config/screens/parsed').catch((): ScreensDoc => ({ path: '', screens: {} })),
       // Dashboards feed the ``dashboard`` target dropdown the same way (non-fatal too).
       api.get<DashboardsDoc>('/admin/config/dashboards/parsed').catch((): DashboardsDoc => ({ path: '', dashboards: {} })),
+      // The nomaflow jobs feed the ``job`` target dropdown (non-fatal: nomaflow may be off).
+      api.get<{ jobs: { id: string; description?: string | null }[] }>('/admin/jobs').catch(() => ({ jobs: [] })),
     ])
-      .then(([s, d, c, sc, db]) => {
+      .then(([s, d, c, sc, db, jb]) => {
         setSchemas(s); setApps(d.menus); setOriginal(JSON.stringify(d.menus))
         setConnectors(c.connectors)
         setScreens(sc.screens)
         setDashboards(db.dashboards)
+        setJobs(jb.jobs)
         setSelApp((cur) => (cur && d.menus[cur] ? cur : (workspaceApp && d.menus[workspaceApp] ? workspaceApp : Object.keys(d.menus)[0] ?? null)))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
@@ -357,6 +361,10 @@ export default function MenusBuilder() {
         const own = (v: string) => (selApp && v.startsWith(`${selApp}.`) ? 0 : 1)
         return own(a.value) - own(b.value) || a.value.localeCompare(b.value)
       })
+    } else if (selRec?.type === 'job') {
+      // Every nomaflow job by id (the user page runs it; the first line of its description labels it).
+      for (const j of jobs) targets.push({ value: j.id, label: (j.description || j.id).split('\n')[0], mono: j.id })
+      targets.sort((a, b) => a.value.localeCompare(b.value))
     }
     base.MENU_TARGETS = {
       label: selRec?.type === 'endpoint'
@@ -365,12 +373,14 @@ export default function MenusBuilder() {
           ? `Screens — ${connKey ?? ''}`
           : selRec?.type === 'dashboard'
             ? 'Dashboards'
-            : `Queries — ${connKey ?? ''}`,
+            : selRec?.type === 'job'
+              ? 'Jobs'
+              : `Queries — ${connKey ?? ''}`,
       values: targets,
     }
 
     return base
-  }, [schemas, connectors, screens, dashboards, apps, selApp, selItem])
+  }, [schemas, connectors, screens, dashboards, apps, selApp, selItem, jobs])
 
   if (error && !apps) return <Banner $tone="error">{error}</Banner>
   if (!apps || !schemas) return <Centered />
