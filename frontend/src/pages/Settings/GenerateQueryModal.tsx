@@ -143,21 +143,21 @@ export function GenerateQueryModal({ kind, connector, record, existingQueryNames
   const effectiveSql = sqlOverride != null ? sqlOverride : generatedSql
 
   const missingField = isSequence
-    ? (!ddId ? t('settings.generateQuery.needDdId', 'Set this sequence’s column (dd_id) first.') : null)
-    : (!valueAlias ? t('settings.generateQuery.needValue', 'Set this lookup’s value column first.') : null)
+    ? (!ddId ? t('settings.generateQuery.needDdId') : null)
+    : (!valueAlias ? t('settings.generateQuery.needValue') : null)
 
   const error: string | null = (() => {
     const n = name.trim()
-    if (!n) return t('settings.generateQuery.nameRequired', 'Name the query.')
-    if (existingQueryNames.has(n)) return t('settings.generateQuery.nameExists', 'A query named "{{name}}" already exists.', { name: n })
+    if (!n) return t('settings.generateQuery.nameRequired')
+    if (existingQueryNames.has(n)) return t('settings.generateQuery.nameExists', { name: n })
     // A table isn't required — the operator can write the SQL directly. We only need SOME SQL. When
     // there's none yet, point them at the table generator (which needs the record's value/dd_id) or
     // the editor below.
     if (!effectiveSql.trim()) {
       return missingField
         ?? (picked
-          ? t('settings.generateQuery.sqlEmpty', 'The generated SQL is empty.')
-          : t('settings.generateQuery.pickTableOrSql', 'Pick a table to generate the SQL, or write it directly below.'))
+          ? t('settings.generateQuery.sqlEmpty')
+          : t('settings.generateQuery.pickTableOrSql'))
     }
     return null
   })()
@@ -184,40 +184,40 @@ export function GenerateQueryModal({ kind, connector, record, existingQueryNames
         <ModalHeader>
           <span>
             {isSequence
-              ? t('settings.generateQuery.sequenceTitle', 'Generate sequence query')
-              : t('settings.generateQuery.lookupTitle', 'Generate lookup query')} ·{' '}
+              ? t('settings.generateQuery.sequenceTitle')
+              : t('settings.generateQuery.lookupTitle')} ·{' '}
             <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>[connectors.{connector}]</span>
           </span>
         </ModalHeader>
         <ModalBody>
-          <Field label={t('settings.generateQuery.table', 'Table to read from')}>
+          <Field label={t('settings.generateQuery.table')}>
             <TablePicker connector={connector} onPick={(p) => { setPicked(p); setName('') }} />
             {picked && (
               <Hint style={{ marginTop: 4 }}>{picked.schema ? `${picked.schema}.` : ''}{picked.name}</Hint>
             )}
           </Field>
           {/* One row per dd param — map the alias (the dd field code) to a real table column. */}
-          <Field label={t('settings.generateQuery.mapColumns', 'Map each parameter to a column')}>
+          <Field label={t('settings.generateQuery.mapColumns')}>
             {missingField ? (
               <Hint>{missingField}</Hint>
             ) : !picked ? (
-              <Hint>{t('settings.generateQuery.pickTableOptional', 'Pick a table to auto-map its columns — or skip it and write the SQL directly below.')}</Hint>
+              <Hint>{t('settings.generateQuery.pickTableOptional')}</Hint>
             ) : (
               params.map((p) => (
                 <MapRow key={p.alias}>
                   <MapLabel>{roleLabel(p.role)}: {p.alias.toUpperCase()}</MapLabel>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <SearchSelect value={colMap[p.alias] ?? ''} onChange={(v) => setCol(p.alias, v)}
-                      options={colOpts} placeholder={t('settings.generateQuery.column', 'Column…')} />
+                      options={colOpts} placeholder={t('settings.generateQuery.column')} />
                   </div>
                 </MapRow>
               ))
             )}
           </Field>
-          <Field label={t('settings.generateQuery.queryName', 'Query name')}>
+          <Field label={t('settings.generateQuery.queryName')}>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={suggested} />
           </Field>
-          <Field label={t('settings.generateQuery.sqlPreview', 'Generated SQL — editable')}>
+          <Field label={t('settings.generateQuery.sqlPreview')}>
             <SqlConnectorContext.Provider value={connector}>
               <SqlEditor value={effectiveSql} rows={10} onChange={(v) => setSqlOverride(v)} connector={connector} />
             </SqlConnectorContext.Provider>
@@ -227,7 +227,7 @@ export function GenerateQueryModal({ kind, connector, record, existingQueryNames
         <ModalFooter>
           <Button $variant="ghost" $size="sm" onClick={onCancel}>{t('common.cancel')}</Button>
           <Button $variant="primary" $size="sm" onClick={confirm} disabled={!!error}>
-            {t('settings.generateQuery.use', 'Use this query')}
+            {t('settings.generateQuery.use')}
           </Button>
         </ModalFooter>
       </Modal>

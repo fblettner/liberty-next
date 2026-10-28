@@ -1011,7 +1011,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
             <>
               <Row gap={10}>
                 <div style={{ flex: 1 }}>
-                  <Field label={`${t('settings.screens.visual.tabSettings.reuseScreen', 'Reuse a screen')} *`}>
+                  <Field label={`${t('settings.screens.visual.tabSettings.reuseScreen')} *`}>
                     <SearchSelect
                       value={(selTab.form_screen as string | undefined) ?? ''}
                       options={sameAppScreenOptions}
@@ -1035,7 +1035,6 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
               {selTab.form_screen ? (
                 <Banner $tone="info">
                   {t('settings.screens.visual.tabSettings.reuseScreenHint',
-                    'This tab reuses the "{{screen}}" screen\'s form (its queries + fields). Edit those on that screen; here you only bind the parent\'s values into it.',
                     { screen: String(selTab.form_screen) })}
                 </Banner>
               ) : null}
@@ -1189,7 +1188,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
         <CollapsedRail
           type="button"
           onClick={() => setLeftCollapsed(false)}
-          title={t('settings.screens.visual.palette.expand', { defaultValue: 'Show palette' })}
+          title={t('settings.screens.visual.palette.expand')}
         >
           <PanelLeftOpen size={14} />
         </CollapsedRail>
@@ -1200,7 +1199,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
           <CollapseBtn
             type="button"
             onClick={() => setLeftCollapsed(true)}
-            title={t('settings.screens.visual.palette.collapse', { defaultValue: 'Hide palette' })}
+            title={t('settings.screens.visual.palette.collapse')}
           >
             <ChevronLeft size={13} />
           </CollapseBtn>
@@ -1356,7 +1355,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                     {/* "key" badge — the column is part of the row's primary key (drives the
                         Excel-import match + edit-mode lock). Surfaces here so the operator
                         sees at-a-glance which columns are keys without opening each one. */}
-                    {Boolean(column?.key) && <Badge $tone="green">{t('settings.screens.field.key', 'key')}</Badge>}
+                    {Boolean(column?.key) && <Badge $tone="green">{t('settings.screens.field.key')}</Badge>}
                     {isHidden && <Badge $tone="muted"><EyeOff size={10} style={{ verticalAlign: 'middle' }} /> {t('settings.screens.field.hidden')}</Badge>}
                     {isDisabled && <Badge $tone="muted"><Lock size={10} style={{ verticalAlign: 'middle' }} /> {t('settings.screens.field.disabled')}</Badge>}
                     {(Array.isArray(f.visible_when) && (f.visible_when as unknown[]).length > 0)
@@ -1401,7 +1400,6 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                 )}
                 {tabType === 'nested_form' && (
                   <Empty>{t('settings.screens.visual.tabSettings.reuseScreenNoFields',
-                    'Fields + queries come from the reused "{{screen}}" screen. Edit them on that screen.',
                     { screen: String(selTab.form_screen ?? '') })}</Empty>
                 )}
                 {/* Hidden fields — collapsible group at the bottom. Migrated v1 screens often
@@ -1452,7 +1450,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
         <CollapsedRail
           type="button"
           onClick={() => setRightCollapsed(false)}
-          title={t('settings.screens.visual.inspector.expand', { defaultValue: 'Show inspector' })}
+          title={t('settings.screens.visual.inspector.expand')}
         >
           <PanelRightOpen size={14} />
         </CollapsedRail>
@@ -1463,7 +1461,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
           <CollapseBtn
             type="button"
             onClick={() => setRightCollapsed(true)}
-            title={t('settings.screens.visual.inspector.collapse', { defaultValue: 'Hide inspector' })}
+            title={t('settings.screens.visual.inspector.collapse')}
           >
             <ChevronRightIcon size={13} />
           </CollapseBtn>
@@ -1554,12 +1552,11 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                 (Display group) — lives here, shared by the grid and the dialog. No field-level props. */}
             <InspSection>
               <InspTitle><FileText size={13} /> {String(selField.name ?? '')}</InspTitle>
-              <Sub>{t('settings.screens.visual.fieldIsColumn',
-                'This field renders its column. Edit everything — including its dialog span (Display ▸ Colspan) — below; the same config drives the grid.')}</Sub>
+              <Sub>{t('settings.screens.visual.fieldIsColumn')}</Sub>
               {/* Move the field to another tab. Only shown when there's more than one form tab to
                   move between (a drag across the tab strip does the same thing). */}
               {formTabOptions.length > 1 && (
-                <Field label={t('settings.screens.visual.moveToTab', 'Tab')}>
+                <Field label={t('settings.screens.visual.moveToTab')}>
                   <SearchSelect
                     value={String(tabIdx)}
                     options={formTabOptions}
@@ -1571,7 +1568,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
             {/* The column editor — identical to the Columns tab. Edits ``Screen.columns[<name>]``;
                 creates the column on first edit if the field referenced one not yet listed. */}
             <InspSection>
-              <InspTitle><Layers size={13} /> {t('settings.screens.visual.columnConfig', 'Column configuration')}</InspTitle>
+              <InspTitle><Layers size={13} /> {t('settings.screens.visual.columnConfig')}</InspTitle>
               <SchemaForm
                 schema={columnDef}
                 defs={defs}

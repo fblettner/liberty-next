@@ -28,24 +28,24 @@ export function AddScopeModal({
   return (
     <Overlay>
       <Modal onClick={(e) => e.stopPropagation()} style={{ width: 'min(440px, 94vw)' }}>
-        <ModalHeader>{title ?? t('settings.addScope', 'Add scope')}</ModalHeader>
+        <ModalHeader>{title ?? t('settings.addScope')}</ModalHeader>
         <ModalBody>
           {none ? (
             <Banner $tone="info">
-              {emptyHint ?? t('settings.addScopeEmpty', 'Every connector already has content here. Add a connector in the Connectors tab first.')}
+              {emptyHint ?? t('settings.addScopeEmpty')}
             </Banner>
           ) : (
-            <Field label={label ?? t('settings.addScopePick', 'Connector')}>
+            <Field label={label ?? t('settings.addScopePick')}>
               <SearchSelect value={value} onChange={setValue} options={opts}
-                placeholder={t('common.pick', 'Pick…')} />
+                placeholder={t('common.pick')} />
             </Field>
           )}
         </ModalBody>
         <ModalFooter>
-          <Button $size="sm" $variant="ghost" onClick={onClose}>{t('common.cancel', 'Cancel')}</Button>
+          <Button $size="sm" $variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
           <Button $size="sm" $variant="primary" disabled={none || !value}
             onClick={() => { if (value) { onPick(value); onClose() } }}>
-            {t('common.ok', 'OK')}
+            {t('common.ok')}
           </Button>
         </ModalFooter>
       </Modal>

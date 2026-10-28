@@ -121,8 +121,7 @@ export function CloneWithDepsModal({ kind, name, scope, existingNames, onCloned,
         // Non-fatal — the clone succeeded but the backend flagged something the
         // operator should know about (e.g. dangling refs that the rewriter left
         // pointing at the originals). Surface but let the parent close anyway.
-        setError(t('settings.cloneDeps.partialWarnings',
-          'Clone succeeded with warnings: {{w}}', { w: data.warnings.join('; ') }))
+        setError(t('settings.cloneDeps.partialWarnings', { w: data.warnings.join('; ') }))
         return
       }
       onClose()
@@ -138,7 +137,7 @@ export function CloneWithDepsModal({ kind, name, scope, existingNames, onCloned,
       <Modal onClick={(e) => e.stopPropagation()} style={{ width: 'min(560px, 96vw)' }}>
         <ModalHeader>{t(`settings.cloneDeps.${kind}.title`, TITLE_BY_KIND[kind])}</ModalHeader>
         <ModalBody>
-          <Field label={t('settings.cloneDeps.newName', 'New id')}>
+          <Field label={t('settings.cloneDeps.newName')}>
             <Input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
@@ -156,14 +155,12 @@ export function CloneWithDepsModal({ kind, name, scope, existingNames, onCloned,
             <Checkbox
               checked={markOverride}
               onChange={setMarkOverride}
-              label={t('settings.cloneDeps.markOverride', 'Mark the clone as customer override (preserved by future vendor upgrades)')}
+              label={t('settings.cloneDeps.markOverride')}
             />
             <div style={{ color: colors.text.muted, fontSize: fontSize.sm, marginTop: 4, paddingLeft: 24 }}>
               {markOverride
-                ? t('settings.cloneDeps.markOverrideOn',
-                    'A subsequent upgrade-package import with the overwrite strategy will leave this clone alone.')
-                : t('settings.cloneDeps.markOverrideOff',
-                    'The clone will follow vendor updates (an upgrade may overwrite your edits). Tick the box if this is your customer fork.')}
+                ? t('settings.cloneDeps.markOverrideOn')
+                : t('settings.cloneDeps.markOverrideOff')}
             </div>
           </div>
 
@@ -171,26 +168,24 @@ export function CloneWithDepsModal({ kind, name, scope, existingNames, onCloned,
             <Checkbox
               checked={cloneQueries}
               onChange={setCloneQueries}
-              label={t('settings.cloneDeps.cloneQueries', 'Also clone referenced queries')}
+              label={t('settings.cloneDeps.cloneQueries')}
             />
             <div style={{ color: colors.text.muted, fontSize: fontSize.sm, marginTop: 4, paddingLeft: 24 }}>
               {cloneQueries ? (
                 previewCount === null
-                  ? t('settings.cloneDeps.previewLoading', 'Computing closure…')
+                  ? t('settings.cloneDeps.previewLoading')
                   : previewCount === 0
-                    ? t('settings.cloneDeps.previewEmpty', 'This entity references no queries.')
+                    ? t('settings.cloneDeps.previewEmpty')
                     : t('settings.cloneDeps.previewCount',
-                        '{{n}} referenced quer(y/ies) will be duplicated as <name>_{{suffix}}',
                         { n: previewCount, suffix: suffix || 'copy' })
               ) : (
-                t('settings.cloneDeps.unticked',
-                  'The clone will reference the SAME queries as the original — editing the clone\'s SQL would affect both. Tick the box to create independent copies.')
+                t('settings.cloneDeps.unticked')
               )}
             </div>
           </div>
 
           <div style={{ marginTop: 14, fontSize: fontSize.sm, color: colors.text.muted, fontFamily: fonts.sans }}>
-            {t('settings.cloneDeps.source', 'Source:')} <Mono>{scope ? `${scope}.${name}` : name}</Mono>
+            {t('settings.cloneDeps.source')} <Mono>{scope ? `${scope}.${name}` : name}</Mono>
           </div>
 
           {error && (
@@ -202,11 +197,11 @@ export function CloneWithDepsModal({ kind, name, scope, existingNames, onCloned,
         </ModalBody>
         <ModalFooter>
           <Button $size="sm" $variant="ghost" onClick={onClose} disabled={busy}>
-            {t('common.cancel', 'Cancel')}
+            {t('common.cancel')}
           </Button>
           <Button $size="sm" $variant="primary" onClick={() => void submit()} disabled={busy || blockedByValidation}>
             {busy ? <SpinnerRing size={13} thickness={2} /> : <Copy size={13} />}
-            {t('common.clone', 'Clone')}
+            {t('common.clone')}
           </Button>
         </ModalFooter>
       </Modal>

@@ -168,7 +168,7 @@ export function MissedPanel({ onChanged }: MissedPanelProps) {
                 <Field>
                   <FieldLabel>{t('nomaflow.missed.enabledLabel')}</FieldLabel>
                   <Toggle type="button" $on={draft.enabled} onClick={() => setDraft({ ...draft, enabled: !draft.enabled })}>
-                    {draft.enabled ? t('nomaflow.retention.on', 'On') : t('nomaflow.retention.off', 'Off')}
+                    {draft.enabled ? t('nomaflow.retention.on') : t('nomaflow.retention.off')}
                   </Toggle>
                 </Field>
                 <Field>

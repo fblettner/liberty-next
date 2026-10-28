@@ -168,7 +168,7 @@ export default function TabStrip() {
     <Bar>
       {scroll.overflow && (
         <EdgeBtn onClick={() => by(-240)} disabled={scroll.atStart}
-          title={t('tabs.scrollLeft', 'Scroll left')} aria-label={t('tabs.scrollLeft', 'Scroll left')}>
+          title={t('tabs.scrollLeft')} aria-label={t('tabs.scrollLeft')}>
           <ChevronLeft size={16} />
         </EdgeBtn>
       )}
@@ -188,11 +188,11 @@ export default function TabStrip() {
           let label: string
           let appLabel: string | undefined
           if (tab.kind === 'nomaflow_run') {
-            label = t('tabs.nomaflowRun', 'Run {{id}}', { id: tab.target.slice(0, 8) })
+            label = t('tabs.nomaflowRun', { id: tab.target.slice(0, 8) })
           } else if (tab.kind === 'settings') {
-            label = t('nav.settings', 'Settings')
+            label = t('nav.settings')
           } else if (tab.kind === 'monitoring') {
-            label = t('nav.monitoring', 'Monitoring')
+            label = t('nav.monitoring')
           } else if (tab.kind === 'page') {
             // Page tabs are menu-driven (type="page"); resolve the leaf's localized label by its
             // route path. Falls back to the last path segment when not found in any menu.
@@ -234,7 +234,7 @@ export default function TabStrip() {
       </Scroller>
       {scroll.overflow && (
         <EdgeBtn onClick={() => by(240)} disabled={scroll.atEnd}
-          title={t('tabs.scrollRight', 'Scroll right')} aria-label={t('tabs.scrollRight', 'Scroll right')}>
+          title={t('tabs.scrollRight')} aria-label={t('tabs.scrollRight')}>
           <ChevronRight size={16} />
         </EdgeBtn>
       )}

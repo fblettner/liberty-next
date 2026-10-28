@@ -559,15 +559,15 @@ export default function DictionaryBuilder() {
     if (!src) return
     const existing = Object.keys(section)
     const raw = (await modals.prompt({
-      title: t('common.clone', 'Clone'),
+      title: t('common.clone'),
       message: t(`settings.dictionary.${kind}.namePrompt`),
       // suggestCloneId picks a non-colliding suffix (_copy, _copy2, _copy3, …) so the
       // operator doesn't have to manually find a free name.
       defaultValue: suggestCloneId(oldKey, existing),
-      submitLabel: t('common.clone', 'Clone'),
+      submitLabel: t('common.clone'),
       validate: (v) => {
         const proposed = kind === 'entries' ? v.toUpperCase() : v
-        if (proposed === oldKey) return { error: t('settings.tables.duplicateSameName', 'Pick a different name.') }
+        if (proposed === oldKey) return { error: t('settings.tables.duplicateSameName') }
         return validateId({ kind, proposed, existing, crossKindIds, mode: 'clone' })
       },
     }))?.trim()
@@ -650,13 +650,13 @@ export default function DictionaryBuilder() {
         right={
           <>
             <Button $variant="ghost" $size="sm" onClick={() => setScanOpen(true)} disabled={busy}>
-              <BookText size={13} /> {t('settings.dictscan.scanTable', 'Scan a table')}
+              <BookText size={13} /> {t('settings.dictscan.scanTable')}
             </Button>
-            <Button $variant="ghost" $size="sm" onClick={exportEntries} disabled={busy || !dict} title={t('settings.dictionary.exportTitle', 'Export all entries to Excel (label / format / rule / default) — diff against the source data dictionary')}>
-              <FileSpreadsheet size={13} /> {t('settings.dictionary.export', 'Export')}
+            <Button $variant="ghost" $size="sm" onClick={exportEntries} disabled={busy || !dict} title={t('settings.dictionary.exportTitle')}>
+              <FileSpreadsheet size={13} /> {t('settings.dictionary.export')}
             </Button>
             <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
-              <Undo2 size={13} /> {t('common.discard', 'Discard')}
+              <Undo2 size={13} /> {t('common.discard')}
             </Button>
             <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
               {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
@@ -700,7 +700,7 @@ export default function DictionaryBuilder() {
                     {k}
                     {isOverride && (
                       <Tag $tone="orange" style={{ marginLeft: 6, fontSize: fontSize.micro }}>
-                        {t('settings.override.badge', 'override')}
+                        {t('settings.override.badge')}
                       </Tag>
                     )}
                   </span>
@@ -738,17 +738,17 @@ export default function DictionaryBuilder() {
                       scope: scope || 'shared',
                       label: `${kind === 'entries' ? 'dictionary entry' : kind.slice(0, -1)} ${sel}`,
                     })} disabled={busy}>
-                      <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
+                      <GitBranch size={13} /> {t('findUsages.button')}
                     </Button>
                   )}
                   <Button $variant="ghost" $size="sm" onClick={() => renameRecord(sel)} disabled={busy}>
                     <Edit3 size={13} /> {t('settings.rename.button')}
                   </Button>
                   <Button $variant="ghost" $size="sm" onClick={() => cloneRecord(sel)} disabled={busy}>
-                    <Copy size={13} /> {t('common.clone', 'Clone')}
+                    <Copy size={13} /> {t('common.clone')}
                   </Button>
                   <Button $variant="ghost" $size="sm" onClick={() => removeRecord(sel)} disabled={busy} style={{ color: colors.red.main }}>
-                    <Trash2 size={13} /> {t('common.delete', 'Delete')}
+                    <Trash2 size={13} /> {t('common.delete')}
                   </Button>
                 </Row>
               </Row>
@@ -779,13 +779,13 @@ export default function DictionaryBuilder() {
                     if (!src) return
                     const existing = arr.map((q) => String(q.name ?? ''))
                     const newName = (await modals.prompt({
-                      title: t('settings.editQuery.cloneTitle', 'Clone query'),
-                      message: t('settings.editQuery.clonePrompt', 'New name for the copy of "{{name}}":', { name: queryName }),
+                      title: t('settings.editQuery.cloneTitle'),
+                      message: t('settings.editQuery.clonePrompt', { name: queryName }),
                       defaultValue: suggestCloneId(queryName, existing),
                       placeholder: 'snake_case',
-                      submitLabel: t('common.clone', 'Clone'),
+                      submitLabel: t('common.clone'),
                       validate: (v) => v === queryName
-                        ? { error: t('settings.tables.duplicateSameName', 'Pick a different name.') }
+                        ? { error: t('settings.tables.duplicateSameName') }
                         : validateId({ kind: 'query', proposed: v, existing, mode: 'clone' }),
                     }))?.trim()
                     if (!newName) return
@@ -803,10 +803,10 @@ export default function DictionaryBuilder() {
                     const arr = (conns[resolved]?.queries ?? []) as Record<string, unknown>[]
                     const existing = arr.map((q) => String(q.name ?? ''))
                     const newName = (await modals.prompt({
-                      title: t('settings.editQuery.addTitle', 'New query'),
-                      message: t('settings.editQuery.addPrompt', 'Name for the new query:'),
+                      title: t('settings.editQuery.addTitle'),
+                      message: t('settings.editQuery.addPrompt'),
                       placeholder: 'snake_case',
-                      submitLabel: t('common.add', 'Add'),
+                      submitLabel: t('common.add'),
                       validate: (v) => validateId({ kind: 'query', proposed: v, existing, mode: 'add' }),
                     }))?.trim()
                     if (!newName) return
@@ -833,8 +833,8 @@ export default function DictionaryBuilder() {
       {addScopeOpen && (
         <AddScopeModal
           candidates={addScopeCandidates}
-          title={t('settings.dictionary.scope.add', 'Add a connector scope')}
-          emptyHint={t('settings.dictionary.scope.addEmpty', 'Every connector already has a dictionary overlay.')}
+          title={t('settings.dictionary.scope.add')}
+          emptyHint={t('settings.dictionary.scope.addEmpty')}
           onPick={onPickScope}
           onClose={() => setAddScopeOpen(false)}
         />
@@ -895,7 +895,7 @@ export default function DictionaryBuilder() {
               await api.put<{ saved: boolean }>('/admin/config/connectors/parsed', { connectors: flat })
               await refreshConnectors()
               setRecord(recId, { ...(section[recId] as Record<string, unknown>), query: name })
-              setStatus(t('settings.generateQuery.saved', 'Query "{{name}}" saved — set it on the record.', { name }))
+              setStatus(t('settings.generateQuery.saved', { name }))
             } catch (e) {
               setError(e instanceof ApiError ? e.message : String(e))
             } finally { setBusy(false) }
@@ -935,24 +935,24 @@ function FrameworkEnumPickerModal({
   return (
     <Overlay>
       <Modal onClick={(e) => e.stopPropagation()} style={{ width: 'min(480px, 94vw)' }}>
-        <ModalHeader>{t('settings.dictionary.framework_enums.add', 'Customize framework enum')}</ModalHeader>
+        <ModalHeader>{t('settings.dictionary.framework_enums.add')}</ModalHeader>
         <ModalBody>
           {none ? (
             <Banner $tone="info">
-              {t('settings.dictionary.framework_enums.allOverridden', 'Every bundled framework enum already has an override here.')}
+              {t('settings.dictionary.framework_enums.allOverridden')}
             </Banner>
           ) : (
-            <Field label={t('settings.dictionary.framework_enums.pick', 'Which framework enum to customize')}>
+            <Field label={t('settings.dictionary.framework_enums.pick')}>
               <SearchSelect value={value} onChange={setValue} options={opts}
-                placeholder={t('common.pick', 'Pick…')} />
+                placeholder={t('common.pick')} />
             </Field>
           )}
         </ModalBody>
         <ModalFooter>
-          <Button $size="sm" $variant="ghost" onClick={onClose}>{t('common.cancel', 'Cancel')}</Button>
+          <Button $size="sm" $variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
           <Button $size="sm" $variant="primary" disabled={none || !value}
             onClick={() => { if (value) { onPick(value); onClose() } }}>
-            {t('common.ok', 'OK')}
+            {t('common.ok')}
           </Button>
         </ModalFooter>
       </Modal>

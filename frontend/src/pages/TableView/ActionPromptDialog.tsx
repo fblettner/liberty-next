@@ -103,7 +103,7 @@ export function ActionPromptDialog({
       if (!st.required) continue
       const v = values[f.name]
       if (v == null || v === '') {
-        setError(t('prompt.required', { defaultValue: 'Please fill all required fields.' }))
+        setError(t('prompt.required'))
         return
       }
     }
@@ -139,7 +139,7 @@ export function ActionPromptDialog({
             })}
             {visibleFields.length === 0 && (
               <CellWrap $span={gridCols}>
-                <Banner $tone="info">{t('prompt.noFields', { defaultValue: 'No inputs required — click Confirm to continue.' })}</Banner>
+                <Banner $tone="info">{t('prompt.noFields')}</Banner>
               </CellWrap>
             )}
           </PromptGrid>
@@ -150,7 +150,7 @@ export function ActionPromptDialog({
               <X size={13} /> {t('common.cancel')}
             </Button>
             <Button $size="sm" $variant="primary" onClick={handleSubmit}>
-              <Check size={13} /> {submitLabel || t('common.confirm', { defaultValue: 'Confirm' })}
+              <Check size={13} /> {submitLabel || t('common.confirm')}
             </Button>
           </FlexRow>
         </ModalFooter>

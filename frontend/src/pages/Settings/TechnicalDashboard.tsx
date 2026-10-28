@@ -131,16 +131,16 @@ function fmtUptime(s: number): string {
 
 function PoolsCard({ pools }: { pools: PoolStats[] }) {
   const { t } = useTranslation()
-  if (pools.length === 0) return <EmptyHint>{t('dashboard.tech.pools.empty', 'No pools configured.')}</EmptyHint>
+  if (pools.length === 0) return <EmptyHint>{t('dashboard.tech.pools.empty')}</EmptyHint>
   return (
     <ListTable>
       <thead>
         <tr>
-          <th>{t('dashboard.tech.pools.name', 'Pool')}</th>
-          <th>{t('dashboard.tech.pools.dialect', 'Dialect')}</th>
-          <th style={{ textAlign: 'right' }}>{t('dashboard.tech.pools.checkedOut', 'In use')}</th>
-          <th style={{ textAlign: 'right' }}>{t('dashboard.tech.pools.checkedIn', 'Idle')}</th>
-          <th style={{ textAlign: 'right' }}>{t('dashboard.tech.pools.overflow', 'Overflow')}</th>
+          <th>{t('dashboard.tech.pools.name')}</th>
+          <th>{t('dashboard.tech.pools.dialect')}</th>
+          <th style={{ textAlign: 'right' }}>{t('dashboard.tech.pools.checkedOut')}</th>
+          <th style={{ textAlign: 'right' }}>{t('dashboard.tech.pools.checkedIn')}</th>
+          <th style={{ textAlign: 'right' }}>{t('dashboard.tech.pools.overflow')}</th>
         </tr>
       </thead>
       <tbody>
@@ -149,7 +149,7 @@ function PoolsCard({ pools }: { pools: PoolStats[] }) {
             <td className="mono">{p.name}</td>
             <td><Tag $tone="blue">{p.dialect}</Tag></td>
             <td className="mono" style={{ textAlign: 'right' }}>
-              {p.materialised ? (p.checked_out ?? 'n/a') : <Mono>{t('dashboard.tech.pools.lazy', 'not opened')}</Mono>}
+              {p.materialised ? (p.checked_out ?? 'n/a') : <Mono>{t('dashboard.tech.pools.lazy')}</Mono>}
             </td>
             <td className="mono" style={{ textAlign: 'right' }}>{p.materialised ? (p.checked_in ?? 'n/a') : ''}</td>
             <td className="mono" style={{ textAlign: 'right' }}>
@@ -164,14 +164,14 @@ function PoolsCard({ pools }: { pools: PoolStats[] }) {
 
 function UsersCard({ users }: { users: ConnectedUser[] }) {
   const { t } = useTranslation()
-  if (users.length === 0) return <EmptyHint>{t('dashboard.tech.users.empty', 'No connected sessions.')}</EmptyHint>
+  if (users.length === 0) return <EmptyHint>{t('dashboard.tech.users.empty')}</EmptyHint>
   return (
     <ListTable>
       <thead>
         <tr>
-          <th>{t('dashboard.tech.users.user', 'User')}</th>
-          <th>{t('dashboard.tech.users.session', 'Session')}</th>
-          <th>{t('dashboard.tech.users.client', 'Client')}</th>
+          <th>{t('dashboard.tech.users.user')}</th>
+          <th>{t('dashboard.tech.users.session')}</th>
+          <th>{t('dashboard.tech.users.client')}</th>
         </tr>
       </thead>
       <tbody>
@@ -189,14 +189,14 @@ function UsersCard({ users }: { users: ConnectedUser[] }) {
 
 function LocksCard({ locks }: { locks: HeldLock[] }) {
   const { t } = useTranslation()
-  if (locks.length === 0) return <EmptyHint>{t('dashboard.tech.locks.empty', 'No records currently locked.')}</EmptyHint>
+  if (locks.length === 0) return <EmptyHint>{t('dashboard.tech.locks.empty')}</EmptyHint>
   return (
     <ListTable>
       <thead>
         <tr>
-          <th>{t('dashboard.tech.locks.who', 'User')}</th>
-          <th>{t('dashboard.tech.locks.what', 'Record')}</th>
-          <th>{t('dashboard.tech.locks.when', 'Since')}</th>
+          <th>{t('dashboard.tech.locks.who')}</th>
+          <th>{t('dashboard.tech.locks.what')}</th>
+          <th>{t('dashboard.tech.locks.when')}</th>
         </tr>
       </thead>
       <tbody>
@@ -240,7 +240,7 @@ function LogsCard() {
   }, [filtered, paused])
 
   if (denied) {
-    return <Banner $tone="error">{t('dashboard.tech.logs.denied', 'Log viewer requires superuser access.')}</Banner>
+    return <Banner $tone="error">{t('dashboard.tech.logs.denied')}</Banner>
   }
 
   return (
@@ -249,23 +249,23 @@ function LogsCard() {
         <LogFilter
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder={t('dashboard.tech.logs.filterPlaceholder', 'Filter… (logger name or message)') ?? ''}
+          placeholder={t('dashboard.tech.logs.filterPlaceholder') ?? ''}
         />
-        <PillBtn $active={levelFilter === 'all'} onClick={() => setLevelFilter('all')}>{t('dashboard.tech.logs.all', 'All')}</PillBtn>
+        <PillBtn $active={levelFilter === 'all'} onClick={() => setLevelFilter('all')}>{t('dashboard.tech.logs.all')}</PillBtn>
         <PillBtn $active={levelFilter === 'info'} onClick={() => setLevelFilter('info')}>INFO+</PillBtn>
         <PillBtn $active={levelFilter === 'warn'} onClick={() => setLevelFilter('warn')}>WARN+</PillBtn>
         <PillBtn $active={levelFilter === 'err'} onClick={() => setLevelFilter('err')}>ERROR</PillBtn>
         <PillBtn $active={paused} onClick={() => setPaused((p) => !p)}>
           {paused ? <Play size={12} /> : <Pause size={12} />}
-          {paused ? t('dashboard.tech.logs.resume', 'Resume') : t('dashboard.tech.logs.pause', 'Pause')}
+          {paused ? t('dashboard.tech.logs.resume') : t('dashboard.tech.logs.pause')}
         </PillBtn>
         <PillBtn onClick={() => setFilter('')}>
-          <Trash2 size={12} /> {t('dashboard.tech.logs.clearFilter', 'Clear filter')}
+          <Trash2 size={12} /> {t('dashboard.tech.logs.clearFilter')}
         </PillBtn>
       </LogControls>
       <LogPane ref={paneRef}>
         {filtered.length === 0 ? (
-          <EmptyHint>{t('dashboard.tech.logs.empty', 'No log lines match the current filter.')}</EmptyHint>
+          <EmptyHint>{t('dashboard.tech.logs.empty')}</EmptyHint>
         ) : (
           filtered.map((e, i) => (
             <LogLine key={i} $level={e.level}>
@@ -275,7 +275,7 @@ function LogsCard() {
                 <Mono>{e.name}</Mono> {e.message}
                 {e.exc_info && (
                   <details style={{ marginTop: 4 }}>
-                    <summary style={{ cursor: 'pointer', color: colors.text.muted }}>{t('dashboard.tech.logs.traceback', 'traceback')}</summary>
+                    <summary style={{ cursor: 'pointer', color: colors.text.muted }}>{t('dashboard.tech.logs.traceback')}</summary>
                     <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap', color: colors.red.main }}>{e.exc_info}</pre>
                   </details>
                 )}
@@ -297,22 +297,21 @@ export default function TechnicalDashboard(): ReactNode {
   const snap = useDashboardSnapshot()
 
   if (!user?.is_superuser) {
-    return <Banner $tone="error">{t('dashboard.tech.superuserOnly', 'Technical dashboard requires superuser access.')}</Banner>
+    return <Banner $tone="error">{t('dashboard.tech.superuserOnly')}</Banner>
   }
   if (snap === 'denied') {
-    return <Banner $tone="error">{t('dashboard.tech.denied', 'Dashboard subscription denied by the server.')}</Banner>
+    return <Banner $tone="error">{t('dashboard.tech.denied')}</Banner>
   }
   if (!snap) {
     if (status === 'open') {
-      return <Banner $tone="info">{t('dashboard.tech.waiting', 'Connected — waiting for first snapshot…')}</Banner>
+      return <Banner $tone="info">{t('dashboard.tech.waiting')}</Banner>
     }
     if (status === 'closed') {
       return <Banner $tone="error">
-        {t('dashboard.tech.disconnected',
-          'Socket.IO disconnected — the page can\'t subscribe to live updates. Check the backend log; client will keep retrying.')}
+        {t('dashboard.tech.disconnected')}
       </Banner>
     }
-    return <Banner $tone="info">{t('dashboard.tech.connecting', 'Connecting…')} ({status})</Banner>
+    return <Banner $tone="info">{t('dashboard.tech.connecting')} ({status})</Banner>
   }
 
   const pools = snap.pools
@@ -324,22 +323,22 @@ export default function TechnicalDashboard(): ReactNode {
     <div>
       <KpiRow>
         <Kpi>
-          <KpiLabel><Users size={12} /> {t('dashboard.tech.kpi.users', 'Connected users')}</KpiLabel>
+          <KpiLabel><Users size={12} /> {t('dashboard.tech.kpi.users')}</KpiLabel>
           <KpiValue>{users.length}</KpiValue>
-          <KpiSub>{t('dashboard.tech.kpi.usersSub', 'Live Socket.IO sessions')}</KpiSub>
+          <KpiSub>{t('dashboard.tech.kpi.usersSub')}</KpiSub>
         </Kpi>
         <Kpi>
-          <KpiLabel><LockIcon size={12} /> {t('dashboard.tech.kpi.locks', 'Active locks')}</KpiLabel>
+          <KpiLabel><LockIcon size={12} /> {t('dashboard.tech.kpi.locks')}</KpiLabel>
           <KpiValue>{locks.length}</KpiValue>
-          <KpiSub>{t('dashboard.tech.kpi.locksSub', 'Records currently being edited')}</KpiSub>
+          <KpiSub>{t('dashboard.tech.kpi.locksSub')}</KpiSub>
         </Kpi>
         <Kpi>
-          <KpiLabel><Database size={12} /> {t('dashboard.tech.kpi.pools', 'Pools')}</KpiLabel>
+          <KpiLabel><Database size={12} /> {t('dashboard.tech.kpi.pools')}</KpiLabel>
           <KpiValue>{pools.filter((p) => p.materialised).length} / {pools.length}</KpiValue>
-          <KpiSub>{t('dashboard.tech.kpi.poolsSub', 'Materialised / configured')}</KpiSub>
+          <KpiSub>{t('dashboard.tech.kpi.poolsSub')}</KpiSub>
         </Kpi>
         <Kpi>
-          <KpiLabel><Activity size={12} /> {t('dashboard.tech.kpi.uptime', 'Uptime')}</KpiLabel>
+          <KpiLabel><Activity size={12} /> {t('dashboard.tech.kpi.uptime')}</KpiLabel>
           <KpiValue>{fmtUptime(snap.uptime_s)}</KpiValue>
           <KpiSub>Python {snap.runtime.python}</KpiSub>
         </Kpi>
@@ -347,19 +346,19 @@ export default function TechnicalDashboard(): ReactNode {
 
       <CardGrid>
         <Card style={{ padding: 14 }}>
-          <SectionTitle><Database size={12} /> {t('dashboard.tech.pools.heading', 'Database pools')}</SectionTitle>
+          <SectionTitle><Database size={12} /> {t('dashboard.tech.pools.heading')}</SectionTitle>
           <PoolsCard pools={pools} />
         </Card>
         <Card style={{ padding: 14 }}>
-          <SectionTitle><Users size={12} /> {t('dashboard.tech.users.heading', 'Connected users')}</SectionTitle>
+          <SectionTitle><Users size={12} /> {t('dashboard.tech.users.heading')}</SectionTitle>
           <UsersCard users={users} />
         </Card>
         <Card style={{ padding: 14 }}>
-          <SectionTitle><LockIcon size={12} /> {t('dashboard.tech.locks.heading', 'Record locks')}</SectionTitle>
+          <SectionTitle><LockIcon size={12} /> {t('dashboard.tech.locks.heading')}</SectionTitle>
           <LocksCard locks={locks} />
         </Card>
         <Card style={{ padding: 14 }}>
-          <SectionTitle><Cpu size={12} /> {t('dashboard.tech.runtime.heading', 'Runtime')}</SectionTitle>
+          <SectionTitle><Cpu size={12} /> {t('dashboard.tech.runtime.heading')}</SectionTitle>
           <ListTable>
             <tbody>
               <tr><td>Connectors</td><td className="mono">{snap.runtime.connector_count}</td></tr>
@@ -374,7 +373,7 @@ export default function TechnicalDashboard(): ReactNode {
                 </td>
               </tr>
               <tr>
-                <td><Server size={11} style={{ verticalAlign: 'middle' }} /> {t('dashboard.tech.runtime.sio', 'Socket.IO')}</td>
+                <td><Server size={11} style={{ verticalAlign: 'middle' }} /> {t('dashboard.tech.runtime.sio')}</td>
                 <td><Tag $tone={status === 'open' ? 'green' : status === 'connecting' ? 'orange' : 'red'}>{status}</Tag></td>
               </tr>
             </tbody>
@@ -383,7 +382,7 @@ export default function TechnicalDashboard(): ReactNode {
       </CardGrid>
 
       <Card style={{ padding: 14 }}>
-        <SectionTitle><Activity size={12} /> {t('dashboard.tech.logs.heading', 'Live log tail')}</SectionTitle>
+        <SectionTitle><Activity size={12} /> {t('dashboard.tech.logs.heading')}</SectionTitle>
         <LogsCard />
       </Card>
     </div>

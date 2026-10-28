@@ -162,7 +162,7 @@ function AvailablePane({ title, joins, ids, colLabel, onAdd, emptyText }: {
       <PaneHead><ArrowRight size={12} /> {title} · {shown.length}{needle && shown.length !== ids.length ? `/${ids.length}` : ''}</PaneHead>
       <SearchBox>
         <Search size={13} />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('assistant.colFilter', 'Filter columns…')} />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('assistant.colFilter')} />
         {q && <SmallX type="button" style={{ width: 22, height: 22 }} onClick={() => setQ('')}><X size={12} /></SmallX>}
       </SearchBox>
       <PaneList>
@@ -176,8 +176,8 @@ function AvailablePane({ title, joins, ids, colLabel, onAdd, emptyText }: {
                 <GroupToggle type="button" onClick={() => toggle(j.alias)}>
                   {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}<b>{j.name}</b> · {j.alias} · {avail.length}
                 </GroupToggle>
-                <GroupAdd type="button" title={t('assistant.addGroup', 'Add all from this table')} onClick={() => avail.forEach((id) => onAdd(id))}>
-                  <Plus size={11} /> {t('assistant.addGroupShort', 'all')}
+                <GroupAdd type="button" title={t('assistant.addGroup')} onClick={() => avail.forEach((id) => onAdd(id))}>
+                  <Plus size={11} /> {t('assistant.addGroupShort')}
                 </GroupAdd>
               </PaneGroup>
               {!isCollapsed && avail.map((id) => (
@@ -189,7 +189,7 @@ function AvailablePane({ title, joins, ids, colLabel, onAdd, emptyText }: {
             </Fragment>
           )
         })}
-        {shown.length === 0 && <ColRow><span className="grow" style={{ color: colors.text.muted }}>{needle ? t('assistant.noColMatch', 'No matching columns') : emptyText}</span></ColRow>}
+        {shown.length === 0 && <ColRow><span className="grow" style={{ color: colors.text.muted }}>{needle ? t('assistant.noColMatch') : emptyText}</span></ColRow>}
       </PaneList>
     </Pane>
   )
@@ -357,7 +357,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
       if (only?.query && (!only.query_connector || only.query_connector === connector)) {
         const r = await api.get<{ columns?: Array<{ name: string; type?: string | null }> }>(`/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(only.query)}?_limit=0`)
         const cols = (r.columns ?? []).map((c) => ({ name: c.name, type: c.type ?? undefined }))
-        if (!cols.length) { setMsg({ tone: 'err', text: t('assistant.queryNoCols', 'That query returned no columns.') }); return }
+        if (!cols.length) { setMsg({ tone: 'err', text: t('assistant.queryNoCols') }); return }
         setSourceMode('query'); setSourceQuery(only.query)
         setJoins([{ schema: null, name: only.query, alias: suggestAlias(only.query, new Set()), columns: cols }])
         setAdding(false); setTabs(DEFAULT_TABS); setActiveTab('general'); setKeys(new Set()); setGridCols([]); setDdItems([])
@@ -383,7 +383,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
         if (!cols || cols.length === 0) {
           const part = await getPoolSchemaTables(connector, pt.schema ?? null, pt.name)
           const tb = (part?.tables ?? []).find((x) => x.name.toLowerCase() === pt.name.toLowerCase())
-          if (!tb) { setMsg({ tone: 'err', text: t('assistant.presetMiss', { name: pt.name, defaultValue: 'Table {{name}} not found on this connector.' }) }); continue }
+          if (!tb) { setMsg({ tone: 'err', text: t('assistant.presetMiss', { name: pt.name }) }); continue }
           cols = tb.columns; name = tb.name; schema = pt.schema ?? tb.schema ?? null
         }
         const alias = pt.alias || suggestAlias(name, taken)
@@ -415,7 +415,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
     const m = new Map<string, Preset[]>()
     for (const p of presets) {
       if (!match(p)) continue
-      const g = p.group || t('assistant.presetOther', 'Other')
+      const g = p.group || t('assistant.presetOther')
       const list = m.get(g) ?? []; list.push(p); m.set(g, list)
     }
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
@@ -437,7 +437,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
     try {
       const r = await api.get<{ columns?: Array<{ name: string; type?: string | null }> }>(`/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(qname)}?_limit=0`)
       const cols = (r.columns ?? []).map((c) => ({ name: c.name, type: c.type ?? undefined }))
-      if (!cols.length) { setMsg({ tone: 'err', text: t('assistant.queryNoCols', 'That query returned no columns.') }); return }
+      if (!cols.length) { setMsg({ tone: 'err', text: t('assistant.queryNoCols') }); return }
       setJoins([{ schema: null, name: qname, alias: suggestAlias(qname, new Set()), columns: cols }])
       setSourceQuery(qname)
       setTabs(DEFAULT_TABS); setActiveTab('general'); setKeys(new Set()); setGridCols([]); setDdItems([])
@@ -653,7 +653,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
       // without a manual browser reload.
       refresh()
       setResult({ screen: r.created.screen })
-      setMsg({ tone: 'ok', text: t('assistant.created', { screen: r.created.screen, defaultValue: 'Created {{screen}} and reloaded.' }) })
+      setMsg({ tone: 'ok', text: t('assistant.created', { screen: r.created.screen }) })
     } catch (e) { setMsg({ tone: 'err', text: e instanceof Error ? e.message : String(e) }) } finally { setBusy(false) }
   }
 
@@ -679,9 +679,9 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
       <Modal style={{ width: 'min(1120px, 96vw)', height: 'min(840px, 92vh)', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>
           <HeadBar>
-            <Title><Wand2 size={18} /> {t('assistant.title', 'Screen Creation Assistant')}</Title>
-            <Button $size="sm" $variant="ghost" onClick={resetAll} title={t('assistant.reset', 'Reset')}><RotateCcw size={14} /></Button>
-            <Button $size="sm" $variant="ghost" onClick={onClose} title={t('common.close', 'Close')}><X size={16} /></Button>
+            <Title><Wand2 size={18} /> {t('assistant.title')}</Title>
+            <Button $size="sm" $variant="ghost" onClick={resetAll} title={t('assistant.reset')}><RotateCcw size={14} /></Button>
+            <Button $size="sm" $variant="ghost" onClick={onClose} title={t('common.close')}><X size={16} /></Button>
           </HeadBar>
         </ModalHeader>
         <ModalBody style={{ flex: 1, overflow: 'auto' }}>
@@ -698,11 +698,11 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
           {/* ── Step 1: target ── */}
           {STEPS[step] === 'target' && (
             <Grid2>
-              <Field label={t('assistant.connector', 'Source connector')}>
-                <SearchSelect value={connector} onChange={(v) => { setConnector(v); if (!app) setApp(v) }} options={connectors} placeholder={t('common.pick', 'Pick…')} />
+              <Field label={t('assistant.connector')}>
+                <SearchSelect value={connector} onChange={(v) => { setConnector(v); if (!app) setApp(v) }} options={connectors} placeholder={t('common.pick')} />
               </Field>
-              <Field label={t('assistant.app', 'App (for the screen + menu)')}>
-                <SearchSelect value={app} onChange={setApp} options={appOptions} allowCustom placeholder={t('assistant.appPick', 'Pick an app or type a new one')} />
+              <Field label={t('assistant.app')}>
+                <SearchSelect value={app} onChange={setApp} options={appOptions} allowCustom placeholder={t('assistant.appPick')} />
               </Field>
             </Grid2>
           )}
@@ -713,33 +713,33 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
               {/* Source: a brand-new DB table (generates CRUD queries) or an existing connector query. */}
               <RowBar style={{ marginBottom: 4 }}>
                 <Chip $active={sourceMode === 'table'} onClick={() => { if (sourceMode !== 'table') { resetTables(); setSourceMode('table') } }}>
-                  {t('assistant.srcTable', 'Database table')}
+                  {t('assistant.srcTable')}
                 </Chip>
                 <Chip $active={sourceMode === 'query'} onClick={() => { if (sourceMode !== 'query') { resetTables(); setSourceMode('query') } }}>
-                  {t('assistant.srcQuery', 'Existing query')}
+                  {t('assistant.srcQuery')}
                 </Chip>
               </RowBar>
 
               {/* Resolving a catalog preset / existing query describes its columns in the DB — show it. */}
               {busy && (
                 <RowBar style={{ color: colors.text.muted, fontSize: fontSize.sm, marginTop: 8 }}>
-                  <SpinnerRing size={16} /> {t('assistant.loadingCols', 'Fetching columns from the database…')}
+                  <SpinnerRing size={16} /> {t('assistant.loadingCols')}
                 </RowBar>
               )}
 
               {sourceMode === 'query' ? (
                 !base ? (
-                  <Field label={t('assistant.existingQuery', 'Existing connector query')}>
+                  <Field label={t('assistant.existingQuery')}>
                     {existingQueries.length
-                      ? <SearchSelect value="" onChange={(v) => void pickQuery(v)} options={existingQueries} placeholder={t('common.pick', 'Pick…')} />
-                      : <div style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('assistant.noQueries', 'This connector has no read queries.')}</div>}
+                      ? <SearchSelect value="" onChange={(v) => void pickQuery(v)} options={existingQueries} placeholder={t('common.pick')} />
+                      : <div style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('assistant.noQueries')}</div>}
                   </Field>
                 ) : (
                   <Section>
-                    <SectionTitle>{t('assistant.source', 'Source')}</SectionTitle>
+                    <SectionTitle>{t('assistant.source')}</SectionTitle>
                     <RowBar>
                       <strong style={{ fontFamily: fonts.mono, fontSize: fontSize.sm, flex: 1 }}>{sourceQuery}</strong>
-                      <SmallX type="button" onClick={resetTables} title={t('common.remove', 'Remove')}><X size={13} /></SmallX>
+                      <SmallX type="button" onClick={resetTables} title={t('common.remove')}><X size={13} /></SmallX>
                     </RowBar>
                   </Section>
                 )
@@ -747,17 +747,17 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
               <>
               {presets.length > 0 && (
                 <Section>
-                  <SectionTitle>{t('assistant.preset', 'Start from a catalog preset')}</SectionTitle>
+                  <SectionTitle>{t('assistant.preset')}</SectionTitle>
                   <Button $size="sm" $variant="ghost" onClick={() => { setCatalogQ(''); setCatalogOpen(true) }} style={{ alignSelf: 'flex-start' }}>
-                    <BookOpen size={14} /> {t('assistant.browseCatalog', 'Browse catalog ({{n}})', { n: presets.length })}
+                    <BookOpen size={14} /> {t('assistant.browseCatalog', { n: presets.length })}
                   </Button>
                 </Section>
               )}
               {!base ? (
-                <Field label={t('assistant.baseTable', 'Base table')}><TablePicker connector={connector} onPick={pickBase} /></Field>
+                <Field label={t('assistant.baseTable')}><TablePicker connector={connector} onPick={pickBase} /></Field>
               ) : (
                 <Section>
-                  <SectionTitle>{t('assistant.tables', 'Tables')}</SectionTitle>
+                  <SectionTitle>{t('assistant.tables')}</SectionTitle>
                   {joins.map((j, i) => (
                     <div key={`${j.alias}_${i}`}>
                       <RowBar>
@@ -770,7 +770,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
                           {(j.schema ? `${j.schema}.` : '') + j.name}<span style={{ color: colors.text.muted, marginLeft: 6 }}>{j.alias}</span>
                         </strong>
                         <SmallX type="button" onClick={() => (i === 0 ? resetTables() : removeJoin(i))}
-                          title={i === 0 ? t('assistant.changeBase', 'Remove base table') : t('common.remove', 'Remove')}><X size={13} /></SmallX>
+                          title={i === 0 ? t('assistant.changeBase') : t('common.remove')}><X size={13} /></SmallX>
                       </RowBar>
                       {i > 0 && (() => {
                         const conds = j.join?.conds ?? [{ left: '', right: '' }]
@@ -780,23 +780,23 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
                             {conds.map((c, k) => (
                               <RowBar key={k} style={{ marginTop: 4 }}>
                                 <div style={{ flex: 1 }}>
-                                  <SearchSelect value={c.left} onChange={(v) => setConds(i, conds.map((x, ci) => ci === k ? { ...x, left: v } : x))} options={leftOpts} placeholder={t('assistant.joinSource', 'Source column')} />
+                                  <SearchSelect value={c.left} onChange={(v) => setConds(i, conds.map((x, ci) => ci === k ? { ...x, left: v } : x))} options={leftOpts} placeholder={t('assistant.joinSource')} />
                                 </div>
                                 <span style={{ color: colors.text.muted }}>=</span>
                                 <div style={{ flex: 1 }}>
-                                  <SearchSelect value={c.right} onChange={(v) => setConds(i, conds.map((x, ci) => ci === k ? { ...x, right: v } : x))} options={rightOpts} placeholder={t('assistant.joinTarget', 'Target column')} />
+                                  <SearchSelect value={c.right} onChange={(v) => setConds(i, conds.map((x, ci) => ci === k ? { ...x, right: v } : x))} options={rightOpts} placeholder={t('assistant.joinTarget')} />
                                 </div>
                                 {conds.length > 1 && <SmallX type="button" onClick={() => setConds(i, conds.filter((_, ci) => ci !== k))}><X size={13} /></SmallX>}
                               </RowBar>
                             ))}
-                            <Mini type="button" onClick={() => setConds(i, [...conds, { left: '', right: '' }])}><Plus size={12} /> {t('assistant.addCond', 'Add condition')}</Mini>
+                            <Mini type="button" onClick={() => setConds(i, [...conds, { left: '', right: '' }])}><Plus size={12} /> {t('assistant.addCond')}</Mini>
                           </div>
                         )
                       })()}
                     </div>
                   ))}
                   {adding ? <TablePicker connector={connector} onPick={addJoin} />
-                    : <Mini type="button" onClick={() => setAdding(true)}><Plus size={12} /> {t('assistant.addJoin', 'Add a joined table')}</Mini>}
+                    : <Mini type="button" onClick={() => setAdding(true)}><Plus size={12} /> {t('assistant.addJoin')}</Mini>}
                 </Section>
               )}
               </>
@@ -808,7 +808,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
           {STEPS[step] === 'columns' && (
             <>
               <div style={{ fontSize: fontSize.sm, color: colors.text.muted, marginBottom: 4 }}>
-                {t('assistant.dialogOptional', 'Optional — arrange columns into dialog tabs for an editable form. Leave empty for a read-only grid. The dialog can show more columns than the grid.')}
+                {t('assistant.dialogOptional')}
               </div>
               <RowBar style={{ marginBottom: 4 }}>
                 {tabs.map((tb) => (
@@ -817,16 +817,16 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
                     {tabs.length > 1 && <X size={11} onClick={(e) => { e.stopPropagation(); removeTab(tb.id) }} />}
                   </Chip>
                 ))}
-                <Mini type="button" onClick={addTab}><Plus size={12} /> {t('assistant.addTab', 'Add tab')}</Mini>
+                <Mini type="button" onClick={addTab}><Plus size={12} /> {t('assistant.addTab')}</Mini>
               </RowBar>
               <RowBar>
-                <Input style={{ flex: '0 0 240px' }} value={activeWizTab?.label ?? ''} onChange={(e) => renameTab(activeTab, e.target.value)} placeholder={t('assistant.tabLabel', 'Active tab label')} />
-                <Mini type="button" onClick={addAllToTab} disabled={available.length === 0}>{t('assistant.addAll', 'Add all available →')}</Mini>
-                <Mini type="button" onClick={removeAllFromTab} disabled={(activeWizTab?.cols.length ?? 0) === 0}>{t('assistant.removeAll', '← Remove all')}</Mini>
+                <Input style={{ flex: '0 0 240px' }} value={activeWizTab?.label ?? ''} onChange={(e) => renameTab(activeTab, e.target.value)} placeholder={t('assistant.tabLabel')} />
+                <Mini type="button" onClick={addAllToTab} disabled={available.length === 0}>{t('assistant.addAll')}</Mini>
+                <Mini type="button" onClick={removeAllFromTab} disabled={(activeWizTab?.cols.length ?? 0) === 0}>{t('assistant.removeAll')}</Mini>
               </RowBar>
               <Dual>
-                <AvailablePane title={t('assistant.available', 'Available columns')} joins={joins} ids={available}
-                  colLabel={colLabel} onAdd={moveToTab} emptyText={t('assistant.allAssigned', 'All columns assigned')} />
+                <AvailablePane title={t('assistant.available')} joins={joins} ids={available}
+                  colLabel={colLabel} onAdd={moveToTab} emptyText={t('assistant.allAssigned')} />
                 <Pane>
                   <PaneHead><ArrowLeft size={12} /> {activeWizTab?.label} · {activeWizTab?.cols.length ?? 0}</PaneHead>
                   <PaneList>
@@ -848,16 +848,16 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
             <>
               <RowBar>
                 <div style={{ flex: 1, fontSize: fontSize.sm, color: colors.text.muted }}>
-                  {t('assistant.gridIntro', 'Pick the columns enabled in the default grid view. The screen keeps every query column (and the dialog shows them all); the view just sets which are visible — users can add the rest from the grid’s column menu.')}
+                  {t('assistant.gridIntro')}
                 </div>
-                <Mini type="button" onClick={addAllToGrid} disabled={gridAvailable.length === 0}>{t('assistant.addAll', 'Add all available →')}</Mini>
-                <Mini type="button" onClick={removeAllFromGrid} disabled={gridCols.length === 0}>{t('assistant.removeAll', '← Remove all')}</Mini>
+                <Mini type="button" onClick={addAllToGrid} disabled={gridAvailable.length === 0}>{t('assistant.addAll')}</Mini>
+                <Mini type="button" onClick={removeAllFromGrid} disabled={gridCols.length === 0}>{t('assistant.removeAll')}</Mini>
               </RowBar>
               <Dual>
-                <AvailablePane title={t('assistant.gridHidden', 'Not in the view')} joins={joins} ids={gridAvailable}
-                  colLabel={colLabel} onAdd={addToGrid} emptyText={t('assistant.allInGrid', 'Every column is in the view')} />
+                <AvailablePane title={t('assistant.gridHidden')} joins={joins} ids={gridAvailable}
+                  colLabel={colLabel} onAdd={addToGrid} emptyText={t('assistant.allInGrid')} />
                 <Pane>
-                  <PaneHead><ArrowLeft size={12} /> {t('assistant.gridShown', 'In the view')} · {gridCols.length}</PaneHead>
+                  <PaneHead><ArrowLeft size={12} /> {t('assistant.gridShown')} · {gridCols.length}</PaneHead>
                   <PaneList>
                     {gridCols.map((id) => (
                       <ColRow key={id}>
@@ -865,7 +865,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
                         <Mini type="button" onClick={() => removeFromGrid(id)}><X size={11} /></Mini>
                       </ColRow>
                     ))}
-                    {gridCols.length === 0 && <ColRow><span className="grow" style={{ color: colors.text.muted }}>{t('assistant.gridEmpty', 'No columns in the view yet')}</span></ColRow>}
+                    {gridCols.length === 0 && <ColRow><span className="grow" style={{ color: colors.text.muted }}>{t('assistant.gridEmpty')}</span></ColRow>}
                   </PaneList>
                 </Pane>
               </Dual>
@@ -875,16 +875,16 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
           {/* ── Step 5: JDE dictionary ── */}
           {STEPS[step] === 'dictionary' && (
             sourceQuery ? (
-              <Banner $tone="info">{t('assistant.ddSkipQuery', 'Reusing an existing query — its columns already carry their dictionary entries, so there is nothing to propose here.')}</Banner>
+              <Banner $tone="info">{t('assistant.ddSkipQuery')}</Banner>
             ) : ddLoading ? <SpinnerRing /> : (
               <>
                 <RowBar>
                   <SectionTitle style={{ flex: 1 }}>
-                    {t('assistant.ddProposals', 'Proposed dictionary entries (base table)')} · {t('settings.dictscan.summary2', '{{missing}} of {{total}} missing', summarizeProposals(ddItems ?? []))} · {t('assistant.ddScope', 'scope “{{scope}}”', { scope: appKey })}
+                    {t('assistant.ddProposals')} · {t('settings.dictscan.summary2', summarizeProposals(ddItems ?? []))} · {t('assistant.ddScope', { scope: appKey })}
                   </SectionTitle>
-                  <Mini type="button" onClick={() => void runScan()}>{t('assistant.rescan', 'Re-scan')}</Mini>
+                  <Mini type="button" onClick={() => void runScan()}>{t('assistant.rescan')}</Mini>
                 </RowBar>
-                {!isJde && <Banner $tone="info">{t('assistant.notJde', 'This pool is not JDE/Oracle — dictionary entries are inferred from column names. Review or skip.')}</Banner>}
+                {!isJde && <Banner $tone="info">{t('assistant.notJde')}</Banner>}
                 <ScanProposalsTable items={ddItems ?? []} jde={isJde} fmtOpts={fmtOpts} ruleOpts={ruleOpts} onPatch={patchDd} />
               </>
             )
@@ -893,18 +893,18 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
           {/* ── Step 5: menu placement ── */}
           {STEPS[step] === 'menu' && (
             <>
-              <RowBar><Checkbox checked={createMenu} onChange={() => setCreateMenu((v) => !v)} label={t('assistant.createMenu', 'Add a menu item under this app')} /></RowBar>
+              <RowBar><Checkbox checked={createMenu} onChange={() => setCreateMenu((v) => !v)} label={t('assistant.createMenu')} /></RowBar>
               {createMenu && (
                 <Grid2>
-                  <Field label={t('assistant.menuLabel', 'Menu label')}>
-                    <Input value={menuLabel} onChange={(e) => setMenuLabel(e.target.value)} placeholder={screenLabel || t('assistant.menuLabelPh', 'shown in the sidebar')} />
+                  <Field label={t('assistant.menuLabel')}>
+                    <Input value={menuLabel} onChange={(e) => setMenuLabel(e.target.value)} placeholder={screenLabel || t('assistant.menuLabelPh')} />
                   </Field>
-                  <Field label={t('assistant.menuParent', 'Parent menu (optional)')}>
-                    <SearchSelect value={menuParent} onChange={setMenuParent} options={menuItems} anyLabel={t('assistant.menuTop', '(top level)')}
-                      placeholder={menuItems.length ? t('assistant.menuParentPh', 'Nest under…') : t('assistant.menuNoParents', 'No existing items — top level')} />
+                  <Field label={t('assistant.menuParent')}>
+                    <SearchSelect value={menuParent} onChange={setMenuParent} options={menuItems} anyLabel={t('assistant.menuTop')}
+                      placeholder={menuItems.length ? t('assistant.menuParentPh') : t('assistant.menuNoParents')} />
                   </Field>
-                  <Field label={t('assistant.menuIcon', 'Icon')}>
-                    <SearchSelect value={menuIcon} onChange={setMenuIcon} options={ICON_OPTS} anyLabel={t('assistant.menuNoIcon', '(none)')} placeholder={t('assistant.menuIconPh', 'Pick an icon')} />
+                  <Field label={t('assistant.menuIcon')}>
+                    <SearchSelect value={menuIcon} onChange={setMenuIcon} options={ICON_OPTS} anyLabel={t('assistant.menuNoIcon')} placeholder={t('assistant.menuIconPh')} />
                   </Field>
                 </Grid2>
               )}
@@ -915,36 +915,36 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
           {STEPS[step] === 'review' && (
             result ? (
               <Section>
-                <Banner $tone="ok">{t('assistant.done', 'Screen {{screen}} created and live.', { screen: result.screen })}</Banner>
+                <Banner $tone="ok">{t('assistant.done', { screen: result.screen })}</Banner>
                 <RowBar>
-                  <Button $variant="primary" onClick={() => { navigate(`/screen/${appKey}/${screenId}`); onClose() }}>{t('assistant.openScreen', 'Open the new screen')}</Button>
-                  <Button $variant="ghost" onClick={resetAll}>{t('assistant.again', 'Create another')}</Button>
-                  <Button $variant="ghost" onClick={onClose}>{t('common.close', 'Close')}</Button>
+                  <Button $variant="primary" onClick={() => { navigate(`/screen/${appKey}/${screenId}`); onClose() }}>{t('assistant.openScreen')}</Button>
+                  <Button $variant="ghost" onClick={resetAll}>{t('assistant.again')}</Button>
+                  <Button $variant="ghost" onClick={onClose}>{t('common.close')}</Button>
                 </RowBar>
               </Section>
             ) : (
               <>
                 <Grid2>
-                  <Field label={t('assistant.tableName', 'Table / query name')}><Input value={tableName} onChange={(e) => setTableName(e.target.value)} placeholder="address_book" /></Field>
-                  <Field label={t('assistant.screenLabel', 'Screen label')}><Input value={screenLabel} onChange={(e) => setScreenLabel(e.target.value)} placeholder="Address Book" /></Field>
+                  <Field label={t('assistant.tableName')}><Input value={tableName} onChange={(e) => setTableName(e.target.value)} placeholder="address_book" /></Field>
+                  <Field label={t('assistant.screenLabel')}><Input value={screenLabel} onChange={(e) => setScreenLabel(e.target.value)} placeholder="Address Book" /></Field>
                 </Grid2>
                 <Section>
-                  <SectionTitle>{t('assistant.summary', 'Will create')}</SectionTitle>
+                  <SectionTitle>{t('assistant.summary')}</SectionTitle>
                   <div style={{ fontSize: fontSize.sm, color: colors.text.secondary, lineHeight: 1.7 }}>
                     {sourceQuery
-                      ? <div>· {t('assistant.sumQuery', 'Reuses existing query')} <Mono>{connector}.{sourceQuery}</Mono> ({t('assistant.readOnlyWord', 'read-only')})</div>
-                      : <div>· {t('assistant.sumTable', 'Connector table')} <Mono>{connector}.{slug(tableName)}</Mono> ({screenColumns.length} {t('assistant.cols', 'columns')})</div>}
+                      ? <div>· {t('assistant.sumQuery')} <Mono>{connector}.{sourceQuery}</Mono> ({t('assistant.readOnlyWord')})</div>
+                      : <div>· {t('assistant.sumTable')} <Mono>{connector}.{slug(tableName)}</Mono> ({screenColumns.length} {t('assistant.cols')})</div>}
                     {tabs.some((tb) => tb.cols.length)
-                      ? <div>· {t('assistant.sumScreen', 'Screen + dialog')} <Mono>{appKey}.{screenId}</Mono> ({tabs.filter((tb) => tb.cols.length).length} {t('assistant.tabsWord', 'tabs')})</div>
-                      : <div>· {t('assistant.sumScreenRo', 'Screen')} <Mono>{appKey}.{screenId}</Mono> ({t('assistant.readOnlyGrid', 'read-only grid, no dialog')})</div>}
-                    <div>· {t('assistant.sumCols', 'Default view enables {{grid}} of {{total}} columns', { grid: gridCols.length, total: screenColumns.length })}</div>
-                    {!sourceQuery && <div>· {t('assistant.sumDict', 'Dictionary entries')}: {(ddItems ?? []).filter((d) => d.keep && !d.exists).length}</div>}
-                    {createMenu && <div>· {t('assistant.sumMenu', 'Menu item')} <Mono>{appKey}</Mono>{menuParent ? ` → ${menuParent}` : ''}</div>}
+                      ? <div>· {t('assistant.sumScreen')} <Mono>{appKey}.{screenId}</Mono> ({tabs.filter((tb) => tb.cols.length).length} {t('assistant.tabsWord')})</div>
+                      : <div>· {t('assistant.sumScreenRo')} <Mono>{appKey}.{screenId}</Mono> ({t('assistant.readOnlyGrid')})</div>}
+                    <div>· {t('assistant.sumCols', { grid: gridCols.length, total: screenColumns.length })}</div>
+                    {!sourceQuery && <div>· {t('assistant.sumDict')}: {(ddItems ?? []).filter((d) => d.keep && !d.exists).length}</div>}
+                    {createMenu && <div>· {t('assistant.sumMenu')} <Mono>{appKey}</Mono>{menuParent ? ` → ${menuParent}` : ''}</div>}
                   </div>
                 </Section>
                 {!sourceQuery && (
                   <Section>
-                    <SectionTitle>{t('assistant.readPreview', 'Read query (SELECT)')}</SectionTitle>
+                    <SectionTitle>{t('assistant.readPreview')}</SectionTitle>
                     <SqlEditor value={readSql} onChange={() => undefined} rows={8} readOnly />
                   </Section>
                 )}
@@ -955,12 +955,12 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
         {!result && (
           <ModalFooter style={{ justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', gap: 8 }}>
-              <Button $size="sm" $variant="ghost" disabled={busy} onClick={onClose}>{t('common.cancel', 'Cancel')}</Button>
-              <Button $size="sm" $variant="ghost" disabled={step === 0 || busy} onClick={() => setStep((s) => Math.max(0, s - 1))}><ChevronLeft size={14} /> {t('common.back', 'Back')}</Button>
+              <Button $size="sm" $variant="ghost" disabled={busy} onClick={onClose}>{t('common.cancel')}</Button>
+              <Button $size="sm" $variant="ghost" disabled={step === 0 || busy} onClick={() => setStep((s) => Math.max(0, s - 1))}><ChevronLeft size={14} /> {t('common.back')}</Button>
             </div>
             {STEPS[step] === 'review'
-              ? <Button $size="sm" $variant="primary" disabled={busy || !tableName.trim() || screenColumns.length === 0} onClick={submit}>{busy ? <SpinnerRing size={14} /> : <Check size={14} />} {t('assistant.create', 'Create screen')}</Button>
-              : <Button $size="sm" $variant="primary" disabled={!canNext || busy} onClick={() => setStep((s) => Math.min(STEPS.length - 1, s + 1))}>{t('common.next', 'Next')} <ChevronRight size={14} /></Button>}
+              ? <Button $size="sm" $variant="primary" disabled={busy || !tableName.trim() || screenColumns.length === 0} onClick={submit}>{busy ? <SpinnerRing size={14} /> : <Check size={14} />} {t('assistant.create')}</Button>
+              : <Button $size="sm" $variant="primary" disabled={!canNext || busy} onClick={() => setStep((s) => Math.min(STEPS.length - 1, s + 1))}>{t('common.next')} <ChevronRight size={14} /></Button>}
           </ModalFooter>
         )}
       </Modal>
@@ -972,13 +972,13 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
         <Modal style={{ width: 'min(760px, 94vw)', height: 'min(640px, 88vh)', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
           <ModalHeader>
             <HeadBar>
-              <Title><BookOpen size={16} /> {t('assistant.catalog', 'Preset catalog')}</Title>
-              <Button $size="sm" $variant="ghost" onClick={() => setCatalogOpen(false)} title={t('common.close', 'Close')}><X size={16} /></Button>
+              <Title><BookOpen size={16} /> {t('assistant.catalog')}</Title>
+              <Button $size="sm" $variant="ghost" onClick={() => setCatalogOpen(false)} title={t('common.close')}><X size={16} /></Button>
             </HeadBar>
           </ModalHeader>
           <ModalBody style={{ flex: 1, overflow: 'auto' }}>
-            <Input value={catalogQ} onChange={(e) => setCatalogQ(e.target.value)} placeholder={t('assistant.catalogSearch', 'Search presets…')} autoFocus />
-            {catalogGroups.length === 0 && <div style={{ color: colors.text.muted, fontSize: fontSize.sm, padding: '20px', textAlign: 'center' }}>{t('assistant.catalogNoMatch', 'No matching presets.')}</div>}
+            <Input value={catalogQ} onChange={(e) => setCatalogQ(e.target.value)} placeholder={t('assistant.catalogSearch')} autoFocus />
+            {catalogGroups.length === 0 && <div style={{ color: colors.text.muted, fontSize: fontSize.sm, padding: '20px', textAlign: 'center' }}>{t('assistant.catalogNoMatch')}</div>}
             {catalogGroups.map(([g, list]) => (
               <div key={g}>
                 <CatGroup>{g}</CatGroup>

@@ -189,11 +189,11 @@ export function FindUsagesModal({
       <Modal onClick={(e) => e.stopPropagation()} style={{ width: 'min(640px, 96vw)' }}>
         <Header>
           <Search size={16} />
-          <span>{t('findUsages.title', 'Find usages')}</span>
+          <span>{t('findUsages.title')}</span>
           <span className="count">· {titleEntity}</span>
           {response && (
             <span className="count" style={{ marginLeft: 'auto' }}>
-              {t('findUsages.count', '{{count}} reference(s)', { count: response.count })}
+              {t('findUsages.count', { count: response.count })}
             </span>
           )}
         </Header>
@@ -202,12 +202,10 @@ export function FindUsagesModal({
           {error && <Banner $tone="error"><AlertCircle size={14} style={{ marginRight: 6, verticalAlign: -2 }} />{error}</Banner>}
           {!loading && !error && response && response.usages.length === 0 && (
             <Empty>
-              {t('findUsages.empty',
-                'No references found. Safe to rename or delete — nothing in the loaded configuration points at this.')}
+              {t('findUsages.empty')}
               {' '}
               <span style={{ display: 'block', fontSize: fontSize.micro, marginTop: 8 }}>
-                {t('findUsages.reloadHint',
-                  'Reload the configuration first (POST /admin/reload) if you edited a file on disk and need fresh results.')}
+                {t('findUsages.reloadHint')}
               </span>
             </Empty>
           )}
@@ -234,7 +232,7 @@ export function FindUsagesModal({
           )}
         </Body>
         <ModalFooter>
-          <Button $size="sm" $variant="ghost" onClick={onClose}>{t('common.close', 'Close')}</Button>
+          <Button $size="sm" $variant="ghost" onClick={onClose}>{t('common.close')}</Button>
         </ModalFooter>
       </Modal>
     </Overlay>

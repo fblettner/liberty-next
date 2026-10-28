@@ -44,7 +44,7 @@ export function ModelsPicker({ value, models, onChange }: {
         </Tag>
       ))}
       <div style={{ minWidth: 220 }}>
-        <SearchSelect value="" options={remaining} placeholder={t('settings.app.aiAddModel', '+ add a model…')} allowCustom
+        <SearchSelect value="" options={remaining} placeholder={t('settings.app.aiAddModel')} allowCustom
           onChange={(v) => { if (v && !value.includes(v)) onChange([...value, v]) }} />
       </div>
     </Chips>
@@ -70,7 +70,7 @@ export function QuestionsList({ value, onChange }: { value: string[]; onChange: 
         </Question>
       ))}
       <div style={{ display: 'flex', gap: 6 }}>
-        <Input value={draft} placeholder={t('settings.app.aiStarterPlaceholder', 'A question the user can click…')}
+        <Input value={draft} placeholder={t('settings.app.aiStarterPlaceholder')}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }} style={{ flex: 1 }} />
         <Button $variant="ghost" $size="sm" onClick={add} disabled={!draft.trim()}><Plus size={12} /></Button>
@@ -88,7 +88,7 @@ export function AiStartersEditor({ value, apps, onChange }: {
   const { t } = useTranslation()
   const scopes = Object.keys(value)
   const scopeOptions: SearchSelectOption[] = [
-    { value: '*', label: t('settings.app.aiStartersEverywhere', 'everywhere'), mono: '*' },
+    { value: '*', label: t('settings.app.aiStartersEverywhere'), mono: '*' },
     ...apps.map((a) => ({ value: a, label: a, mono: a })),
   ].filter((o) => !scopes.includes(o.value))
   const setScope = (key: string, list: string[]) => onChange({ ...value, [key]: list })
@@ -98,15 +98,15 @@ export function AiStartersEditor({ value, apps, onChange }: {
       {scopes.map((key) => (
         <Scope key={key}>
           <ScopeHead>
-            <span className="key">{key === '*' ? t('settings.app.aiStartersEverywhere', 'everywhere') : key}</span>
+            <span className="key">{key === '*' ? t('settings.app.aiStartersEverywhere') : key}</span>
             <span className="spacer" />
-            <Button $variant="ghost" $size="sm" onClick={() => dropScope(key)} title={t('common.remove', 'Remove')}><X size={12} /></Button>
+            <Button $variant="ghost" $size="sm" onClick={() => dropScope(key)} title={t('common.remove')}><X size={12} /></Button>
           </ScopeHead>
           <QuestionsList value={value[key] ?? []} onChange={(list) => setScope(key, list)} />
         </Scope>
       ))}
       <div style={{ maxWidth: 320 }}>
-        <SearchSelect value="" options={scopeOptions} allowCustom placeholder={t('settings.app.aiStartersAddScope', '+ a scope: everywhere, an app, or app/screen…')}
+        <SearchSelect value="" options={scopeOptions} allowCustom placeholder={t('settings.app.aiStartersAddScope')}
           onChange={(v) => { const k = v.trim(); if (k && !scopes.includes(k)) setScope(k, []) }} />
       </div>
     </div>

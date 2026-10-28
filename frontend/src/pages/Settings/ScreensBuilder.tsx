@@ -158,12 +158,12 @@ export default function ScreensBuilder() {
     })()
     if (hasModalEdits) {
       const choice = await modals.choose({
-        title: t('settings.screens.designer.unsavedTitle', 'Unsaved changes'),
-        message: t('settings.screens.designer.unsavedMsg', 'You have unsaved changes in this screen. Save them, discard them, or keep editing?'),
+        title: t('settings.screens.designer.unsavedTitle'),
+        message: t('settings.screens.designer.unsavedMsg'),
         options: [
-          { value: 'discard', label: t('settings.screens.designer.discard', 'Discard'), variant: 'danger' },
+          { value: 'discard', label: t('settings.screens.designer.discard'), variant: 'danger' },
           { value: 'save', label: t('common.save'), variant: 'primary' },
-          { value: 'keep', label: t('settings.screens.designer.keepEditing', 'Keep editing'), variant: 'ghost', autoFocus: true },
+          { value: 'keep', label: t('settings.screens.designer.keepEditing'), variant: 'ghost', autoFocus: true },
         ],
         cancelValue: 'keep',  // Escape / overlay click = keep editing
       })
@@ -336,7 +336,7 @@ export default function ScreensBuilder() {
   // screens.toml + charts.toml + dashboards.toml). Per-screen Clone / Rename / Delete + Add
   // screen live here; everything else stays in the Connectors editor.
   const validateScreenId = (v: string, app: string, oldId: string | null) => {
-    if (oldId && v === oldId) return { error: t('settings.tables.duplicateSameName', 'Pick a different name.') }
+    if (oldId && v === oldId) return { error: t('settings.tables.duplicateSameName') }
     const existing = Object.keys(doc?.[app] ?? {}).filter((k) => k !== oldId)
     return validateId({ kind: 'screen', proposed: v, existing, mode: oldId ? 'rename' : 'add', currentName: oldId ?? undefined })
   }
@@ -364,16 +364,16 @@ export default function ScreensBuilder() {
     // below would discard them). This replaces the old in-place id swap, which left menus dangling.
     if (dirty) {
       await modals.alert({
-        title: t('settings.rename.button', 'Rename'),
-        message: t('settings.screens.renameSaveFirst', 'Save your changes before renaming — the rename rewrites the saved files (screens + menus).'),
+        title: t('settings.rename.button'),
+        message: t('settings.screens.renameSaveFirst'),
         variant: 'danger',
       })
       return
     }
     const next = (await modals.prompt({
-      title: t('settings.rename.button', 'Rename'),
-      message: t('settings.screens.renamePrompt', 'New id for "{{name}}":', { name: oldId }),
-      defaultValue: oldId, submitLabel: t('settings.rename.button', 'Rename'),
+      title: t('settings.rename.button'),
+      message: t('settings.screens.renamePrompt', { name: oldId }),
+      defaultValue: oldId, submitLabel: t('settings.rename.button'),
       validate: (v) => validateScreenId(v.trim(), app, oldId),
     }))?.trim()
     if (!next || next === oldId) return
@@ -507,7 +507,7 @@ export default function ScreensBuilder() {
               <Plus size={13} /> {t('settings.screens.add')}
             </Button>
             <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
-              <Undo2 size={13} /> {t('common.discard', 'Discard')}
+              <Undo2 size={13} /> {t('common.discard')}
             </Button>
             <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
               {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
@@ -519,7 +519,7 @@ export default function ScreensBuilder() {
         <FilterBar>
           <Search size={14} />
           <input value={q} onChange={(e) => setQ(e.target.value)}
-            placeholder={t('settings.filterPlaceholder', 'Filter…')} />
+            placeholder={t('settings.filterPlaceholder')} />
         </FilterBar>
       )}
       <List>
@@ -555,7 +555,7 @@ export default function ScreensBuilder() {
                   {id}
                   {isOverride && (
                     <Tag $tone="orange" style={{ marginLeft: 6, fontSize: fontSize.micro }}>
-                      {t('settings.override.badge', 'override')}
+                      {t('settings.override.badge')}
                     </Tag>
                   )}
                 </span>
@@ -566,21 +566,21 @@ export default function ScreensBuilder() {
                 <Button $variant="ghost" $size="sm" onClick={() => setUsagesTarget({
                   kind: 'screen', name: id, scope: selApp, label: `screen ${selApp}.${id}`,
                 })} disabled={busy}>
-                  <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
+                  <GitBranch size={13} /> {t('findUsages.button')}
                 </Button>
                 <Button $variant="ghost" $size="sm" onClick={() => setDepsSeeds([{
                   kind: 'screen', name: id, scope: selApp, label: `screen ${selApp}.${id}`,
                 }])} disabled={busy}>
-                  <GitMerge size={13} /> {t('findDeps.button', 'Find dependencies')}
+                  <GitMerge size={13} /> {t('findDeps.button')}
                 </Button>
                 <Button $variant="ghost" $size="sm" onClick={() => void renameScreen(selApp, id)} disabled={busy}>
-                  <Edit3 size={13} /> {t('settings.rename.button', 'Rename')}
+                  <Edit3 size={13} /> {t('settings.rename.button')}
                 </Button>
                 <Button $variant="ghost" $size="sm" onClick={() => void cloneScreen(selApp, id)} disabled={busy}>
-                  <Copy size={13} /> {t('common.clone', 'Clone')}
+                  <Copy size={13} /> {t('common.clone')}
                 </Button>
                 <Button $variant="ghost" $size="sm" onClick={() => void removeScreen(selApp, id)} disabled={busy} style={{ color: colors.red.main }}>
-                  <Trash2 size={13} /> {t('common.delete', 'Delete')}
+                  <Trash2 size={13} /> {t('common.delete')}
                 </Button>
               </span>
             </Item>
@@ -592,15 +592,15 @@ export default function ScreensBuilder() {
               ? (apps.length ? t('settings.screens.pickApp') : t('settings.screens.empty'))
               : ids.length === 0
                 ? t('settings.screens.emptyApp')
-                : t('common.noMatches', 'No matches')}
+                : t('common.noMatches')}
           </Empty>
         )}
       </List>
       {addScopeOpen && (
         <AddScopeModal
           candidates={addScopeCandidates}
-          title={t('settings.screens.addApp', 'Add screens for a connector')}
-          emptyHint={t('settings.screens.allHaveScreens', 'Every connector already has a screens section. Add a connector in the Connectors tab first.')}
+          title={t('settings.screens.addApp')}
+          emptyHint={t('settings.screens.allHaveScreens')}
           onPick={onPickScope}
           onClose={() => setAddScopeOpen(false)}
         />

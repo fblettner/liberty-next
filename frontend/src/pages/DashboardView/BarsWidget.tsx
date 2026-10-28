@@ -34,7 +34,7 @@ export function BarsWidget({ widget, ...common }: { widget: BarsWidgetWire } & W
       </div>
       {error ? <Banner $tone="error">{error}</Banner>
         : !result ? <SpinnerRing size={18} thickness={2} />
-        : rows.length === 0 ? <Empty>{t('dashboard.list.empty', 'Nothing to show.')}</Empty>
+        : rows.length === 0 ? <Empty>{t('dashboard.list.empty')}</Empty>
         : (
           <Scroll>
             {rows.map((r, i) => (

@@ -72,7 +72,7 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
         setDoc(d.actions)
         const v = d.actions[actionId]
         if (v) { setValue(v); setOriginal(JSON.stringify(v)) }
-        else setError(t('settings.actions.notFound', 'Shared action "{{id}}" not found.', { id: actionId }))
+        else setError(t('settings.actions.notFound', { id: actionId }))
       })
       .catch((e) => { if (!cancelled) setError(e instanceof ApiError ? e.message : String(e)) })
     return () => { cancelled = true }
@@ -109,12 +109,12 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
     if (closedRef.current) return
     if (!dirty) { onClose(); return }
     const choice = await modals.choose<'discard' | 'save' | 'keep'>({
-      title: t('settings.screens.designer.unsavedTitle', 'Unsaved changes'),
-      message: t('settings.actions.unsavedMsg', 'You have unsaved changes in this action. Save them, discard them, or keep editing?'),
+      title: t('settings.screens.designer.unsavedTitle'),
+      message: t('settings.actions.unsavedMsg'),
       options: [
-        { value: 'discard', label: t('settings.screens.designer.discard', 'Discard'), variant: 'danger' },
+        { value: 'discard', label: t('settings.screens.designer.discard'), variant: 'danger' },
         { value: 'save', label: t('common.save'), variant: 'primary' },
-        { value: 'keep', label: t('settings.screens.designer.keepEditing', 'Keep editing'), variant: 'ghost', autoFocus: true },
+        { value: 'keep', label: t('settings.screens.designer.keepEditing'), variant: 'ghost', autoFocus: true },
       ],
       cancelValue: 'keep',
     })
@@ -135,40 +135,39 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
     : (
       <Body>
         <Two>
-          <Field label={t('settings.actions.label', 'Label')}>
+          <Field label={t('settings.actions.label')}>
             <Input value={typeof value.label === 'string' ? value.label : ''} placeholder={actionId}
               onChange={(e) => patch({ label: e.target.value })} />
           </Field>
-          <Field label={t('settings.actions.description', 'Description')}>
+          <Field label={t('settings.actions.description')}>
             <Input value={typeof value.description === 'string' ? value.description : ''}
               onChange={(e) => patch({ description: e.target.value })} />
           </Field>
         </Two>
 
         <div>
-          <SubHead>{t('settings.actions.params', 'Inputs')}</SubHead>
-          <Sub>{t('settings.actions.paramsHint',
-            'The inputs this action needs. A step reads one as INPUT.<name>; a screen binds its source via call_action. The default is used when the caller doesn’t bind it — a literal (Y / QPRINT) or a built-in: #LOGIN_USER#, #SYSDATE#, #NOW#, #CURRENT_TIME#, #LANGUAGE#.')}</Sub>
+          <SubHead>{t('settings.actions.params')}</SubHead>
+          <Sub>{t('settings.actions.paramsHint')}</Sub>
           {params.map((p, i) => (
             <ParamRow key={i}>
               <Input value={typeof p.name === 'string' ? p.name : ''}
-                placeholder={t('settings.actions.paramName', 'name')}
+                placeholder={t('settings.actions.paramName')}
                 onChange={(e) => { const nx = params.slice(); nx[i] = { ...nx[i], name: e.target.value }; setParams(nx) }} />
               <SearchSelect value={typeof p.default === 'string' ? p.default : ''}
                 options={BUILTIN_VALUE_OPTIONS} allowCustom
-                anyLabel={t('common.none', '(none)')}
-                placeholder={t('settings.actions.paramDefault', 'default — literal or built-in')}
+                anyLabel={t('common.none')}
+                placeholder={t('settings.actions.paramDefault')}
                 onChange={(v) => { const nx = params.slice(); const cur = { ...nx[i] }; if (v) cur.default = v; else delete cur.default; nx[i] = cur; setParams(nx) }} />
               <SmallRemove type="button" onClick={() => { const nx = params.slice(); nx.splice(i, 1); setParams(nx) }}><Trash2 size={14} /></SmallRemove>
             </ParamRow>
           ))}
           <Button $variant="ghost" $size="sm" onClick={() => setParams([...params, { name: '' }])}>
-            <Plus size={13} /> {t('settings.actions.addParam', 'Add input')}
+            <Plus size={13} /> {t('settings.actions.addParam')}
           </Button>
         </div>
 
         <div>
-          <SubHead>{t('settings.actions.steps', 'Steps')}</SubHead>
+          <SubHead>{t('settings.actions.steps')}</SubHead>
           <ActionTreeView
             actions={steps}
             onChange={(nx) => patch({ steps: nx })}
@@ -180,7 +179,7 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
             rootLabel={actionId}
             // Heading rendered by the outer <SubHead> above — don't let ActionTreeView paint a
             // second "Steps". Keep the hint (it has no outer equivalent).
-            hint={t('settings.actions.stepsHint', 'The ordered steps this action runs. Pin each query/plugin step’s connector explicitly (shared actions aren’t tied to one app).')}
+            hint={t('settings.actions.stepsHint')}
           />
         </div>
       </Body>
@@ -192,7 +191,7 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
         variant="visual"
         title={(
           <>
-            {t('settings.actions.designerTitle', 'Shared action')} ·{' '}
+            {t('settings.actions.designerTitle')} ·{' '}
             <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>[actions.{actionId}]</span>
           </>
         )}

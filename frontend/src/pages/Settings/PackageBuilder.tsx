@@ -152,10 +152,10 @@ export default function PackageBuilder() {
     <Shell>
       <Tabs>
         <TabBtn $active={mode === 'build'} onClick={() => setMode('build')}>
-          <Download size={13} /> {t('settings.package.buildTab', 'Build package')}
+          <Download size={13} /> {t('settings.package.buildTab')}
         </TabBtn>
         <TabBtn $active={mode === 'import'} onClick={() => setMode('import')}>
-          <Upload size={13} /> {t('settings.package.importTab', 'Import package')}
+          <Upload size={13} /> {t('settings.package.importTab')}
         </TabBtn>
       </Tabs>
       {mode === 'build' ? <BuildPanel /> : <ImportPanel />}
@@ -346,64 +346,64 @@ function BuildPanel() {
         <SearchBox style={{ flex: 1 }}>
           <Search size={13} />
           <input value={q} onChange={(e) => setQ(e.target.value)}
-            placeholder={t('settings.package.filter', 'Filter seeds')} />
+            placeholder={t('settings.package.filter')} />
         </SearchBox>
         <Button $variant="ghost" $size="sm" onClick={clearSeeds} disabled={selected.size === 0}>
-          {t('settings.package.clear', 'Clear ({{n}})', { n: selected.size })}
+          {t('settings.package.clear', { n: selected.size })}
         </Button>
         <Button $variant="primary" $size="sm" onClick={() => void download()}
           disabled={selected.size === 0 || downloading || totalIncluded === 0}>
           {downloading ? <SpinnerRing size={13} thickness={2} /> : <Download size={13} />}
-          {t('settings.package.download', 'Download ZIP ({{n}})', { n: totalIncluded })}
+          {t('settings.package.download', { n: totalIncluded })}
         </Button>
       </Toolbar>
       {depError && <Banner $tone="error"><AlertCircle size={14} style={{ marginRight: 6, verticalAlign: -2 }} />{depError}</Banner>}
       <Grid>
         <Panel>
           <PanelHeader>
-            <Package size={14} /> {t('settings.package.seedsTitle', 'Seeds')}
-            <span className="count">· {selected.size} {t('settings.package.selected', 'selected')}</span>
+            <Package size={14} /> {t('settings.package.seedsTitle')}
+            <span className="count">· {selected.size} {t('settings.package.selected')}</span>
             {visibleAll.length > 0 && (
               <button className="toggle" onClick={() => toggleSeedBulk(visibleAll, !allOn)}>
-                {allOn ? t('settings.package.deselectAll', 'deselect all') : t('settings.package.selectAll', 'select all')}
+                {allOn ? t('settings.package.deselectAll') : t('settings.package.selectAll')}
               </button>
             )}
           </PanelHeader>
           <PanelBody>
-            <SeedGroup title={t('settings.package.screens', 'Screens')} Icon={FileText} groups={screenSeeds} selected={selected}
+            <SeedGroup title={t('settings.package.screens')} Icon={FileText} groups={screenSeeds} selected={selected}
               toggle={toggleSeed} toggleBulk={(on) => toggleSeedBulk(visibleScreens, on)}
               picked={screenPicked} totalVisible={visibleScreens.length} matches={matches}
-              selectAllLabel={t('settings.package.selectAll', 'select all')} deselectAllLabel={t('settings.package.deselectAll', 'deselect all')} />
-            <SeedGroup title={t('settings.package.menus', 'Menu items')} Icon={MenuIcon} groups={menuSeeds} selected={selected}
+              selectAllLabel={t('settings.package.selectAll')} deselectAllLabel={t('settings.package.deselectAll')} />
+            <SeedGroup title={t('settings.package.menus')} Icon={MenuIcon} groups={menuSeeds} selected={selected}
               toggle={toggleSeed} toggleBulk={(on) => toggleSeedBulk(visibleMenus, on)}
               picked={menuPicked} totalVisible={visibleMenus.length} matches={matches}
-              selectAllLabel={t('settings.package.selectAll', 'select all')} deselectAllLabel={t('settings.package.deselectAll', 'deselect all')} />
-            <SeedGroup title={t('settings.package.dashboards', 'Dashboards')} Icon={LayoutDashboard} groups={dashboardSeeds} selected={selected}
+              selectAllLabel={t('settings.package.selectAll')} deselectAllLabel={t('settings.package.deselectAll')} />
+            <SeedGroup title={t('settings.package.dashboards')} Icon={LayoutDashboard} groups={dashboardSeeds} selected={selected}
               toggle={toggleSeed} toggleBulk={(on) => toggleSeedBulk(visibleDashboards, on)}
               picked={dashPicked} totalVisible={visibleDashboards.length} matches={matches}
-              selectAllLabel={t('settings.package.selectAll', 'select all')} deselectAllLabel={t('settings.package.deselectAll', 'deselect all')} />
+              selectAllLabel={t('settings.package.selectAll')} deselectAllLabel={t('settings.package.deselectAll')} />
           </PanelBody>
         </Panel>
         <Panel>
           <PanelHeader>
-            <Package size={14} /> {t('settings.package.depsTitle', 'Dependencies')}
-            <span className="count">· {totalIncluded}/{totalDeps} {t('settings.package.willInclude', 'will be packaged')}</span>
+            <Package size={14} /> {t('settings.package.depsTitle')}
+            <span className="count">· {totalIncluded}/{totalDeps} {t('settings.package.willInclude')}</span>
             {depBusy && <SpinnerRing size={12} thickness={2} />}
             {manifest && totalDeps > 0 && (
               <button className="toggle" onClick={() => selectAllDeps(totalIncluded !== totalDeps)}>
-                {totalIncluded === totalDeps ? t('findDeps.deselectAll', 'deselect all') : t('findDeps.selectAll', 'select all')}
+                {totalIncluded === totalDeps ? t('findDeps.deselectAll') : t('findDeps.selectAll')}
               </button>
             )}
           </PanelHeader>
           <PanelBody>
             {selected.size === 0 && (
               <div style={{ color: colors.text.muted, padding: '12px 4px' }}>
-                {t('settings.package.pickHint', 'Tick seeds on the left. The closure of every connector / query / dictionary entry / pool / chart they reach appears here. Connectors / pools / API endpoints are unchecked by default (the target usually has its own) — tick them if you want a bare-metal deploy.')}
+                {t('settings.package.pickHint')}
               </div>
             )}
             {manifest && manifest.missing.length > 0 && (
               <Banner $tone="error">
-                <strong>{manifest.missing.length} {t('settings.package.missing', 'missing references')}</strong>
+                <strong>{manifest.missing.length} {t('settings.package.missing')}</strong>
                 <ul style={{ margin: '4px 0 0 18px', padding: 0 }}>
                   {manifest.missing.slice(0, 8).map((m, i) => (
                     <li key={i}><Mono>{m.kind} · {m.scope ?? '-'} · {m.name}</Mono></li>
@@ -421,7 +421,7 @@ function BuildPanel() {
                   <GroupTitle>
                     {KIND_TITLES[kind] ?? kind} · {groupTicked}/{deps.length}
                     <button className="toggle" onClick={() => toggleDepGroup(kind, !allOn)}>
-                      {allOn ? t('findDeps.deselectAll', 'deselect all') : t('findDeps.selectAll', 'select all')}
+                      {allOn ? t('findDeps.deselectAll') : t('findDeps.selectAll')}
                     </button>
                   </GroupTitle>
                   {deps.slice(0, 100).map((d, i) => {
@@ -539,25 +539,24 @@ function ImportPanel() {
   return (
     <ImportShell>
       <Banner $tone="info">
-        {t('settings.package.importIntro',
-          'Apply a package ZIP produced by another install (or this one). The strategy decides what happens when an entity already exists on this install.')}
+        {t('settings.package.importIntro')}
       </Banner>
 
       <StrategyRow>
         <StrategyCard $active={strategy === 'merge'}>
           <input type="radio" name="strategy" value="merge" checked={strategy === 'merge'} onChange={() => setStrategy('merge')} />
-          <span className="name">{t('settings.package.merge', 'Merge')}</span>
-          <span className="desc">{t('settings.package.mergeDesc', 'Add only NEW entities; keep existing ones unchanged. Safest — never overwrites local edits.')}</span>
+          <span className="name">{t('settings.package.merge')}</span>
+          <span className="desc">{t('settings.package.mergeDesc')}</span>
         </StrategyCard>
         <StrategyCard $active={strategy === 'overwrite'}>
           <input type="radio" name="strategy" value="overwrite" checked={strategy === 'overwrite'} onChange={() => setStrategy('overwrite')} />
-          <span className="name">{t('settings.package.overwrite', 'Overwrite (recommended for upgrades)')}</span>
-          <span className="desc">{t('settings.package.overwriteDesc', 'Replace existing entities with the package version. Standard upgrade flow — the package is the new truth for the entities it carries.')}</span>
+          <span className="name">{t('settings.package.overwrite')}</span>
+          <span className="desc">{t('settings.package.overwriteDesc')}</span>
         </StrategyCard>
         <StrategyCard $active={strategy === 'replace_all'}>
           <input type="radio" name="strategy" value="replace_all" checked={strategy === 'replace_all'} onChange={() => setStrategy('replace_all')} />
-          <span className="name">{t('settings.package.replaceAll', 'Replace all')}</span>
-          <span className="desc">{t('settings.package.replaceAllDesc', 'For each TOML in the ZIP, REPLACE the entire target file. Drops every entity NOT in the package. Brutal — only for "deploy from scratch".')}</span>
+          <span className="name">{t('settings.package.replaceAll')}</span>
+          <span className="desc">{t('settings.package.replaceAllDesc')}</span>
         </StrategyCard>
       </StrategyRow>
 
@@ -568,7 +567,7 @@ function ImportPanel() {
           {file ? (
             <><CheckCircle2 size={16} style={{ verticalAlign: -3, marginRight: 6 }} />{file.name} · {(file.size / 1024).toFixed(1)} KB</>
           ) : (
-            <><Upload size={16} style={{ verticalAlign: -3, marginRight: 6 }} />{t('settings.package.pickZip', 'Click to pick a package.zip')}</>
+            <><Upload size={16} style={{ verticalAlign: -3, marginRight: 6 }} />{t('settings.package.pickZip')}</>
           )}
         </span>
       </FileDrop>
@@ -576,12 +575,12 @@ function ImportPanel() {
       <Toolbar>
         <Button $variant="primary" $size="sm" onClick={() => void apply()} disabled={!file || busy}>
           {busy ? <SpinnerRing size={13} thickness={2} /> : <Upload size={13} />}
-          {t('settings.package.apply', 'Apply package')}
+          {t('settings.package.apply')}
         </Button>
         {report?.reloaded && (
           <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>
             <CheckCircle2 size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
-            {t('settings.package.reloaded', 'Applied + reloaded')}
+            {t('settings.package.reloaded')}
           </span>
         )}
       </Toolbar>

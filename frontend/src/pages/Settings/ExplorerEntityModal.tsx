@@ -158,7 +158,7 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
             <SearchSelect value={connector} onChange={(v) => { mark(setConnector)(v); setQuery('') }} options={connectorOpts} anyLabel={`${app} (${t('settings.explorer.theApp')})`} />
           </Field>
           <Field label={table ? t('settings.explorer.tableLabel') : t('settings.explorer.query')}>
-            {table ? <Input value={`${initial?.schema ? `${initial.schema}.` : ''}${table}`} disabled /> : <SearchSelect value={query} onChange={mark(setQuery)} options={queryOpts} placeholder={t('settings.access.pickItem', 'Pick…')} />}
+            {table ? <Input value={`${initial?.schema ? `${initial.schema}.` : ''}${table}`} disabled /> : <SearchSelect value={query} onChange={mark(setQuery)} options={queryOpts} placeholder={t('settings.access.pickItem')} />}
           </Field>
           <Field label={t('settings.explorer.screen')}>
             <SearchSelect value={screen} onChange={mark(setScreen)} options={screenOpts} anyLabel={t('settings.explorer.noScreen')} />

@@ -31,6 +31,13 @@ export default tseslint.config(
       "jsx-a11y/no-static-element-interactions": "warn",
       "jsx-a11y/no-autofocus": "warn",
       "react-hooks/exhaustive-deps": "warn",
+      // Every UI string lives in locales/en.ts + fr.ts (C10): a t('key', 'Default') call hides a
+      // key the French file never gets. Template-literal defaults (a handful of computed
+      // messages) are not matched on purpose.
+      "no-restricted-syntax": ["error", {
+        selector: "CallExpression[callee.name='t'][arguments.length>=2] > Literal.arguments:nth-child(2)[raw=/^['\"]/]",
+        message: "No inline default in t(): add the key to locales/en.ts and fr.ts.",
+      }],
     },
   },
 );

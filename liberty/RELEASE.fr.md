@@ -86,6 +86,16 @@
   digest. Les KPI deviennent des cartes ; les nombres suivent la langue du lecteur (`1 234,5` /
   `1,234.5`), les mots du gabarit (libellés de couverture, mentions de confidentialité) aussi.
   Excel garde les données seules.
+- **Toutes les chaînes de l'interface dans les deux langues (C10).** Les quelque 870 chaînes
+  que les éditeurs récents ne portaient qu'en anglais en ligne (`t('clé', 'Défaut')` et options
+  `defaultValue:`) vivent désormais dans `locales/en.ts` et `locales/fr.ts`, traduites ; le lint
+  interdit un nouveau défaut en ligne, le fichier français ne peut plus manquer une clé en
+  silence. Les questions de départ de l'assistant prennent un bloc de langue dans `ai.toml`
+  (`[ai.<app>.l.fr]` avec `starters`, `groups`, `screens`), servi par `/ai/tools` dans la langue
+  de la requête ; les trois applications livrent leurs questions en français.
+- **Paramètres → Tableaux de bord indique quels widgets un filtre atteint.** Sous chaque filtre,
+  l'éditeur liste les widgets dont l'écran porte la clé du dictionnaire ou dont le résultat a une
+  colonne de ce nom (le bind de dictionnaire), et ceux qu'il manque.
 - **Les tableaux de bord dans la langue du lecteur.** Un tableau de bord, un filtre et un
   widget acceptent un bloc `l` de surcharges par langue pour leurs textes — `l.fr = { label =
   "…", description = "…", sub = "…", count_label = "…" }` — y compris la colonne où une liste

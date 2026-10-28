@@ -94,7 +94,7 @@ function OpPicker({ value, onChange }: { value: string; onChange: (op: string) =
   }, [open])
   return (
     <OpWrap ref={ref}>
-      <OpBtn type="button" $open={open} onClick={() => setOpen((v) => !v)} title={`${t('table.filterOp', 'Operator')}: ${t(`table.op_${value}`, value)}`}>
+      <OpBtn type="button" $open={open} onClick={() => setOpen((v) => !v)} title={`${t('table.filterOp')}: ${t(`table.op_${value}`, value)}`}>
         {OP_GLYPH[value] ?? '~'}
       </OpBtn>
       {open && (

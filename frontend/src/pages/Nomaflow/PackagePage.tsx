@@ -11,7 +11,7 @@ const PackageBuilder = lazy(() => import('../Settings/PackageBuilder'))
 export default function PackagePage() {
   const { t } = useTranslation()
   return (
-    <PageLayout icon={<Package size={18} />} title={t('settings.tabs.package', 'Package')}>
+    <PageLayout icon={<Package size={18} />} title={t('settings.tabs.package')}>
       <Suspense fallback={<Centered />}><PackageBuilder /></Suspense>
     </PageLayout>
   )

@@ -457,10 +457,10 @@ export default function MenusBuilder() {
     if (!src) return
     const existing = items.map((it) => it.id)
     const next = (await modals.prompt({
-      title: t('common.clone', 'Clone'),
-      message: t('settings.menus.item.clonePrompt', 'New id for the copy of "{{name}}":', { name: oldId }),
+      title: t('common.clone'),
+      message: t('settings.menus.item.clonePrompt', { name: oldId }),
       defaultValue: suggestCloneId(oldId, existing),
-      submitLabel: t('common.clone', 'Clone'),
+      submitLabel: t('common.clone'),
       validate: (v) => validateId({ kind: 'menu_item', proposed: v, existing, mode: 'clone' }),
     }))?.trim()
     if (!next) return
@@ -593,7 +593,7 @@ export default function MenusBuilder() {
         right={
           <>
             <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
-              <Undo2 size={13} /> {t('common.discard', 'Discard')}
+              <Undo2 size={13} /> {t('common.discard')}
             </Button>
             <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
               {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
@@ -613,17 +613,17 @@ export default function MenusBuilder() {
                 <Plus size={13} /> {t('settings.menus.tree.addLeaf')}
               </Button>
               <Button $variant="ghost" $size="sm" onClick={() => selItem && cloneItem(selItem)} disabled={!selItem}>
-                <Copy size={13} /> {t('common.clone', 'Clone')}
+                <Copy size={13} /> {t('common.clone')}
               </Button>
               <Button $variant="ghost" $size="sm" onClick={() => selItem && selApp && setUsagesTarget({
                 kind: 'menu_item', name: selItem, scope: selApp, label: `menu item ${selApp}.${selItem}`,
               })} disabled={!selItem}>
-                <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
+                <GitBranch size={13} /> {t('findUsages.button')}
               </Button>
               <Button $variant="ghost" $size="sm" onClick={() => selItem && selApp && setDepsSeeds([{
                 kind: 'menu_item', name: selItem, scope: selApp, label: `menu item ${selApp}.${selItem}`,
               }])} disabled={!selItem}>
-                <GitMerge size={13} /> {t('findDeps.button', 'Find dependencies')}
+                <GitMerge size={13} /> {t('findDeps.button')}
               </Button>
             </Row>
           </AppHeader>
@@ -675,8 +675,8 @@ export default function MenusBuilder() {
       {addScopeOpen && (
         <AddScopeModal
           candidates={addScopeCandidates}
-          title={t('settings.menus.app.add', 'Add a menu for a connector')}
-          emptyHint={t('settings.menus.app.allHaveMenus', 'Every connector already has a menu. Add a connector in the Connectors tab first.')}
+          title={t('settings.menus.app.add')}
+          emptyHint={t('settings.menus.app.allHaveMenus')}
           onPick={onPickScope}
           onClose={() => setAddScopeOpen(false)}
         />

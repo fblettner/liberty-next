@@ -77,7 +77,7 @@ export default function NotificationsPage() {
           <Tab $active={filter === 'unread'} onClick={() => setFilter('unread')}>{t('notifications.unread')}{unread > 0 ? ` (${unread})` : ''}</Tab>
         </Tabs>
         <div style={{ flex: 1 }} />
-        <Button $size="sm" $variant="ghost" onClick={() => void load()} title={t('common.refresh', 'Refresh')}><RefreshCw size={13} /></Button>
+        <Button $size="sm" $variant="ghost" onClick={() => void load()} title={t('common.refresh')}><RefreshCw size={13} /></Button>
         <Button $size="sm" $variant="ghost" onClick={() => void markAll()} disabled={unread === 0}><CheckCheck size={13} /> {t('notifications.markAllRead')}</Button>
       </Toolbar>
       {error && <Banner $tone="error">{error}</Banner>}

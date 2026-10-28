@@ -68,14 +68,14 @@ export function ErrorDetails(
       <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{summary}</span>
       {hasDetails && (
         <Toggle type="button" onClick={() => setOpen((o) => !o)}>
-          {open ? t('common.hideDetails', 'Hide details') : t('common.showDetails', 'Show details')}
+          {open ? t('common.hideDetails') : t('common.showDetails')}
         </Toggle>
       )}
       {open && hasDetails && (
         structured ? (
           <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {sql && <><SubLabel>{t('common.sql', 'SQL')}</SubLabel><Block>{sql}</Block></>}
-            {params && <><SubLabel>{t('common.parameters', 'Parameters')}</SubLabel><Block>{params}</Block></>}
+            {sql && <><SubLabel>{t('common.sql')}</SubLabel><Block>{sql}</Block></>}
+            {params && <><SubLabel>{t('common.parameters')}</SubLabel><Block>{params}</Block></>}
           </div>
         ) : (
           <Block>{message}</Block>

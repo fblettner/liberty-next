@@ -141,7 +141,7 @@ export default function ExplorerBuilder() {
     update({ entities, relations: (model.relations ?? []).filter((r) => r.from !== id && r.to !== id), hub: model.hub === id ? (Object.keys(entities)[0] ?? '') : model.hub })
   }
   const addModel = async () => {
-    const id = (await modals.prompt({ title: t('settings.explorer.addModel'), message: t('settings.explorer.modelPrompt'), defaultValue: '', submitLabel: t('common.ok', 'OK'),
+    const id = (await modals.prompt({ title: t('settings.explorer.addModel'), message: t('settings.explorer.modelPrompt'), submitLabel: t('common.ok'),
       validate: (v) => (!/^[A-Za-z0-9_-]+$/.test(v.trim()) ? { error: t('settings.explorer.idChars') } : modelIds.includes(v.trim()) ? { error: t('settings.explorer.idTaken') } : null) }))?.trim()
     if (!id) return
     setDoc((p) => ({ ...(p ?? {}), [scope]: { ...(p?.[scope] ?? {}), [id]: { hub: '', entities: {}, relations: [] } } }))
@@ -195,7 +195,7 @@ export default function ExplorerBuilder() {
         <Body>
           <Head>
             <Field label={t('settings.explorer.label')}><Input value={model.label ?? ''} onChange={(e) => update({ label: e.target.value || undefined })} placeholder={scope} /></Field>
-            <Field label={t('settings.explorer.hub')}><SearchSelect value={model.hub ?? ''} onChange={(v) => update({ hub: v })} options={entityOpts} placeholder={t('settings.access.pickItem', 'Pick…')} /></Field>
+            <Field label={t('settings.explorer.hub')}><SearchSelect value={model.hub ?? ''} onChange={(v) => update({ hub: v })} options={entityOpts} placeholder={t('settings.access.pickItem')} /></Field>
             <Field label={t('settings.explorer.description')}><Input value={model.description ?? ''} onChange={(e) => update({ description: e.target.value || undefined })} /></Field>
             <Field label={t('settings.explorer.preset')}>
               <SearchSelect value={model.preset ?? ''} anyLabel={t('settings.explorer.noPreset')} options={presets.map((p) => ({ value: p.id, label: p.label || p.id, mono: `${p.connector ? `${p.connector} · ` : ''}${(p.tables ?? []).map((x) => x.name).join(', ')}` }))}
@@ -224,7 +224,7 @@ export default function ExplorerBuilder() {
                     <span className="meta">{meta}</span>
                   </span>
                   <span className="actions" onClick={(ev) => ev.stopPropagation()}>
-                    <Button $variant="ghost" $size="sm" onClick={() => setEditing({ ...e, id })} disabled={busy}><Edit3 size={13} /> {t('common.edit', 'Edit')}</Button>
+                    <Button $variant="ghost" $size="sm" onClick={() => setEditing({ ...e, id })} disabled={busy}><Edit3 size={13} /> {t('common.edit')}</Button>
                     <Button $variant="ghost" $size="sm" onClick={() => void removeEntity(id)} disabled={busy} style={{ color: colors.red.main }}><Trash2 size={13} /> {t('common.delete')}</Button>
                   </span>
                 </Item>

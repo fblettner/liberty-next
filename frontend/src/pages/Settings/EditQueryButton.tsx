@@ -45,8 +45,8 @@ export function EditQueryButton({ connector, queryName, onSaved, title, size = '
       <Button
         $variant="ghost" $size={size} type="button"
         onClick={() => setOpen(true)}
-        title={title ?? t('settings.editQuery.edit', 'Edit query')}
-        aria-label={title ?? t('settings.editQuery.edit', 'Edit query')}
+        title={title ?? t('settings.editQuery.edit')}
+        aria-label={title ?? t('settings.editQuery.edit')}
       >
         <Edit3 size={13} />
       </Button>
@@ -88,13 +88,13 @@ export function CloneQueryButton({ connector, queryName, onSaved, title, size = 
       if (!src) return
       const existing = existingNames ?? arr.map((q) => String(q.name ?? ''))
       const newName = (await modals.prompt({
-        title: t('settings.editQuery.cloneTitle', 'Clone query'),
-        message: t('settings.editQuery.clonePrompt', 'New name for the copy of "{{name}}":', { name: queryName }),
+        title: t('settings.editQuery.cloneTitle'),
+        message: t('settings.editQuery.clonePrompt', { name: queryName }),
         defaultValue: suggestCloneId(queryName, existing),
         placeholder: 'snake_case',
-        submitLabel: t('common.clone', 'Clone'),
+        submitLabel: t('common.clone'),
         validate: (v) => {
-          if (v === queryName) return { error: t('settings.tables.duplicateSameName', 'Pick a different name.') }
+          if (v === queryName) return { error: t('settings.tables.duplicateSameName') }
           return validateId({ kind: 'query', proposed: v, existing, mode: 'clone' })
         },
       }))?.trim()
@@ -114,8 +114,8 @@ export function CloneQueryButton({ connector, queryName, onSaved, title, size = 
       <Button
         $variant="ghost" $size={size} type="button"
         onClick={() => void startClone()}
-        title={title ?? t('settings.editQuery.clone', 'Clone query')}
-        aria-label={title ?? t('settings.editQuery.clone', 'Clone query')}
+        title={title ?? t('settings.editQuery.clone')}
+        aria-label={title ?? t('settings.editQuery.clone')}
       >
         <Copy size={13} />
       </Button>
@@ -151,10 +151,10 @@ export function AddQueryButton({ connector, onSaved, title, size = 'sm', existin
   const startAdd = async () => {
     const existing = existingNames ?? []
     const newName = (await modals.prompt({
-      title: t('settings.editQuery.addTitle', 'New query'),
-      message: t('settings.editQuery.addPrompt', 'Name for the new query:'),
+      title: t('settings.editQuery.addTitle'),
+      message: t('settings.editQuery.addPrompt'),
       placeholder: 'snake_case',
-      submitLabel: t('common.add', 'Add'),
+      submitLabel: t('common.add'),
       validate: (v) => validateId({ kind: 'query', proposed: v, existing, mode: 'add' }),
     }))?.trim()
     if (!newName) return
@@ -167,8 +167,8 @@ export function AddQueryButton({ connector, onSaved, title, size = 'sm', existin
       <Button
         $variant="ghost" $size={size} type="button"
         onClick={() => void startAdd()}
-        title={title ?? t('settings.editQuery.add', 'Add query')}
-        aria-label={title ?? t('settings.editQuery.add', 'Add query')}
+        title={title ?? t('settings.editQuery.add')}
+        aria-label={title ?? t('settings.editQuery.add')}
       >
         <Plus size={13} />
       </Button>

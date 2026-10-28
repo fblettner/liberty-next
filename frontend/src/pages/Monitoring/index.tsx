@@ -12,7 +12,7 @@ const TechnicalDashboard = lazy(() => import('../Settings/TechnicalDashboard'))
 export default function Monitoring() {
   const { t } = useTranslation()
   return (
-    <PageLayout icon={<Activity size={18} />} title={t('nav.monitoring', 'Monitoring')}>
+    <PageLayout icon={<Activity size={18} />} title={t('nav.monitoring')}>
       <Suspense fallback={<Centered />}>
         <TechnicalDashboard />
       </Suspense>

@@ -85,11 +85,11 @@ export default function ReleaseNotes() {
         </div>
       )}
       {!md.trim() ? (
-        <Muted>{t('releaseNotes.empty', 'No release notes bundled with this build.')}</Muted>
+        <Muted>{t('releaseNotes.empty')}</Muted>
       ) : (
         <Wrap>
           <Toc>
-            <TocHead>{t('releaseNotes.versions', 'Versions')}</TocHead>
+            <TocHead>{t('releaseNotes.versions')}</TocHead>
             {sections.map((s) => (
               <TocItem key={s.anchor} onClick={() => refs.current[s.anchor]?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
                 <TagIcon size={11} style={{ alignSelf: 'center', color: colors.text.muted }} />

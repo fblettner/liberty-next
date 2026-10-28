@@ -51,7 +51,7 @@ export function RecordDialog({ app, entity, row, onClose, onSaved }: {
     return () => { cancelled = true }
   }, [app, entity, row, connector])
 
-  if (error) return <Banner $tone="error" style={{ margin: 12 }}>{error} <button type="button" onClick={onClose}>{t('common.close', 'Close')}</button></Banner>
+  if (error) return <Banner $tone="error" style={{ margin: 12 }}>{error} <button type="button" onClick={onClose}>{t('common.close')}</button></Banner>
   if (!screen || !record) return <Centered />
   return (
     <ScreenDialog open nested mode="edit" screen={screen} columns={columns} row={record} connector={screen.connector || connector}

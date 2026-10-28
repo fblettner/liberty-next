@@ -31,11 +31,11 @@ export function FileInput({ value, onChange, accept, disabled, placeholder }: {
       <input ref={ref} type="file" accept={accept} disabled={disabled} tabIndex={-1}
         onChange={(e) => { onChange(e.target.files?.[0] ?? null); e.target.value = '' }} />
       <Button type="button" $size="sm" $variant="ghost" disabled={disabled} onClick={() => ref.current?.click()}>
-        <FileUp size={13} /> {value ? t('common.changeFile', 'Change…') : t('common.chooseFile', 'Choose a file…')}
+        <FileUp size={13} /> {value ? t('common.changeFile') : t('common.chooseFile')}
       </Button>
-      <span className={value ? 'name' : 'name none'} title={value?.name}>{value ? value.name : (placeholder ?? t('common.noFile', 'No file chosen'))}</span>
+      <span className={value ? 'name' : 'name none'} title={value?.name}>{value ? value.name : (placeholder ?? t('common.noFile'))}</span>
       {value && !disabled && (
-        <button type="button" className="clear" title={t('common.clear', 'Clear')} onClick={() => onChange(null)}><X size={13} /></button>
+        <button type="button" className="clear" title={t('common.clear')} onClick={() => onChange(null)}><X size={13} /></button>
       )}
     </Wrap>
   )

@@ -93,7 +93,7 @@ export default function Settings() {
     setReloading(true); setReloadMsg(null)
     try {
       const r = await api.post<{ connectors: string[]; dictionary_entries: number; screen_apps: string[] }>('/admin/reload')
-      setReloadMsg({ tone: 'ok', text: t('settings.reloadDone', { c: r.connectors.length, d: r.dictionary_entries, s: r.screen_apps.length, defaultValue: 'Reloaded — {{c}} connectors, {{d}} dictionary entries, {{s}} apps.' }) })
+      setReloadMsg({ tone: 'ok', text: t('settings.reloadDone', { c: r.connectors.length, d: r.dictionary_entries, s: r.screen_apps.length }) })
     } catch (e) {
       setReloadMsg({ tone: 'err', text: e instanceof ApiError ? e.message : String(e) })
     } finally {
@@ -105,35 +105,35 @@ export default function Settings() {
     <PageLayout icon={<SlidersHorizontal size={18} />} title={t('settings.title')}>
       <Tabs>
         {/* Per-connector editors — each scopes to a connector (an app or a data source). */}
-        <TabGroupLabel>{t('settings.tabGroups.perConnector', 'Per connector')}</TabGroupLabel>
+        <TabGroupLabel>{t('settings.tabGroups.perConnector')}</TabGroupLabel>
         <TabBtn $active={tab === 'connectors'} onClick={() => setTab('connectors')}>{t('settings.tabs.connectors')}</TabBtn>
         <TabBtn $active={tab === 'dictionary'} onClick={() => setTab('dictionary')}>{t('settings.tabs.dictionary')}</TabBtn>
-        <TabBtn $active={tab === 'actions'} onClick={() => setTab('actions')}>{t('settings.tabs.actions', 'Actions')}</TabBtn>
+        <TabBtn $active={tab === 'actions'} onClick={() => setTab('actions')}>{t('settings.tabs.actions')}</TabBtn>
         <TabBtn $active={tab === 'menus'} onClick={() => setTab('menus')}>{t('settings.tabs.menus')}</TabBtn>
         <TabBtn $active={tab === 'screens'} onClick={() => setTab('screens')}>{t('settings.tabs.screens')}</TabBtn>
-        <TabBtn $active={tab === 'charts'} onClick={() => setTab('charts')}>{t('settings.tabs.charts', 'Charts')}</TabBtn>
+        <TabBtn $active={tab === 'charts'} onClick={() => setTab('charts')}>{t('settings.tabs.charts')}</TabBtn>
         <TabBtn $active={tab === 'dashboards'} onClick={() => setTab('dashboards')}>{t('settings.tabs.dashboards')}</TabBtn>
         <TabBtn $active={tab === 'explorer'} onClick={() => setTab('explorer')}>{t('settings.tabs.explorer')}</TabBtn>
         <TabBtn $active={tab === 'ai'} onClick={() => setTab('ai')}>{t('settings.tabs.ai')}</TabBtn>
         {/* Reports — operator-authored Jinja markdown templates rendered through
             the framework. Sits next to dashboards as the other "visualization
             output" surface. Install-wide PDF branding is in the App tab now. */}
-        <TabBtn $active={tab === 'reports'} onClick={() => setTab('reports')}>{t('settings.tabs.reports', 'Reports')}</TabBtn>
-        <TabBtn $active={tab === 'notifications'} onClick={() => setTab('notifications')}>{t('settings.tabs.notifications', 'Notifications')}</TabBtn>
+        <TabBtn $active={tab === 'reports'} onClick={() => setTab('reports')}>{t('settings.tabs.reports')}</TabBtn>
+        <TabBtn $active={tab === 'notifications'} onClick={() => setTab('notifications')}>{t('settings.tabs.notifications')}</TabBtn>
         <TabSep />
         {/* Shared — install-wide, not tied to any connector/app. */}
-        <TabGroupLabel>{t('settings.tabGroups.shared', 'Shared')}</TabGroupLabel>
+        <TabGroupLabel>{t('settings.tabGroups.shared')}</TabGroupLabel>
         <TabBtn $active={tab === 'pools'} onClick={() => setTab('pools')}>{t('settings.tabs.pools')}</TabBtn>
-        <TabBtn $active={tab === 'theme'} onClick={() => setTab('theme')}>{t('settings.tabs.theme', 'Theme')}</TabBtn>
-        <TabBtn $active={tab === 'access'} onClick={() => setTab('access')}>{t('settings.tabs.access', 'Access')}</TabBtn>
-        <TabBtn $active={tab === 'app'} onClick={() => setTab('app')}>{t('settings.tabs.app', 'App')}</TabBtn>
-        <TabBtn $active={tab === 'versions'} onClick={() => setTab('versions')}>{t('settings.tabs.versions', 'History')}</TabBtn>
-        <TabBtn $active={tab === 'releasenotes'} onClick={() => setTab('releasenotes')}>{t('settings.tabs.releasenotes', 'Release notes')}</TabBtn>
+        <TabBtn $active={tab === 'theme'} onClick={() => setTab('theme')}>{t('settings.tabs.theme')}</TabBtn>
+        <TabBtn $active={tab === 'access'} onClick={() => setTab('access')}>{t('settings.tabs.access')}</TabBtn>
+        <TabBtn $active={tab === 'app'} onClick={() => setTab('app')}>{t('settings.tabs.app')}</TabBtn>
+        <TabBtn $active={tab === 'versions'} onClick={() => setTab('versions')}>{t('settings.tabs.versions')}</TabBtn>
+        <TabBtn $active={tab === 'releasenotes'} onClick={() => setTab('releasenotes')}>{t('settings.tabs.releasenotes')}</TabBtn>
         {/* Deterministic "apply all TOML now" — see reloadAll. Right-pushed so it reads as a global action. */}
         <ReloadWrap>
           {reloadMsg && <ReloadMsg $tone={reloadMsg.tone}>{reloadMsg.text}</ReloadMsg>}
-          <Button $size="sm" $variant="ghost" onClick={reloadAll} disabled={reloading} title={t('settings.reloadHint', 'Re-read every config file into the running server')}>
-            <RefreshCw size={13} /> {reloading ? t('settings.reloading', 'Reloading…') : t('settings.reloadConfig', 'Reload config')}
+          <Button $size="sm" $variant="ghost" onClick={reloadAll} disabled={reloading} title={t('settings.reloadHint')}>
+            <RefreshCw size={13} /> {reloading ? t('settings.reloading') : t('settings.reloadConfig')}
           </Button>
         </ReloadWrap>
       </Tabs>

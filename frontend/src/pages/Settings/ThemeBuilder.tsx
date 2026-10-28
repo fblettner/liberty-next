@@ -153,7 +153,7 @@ export default function ThemeBuilder() {
     try {
       await api.put('/admin/config/theme/parsed', { theme })
       await refresh()
-      setStatus(t('settings.theme.saved', 'Saved. The new theme is live for everyone.'))
+      setStatus(t('settings.theme.saved'))
       setOriginal(JSON.stringify({ preset, appName, primary, fontFamily, fontScale }))
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
@@ -172,7 +172,7 @@ export default function ThemeBuilder() {
         </ToolbarLeft>
         <ToolbarRight>
           <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
-            <Undo2 size={13} /> {t('common.discard', 'Discard')}
+            <Undo2 size={13} /> {t('common.discard')}
           </Button>
           <Button $variant="primary" $size="sm" onClick={() => void save()} disabled={busy || !dirty}>
             {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
@@ -180,37 +180,37 @@ export default function ThemeBuilder() {
         </ToolbarRight>
       </Toolbar>
 
-      <Hint>{t('settings.theme.intro', 'Brand the whole install — pick a preset palette, set the primary accent colour, and name the app. Applies to every user; dark/light stays an individual choice.')}</Hint>
+      <Hint>{t('settings.theme.intro')}</Hint>
       {error && <Banner $tone="error">{error}</Banner>}
 
       <Grid>
         <Panel>
-          <PanelHeader><Palette size={14} /> {t('settings.theme.settings', 'Settings')}</PanelHeader>
+          <PanelHeader><Palette size={14} /> {t('settings.theme.settings')}</PanelHeader>
           <PanelBody>
-            <Field label={t('settings.theme.preset', 'Preset')}>
+            <Field label={t('settings.theme.preset')}>
               <Select value={preset} onChange={(e) => onPreset(e.target.value)}>
                 {presets.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
               </Select>
             </Field>
-            <Field label={t('settings.theme.primary', 'Primary colour')}>
+            <Field label={t('settings.theme.primary')}>
               <ColorRow>
                 <Swatch type="color" value={/^#[0-9a-fA-F]{6}$/.test(effectivePrimary) ? effectivePrimary : '#007AFF'}
                   onChange={(e) => { setPrimary(e.target.value); setStatus(null) }} />
                 <Input value={primary} placeholder={presetPrimary}
                   onChange={(e) => { setPrimary(e.target.value); setStatus(null) }} style={{ width: 140 }} />
               </ColorRow>
-              <Hint>{t('settings.theme.primaryHint', "Leave blank to use the preset's colour.")}</Hint>
+              <Hint>{t('settings.theme.primaryHint')}</Hint>
             </Field>
-            <Field label={t('settings.theme.appName', 'App name')}>
+            <Field label={t('settings.theme.appName')}>
               <Input value={appName} placeholder="Liberty" onChange={(e) => { setAppName(e.target.value); setStatus(null) }} />
             </Field>
-            <Field label={t('settings.theme.font', 'Font family')}>
+            <Field label={t('settings.theme.font')}>
               <Select value={fontFamily || (fonts_[0]?.id ?? '')} onChange={(e) => { setFontFamily(e.target.value); setStatus(null) }}>
                 {fonts_.map((f) => <option key={f.id} value={f.id} style={{ fontFamily: f.stack }}>{f.label}</option>)}
               </Select>
-              <Hint>{t('settings.theme.fontHint', 'The UI font for the whole install. Code stays monospace.')}</Hint>
+              <Hint>{t('settings.theme.fontHint')}</Hint>
             </Field>
-            <Field label={t('settings.theme.size', 'Text size')}>
+            <Field label={t('settings.theme.size')}>
               <Seg>
                 {SIZE_STEPS.map((s) => (
                   <SegBtn key={s.id} type="button" $active={Math.abs(fontScale - s.value) < 1e-6}
@@ -224,19 +224,19 @@ export default function ThemeBuilder() {
         </Panel>
 
         <Panel>
-          <PanelHeader><Palette size={14} /> {t('settings.theme.preview', 'Preview')}</PanelHeader>
+          <PanelHeader><Palette size={14} /> {t('settings.theme.preview')}</PanelHeader>
           <PanelBody>
             <Row gap={10} align="center">
               <AppNamePreview>{appName || 'Liberty'}</AppNamePreview>
             </Row>
-            <Hint>{t('settings.theme.previewHint', 'Live preview — buttons, links and active states use the primary accent.')}</Hint>
+            <Hint>{t('settings.theme.previewHint')}</Hint>
             <PreviewBlock>
               <Stack gap={10}>
                 <Row gap={8} align="center">
                   <Button $variant="primary" $size="sm">{t('common.save')}</Button>
-                  <Button $variant="ghost" $size="sm">{t('common.cancel', 'Cancel')}</Button>
+                  <Button $variant="ghost" $size="sm">{t('common.cancel')}</Button>
                   <PvLink href="#" onClick={(e) => e.preventDefault()}>
-                    {t('settings.theme.sampleLink', 'A sample link')}
+                    {t('settings.theme.sampleLink')}
                   </PvLink>
                 </Row>
                 <SwatchTile $bg={colors.blue.main} />

@@ -73,28 +73,28 @@ export function ValueDiffPanel({ row, cfg }: { row: Record<string, unknown>; cfg
   const [changedOnly, setChangedOnly] = useState(isDiff && changedCount > 0 && changedCount < values.length)
 
   if (values.length === 0) {
-    return <Wrap><Empty>{t('table.valueDiff.none', 'No field values could be parsed from this statement.')}</Empty></Wrap>
+    return <Wrap><Empty>{t('table.valueDiff.none')}</Empty></Wrap>
   }
   const shown = changedOnly ? values.filter((v) => v.before !== v.after) : values
 
   return (
     <Wrap>
       <Bar>
-        <span>{t('table.valueDiff.summary', '{{n}} fields', { n: values.length })}{isDiff ? ` · ${t('table.valueDiff.changed', '{{n}} changed', { n: changedCount })}` : ''}</span>
+        <span>{t('table.valueDiff.summary', { n: values.length })}{isDiff ? ` · ${t('table.valueDiff.changed', { n: changedCount })}` : ''}</span>
         {isDiff && changedCount > 0 && changedCount < values.length && (
           <Toggle>
             <input type="checkbox" checked={changedOnly} onChange={(e) => setChangedOnly(e.target.checked)} />
-            {t('table.valueDiff.changedOnly', 'Changed only')}
+            {t('table.valueDiff.changedOnly')}
           </Toggle>
         )}
       </Bar>
       <Table>
         <thead>
           <tr>
-            <Th>{t('table.valueDiff.field', 'Field')}</Th>
-            {hasBefore && <Th>{t('table.valueDiff.before', 'Before')}</Th>}
+            <Th>{t('table.valueDiff.field')}</Th>
+            {hasBefore && <Th>{t('table.valueDiff.before')}</Th>}
             {hasAfter && <Th style={{ width: 28 }} />}
-            {hasAfter && <Th>{t('table.valueDiff.after', 'After')}</Th>}
+            {hasAfter && <Th>{t('table.valueDiff.after')}</Th>}
           </tr>
         </thead>
         <tbody>

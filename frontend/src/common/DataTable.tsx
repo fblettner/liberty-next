@@ -891,7 +891,7 @@ export function DataTable<T extends object>({
               <RowExpandBtn
                 type="button"
                 onClick={(e) => { e.stopPropagation(); row.toggleExpanded() }}
-                title={row.getIsExpanded() ? t('table.collapse', 'Collapse') : t('table.expand', 'Expand')}
+                title={row.getIsExpanded() ? t('table.collapse') : t('table.expand')}
               >
                 {row.getIsExpanded() ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                 {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -931,21 +931,21 @@ export function DataTable<T extends object>({
         <ActionGroup>
           {(tableId || sharedList.length > 0) && (
             <MenuWrap ref={viewRef}>
-              <CtrlBtn $active={!!activeView} onClick={() => setViewOpen((v) => !v)} title={t('table.views', 'Views')}>
-                <LayoutGrid size={13} /> {activeView ? activeView.name : t('table.views', 'Views')}
+              <CtrlBtn $active={!!activeView} onClick={() => setViewOpen((v) => !v)} title={t('table.views')}>
+                <LayoutGrid size={13} /> {activeView ? activeView.name : t('table.views')}
               </CtrlBtn>
               <MenuPortal open={viewOpen} anchorRef={viewRef} onClose={() => setViewOpen(false)} minWidth={240}>
                 <MenuHead>
-                  <MenuTitle>{t('table.views', 'Views')}</MenuTitle>
+                  <MenuTitle>{t('table.views')}</MenuTitle>
                   <Spacer />
                   {tableId && activeView?.scope === 'user' && (
                     <MiniLink type="button" disabled={savingView} onClick={() => { setViewOpen(false); void saveCurrentView() }}>
-                      {t('table.saveView', 'Save')}
+                      {t('table.saveView')}
                     </MiniLink>
                   )}
                   {tableId && (
                     <MiniLink type="button" onClick={() => { setViewOpen(false); openSaveModal() }}>
-                      {t('table.saveAs', 'Save as…')}
+                      {t('table.saveAs')}
                     </MiniLink>
                   )}
                 </MenuHead>
@@ -954,27 +954,27 @@ export function DataTable<T extends object>({
                     returns to it). The picker lists only real views. */}
                 {sharedList.length === 0 && userViews.length === 0 && (
                   <ColRow style={{ color: colors.text.muted }}>
-                    <ColLabel>{t('table.viewsEmpty', 'No views yet — Save as… to create one.')}</ColLabel>
+                    <ColLabel>{t('table.viewsEmpty')}</ColLabel>
                   </ColRow>
                 )}
-                {sharedList.length > 0 && <MenuSub $first>{t('table.viewsShared', 'Shared')}</MenuSub>}
+                {sharedList.length > 0 && <MenuSub $first>{t('table.viewsShared')}</MenuSub>}
                 {sharedList.map((s) => {
                   const on = activeView?.scope === 'shared' && activeView.name === s.name
                   return (
                     <ColRow key={`s:${s.name}`} onClick={() => { selectView({ scope: 'shared', name: s.name }); setViewOpen(false) }} style={{ cursor: 'pointer' }}>
                       <CheckBox $on={on}>{on && <Check size={9} />}</CheckBox>
-                      <ColLabel>{s.name}{s.default ? ` · ${t('table.viewDefaultTag', 'default')}` : ''}</ColLabel>
+                      <ColLabel>{s.name}{s.default ? ` · ${t('table.viewDefaultTag')}` : ''}</ColLabel>
                     </ColRow>
                   )
                 })}
-                {userViews.length > 0 && <MenuSub $first={sharedList.length === 0}>{t('table.viewsMine', 'My views')}</MenuSub>}
+                {userViews.length > 0 && <MenuSub $first={sharedList.length === 0}>{t('table.viewsMine')}</MenuSub>}
                 {userViews.map((u) => {
                   const on = activeView?.scope === 'user' && activeView.name === u.name
                   return (
                     <ColRow key={`u:${u.name}`} style={{ cursor: 'pointer' }}>
                       <CheckBox $on={on} onClick={() => { selectView({ scope: 'user', name: u.name }); setViewOpen(false) }}>{on && <Check size={9} />}</CheckBox>
                       <ColLabel onClick={() => { selectView({ scope: 'user', name: u.name }); setViewOpen(false) }}>{u.name}</ColLabel>
-                      <IconBtn onClick={(e) => { e.stopPropagation(); void deleteUserView(u.name) }} title={t('table.deleteView', 'Delete view')}>
+                      <IconBtn onClick={(e) => { e.stopPropagation(); void deleteUserView(u.name) }} title={t('table.deleteView')}>
                         <Trash2 size={12} />
                       </IconBtn>
                     </ColRow>
@@ -1004,7 +1004,7 @@ export function DataTable<T extends object>({
                   {grouping.length > 0 && (
                     <ColRow onClick={() => setGrouping([])} style={{ cursor: 'pointer' }}>
                       <CheckBox $on={false} />
-                      <ColLabel>{t('table.groupNone', '(None — ungroup all)')}</ColLabel>
+                      <ColLabel>{t('table.groupNone')}</ColLabel>
                     </ColRow>
                   )}
                   {effectiveOrder.map((colId) => {
@@ -1029,15 +1029,15 @@ export function DataTable<T extends object>({
                 <MenuHead>
                   <MenuTitle>{t('table.columns')}</MenuTitle>
                   <Spacer />
-                  <MiniLink type="button" onClick={() => table.toggleAllColumnsVisible(true)}>{t('table.selectAll', 'All')}</MiniLink>
-                  <MiniLink type="button" onClick={() => effectiveOrder.forEach((id) => { const c = table.getColumn(id); if (c && !isInternal(c)) c.toggleVisibility(false) })}>{t('table.selectNone', 'None')}</MiniLink>
+                  <MiniLink type="button" onClick={() => table.toggleAllColumnsVisible(true)}>{t('table.selectAll')}</MiniLink>
+                  <MiniLink type="button" onClick={() => effectiveOrder.forEach((id) => { const c = table.getColumn(id); if (c && !isInternal(c)) c.toggleVisibility(false) })}>{t('table.selectNone')}</MiniLink>
                   {/* "Reset" drops the active view selection and re-applies
                       the screen's defaults (the ``hidden`` hints on each column). Needed when a
                       ``visible_when`` rule drops a column based on a server filter but an older
                       saved entry still hides it — the operator would otherwise have to hunt
                       through the column list to un-stick it. */}
-                  <MiniLink type="button" onClick={resetGrid} title={t('table.resetColumnsHint', 'Clear the saved column visibility / order for this table — handy when a visible_when rule conflicts with an older saved state.')}>
-                    {t('table.resetColumns', 'Reset')}
+                  <MiniLink type="button" onClick={resetGrid} title={t('table.resetColumnsHint')}>
+                    {t('table.resetColumns')}
                   </MiniLink>
                 </MenuHead>
                 {effectiveOrder.map((colId, idx) => {
@@ -1060,7 +1060,7 @@ export function DataTable<T extends object>({
             </CtrlBtn>
             <MenuPortal open={exportOpen} anchorRef={exportRef} onClose={() => setExportOpen(false)} minWidth={150}>
                 <DropdownItem onClick={(e) => { e.stopPropagation(); setExportAll((v) => !v) }}>
-                  <CheckBox $on={exportAll}>{exportAll && <Check size={9} />}</CheckBox> {t('table.exportAllColumns', 'All columns (incl. hidden)')}
+                  <CheckBox $on={exportAll}>{exportAll && <Check size={9} />}</CheckBox> {t('table.exportAllColumns')}
                 </DropdownItem>
                 <DropdownItem onClick={() => exportCsv(exportAll)}><FileText size={13} /> CSV (.csv)</DropdownItem>
                 <DropdownItem onClick={() => exportExcel(exportAll)}><TableIcon size={13} /> Excel (.xlsx)</DropdownItem>
@@ -1135,7 +1135,7 @@ export function DataTable<T extends object>({
                       onDragEnd={() => { dragColRef.current = null; setDragOverId(null) }}
                     >
                       <ThInner $align={align}>
-                        {h.column.getIsGrouped() && <GroupBadge title={t('table.grouped', 'grouped')}><Group size={11} /></GroupBadge>}
+                        {h.column.getIsGrouped() && <GroupBadge title={t('table.grouped')}><Group size={11} /></GroupBadge>}
                         {flexRender(h.column.columnDef.header, h.getContext())}
                         {canSort && (
                           <SortMark $active={!!sorted}>
@@ -1206,7 +1206,7 @@ export function DataTable<T extends object>({
               // ``PAGE_SIZE_ALL`` is the sentinel for "no pagination — show every loaded row".
               // The virtualizer keeps the DOM small even at this size; the operator gets a
               // single scrollable list instead of paging through 50-row chunks.
-              <option key={n} value={n}>{n === PAGE_SIZE_ALL ? t('table.showAll', 'All') : n}</option>
+              <option key={n} value={n}>{n === PAGE_SIZE_ALL ? t('table.showAll') : n}</option>
             ))}
           </PageSizeSelect>
           <span>
@@ -1229,23 +1229,23 @@ export function DataTable<T extends object>({
       {saveModalOpen && (
         <Overlay onClick={() => setSaveModalOpen(false)} style={{ zIndex: 2000 }}>
           <Modal style={{ width: 420 }} onClick={(e) => e.stopPropagation()}>
-            <ModalHeader>{t('table.saveViewTitle', 'Save view')}</ModalHeader>
+            <ModalHeader>{t('table.saveViewTitle')}</ModalHeader>
             <ModalBody>
               <div style={{ fontSize: fontSize.sm, color: colors.text.muted, marginBottom: 8 }}>
-                {t('table.saveViewHint', 'Save the current columns, sort, filters and grouping as one of your views (stored per user, follows you across devices). Reusing a name overwrites it.')}
+                {t('table.saveViewHint')}
               </div>
               <Input
                 autoFocus
                 value={saveName}
                 onChange={(e) => setSaveName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') void confirmSaveView() }}
-                placeholder={t('table.viewNamePlaceholder', 'View name')}
+                placeholder={t('table.viewNamePlaceholder')}
               />
             </ModalBody>
             <ModalFooter>
               <Button $size="sm" $variant="ghost" onClick={() => setSaveModalOpen(false)}>{t('common.cancel')}</Button>
               <Button $size="sm" $variant="primary" onClick={() => void confirmSaveView()} disabled={!saveName.trim() || savingView}>
-                {savingView ? t('table.savingView', 'Saving…') : t('common.save', 'Save')}
+                {savingView ? t('table.savingView') : t('common.save')}
               </Button>
             </ModalFooter>
           </Modal>

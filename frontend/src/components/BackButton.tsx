@@ -47,9 +47,9 @@ export default function BackButton() {
   if (!from) return null
   return (
     <Bar>
-      <BackBtn type="button" onClick={onClick} title={t('common.back', 'Back')}>
+      <BackBtn type="button" onClick={onClick} title={t('common.back')}>
         <ArrowLeft size={13} />
-        {t('common.back', 'Back')}
+        {t('common.back')}
       </BackBtn>
     </Bar>
   )

@@ -109,7 +109,7 @@ export default function PoolsBuilder() {
     const name = (await modals.prompt({
       title: t('settings.pools.add'),
       message: t('settings.pools.namePrompt'),
-      placeholder: t('settings.pools.namePlaceholder', 'e.g. nomasx1, jdedwards'),
+      placeholder: t('settings.pools.namePlaceholder'),
       validate: (v) => validateId({ kind: 'pool', proposed: v, existing, mode: 'add' }),
     }))?.trim()
     if (!name) return
@@ -232,7 +232,7 @@ export default function PoolsBuilder() {
                   <Button $variant="ghost" $size="sm" onClick={() => setUsagesTarget({
                     kind: 'pool', name: sel, label: `pool ${sel}`,
                   })} disabled={busy}>
-                    <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
+                    <GitBranch size={13} /> {t('findUsages.button')}
                   </Button>
                   <Button $variant="ghost" $size="sm" onClick={() => renamePool(sel)} disabled={busy}>
                     <Edit3 size={13} /> {t('settings.rename.button')}

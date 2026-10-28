@@ -103,11 +103,11 @@ export function ChartEditorModal({
 
   const save = () => {
     const cid = slug(id)
-    if (!cid) { setError(t('settings.charts.errId', 'An id is required.')); setTab('general'); return }
-    if (!/^[A-Za-z0-9_-]+$/.test(cid)) { setError(t('settings.charts.errIdShape', 'Id: letters, digits, underscore, hyphen only.')); setTab('general'); return }
-    if (takenIds.includes(cid)) { setError(t('settings.charts.errIdTaken', 'That id is already used by another chart.')); setTab('general'); return }
-    if (!query) { setError(t('settings.charts.errQuery', 'Pick a query.')); setTab('general'); return }
-    if (!spec.x || spec.y.length === 0) { setError(t('settings.charts.errXY', 'Set the X column and at least one Y series.')); setTab('chart'); return }
+    if (!cid) { setError(t('settings.charts.errId')); setTab('general'); return }
+    if (!/^[A-Za-z0-9_-]+$/.test(cid)) { setError(t('settings.charts.errIdShape')); setTab('general'); return }
+    if (takenIds.includes(cid)) { setError(t('settings.charts.errIdTaken')); setTab('general'); return }
+    if (!query) { setError(t('settings.charts.errQuery')); setTab('general'); return }
+    if (!spec.x || spec.y.length === 0) { setError(t('settings.charts.errXY')); setTab('chart'); return }
     // `connector` is the scope (the dict path key) — the builder places the record under it, so we
     // don't write it into the body.
     const record: Record<string, unknown> = {
@@ -124,12 +124,12 @@ export function ChartEditorModal({
   const requestClose = async () => {
     if (!dirty) { onClose(); return }
     const choice = await modals.choose<'discard' | 'save' | 'keep'>({
-      title: t('settings.screens.designer.unsavedTitle', 'Unsaved changes'),
-      message: t('settings.screens.designer.unsavedMsg', 'You have unsaved changes. Save them, discard them, or keep editing?'),
+      title: t('settings.screens.designer.unsavedTitle'),
+      message: t('settings.screens.designer.unsavedMsg'),
       options: [
-        { value: 'discard', label: t('settings.screens.designer.discard', 'Discard'), variant: 'danger' },
+        { value: 'discard', label: t('settings.screens.designer.discard'), variant: 'danger' },
         { value: 'save', label: t('common.save'), variant: 'primary' },
-        { value: 'keep', label: t('settings.screens.designer.keepEditing', 'Keep editing'), variant: 'ghost', autoFocus: true },
+        { value: 'keep', label: t('settings.screens.designer.keepEditing'), variant: 'ghost', autoFocus: true },
       ],
       cancelValue: 'keep',
     })
@@ -143,7 +143,7 @@ export function ChartEditorModal({
       title={(
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontFamily: fonts.mono }}>
           <BarChart3 size={16} color={colors.blue.main} />
-          {isNew ? t('settings.charts.add', 'Add chart') : `[charts.${scope}.${initial?.id}]`}
+          {isNew ? t('settings.charts.add') : `[charts.${scope}.${initial?.id}]`}
         </span>
       )}
       onClose={() => void requestClose()}
@@ -152,8 +152,8 @@ export function ChartEditorModal({
       frameStyle={{ width: 'min(960px, 96vw)', height: 'min(680px, 92vh)' }}
       tabs={(
         <Tabs>
-          <TabBtn $active={tab === 'general'} onClick={() => setTab('general')}><SlidersHorizontal size={14} /> {t('settings.charts.tabGeneral', 'General')}</TabBtn>
-          <TabBtn $active={tab === 'chart'} onClick={() => setTab('chart')}><BarChart3 size={14} /> {t('settings.charts.tabChart', 'Chart')}</TabBtn>
+          <TabBtn $active={tab === 'general'} onClick={() => setTab('general')}><SlidersHorizontal size={14} /> {t('settings.charts.tabGeneral')}</TabBtn>
+          <TabBtn $active={tab === 'chart'} onClick={() => setTab('chart')}><BarChart3 size={14} /> {t('settings.charts.tabChart')}</TabBtn>
         </Tabs>
       )}
     >
@@ -161,23 +161,23 @@ export function ChartEditorModal({
           {tab === 'general' ? (
             <>
               <Grid2>
-                <Field label={t('settings.charts.id', 'Id')}>
+                <Field label={t('settings.charts.id')}>
                   <Input value={id} onChange={(e) => { setId(e.target.value); setError(null) }} placeholder="users_per_app" />
                 </Field>
-                <Field label={t('settings.charts.label', 'Label')}>
-                  <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('settings.charts.label', 'Label')} />
+                <Field label={t('settings.charts.label')}>
+                  <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('settings.charts.label')} />
                 </Field>
               </Grid2>
-              <Field label={t('settings.charts.description', 'Description')}>
+              <Field label={t('settings.charts.description')}>
                 <Input value={description} onChange={(e) => setDescription(e.target.value)} />
               </Field>
               <Grid2>
-                <Field label={t('settings.charts.connector', 'Connector')}>
+                <Field label={t('settings.charts.connector')}>
                   {/* The connector is the chart's scope — fixed here. Move a chart between
                       connectors by deleting + re-adding it under the other scope. */}
                   <Input value={scope} readOnly disabled style={{ fontFamily: fonts.mono }} />
                 </Field>
-                <Field label={t('settings.charts.query', 'Query')}>
+                <Field label={t('settings.charts.query')}>
                   {/* Edit / Clone / Add trio sits next to the picker so the operator can
                       fix the SQL inline, fork it for the customer (Clone), or scaffold a
                       brand-new query (Add) — without bouncing to Settings → Connectors.
@@ -186,7 +186,7 @@ export function ChartEditorModal({
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <SearchSelect value={query} onChange={(v) => { setQuery(v); setError(null) }}
-                        options={queryOpts} placeholder={t('chart.spec.pick', 'Pick…')} allowCustom />
+                        options={queryOpts} placeholder={t('chart.spec.pick')} allowCustom />
                     </div>
                     <EditQueryButton connector={connector} queryName={query} />
                     <CloneQueryButton connector={connector} queryName={query}
@@ -200,7 +200,7 @@ export function ChartEditorModal({
           ) : (
             <PreviewBox>
               {!connector || !query ? (
-                <Msg>{t('settings.charts.previewNeedQuery', 'Set a connector + query on the General tab first.')}</Msg>
+                <Msg>{t('settings.charts.previewNeedQuery')}</Msg>
               ) : sampleErr ? (
                 <Msg style={{ color: colors.red.main }}>{sampleErr}</Msg>
               ) : !sample ? (
@@ -210,7 +210,7 @@ export function ChartEditorModal({
                   <ChartSpecEditor result={sample} spec={spec} onChange={setSpec} />
                   <div style={{ flex: 1, minHeight: 220, marginTop: 10, display: 'flex' }}>
                     <ChartCanvas result={sample} spec={spec} connector={connector}
-                      emptyMessage={t('settings.charts.previewSetXY', 'Set the X column + at least one Y series to preview.')} />
+                      emptyMessage={t('settings.charts.previewSetXY')} />
                   </div>
                 </>
               )}

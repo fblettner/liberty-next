@@ -40,7 +40,7 @@ export function SaveModal({ kind, current, asNew, onSave, onClose }: {
           </div>
         </ModalBody>
         <ModalFooter>
-          <Button $size="sm" $variant="ghost" onClick={onClose} disabled={busy}>{t('common.cancel', 'Cancel')}</Button>
+          <Button $size="sm" $variant="ghost" onClick={onClose} disabled={busy}>{t('common.cancel')}</Button>
           <Button $size="sm" $variant="primary" disabled={busy || !name.trim()} onClick={() => void submit()}>{t('common.save')}</Button>
         </ModalFooter>
       </Modal>

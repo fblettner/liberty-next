@@ -307,12 +307,11 @@ export default function ChangePackagesBuilder() {
   // their tables. Confirm via the themed dialog (never window.confirm). Re-point the selection.
   const deletePkg = useCallback(async (p: Pkg) => {
     const ok = await modals.confirm({
-      title: t('settings.changes.deleteTitle', 'Delete package?'),
+      title: t('settings.changes.deleteTitle'),
       message: t('settings.changes.deleteMsg',
-        'Delete "{{name}}" and its {{n}} captured change(s)? The rows already written to the database are not affected — only this package log is removed.',
         { name: p.name, n: p.entry_count }),
       variant: 'danger',
-      confirmLabel: t('common.delete', 'Delete'),
+      confirmLabel: t('common.delete'),
     })
     if (!ok) return
     setBusy(true); setError(null)
@@ -335,9 +334,9 @@ export default function ChangePackagesBuilder() {
   // promotion. Returns the new id, or null if cancelled.
   const createCustom = useCallback(async (app: string): Promise<string | null> => {
     const name = await modals.prompt({
-      title: t('settings.changes.newPkgTitle', 'New custom package'),
-      message: t('settings.changes.newPkgMsg', 'A holding package for "{{app}}" — move changes into it to promote later. Name:', { app }),
-      placeholder: t('settings.changes.newPkgPlaceholder', 'e.g. Future role cleanup'),
+      title: t('settings.changes.newPkgTitle'),
+      message: t('settings.changes.newPkgMsg', { app }),
+      placeholder: t('settings.changes.newPkgPlaceholder'),
     })
     if (!name || !name.trim()) return null
     try {
@@ -365,12 +364,11 @@ export default function ChangePackagesBuilder() {
   const deleteEntries = useCallback(async (entryIds: string[], label: string) => {
     if (!selId) return
     const ok = await modals.confirm({
-      title: t('settings.changes.delEntriesTitle', 'Delete change(s)?'),
+      title: t('settings.changes.delEntriesTitle'),
       message: t('settings.changes.delEntriesMsg',
-        'Permanently remove {{n}} change(s) ({{label}}) from this package? The rows already written to the database are not affected — only the package log is cleaned up, so a re-export can’t re-include them.',
         { n: entryIds.length, label }),
       variant: 'danger',
-      confirmLabel: t('common.delete', 'Delete'),
+      confirmLabel: t('common.delete'),
     })
     if (!ok) return
     setBusy(true); setError(null)
@@ -422,20 +420,20 @@ export default function ChangePackagesBuilder() {
   }, [detail])
 
   if (error && !packages) return <Banner $tone="error">{error}</Banner>
-  if (!packages) return <Sub>{t('common.loading', 'Loading…')}</Sub>
+  if (!packages) return <Sub>{t('common.loading')}</Sub>
 
   return (
     <>
       <Tabs>
         <TabBtn $active={mode === 'changes'} onClick={() => setMode('changes')}>
-          <Layers size={13} /> {t('settings.changes.changesTab', 'Changes')}
+          <Layers size={13} /> {t('settings.changes.changesTab')}
         </TabBtn>
         <TabBtn $active={mode === 'apply'} onClick={() => setMode('apply')}>
-          <Upload size={13} /> {t('settings.changes.applyTab', 'Apply')}
+          <Upload size={13} /> {t('settings.changes.applyTab')}
         </TabBtn>
         <div style={{ flex: 1 }} />
         <Button $size="sm" $variant="ghost" disabled={busy} onClick={() => void refresh()}>
-          <RefreshCw size={13} /> {t('common.refresh', 'Refresh')}
+          <RefreshCw size={13} /> {t('common.refresh')}
         </Button>
       </Tabs>
       {error && <Banner $tone="error">{error}</Banner>}
@@ -447,7 +445,7 @@ export default function ChangePackagesBuilder() {
             <AppliedPanel>
               <div className="head">
                 <Inbox size={14} />
-                <span>{t('settings.changes.appliedTitle', 'Applied bundles')}</span>
+                <span>{t('settings.changes.appliedTitle')}</span>
                 <span className="count">{applied.length}</span>
               </div>
               {applied.map((a) => {
@@ -459,7 +457,7 @@ export default function ChangePackagesBuilder() {
                       {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                       <Badge $tone={a.status === 'partial' ? colors.orange.main : colors.green.main}>{a.status}</Badge>
                       <span className="name">{a.name}</span>
-                      <span className="meta">{a.application} · {t('settings.changes.opsCount', '{{n}} op(s)', { n: a.op_count })}{summary ? ` · ${summary}` : ''}</span>
+                      <span className="meta">{a.application} · {t('settings.changes.opsCount', { n: a.op_count })}{summary ? ` · ${summary}` : ''}</span>
                       <span className="when">{fmtDate(a.applied_at)}{a.applied_by ? ` · ${a.applied_by}` : ''}</span>
                     </div>
                     {open && a.details && a.details.length > 0 && (
@@ -467,7 +465,7 @@ export default function ChangePackagesBuilder() {
                         {a.details.map((r, i) => (
                           <div className="op" key={i}>
                             <Badge $tone={APPLIED_OP_TONE[r.status] ?? colors.text.muted}>{r.status.replace('_', ' ')}</Badge>
-                            {r.op?.post_apply && <Badge $tone={colors.blue.main}>{t('settings.changes.postApply', 'post-apply')}</Badge>}
+                            {r.op?.post_apply && <Badge $tone={colors.blue.main}>{t('settings.changes.postApply')}</Badge>}
                             <span className="key">{r.op?.post_apply ? (r.op?.label || r.op?.operation) : `${r.op?.operation} ${r.op?.entity_key ? Object.entries(r.op.entity_key).map(([k, v]) => `${k}=${fmt(v)}`).join(' · ') : ''}`}</span>
                             <span className="q">{r.op?.connector}.{r.op?.query}</span>
                             {r.detail && <span className="dt">— {r.detail}</span>}
@@ -484,26 +482,26 @@ export default function ChangePackagesBuilder() {
       ) : (
         <>
         {packages.length === 0 ? (
-        <Sub>{t('settings.changes.empty', 'No change packages yet — edit a record on a change-tracked screen to open one.')}</Sub>
+        <Sub>{t('settings.changes.empty')}</Sub>
       ) : (
         <Wrap>
           <List>
             <Button $size="sm" $variant="ghost" disabled={busy || !(detail?.application ?? visiblePackages[0]?.application)}
               onClick={() => { const app = detail?.application ?? visiblePackages[0]?.application; if (app) void createCustom(app) }}
-              title={t('settings.changes.newPkgTip', 'Create a custom holding package — move changes into it to promote in a later commit')}>
-              <Plus size={13} /> {t('settings.changes.newPkg', 'New package')}
+              title={t('settings.changes.newPkgTip')}>
+              <Plus size={13} /> {t('settings.changes.newPkg')}
             </Button>
             <FilterBox>
               <Search size={13} />
               <input
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                placeholder={t('settings.changes.filter', 'Filter by name / status…')}
+                placeholder={t('settings.changes.filter')}
               />
               {filter && <button type="button" className="clear" onClick={() => setFilter('')}><X size={12} /></button>}
             </FilterBox>
             {visiblePackages.length === 0 ? (
-              <Sub style={{ margin: '4px 2px' }}>{t('settings.changes.noMatch', 'No packages match.')}</Sub>
+              <Sub style={{ margin: '4px 2px' }}>{t('settings.changes.noMatch')}</Sub>
             ) : visiblePackages.map((p) => {
               const d = pkgDate(p)
               return (
@@ -511,8 +509,8 @@ export default function ChangePackagesBuilder() {
                 <span className="name">{p.name}</span>
                 <span className="meta">
                   <Badge $tone={STATUS_TONE[p.status] ?? colors.text.muted}>{p.status}</Badge>
-                  {p.kind === 'custom' && <> <Badge $tone={KIND_TONE.custom}>{t('settings.changes.kindCustom', 'custom')}</Badge></>}
-                  {' '}{p.application} · {t('settings.changes.nChanges', '{{n}} change(s)', { n: p.entry_count })}
+                  {p.kind === 'custom' && <> <Badge $tone={KIND_TONE.custom}>{t('settings.changes.kindCustom')}</Badge></>}
+                  {' '}{p.application} · {t('settings.changes.nChanges', { n: p.entry_count })}
                 </span>
                 {d && <span className="meta">{d.label} · {d.when}</span>}
               </Item>
@@ -530,22 +528,22 @@ export default function ChangePackagesBuilder() {
                     <Button $size="sm" $variant="ghost" onClick={() =>
                       setOpenEntries((s) => s.size >= detail.entries.length ? new Set() : new Set(detail.entries.map((e) => e.id)))}>
                       {openEntries.size >= detail.entries.length
-                        ? t('settings.changes.collapseAll', 'Collapse all')
-                        : t('settings.changes.expandAll', 'Expand all')}
+                        ? t('settings.changes.collapseAll')
+                        : t('settings.changes.expandAll')}
                     </Button>
                   )}
                   {detail.status === 'draft' && (
                     <Button $size="sm" $variant="primary" disabled={busy} onClick={() => void act('/submit')}>
-                      <Send size={13} /> {t('settings.changes.submit', 'Submit')}
+                      <Send size={13} /> {t('settings.changes.submit')}
                     </Button>
                   )}
                   {detail.status === 'pending' && (
                     <>
                       <Button $size="sm" $variant="primary" disabled={busy} onClick={() => void act('/approve')}>
-                        <Check size={13} /> {t('settings.changes.approve', 'Approve')}
+                        <Check size={13} /> {t('settings.changes.approve')}
                       </Button>
                       <Button $size="sm" $variant="ghost" disabled={busy} style={{ color: colors.red.main }} onClick={() => void act('/reject')}>
-                        <X size={13} /> {t('settings.changes.reject', 'Reject')}
+                        <X size={13} /> {t('settings.changes.reject')}
                       </Button>
                     </>
                   )}
@@ -553,24 +551,24 @@ export default function ChangePackagesBuilder() {
                     <>
                       {(detail.post_apply_ids?.length ?? 0) > 0 && (
                         <span style={{ fontSize: fontSize.micro, color: colors.text.muted, alignSelf: 'center' }}
-                          title={t('settings.changes.bundleIncludesTip', 'These run-once post-apply steps — from the screens that contributed to this package — are appended to the exported bundle: {{ids}}', { ids: detail.post_apply_ids.join(', ') })}>
-                          {t('settings.changes.bundleIncludes', '+ {{n}} post-apply', { n: detail.post_apply_ids.length })}
+                          title={t('settings.changes.bundleIncludesTip', { ids: detail.post_apply_ids.join(', ') })}>
+                          {t('settings.changes.bundleIncludes', { n: detail.post_apply_ids.length })}
                         </span>
                       )}
                       <Button $size="sm" $variant="primary" disabled={busy} onClick={() => void exportPkg()}>
-                        <Download size={13} /> {t('settings.changes.export', 'Export bundle')}
+                        <Download size={13} /> {t('settings.changes.export')}
                       </Button>
                     </>
                   )}
                   <Button $size="sm" $variant="ghost" disabled={busy} style={{ color: colors.red.main }}
                     onClick={() => { const p = packages.find((x) => x.id === detail.id); if (p) void deletePkg(p) }}>
-                    <Trash2 size={13} /> {t('common.delete', 'Delete')}
+                    <Trash2 size={13} /> {t('common.delete')}
                   </Button>
                 </span>
               </DetailHead>
             )}
-            {!detail ? <Sub>{t('common.loading', 'Loading…')}</Sub> : detail.entries.length === 0 ? (
-              <Sub>{t('settings.changes.noEntries', 'No changes captured in this package yet.')}</Sub>
+            {!detail ? <Sub>{t('common.loading')}</Sub> : detail.entries.length === 0 ? (
+              <Sub>{t('settings.changes.noEntries')}</Sub>
             ) : grouped.map(([gkey, entries]) => {
               const groupOpen = openGroups.has(gkey)
               // This group is ONE record: show its entity + natural key (e.g. AUUSER=DEMOROLE) on
@@ -595,18 +593,18 @@ export default function ChangePackagesBuilder() {
                     {keyLabel && <span className="keys">· {keyLabel}</span>}
                     {action && <Badge $tone={colors.blue.main} style={{ marginLeft: 6 }}>{action}</Badge>}
                     <Badge $tone={colors.text.muted} style={{ marginLeft: 'auto' }}>
-                      {t('settings.changes.nChanges', '{{n}} change(s)', { n: entries.length })}
+                      {t('settings.changes.nChanges', { n: entries.length })}
                     </Badge>
                   </GroupToggleHead>
                   {draftPkg && (
                     <>
-                      <MiniBtn disabled={busy} title={t('settings.changes.moveGroup', 'Move this record to another package')}
+                      <MiniBtn disabled={busy} title={t('settings.changes.moveGroup')}
                         onClick={() => detail && setMoveFor({ entryIds: groupIds, app: detail.application })}>
-                        <FolderInput size={11} /> {t('settings.changes.move', 'Move')}
+                        <FolderInput size={11} /> {t('settings.changes.move')}
                       </MiniBtn>
-                      <MiniBtn $danger disabled={busy} title={t('settings.changes.deleteGroup', 'Delete this record from the package')}
+                      <MiniBtn $danger disabled={busy} title={t('settings.changes.deleteGroup')}
                         onClick={() => void deleteEntries(groupIds, groupLabel)}>
-                        <Trash2 size={11} /> {t('common.delete', 'Delete')}
+                        <Trash2 size={11} /> {t('common.delete')}
                       </MiniBtn>
                     </>
                   )}
@@ -623,13 +621,13 @@ export default function ChangePackagesBuilder() {
                   const willReplay = e.replay !== false
                   const summary = isInvocation
                     ? (willReplay
-                        ? t('settings.changes.replaysOnApply', 'replays on apply')
-                        : t('settings.changes.captureOnly', 'captured · won’t replay'))
+                        ? t('settings.changes.replaysOnApply')
+                        : t('settings.changes.captureOnly'))
                     : e.operation === 'DELETE'
-                      ? t('settings.changes.rowRemoved', 'row removed')
+                      ? t('settings.changes.rowRemoved')
                       : e.operation === 'INSERT'
-                        ? t('settings.changes.nFields', '{{n}} field(s)', { n: changed.length })
-                        : t('settings.changes.nChanged', '{{n}} changed', { n: changed.length })
+                        ? t('settings.changes.nFields', { n: changed.length })
+                        : t('settings.changes.nChanged', { n: changed.length })
                   return (
                     <Row key={e.id} style={excluded ? { opacity: 0.5 } : undefined}>
                       <div className="head clickable" onClick={() => toggle(openEntries, setOpenEntries, e.id)}>
@@ -642,13 +640,13 @@ export default function ChangePackagesBuilder() {
                         {draft && (
                           <span style={{ marginLeft: 'auto', display: 'flex', gap: 4, flexShrink: 0 }}>
                             <ExBtn style={{ marginLeft: 0 }} disabled={busy} onClick={(ev) => { ev.stopPropagation(); void act(`/entries/${encodeURIComponent(e.id)}/${excluded ? 'include' : 'exclude'}`) }}>
-                              {excluded ? <><Eye size={11} /> {t('settings.changes.include', 'Include')}</> : <><EyeOff size={11} /> {t('settings.changes.exclude', 'Exclude')}</>}
+                              {excluded ? <><Eye size={11} /> {t('settings.changes.include')}</> : <><EyeOff size={11} /> {t('settings.changes.exclude')}</>}
                             </ExBtn>
-                            <MiniBtn disabled={busy} title={t('settings.changes.moveEntry', 'Move this change to another package')}
+                            <MiniBtn disabled={busy} title={t('settings.changes.moveEntry')}
                               onClick={(ev) => { ev.stopPropagation(); detail && setMoveFor({ entryIds: [e.id], app: detail.application }) }}>
-                              <FolderInput size={11} /> {t('settings.changes.move', 'Move')}
+                              <FolderInput size={11} /> {t('settings.changes.move')}
                             </MiniBtn>
-                            <MiniBtn $danger disabled={busy} title={t('settings.changes.deleteEntry', 'Delete this change from the package')}
+                            <MiniBtn $danger disabled={busy} title={t('settings.changes.deleteEntry')}
                               onClick={(ev) => { ev.stopPropagation(); void deleteEntries([e.id], e.operation.replace('_', ' ')) }}>
                               <Trash2 size={11} />
                             </MiniBtn>
@@ -660,8 +658,8 @@ export default function ChangePackagesBuilder() {
                         {isInvocation && (
                           <div style={{ gridColumn: '1 / -1', color: willReplay ? colors.orange.main : colors.text.muted, fontSize: fontSize.micro, marginBottom: 2 }}>
                             {willReplay
-                              ? t('settings.changes.replayNote', 'Re-runs this call on apply — its effects can’t be drift-checked. Arguments:')
-                              : t('settings.changes.captureOnlyNote', 'Captured for review — NOT re-run on apply (change_replay off). Arguments:')}
+                              ? t('settings.changes.replayNote')
+                              : t('settings.changes.captureOnlyNote')}
                           </div>
                         )}
                         {visibleFields.map((f) => {
@@ -683,8 +681,8 @@ export default function ChangePackagesBuilder() {
                         {unchanged.length > 0 && (
                           <MoreFields onClick={() => toggle(showUnchanged, setShowUnchanged, e.id)}>
                             {showUnch
-                              ? t('settings.changes.hideUnchanged', 'hide {{n}} unchanged', { n: unchanged.length })
-                              : t('settings.changes.showUnchanged', '+ {{n}} unchanged', { n: unchanged.length })}
+                              ? t('settings.changes.hideUnchanged', { n: unchanged.length })
+                              : t('settings.changes.showUnchanged', { n: unchanged.length })}
                           </MoreFields>
                         )}
                       </Diff>
@@ -704,25 +702,25 @@ export default function ChangePackagesBuilder() {
       {moveFor && createPortal(
         <Overlay onClick={() => setMoveFor(null)}>
           <Modal onClick={(e) => e.stopPropagation()} style={{ minWidth: 'min(440px, 95vw)' }}>
-            <ModalHeader>{t('settings.changes.moveTitle', 'Move {{n}} change(s) to…', { n: moveFor.entryIds.length })}</ModalHeader>
+            <ModalHeader>{t('settings.changes.moveTitle', { n: moveFor.entryIds.length })}</ModalHeader>
             <ModalBody>
               {moveTargets.length === 0 ? (
-                <Sub style={{ margin: 0 }}>{t('settings.changes.moveNoTargets', 'No other draft package for this application yet — create one below.')}</Sub>
+                <Sub style={{ margin: 0 }}>{t('settings.changes.moveNoTargets')}</Sub>
               ) : moveTargets.map((p) => (
                 <PickRow key={p.id} onClick={() => void moveEntriesTo(moveFor.entryIds, p.id)}>
                   <Layers size={14} />
                   <span className="name">{p.name}</span>
-                  {p.kind === 'custom' && <Badge $tone={KIND_TONE.custom}>{t('settings.changes.kindCustom', 'custom')}</Badge>}
-                  <span className="meta">{t('settings.changes.nChanges', '{{n}} change(s)', { n: p.entry_count })}</span>
+                  {p.kind === 'custom' && <Badge $tone={KIND_TONE.custom}>{t('settings.changes.kindCustom')}</Badge>}
+                  <span className="meta">{t('settings.changes.nChanges', { n: p.entry_count })}</span>
                 </PickRow>
               ))}
               <PickRow onClick={async () => { const id = await createCustom(moveFor.app); if (id) await moveEntriesTo(moveFor.entryIds, id) }}>
                 <Plus size={14} />
-                <span className="name">{t('settings.changes.moveToNew', 'New custom package…')}</span>
+                <span className="name">{t('settings.changes.moveToNew')}</span>
               </PickRow>
             </ModalBody>
             <ModalFooter>
-              <Button $variant="ghost" onClick={() => setMoveFor(null)}>{t('common.cancel', 'Cancel')}</Button>
+              <Button $variant="ghost" onClick={() => setMoveFor(null)}>{t('common.cancel')}</Button>
             </ModalFooter>
           </Modal>
         </Overlay>,

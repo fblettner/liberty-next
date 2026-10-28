@@ -1730,7 +1730,7 @@ export function ResultTable({
                   <X size={11} />
                 </RowXBtn>
               ) : (
-                <span title={t('table.rowReadOnly', 'Read-only row')} style={{ display: 'inline-flex' }}><Lock size={11} /></span>
+                <span title={t('table.rowReadOnly')} style={{ display: 'inline-flex' }}><Lock size={11} /></span>
               )}
             </StatusCell>
           )
@@ -1855,9 +1855,9 @@ export function ResultTable({
                 <TbBtn
                   onClick={() => { void runWorkbookExport() }}
                   disabled={exportBusy}
-                  title={t('table.exportTip', { defaultValue: 'Export configured workbook(s) — one xlsx per split value when split_by is set, a single xlsx otherwise.' })}
+                  title={t('table.exportTip')}
                 >
-                  <FileSpreadsheet size={13} /> {exportBusy ? t('table.exporting', { defaultValue: 'Exporting…' }) : t('table.exportWorkbooks', { defaultValue: 'Export workbooks' })}
+                  <FileSpreadsheet size={13} /> {exportBusy ? t('table.exporting') : t('table.exportWorkbooks')}
                 </TbBtn>
               )}
               {/* Screen-level action buttons (v1 NOMAJDE "Create Role" / "Reset Password" / etc.).
@@ -1900,8 +1900,8 @@ export function ResultTable({
                   <ClipboardPaste size={13} /> {t('table.pasteRows')}{clipboard.length ? ` (${clipboard.length})` : ''}
                 </TbBtn>
               )}
-              <TbBtn onClick={deleteSelected} disabled={saving || selected.size === 0} title={t('table.deleteSelected', 'Delete selected')}>
-                <Trash2 size={13} /> {t('table.deleteSelected', 'Delete selected')}{selected.size ? ` (${selected.size})` : ''}
+              <TbBtn onClick={deleteSelected} disabled={saving || selected.size === 0} title={t('table.deleteSelected')}>
+                <Trash2 size={13} /> {t('table.deleteSelected')}{selected.size ? ` (${selected.size})` : ''}
               </TbBtn>
             </>
           )

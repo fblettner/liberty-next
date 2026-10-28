@@ -52,14 +52,14 @@ export function ScanProposalsTable({
       <Table>
         <thead><tr>
           <Th style={{ width: 36 }} />
-          <Th>{t('settings.dictscan.column', 'Column')}</Th>
-          <Th>{t('settings.dictscan.label', 'Label')}</Th>
-          <Th style={{ width: 120 }}>{t('settings.dictscan.format', 'Format')}</Th>
-          <Th style={{ width: 130 }}>{t('settings.dictscan.rule', 'Rule')}</Th>
-          <Th style={{ width: 96 }}>{t('settings.dictscan.ruleValue', 'Rule value')}</Th>
-          <Th style={{ width: 140 }}>{t('settings.dictscan.lookupParams', 'Lookup params')}</Th>
-          <Th style={{ width: 100 }}>{t('settings.dictscan.default', 'Default')}</Th>
-          <Th style={{ width: 92 }}>{t('settings.dictscan.source', 'Source')}</Th>
+          <Th>{t('settings.dictscan.column')}</Th>
+          <Th>{t('settings.dictscan.label')}</Th>
+          <Th style={{ width: 120 }}>{t('settings.dictscan.format')}</Th>
+          <Th style={{ width: 130 }}>{t('settings.dictscan.rule')}</Th>
+          <Th style={{ width: 96 }}>{t('settings.dictscan.ruleValue')}</Th>
+          <Th style={{ width: 140 }}>{t('settings.dictscan.lookupParams')}</Th>
+          <Th style={{ width: 100 }}>{t('settings.dictscan.default')}</Th>
+          <Th style={{ width: 92 }}>{t('settings.dictscan.source')}</Th>
         </tr></thead>
         <tbody>
           {items.map((d) => {
@@ -69,16 +69,16 @@ export function ScanProposalsTable({
                 <Td><Checkbox checked={d.keep} disabled={dis} onChange={(v) => onPatch(d.column, { keep: v })} /></Td>
                 <Td>
                   <Mono>{d.dd_id}</Mono>
-                  {d.exists && <span style={{ marginLeft: 6, fontSize: fontSize.micro, color: colors.text.muted }}>({t('settings.dictscan.exists', 'exists')})</span>}
+                  {d.exists && <span style={{ marginLeft: 6, fontSize: fontSize.micro, color: colors.text.muted }}>({t('settings.dictscan.exists')})</span>}
                   <div style={{ fontSize: fontSize.micro, color: colors.text.muted }}>{d.column !== d.dd_id ? `${d.column} · ` : ''}{d.type ?? ''}</div>
                 </Td>
                 <Td><Input value={d.label} disabled={dis} onChange={(e) => onPatch(d.column, { label: e.target.value })} placeholder={d.dd_id} /></Td>
                 <Td><SearchSelect value={d.format} disabled={dis} onChange={(v) => onPatch(d.column, { format: v })} options={fmtOpts} allowCustom placeholder="text" /></Td>
-                <Td><SearchSelect value={d.rules} disabled={dis} onChange={(v) => onPatch(d.column, { rules: v })} options={ruleOpts} anyLabel={t('common.none', '(none)')} placeholder="—" /></Td>
+                <Td><SearchSelect value={d.rules} disabled={dis} onChange={(v) => onPatch(d.column, { rules: v })} options={ruleOpts} anyLabel={t('common.none')} placeholder="—" /></Td>
                 <Td><Input value={d.rules_values} disabled={dis || !d.rules} onChange={(e) => onPatch(d.column, { rules_values: e.target.value })} placeholder="—" /></Td>
                 <Td><Input value={d.lookup_params} disabled={dis || d.rules !== 'LOOKUP'} onChange={(e) => onPatch(d.column, { lookup_params: e.target.value })} placeholder={d.rules === 'LOOKUP' ? 'SY=01,RT=ST' : ''} /></Td>
                 <Td><Input value={d.default} disabled={dis} onChange={(e) => onPatch(d.column, { default: e.target.value })} placeholder="—" /></Td>
-                <Td>{d.source === 'jde' ? <Tag $tone="orange">JDE&nbsp;DD</Tag> : <Tag $tone="blue">{jde ? t('settings.dictscan.inferred', 'inferred') : t('settings.dictscan.column', 'Column')}</Tag>}</Td>
+                <Td>{d.source === 'jde' ? <Tag $tone="orange">JDE&nbsp;DD</Tag> : <Tag $tone="blue">{jde ? t('settings.dictscan.inferred') : t('settings.dictscan.column')}</Tag>}</Td>
               </tr>
             )
           })}

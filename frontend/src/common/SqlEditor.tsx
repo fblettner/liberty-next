@@ -190,8 +190,8 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector, stat
         <Toolbar>
           <MenuWrap ref={tokenWrapRef}>
             <ToolBtn type="button" $active={tokenOpen} onClick={() => setTokenOpen((v) => !v)}
-              title={t('settings.sqlEditor.tokenTitle', 'Insert a predefined value resolved at write time')}>
-              <Braces size={11} /> {t('settings.sqlEditor.token', 'Token')}
+              title={t('settings.sqlEditor.tokenTitle')}>
+              <Braces size={11} /> {t('settings.sqlEditor.token')}
             </ToolBtn>
             {tokenOpen && (
               <TokenMenu>
@@ -203,7 +203,7 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector, stat
                 ))}
                 {schemaTokens.length > 0 && (
                   <>
-                    <TokenDivider>{t('settings.sqlEditor.schemaTokens', 'Pool schemas')}</TokenDivider>
+                    <TokenDivider>{t('settings.sqlEditor.schemaTokens')}</TokenDivider>
                     {schemaTokens.map((s) => (
                       <TokenItem key={s.key} type="button" onClick={() => insertSnippet(`#SCHEMA.${s.key}#`)}>
                         <span className="tok">{`#SCHEMA.${s.key}#`}</span>

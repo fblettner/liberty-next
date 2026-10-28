@@ -51,19 +51,18 @@ export function MoveQueryModal({
   return (
     <Overlay>
       <Modal onClick={(e) => e.stopPropagation()} style={{ width: 'min(520px, 94vw)' }}>
-        <ModalHeader>{t('settings.connectors.moveTitle', 'Move {{kind}} "{{name}}"', { kind, name })}</ModalHeader>
+        <ModalHeader>{t('settings.connectors.moveTitle', { kind, name })}</ModalHeader>
         <ModalBody>
           {result ? (
             <>
               <Banner $tone={result.manual_refs.length ? 'warning' : 'ok'}>
                 {t('settings.connectors.moveDone',
-                  'Moved {{name}} to {{to}}. {{refs}} reference(s) rewritten.',
                   { name, to: value, refs: result.total_refs })}
               </Banner>
               {result.manual_refs.length > 0 && (
                 <div style={{ marginTop: 12 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                    {t('settings.connectors.moveManual', 'Fix these by hand (connector shared with queries left behind):')}
+                    {t('settings.connectors.moveManual')}
                   </div>
                   <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.6 }}>
                     {result.manual_refs.map((m, i) => {
@@ -81,23 +80,23 @@ export function MoveQueryModal({
             </>
           ) : none ? (
             <Banner $tone="info">
-              {t('settings.connectors.moveNoTarget', 'No other SQL connector to move to — create one in the Connectors tab first.')}
+              {t('settings.connectors.moveNoTarget')}
             </Banner>
           ) : (
-            <Field label={t('settings.connectors.moveTo', 'Move to connector')}>
-              <SearchSelect value={value} onChange={setValue} options={opts} placeholder={t('common.pick', 'Pick…')} />
+            <Field label={t('settings.connectors.moveTo')}>
+              <SearchSelect value={value} onChange={setValue} options={opts} placeholder={t('common.pick')} />
             </Field>
           )}
           {error && <Banner $tone="error" style={{ marginTop: 10 }}>{error}</Banner>}
         </ModalBody>
         <ModalFooter>
           {result ? (
-            <Button $size="sm" $variant="primary" onClick={onClose}>{t('common.done', 'Done')}</Button>
+            <Button $size="sm" $variant="primary" onClick={onClose}>{t('common.done')}</Button>
           ) : (
             <>
-              <Button $size="sm" $variant="ghost" onClick={onClose} disabled={busy}>{t('common.cancel', 'Cancel')}</Button>
+              <Button $size="sm" $variant="ghost" onClick={onClose} disabled={busy}>{t('common.cancel')}</Button>
               <Button $size="sm" $variant="primary" disabled={none || !value || busy} onClick={() => void run()}>
-                {busy ? t('common.working', 'Working…') : t('settings.connectors.moveButton', 'Move')}
+                {busy ? t('common.working') : t('settings.connectors.moveButton')}
               </Button>
             </>
           )}

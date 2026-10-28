@@ -374,7 +374,7 @@ export default function ActionListEditor({
                     $variant="ghost"
                     $size="sm"
                     onClick={() => onEditQuery(actionConn, String(a[targetKey]))}
-                    title={t('settings.editQuery.edit', 'Edit query')}
+                    title={t('settings.editQuery.edit')}
                   >
                     <Edit3 size={13} />
                   </Button>

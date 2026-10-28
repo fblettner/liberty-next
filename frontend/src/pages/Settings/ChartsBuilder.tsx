@@ -95,20 +95,20 @@ export default function ChartsBuilder() {
     byId[id] = record
     const next: Charts = { ...(doc ?? {}), [scope]: byId }
     setEditing(undefined)
-    void persist(next, t('settings.charts.saved', 'Saved.'))
+    void persist(next, t('settings.charts.saved'))
   }
 
   const validateChartId = (v: string, oldId: string | null) => {
-    if (oldId && v === oldId) return { error: t('settings.tables.duplicateSameName', 'Pick a different name.') }
+    if (oldId && v === oldId) return { error: t('settings.tables.duplicateSameName') }
     const existing = Object.keys(doc?.[scope] ?? {}).filter((k) => k !== oldId)
     return validateIdShared({ kind: 'chart', proposed: v, existing, mode: oldId ? 'rename' : 'add', currentName: oldId ?? undefined })
   }
 
   const renameChart = async (oldId: string) => {
     const next = (await modals.prompt({
-      title: t('settings.rename.button', 'Rename'),
-      message: t('settings.charts.renamePrompt', 'New id for "{{name}}":', { name: oldId }),
-      defaultValue: oldId, submitLabel: t('settings.rename.button', 'Rename'),
+      title: t('settings.rename.button'),
+      message: t('settings.charts.renamePrompt', { name: oldId }),
+      defaultValue: oldId, submitLabel: t('settings.rename.button'),
       validate: (v) => validateChartId(v.trim(), oldId),
     }))?.trim()
     if (!next || next === oldId) return
@@ -116,7 +116,7 @@ export default function ChartsBuilder() {
     const src = byId[oldId] as Record<string, unknown>
     delete byId[oldId]
     byId[next] = { ...src, id: next }
-    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.charts.renamed', 'Renamed.'))
+    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.charts.renamed'))
   }
 
   // CloneWithDepsModal — operator can opt to also duplicate the chart's referenced
@@ -166,7 +166,7 @@ export default function ChartsBuilder() {
   return (
     <Shell>
       <ScopeBar scopes={scopes} value={scope} onChange={setScope}
-        emptyHint={t('settings.charts.noScopes', 'No charts yet — use "Add scope" to start.')}
+        emptyHint={t('settings.charts.noScopes')}
         onAddScope={() => setAddScopeOpen(true)} />
       <Toolbar>
         <ToolbarLeft>
@@ -176,7 +176,7 @@ export default function ChartsBuilder() {
         </ToolbarLeft>
         <ToolbarRight>
           <Button $variant="ghost" $size="sm" onClick={() => { setEditing(null); setStatus(null) }} disabled={busy || !scope}>
-            <Plus size={13} /> {t('settings.charts.add', 'Add chart')}
+            <Plus size={13} /> {t('settings.charts.add')}
           </Button>
         </ToolbarRight>
       </Toolbar>
@@ -185,7 +185,7 @@ export default function ChartsBuilder() {
         <FilterBar>
           <Search size={14} />
           <input value={filter} onChange={(e) => setFilter(e.target.value)}
-            placeholder={t('settings.filterPlaceholder', 'Filter…')} />
+            placeholder={t('settings.filterPlaceholder')} />
         </FilterBar>
       )}
 
@@ -204,7 +204,7 @@ export default function ChartsBuilder() {
                   {id}
                   {isOverride && (
                     <Tag $tone="orange" style={{ marginLeft: 6, fontSize: fontSize.micro }}>
-                      {t('settings.override.badge', 'override')}
+                      {t('settings.override.badge')}
                     </Tag>
                   )}
                 </span>
@@ -215,21 +215,21 @@ export default function ChartsBuilder() {
                 <Button $variant="ghost" $size="sm" onClick={() => setUsagesTarget({
                   kind: 'chart', name: id, scope, label: `chart ${scope}.${id}`,
                 })} disabled={busy}>
-                  <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
+                  <GitBranch size={13} /> {t('findUsages.button')}
                 </Button>
                 <Button $variant="ghost" $size="sm" onClick={() => setDepsSeeds([{
                   kind: 'chart', name: id, scope, label: `chart ${scope}.${id}`,
                 }])} disabled={busy}>
-                  <GitMerge size={13} /> {t('findDeps.button', 'Find dependencies')}
+                  <GitMerge size={13} /> {t('findDeps.button')}
                 </Button>
                 <Button $variant="ghost" $size="sm" onClick={() => void renameChart(id)} disabled={busy}>
-                  <Edit3 size={13} /> {t('settings.rename.button', 'Rename')}
+                  <Edit3 size={13} /> {t('settings.rename.button')}
                 </Button>
                 <Button $variant="ghost" $size="sm" onClick={() => void cloneChart(id)} disabled={busy}>
-                  <Copy size={13} /> {t('common.clone', 'Clone')}
+                  <Copy size={13} /> {t('common.clone')}
                 </Button>
                 <Button $variant="ghost" $size="sm" onClick={() => void removeChart(id)} disabled={busy} style={{ color: colors.red.main }}>
-                  <Trash2 size={13} /> {t('common.delete', 'Delete')}
+                  <Trash2 size={13} /> {t('common.delete')}
                 </Button>
               </span>
             </Item>
@@ -238,10 +238,10 @@ export default function ChartsBuilder() {
         {ids.length === 0 && (
           <Empty>
             {!scope
-              ? t('settings.charts.empty', 'No charts yet. Use "Add scope" to pick a connector, then "Add chart".')
+              ? t('settings.charts.empty')
               : allIds.length === 0
-                ? t('settings.charts.emptyScope', 'No charts in "{{scope}}" yet.', { scope })
-                : t('common.noMatches', 'No matches')}
+                ? t('settings.charts.emptyScope', { scope })
+                : t('common.noMatches')}
           </Empty>
         )}
       </List>
@@ -258,8 +258,8 @@ export default function ChartsBuilder() {
       {addScopeOpen && (
         <AddScopeModal
           candidates={addCandidates}
-          title={t('settings.charts.addScope', 'Add a connector scope')}
-          emptyHint={t('settings.charts.addScopeEmpty', 'Every SQL connector already has a charts scope.')}
+          title={t('settings.charts.addScope')}
+          emptyHint={t('settings.charts.addScopeEmpty')}
           onPick={(c) => { setDoc((p) => ({ ...(p ?? {}), [c]: p?.[c] ?? {} })); setScope(c); setStatus(null) }}
           onClose={() => setAddScopeOpen(false)}
         />

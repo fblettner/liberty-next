@@ -236,9 +236,9 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
     if (!meta) return
     if (meta.writable) {
       const ok = await modals.confirm({
-        title: t('table.run', 'Run'),
+        title: t('table.run'),
         message: t('table.runWritableConfirm', { q: `${connector}.${query}` }),
-        confirmLabel: t('table.run', 'Run'),
+        confirmLabel: t('table.run'),
       })
       if (!ok) return
     }
@@ -482,7 +482,7 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
   // path keeps appending; this just reads the running cumulative count.
   const runLabel = busy
     ? (streamCount != null
-        ? t('table.runningRows', { count: streamCount, defaultValue: 'Running… {{count}} rows' })
+        ? t('table.runningRows', { count: streamCount })
         : t('common.running'))
     : t('common.run')
   const runBtn = (
@@ -574,15 +574,15 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
                       on hierarchy-shaped screens (security_menus, sod_processes, …) and stays
                       hidden on flat tables. */}
                   {screen?.treeview && (
-                    <button type="button" aria-pressed={view === 'tree'} onClick={() => setView('tree')} title={t('table.viewTree', 'Tree')}>
-                      <Network size={12} /> {t('table.viewTree', 'Tree')}
+                    <button type="button" aria-pressed={view === 'tree'} onClick={() => setView('tree')} title={t('table.viewTree')}>
+                      <Network size={12} /> {t('table.viewTree')}
                     </button>
                   )}
                   {/* Summary button gated on the screen carrying a ``summary`` config — server
                       aggregated parent rows + expandable detail. */}
                   {screen?.summary && (
-                    <button type="button" aria-pressed={view === 'summary'} onClick={() => setView('summary')} title={t('table.viewSummary', 'Summary')}>
-                      <LayoutList size={12} /> {t('table.viewSummary', 'Summary')}
+                    <button type="button" aria-pressed={view === 'summary'} onClick={() => setView('summary')} title={t('table.viewSummary')}>
+                      <LayoutList size={12} /> {t('table.viewSummary')}
                     </button>
                   )}
                 </ViewToggle>

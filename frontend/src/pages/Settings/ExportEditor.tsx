@@ -204,8 +204,8 @@ export default function ExportEditor({
   }
   const removeSheet = async (idx: number) => {
     const ok = await modals.confirm({
-      title: t('settings.screens.export.removeSheetTitle', 'Remove sheet?'),
-      message: t('settings.screens.export.removeSheetMsg', 'The sheet will be removed from the export. The query is not affected.'),
+      title: t('settings.screens.export.removeSheetTitle'),
+      message: t('settings.screens.export.removeSheetMsg'),
       variant: 'danger',
       confirmLabel: t('common.delete'),
     })
@@ -227,13 +227,13 @@ export default function ExportEditor({
   // Workbook-level placeholder chips: every field supports {{screen}}; the two file-name
   // fields also get {{split_value}}. Each chip appends its token to the field on click.
   const renderWorkbookChips = (field: 'file_name_template' | 'archive_name'): ReactNode => {
-    const chips: { token: string; label: string }[] = [{ token: '{{screen}}', label: t('settings.screens.export.chip.screen', 'screen id') }]
-    if (splitBy) chips.push({ token: '{{split_value}}', label: t('settings.screens.export.chip.splitValue', "this workbook's group key") })
+    const chips: { token: string; label: string }[] = [{ token: '{{screen}}', label: t('settings.screens.export.chip.screen') }]
+    if (splitBy) chips.push({ token: '{{split_value}}', label: t('settings.screens.export.chip.splitValue') })
     if (chips.length === 0) return null
     const current = field === 'file_name_template' ? fileNameTemplate : archiveName
     return (
       <ChipStrip>
-        <ChipLabel>{t('settings.screens.export.insert', 'Insert:')}</ChipLabel>
+        <ChipLabel>{t('settings.screens.export.insert')}</ChipLabel>
         {chips.map((c) => (
           <Chip
             key={c.token}
@@ -251,13 +251,13 @@ export default function ExportEditor({
   const renderSheetNameChips = (idx: number, sheet: Row): ReactNode => {
     const sheetSplitBy = ((sheet.split_by as string | null | undefined) ?? '').trim()
     const chips: { token: string; label: string }[] = []
-    if (splitBy) chips.push({ token: '{{split_value}}', label: t('settings.screens.export.chip.splitValue', "this workbook's group key") })
-    if (sheetSplitBy) chips.push({ token: '{{sheet_value}}', label: t('settings.screens.export.chip.sheetValue', "this sheet's partition value") })
-    chips.push({ token: '{{screen}}', label: t('settings.screens.export.chip.screen', 'screen id') })
+    if (splitBy) chips.push({ token: '{{split_value}}', label: t('settings.screens.export.chip.splitValue') })
+    if (sheetSplitBy) chips.push({ token: '{{sheet_value}}', label: t('settings.screens.export.chip.sheetValue') })
+    chips.push({ token: '{{screen}}', label: t('settings.screens.export.chip.screen') })
     const current = (sheet.name as string | null | undefined) ?? ''
     return (
       <ChipStrip>
-        <ChipLabel>{t('settings.screens.export.insert', 'Insert:')}</ChipLabel>
+        <ChipLabel>{t('settings.screens.export.insert')}</ChipLabel>
         {chips.map((c) => (
           <Chip
             key={c.token}
@@ -276,25 +276,23 @@ export default function ExportEditor({
     <Stack gap={16}>
       {/* ── Workbook-level fields ──────────────────────────────────────────────────────── */}
       <Stack gap={12}>
-        <Field label={t('settings.screens.export.splitBy', 'Split by column')}>
+        <Field label={t('settings.screens.export.splitBy')}>
           <SearchSelect
             value={splitBy}
             options={readColumnOptions}
             onChange={(v) => setProp('split_by', v || null)}
-            anyLabel={t('settings.screens.export.noSplit', 'Single workbook (no split)') ?? ''}
-            placeholder={readColumnOptions.length ? t('common.pick') : t('settings.screens.export.noColumns', 'No columns on the screen — type a column name')}
+            anyLabel={t('settings.screens.export.noSplit') ?? ''}
+            placeholder={readColumnOptions.length ? t('common.pick') : t('settings.screens.export.noColumns')}
             allowCustom
           />
           <Hint>
             {readColumnOptions.length
-              ? t('settings.screens.export.splitByHint',
-                  "Optional. The screen's read query runs first; one xlsx is produced per distinct value of this column. Leave blank for a single xlsx with all sheets.")
-              : t('settings.screens.export.noColumnsHint',
-                  "The screen has no resolved columns. Type the column's name; the runtime matches case-insensitively against the read query's discovered columns.")}
+              ? t('settings.screens.export.splitByHint')
+              : t('settings.screens.export.noColumnsHint')}
           </Hint>
         </Field>
 
-        <Field label={t('settings.screens.export.fileNameTemplate', 'File name template')}>
+        <Field label={t('settings.screens.export.fileNameTemplate')}>
           <Input
             value={fileNameTemplate}
             onChange={(e) => setProp('file_name_template', e.target.value || null)}
@@ -302,12 +300,11 @@ export default function ExportEditor({
           />
           {renderWorkbookChips('file_name_template')}
           <Hint>
-            {t('settings.screens.export.fileNameHint',
-              'Per-xlsx file name. Defaults to ``<screen>_<split_value>.xlsx`` when splitting, ``<screen>.xlsx`` otherwise.')}
+            {t('settings.screens.export.fileNameHint')}
           </Hint>
         </Field>
 
-        <Field label={t('settings.screens.export.archiveName', 'Archive name')}>
+        <Field label={t('settings.screens.export.archiveName')}>
           <Input
             value={archiveName}
             onChange={(e) => setProp('archive_name', e.target.value || null)}
@@ -317,10 +314,8 @@ export default function ExportEditor({
           {splitBy && renderWorkbookChips('archive_name')}
           <Hint>
             {splitBy
-              ? t('settings.screens.export.archiveNameHint',
-                  "Name of the .zip downloaded when multiple workbooks are produced. Defaults to ``<screen>.zip``.")
-              : t('settings.screens.export.archiveNameOnlyOnSplit',
-                  'Only used when ``Split by column`` is set.')}
+              ? t('settings.screens.export.archiveNameHint')
+              : t('settings.screens.export.archiveNameOnlyOnSplit')}
           </Hint>
         </Field>
       </Stack>
@@ -329,17 +324,16 @@ export default function ExportEditor({
       <Stack gap={10}>
         <Row gap={8} style={{ alignItems: 'center', justifyContent: 'space-between' }}>
           <Sub>
-            {t('settings.screens.export.sheetsHint',
-              'Each sheet runs its own query and becomes a tab inside the xlsx. ParamBinds with ``source = "split_value"`` receive the workbook\'s group key.')}
+            {t('settings.screens.export.sheetsHint')}
           </Sub>
           <Button $variant="primary" $size="sm" onClick={addSheet}>
-            <Plus size={13} /> {t('settings.screens.export.addSheet', 'Add sheet')}
+            <Plus size={13} /> {t('settings.screens.export.addSheet')}
           </Button>
         </Row>
 
         {sheets.length === 0 && (
           <Sub style={{ fontStyle: 'italic' }}>
-            {t('settings.screens.export.noSheets', 'No sheets yet. Add at least one to make the export runnable.')}
+            {t('settings.screens.export.noSheets')}
           </Sub>
         )}
 
@@ -354,7 +348,7 @@ export default function ExportEditor({
           // the read query's columns are useful for future per-row context but currently
           // not exposed to the export runtime — leaving them out keeps the suggestion clean.
           const paramSourceOptions: SearchSelectOption[] = [
-            { value: 'split_value', label: t('settings.screens.export.chip.splitValue', "this workbook's group key"), mono: 'split_value' },
+            { value: 'split_value', label: t('settings.screens.export.chip.splitValue'), mono: 'split_value' },
           ]
           // Target query's declared params + scanned :bind_params drive the param autocomplete.
           const paramOptions: SearchSelectOption[] = qMeta
@@ -369,7 +363,7 @@ export default function ExportEditor({
             <SheetCard key={idx}>
               <SheetHeader>
                 <SheetTitle>
-                  {t('settings.screens.export.sheetN', 'Sheet {{n}}', { n: idx + 1 })}
+                  {t('settings.screens.export.sheetN', { n: idx + 1 })}
                   {sheet.name ? <Tag $tone="blue" style={{ marginLeft: 10 }}>{sheet.name as string}</Tag> : null}
                 </SheetTitle>
                 <Button $variant="ghost" $size="sm" onClick={() => void removeSheet(idx)} title={t('common.delete')}>
@@ -378,7 +372,7 @@ export default function ExportEditor({
               </SheetHeader>
 
               <Stack gap={10}>
-                <Field label={t('settings.screens.export.sheetName', 'Sheet name')}>
+                <Field label={t('settings.screens.export.sheetName')}>
                   <Input
                     value={(sheet.name as string | null | undefined) ?? ''}
                     onChange={(e) => patchSheet(idx, { name: e.target.value })}
@@ -386,25 +380,24 @@ export default function ExportEditor({
                   />
                   {renderSheetNameChips(idx, sheet)}
                   <Hint>
-                    {t('settings.screens.export.sheetNameHint',
-                      'Worksheet tab name. Excel allows 31 characters; the exporter truncates + sanitises automatically.')}
+                    {t('settings.screens.export.sheetNameHint')}
                   </Hint>
                 </Field>
 
                 <Row gap={10} style={{ alignItems: 'flex-end' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <Field label={t('settings.screens.export.sheetConnector', 'Connector')}>
+                    <Field label={t('settings.screens.export.sheetConnector')}>
                       <SearchSelect
                         value={sheetConnector}
                         options={sqlConnectorOptions}
                         onChange={(v) => patchSheet(idx, { connector: v || null })}
-                        anyLabel={t('settings.screens.export.sheetConnectorDefault', "Use screen's connector ({{c}})", { c: effectiveConnector }) ?? ''}
+                        anyLabel={t('settings.screens.export.sheetConnectorDefault', { c: effectiveConnector }) ?? ''}
                         placeholder={t('common.pick')}
                       />
                     </Field>
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <Field label={t('settings.screens.export.sheetQuery', 'Query')}>
+                    <Field label={t('settings.screens.export.sheetQuery')}>
                       <Row gap={6} style={{ alignItems: 'center' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <SearchSelect
@@ -420,7 +413,7 @@ export default function ExportEditor({
                             $variant="ghost"
                             $size="sm"
                             onClick={() => setEditQuery({ connector: effConn, queryName: sheetQuery })}
-                            title={t('settings.editQuery.edit', 'Edit query')}
+                            title={t('settings.editQuery.edit')}
                           >
                             <Edit3 size={13} />
                           </Button>
@@ -430,19 +423,18 @@ export default function ExportEditor({
                   </div>
                 </Row>
 
-                <Field label={t('settings.screens.export.sheetSplitBy', 'Sheet split by column')}>
+                <Field label={t('settings.screens.export.sheetSplitBy')}>
                   <Input
                     value={sheetSplitBy}
                     onChange={(e) => patchSheet(idx, { split_by: e.target.value || null })}
-                    placeholder={t('settings.screens.export.sheetSplitByPh', 'Column name (e.g. APPS_NAME)') ?? ''}
+                    placeholder={t('settings.screens.export.sheetSplitByPh') ?? ''}
                   />
                   <Hint>
-                    {t('settings.screens.export.sheetSplitByHint',
-                      "Optional. When set, the query's rows are partitioned by this column into one worksheet per distinct value (v1's ``tbl_sheet``). Reference ``{{sheet_value}}`` in the sheet name for the partition key.")}
+                    {t('settings.screens.export.sheetSplitByHint')}
                   </Hint>
                 </Field>
 
-                <Field label={t('settings.screens.export.paramBinds', 'Parameter bindings')}>
+                <Field label={t('settings.screens.export.paramBinds')}>
                   <ParamBindList
                     value={(sheet.param_binds as ParamBind[] | undefined) ?? []}
                     onChange={(next) => patchSheet(idx, { param_binds: next })}
@@ -450,8 +442,7 @@ export default function ExportEditor({
                     paramOptions={paramOptions}
                   />
                   <Hint>
-                    {t('settings.screens.export.paramBindsHint',
-                      "Bind the workbook's ``split_value`` (or a literal) into the query's ``:placeholder`` params.")}
+                    {t('settings.screens.export.paramBindsHint')}
                   </Hint>
                 </Field>
               </Stack>

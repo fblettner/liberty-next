@@ -53,6 +53,17 @@ class Playbook(BaseModel):
     body: str = Field(min_length=1, description="The procedure, Markdown; the assistant follows it step by step.")
 
 
+class AiLocale(BaseModel):
+    """The starters of one app in one language: what ``l.fr`` carries — the app's starters and
+    groups, and the screens' — each list replacing its English counterpart when present."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    starters: list[str] = Field(default_factory=list)
+    groups: list[StarterGroup] = Field(default_factory=list)
+    screens: dict[str, ScreenAi] = Field(default_factory=dict)
+
+
 class AppAi(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -60,6 +71,21 @@ class AppAi(BaseModel):
     groups: list[StarterGroup] = Field(default_factory=list, description="Starter questions by heading; shown instead of `starters` when set.")
     screens: dict[str, ScreenAi] = Field(default_factory=dict, description="Per-screen starters, keyed by screen id.")
     playbooks: dict[str, Playbook] = Field(default_factory=dict, description="Procedures the assistant can load, keyed by id.")
+    l: dict[str, AiLocale] = Field(default_factory=dict, description="The starters per language (``l.fr``): a list given there replaces the English one for that language.")
+
+    def for_language(self, language: str | None) -> AppAi:
+        """This block with the lists of *language* (``fr``, or ``fr-FR`` → ``fr``) swapped in."""
+        if not language:
+            return self
+        lang = language.lower()
+        loc = self.l.get(lang) or self.l.get(lang.split("-")[0])
+        if loc is None:
+            return self
+        screens = dict(self.screens)
+        for sid, scr in loc.screens.items():
+            base = screens.get(sid, ScreenAi())
+            screens[sid] = ScreenAi(starters=scr.starters or base.starters, groups=scr.groups or base.groups)
+        return self.model_copy(update={"starters": loc.starters or self.starters, "groups": loc.groups or self.groups, "screens": screens})
 
 
 class AiFile(BaseModel):
@@ -67,10 +93,12 @@ class AiFile(BaseModel):
 
     ai: dict[str, AppAi] = Field(default_factory=dict, description="One block per app (the connector name).")
 
-    def starters(self) -> dict[str, list[str]]:
-        """``{app: [...], "app/screen": [...]}`` — empty lists dropped."""
+    def starters(self, language: str | None = None) -> dict[str, list[str]]:
+        """``{app: [...], "app/screen": [...]}`` — empty lists dropped; in *language* when the
+        app ships it."""
         out: dict[str, list[str]] = {}
         for app, block in self.ai.items():
+            block = block.for_language(language)
             if block.starters:
                 out[app] = list(block.starters)
             for sid, scr in block.screens.items():
@@ -78,10 +106,12 @@ class AiFile(BaseModel):
                     out[f"{app}/{sid}"] = list(scr.starters)
         return out
 
-    def starter_groups(self) -> dict[str, list[dict[str, Any]]]:
-        """``{app | "app/screen": [{label, starters}, …]}`` — the grouped starters only."""
+    def starter_groups(self, language: str | None = None) -> dict[str, list[dict[str, Any]]]:
+        """``{app | "app/screen": [{label, starters}, …]}`` — the grouped starters only, in
+        *language* when the app ships it."""
         out: dict[str, list[dict[str, Any]]] = {}
         for app, block in self.ai.items():
+            block = block.for_language(language)
             if block.groups:
                 out[app] = [g.model_dump() for g in block.groups]
             for sid, scr in block.screens.items():
@@ -106,10 +136,10 @@ def load_ai_config(path: Path | str) -> AiFile:
     return parse_ai_config(tomllib.loads(p.read_text(encoding="utf-8")))
 
 
-def merged_starters(bundled: AiFile | None, operator: dict[str, list[str]] | None) -> dict[str, list[str]]:
+def merged_starters(bundled: AiFile | None, operator: dict[str, list[str]] | None, language: str | None = None) -> dict[str, list[str]]:
     """The apps' starters, then the operator's ``[ai] starters`` on top (same key → the
     operator's list wins; an empty operator list removes the key)."""
-    out = bundled.starters() if bundled is not None else {}
+    out = bundled.starters(language) if bundled is not None else {}
     for key, qs in (operator or {}).items():
         if qs:
             out[key] = list(qs)

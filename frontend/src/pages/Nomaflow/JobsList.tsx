@@ -305,19 +305,19 @@ export default function JobsList() {
       let suggested = `${job.id}_copy`
       for (let i = 2; existing.has(suggested); i += 1) suggested = `${job.id}_copy${i}`
       const answer = await modals.prompt({
-        title: t('nomaflow.jobs.duplicateTitle', 'Duplicate job'),
-        message: t('nomaflow.jobs.duplicatePrompt', 'New job id (letters, digits, - or _):'),
+        title: t('nomaflow.jobs.duplicateTitle'),
+        message: t('nomaflow.jobs.duplicatePrompt'),
         defaultValue: suggested,
         placeholder: suggested,
       })
       const newId = answer?.trim()
       if (!newId) return  // cancelled or empty
       if (!/^[A-Za-z0-9_-]+$/.test(newId)) {
-        setError(t('nomaflow.jobs.badId', 'Job id may only contain letters, digits, - and _.'))
+        setError(t('nomaflow.jobs.badId'))
         return
       }
       if (existing.has(newId)) {
-        setError(t('nomaflow.jobs.idExists', { defaultValue: 'A job named "{{id}}" already exists.', id: newId }))
+        setError(t('nomaflow.jobs.idExists', { id: newId }))
         return
       }
       setBusyId(job.id)
@@ -339,9 +339,8 @@ export default function JobsList() {
   // the entry deletes it. Run history (nomaflow_job_runs) is retention-managed, not touched.
   const deleteJob = useCallback(async (job: JobSummary) => {
     const ok = await modals.confirm({
-      title: t('nomaflow.jobs.deleteTitle', 'Delete job'),
+      title: t('nomaflow.jobs.deleteTitle'),
       message: t('nomaflow.jobs.deletePrompt', {
-        defaultValue: 'Delete "{{id}}" from jobs.toml? Its schedule and config are removed (past run history is kept).',
         id: job.id,
       }),
       variant: 'danger',
@@ -410,7 +409,7 @@ export default function JobsList() {
           active. Hidden when no tags are declared anywhere (no value to add). */}
       {allTags.length > 0 && (
         <TagFilterRow>
-          <TagFilterLabel>{t('nomaflow.jobs.filterByTags', 'Filter:')}</TagFilterLabel>
+          <TagFilterLabel>{t('nomaflow.jobs.filterByTags')}</TagFilterLabel>
           {allTags.map((tg) => (
             <TagFilterChip
               key={tg}
@@ -423,7 +422,7 @@ export default function JobsList() {
           ))}
           {selectedTags.size > 0 && (
             <TagFilterClear type="button" onClick={clearTagFilters}>
-              {t('nomaflow.jobs.clearFilters', 'Clear')}
+              {t('nomaflow.jobs.clearFilters')}
             </TagFilterClear>
           )}
         </TagFilterRow>
@@ -483,7 +482,6 @@ export default function JobsList() {
                     >
                       <Copy size={13} />
                       {t('nomaflow.jobs.presetSchedules', {
-                        defaultValue: '{{count}} preset schedule(s)',
                         count: job.preset_schedules.length,
                       })}
                     </Meta>
@@ -525,19 +523,19 @@ export default function JobsList() {
                   <Button
                     $variant="ghost" $size="sm" disabled={busy}
                     onClick={() => duplicateJob(job)}
-                    title={t('nomaflow.jobs.duplicate', 'Duplicate this job (clones config to a new id; disabled + unscheduled).')}
+                    title={t('nomaflow.jobs.duplicate')}
                   >
                     {busy ? <SpinnerRing size={13} thickness={2} /> : <Copy size={13} />}
-                    {t('nomaflow.jobs.duplicateBtn', 'Duplicate')}
+                    {t('nomaflow.jobs.duplicateBtn')}
                   </Button>
                   {/* Delete — confirm, then rewrite jobs.toml without this entry + reload.
                       Run history is retention-managed and left intact. */}
                   <Button
                     $variant="ghost" $size="sm" disabled={busy}
                     onClick={() => deleteJob(job)}
-                    title={t('nomaflow.jobs.delete', 'Delete this job from jobs.toml (config only; run history kept).')}
+                    title={t('nomaflow.jobs.delete')}
                   >
-                    <Trash2 size={13} /> {t('common.delete', 'Delete')}
+                    <Trash2 size={13} /> {t('common.delete')}
                   </Button>
                   {/* Export — minimal ZIP carrying just this job's [[jobs]] entry + a
                       MANIFEST.md. Referenced queries / connectors are NOT bundled (the
@@ -559,9 +557,9 @@ export default function JobsList() {
                       document.body.appendChild(a); a.click(); a.remove()
                       URL.revokeObjectURL(url)
                     }}
-                    title={t('nomaflow.jobs.export', 'Export this job (ZIP with jobs.toml + MANIFEST.md). Queries / connectors not bundled.')}
+                    title={t('nomaflow.jobs.export')}
                   >
-                    <Download size={13} /> {t('nomaflow.jobs.exportBtn', 'Export')}
+                    <Download size={13} /> {t('nomaflow.jobs.exportBtn')}
                   </Button>
                 </Actions>
               </JobCard>
@@ -764,9 +762,9 @@ function RunWithParamsModal({
   }
   const handleSavePreset = async () => {
     const rawName = await modals.prompt({
-      title: t('nomaflow.runParams.savePresetTitle', 'Save preset'),
-      message: t('nomaflow.runParams.savePresetPrompt', 'Preset name:'),
-      placeholder: t('nomaflow.runParams.savePresetPlaceholder', 'e.g. nightly-batch') as string,
+      title: t('nomaflow.runParams.savePresetTitle'),
+      message: t('nomaflow.runParams.savePresetPrompt'),
+      placeholder: t('nomaflow.runParams.savePresetPlaceholder') as string,
       submitLabel: t('common.save'),
     })
     const name = rawName?.trim()
@@ -864,7 +862,7 @@ function RunWithParamsModal({
             value={v == null ? '' : String(v)}
             options={connectorOptions}
             onChange={setter}
-            placeholder={t('nomaflow.runParams.pickConnector', 'Pick a connector…')}
+            placeholder={t('nomaflow.runParams.pickConnector')}
           />
         ) : typeof v === 'boolean' ? (
           <Checkbox checked={v} onChange={(checked) => setter(checked)} />
@@ -888,13 +886,12 @@ function RunWithParamsModal({
     <Overlay onClick={onCancel}>
       <Modal style={{ width: 'min(640px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>
-          {t('nomaflow.runParams.title', 'Run with parameters')} ·{' '}
+          {t('nomaflow.runParams.title')} ·{' '}
           <Mono style={{ color: colors.text.muted, fontWeight: 400 }}>{job.id}</Mono>
         </ModalHeader>
         <ModalBody>
           <div style={{ color: colors.text.muted, fontSize: fontSize.sm }}>
-            {t('nomaflow.runParams.hint',
-              'Values apply to this fire only — jobs.toml stays unchanged. Leave a field as-is to use its saved value.')}
+            {t('nomaflow.runParams.hint')}
           </div>
           {/* Presets — named snapshots saved by operators. Always shown (even
               when the job has none yet) so the "Save as preset…" button is
@@ -903,10 +900,10 @@ function RunWithParamsModal({
               values onto the form (doesn't replace untouched fields). */}
           <ParamSection>
               <ParamSectionTitle>
-                <span>{t('nomaflow.runParams.presets', 'Preset')}</span>
+                <span>{t('nomaflow.runParams.presets')}</span>
               </ParamSectionTitle>
               <ParamRow>
-                <ParamKey>{t('nomaflow.runParams.presetPick', 'Apply')}</ParamKey>
+                <ParamKey>{t('nomaflow.runParams.presetPick')}</ParamKey>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}>
                   <Select
                     value={selectedPreset}
@@ -916,8 +913,8 @@ function RunWithParamsModal({
                   >
                     <option value="">
                       {presets.length === 0
-                        ? t('nomaflow.runParams.noPresets', '(no saved presets — Save current as preset to add one)')
-                        : t('nomaflow.runParams.pickPreset', '(pick a preset…)')}
+                        ? t('nomaflow.runParams.noPresets')
+                        : t('nomaflow.runParams.pickPreset')}
                     </option>
                     {presets.map((p) => (
                       <option key={p.name} value={p.name}>{p.name}</option>
@@ -928,10 +925,10 @@ function RunWithParamsModal({
                     onClick={handleSavePreset}
                     disabled={savePresetBusy}
                     style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
-                    title={t('nomaflow.runParams.savePresetTitle', 'Save the current modal state as a named preset on this job (writes to jobs.toml).')}
+                    title={t('nomaflow.runParams.savePresetTitle')}
                   >
                     {savePresetBusy ? <SpinnerRing size={12} thickness={2} /> : null}
-                    {t('nomaflow.runParams.savePresetBtn', 'Save as preset…')}
+                    {t('nomaflow.runParams.savePresetBtn')}
                   </Button>
                 </div>
               </ParamRow>
@@ -945,7 +942,7 @@ function RunWithParamsModal({
               into the log (useful for troubleshooting a specific run). */}
           <ParamSection>
             <ParamSectionTitle>
-              <span>{t('nomaflow.runParams.logLevel', 'Log level')}</span>
+              <span>{t('nomaflow.runParams.logLevel')}</span>
             </ParamSectionTitle>
             <ParamRow>
               <ParamKey>log_level</ParamKey>
@@ -954,13 +951,13 @@ function RunWithParamsModal({
                 onChange={(e) => setLogLevel(e.target.value as 'WARNING' | 'INFO' | 'DEBUG')}
               >
                 <option value="WARNING">
-                  {t('nomaflow.runParams.logLevelWarning', 'WARNING — warnings + errors only')}
+                  {t('nomaflow.runParams.logLevelWarning')}
                 </option>
                 <option value="INFO">
-                  {t('nomaflow.runParams.logLevelInfo', 'INFO — row counts + progress markers')}
+                  {t('nomaflow.runParams.logLevelInfo')}
                 </option>
                 <option value="DEBUG">
-                  {t('nomaflow.runParams.logLevelDebug', 'DEBUG — full SQL of every query')}
+                  {t('nomaflow.runParams.logLevelDebug')}
                 </option>
               </Select>
             </ParamRow>
@@ -970,7 +967,7 @@ function RunWithParamsModal({
           {Object.keys(paramValues).length > 0 && (
             <ParamSection>
               <ParamSectionTitle>
-                <span>{t('nomaflow.runParams.jobParams', 'Shared params (apply to every step)')}</span>
+                <span>{t('nomaflow.runParams.jobParams')}</span>
               </ParamSectionTitle>
               {Object.entries(paramValues).map(([k, v]) =>
                 renderKwargRow(k, v, (nv) => setParamKey(k, nv)),
@@ -986,9 +983,9 @@ function RunWithParamsModal({
           <div>
             <StepsListHeader>
               <StepsListTitle>
-                <span>{t('nomaflow.runParams.steps', 'Steps')}</span>
+                <span>{t('nomaflow.runParams.steps')}</span>
                 <StepsListCounter>
-                  {t('nomaflow.runParams.stepsCount', '{{enabled}} / {{total}} enabled',
+                  {t('nomaflow.runParams.stepsCount',
                     { enabled: enabledCount, total: steps.length })}
                 </StepsListCounter>
               </StepsListTitle>
@@ -997,14 +994,14 @@ function RunWithParamsModal({
                   onClick={selectAllSteps}
                   disabled={enabledCount === steps.length}
                 >
-                  {t('nomaflow.runParams.selectAll', 'All')}
+                  {t('nomaflow.runParams.selectAll')}
                 </LinkLikeButton>
                 <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>·</span>
                 <LinkLikeButton
                   onClick={selectNoneSteps}
                   disabled={enabledCount === 0}
                 >
-                  {t('nomaflow.runParams.selectNone', 'None')}
+                  {t('nomaflow.runParams.selectNone')}
                 </LinkLikeButton>
               </StepsListActions>
             </StepsListHeader>
@@ -1037,8 +1034,8 @@ function RunWithParamsModal({
                         disabled={!expandable}
                         title={expandable
                           ? (isExpanded
-                              ? t('nomaflow.runParams.collapseKwargs', 'Collapse parameters')
-                              : t('nomaflow.runParams.expandKwargs', 'Edit parameters'))
+                              ? t('nomaflow.runParams.collapseKwargs')
+                              : t('nomaflow.runParams.expandKwargs'))
                           : ''}
                       >
                         {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -1054,14 +1051,14 @@ function RunWithParamsModal({
                     {isFileLoad && enabled && (
                       <StepKwargsPanel>
                         <ParamRow>
-                          <ParamKey>{t('nomaflow.runParams.file', 'file')}</ParamKey>
+                          <ParamKey>{t('nomaflow.runParams.file')}</ParamKey>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
                             <FileInput value={stepFiles[s.name] ?? null} accept=".xlsx,.xlsm,.csv,.txt,.tsv"
                               onChange={(file) => setStepFiles((prev) => ({ ...prev, [s.name]: file }))} />
                             <span style={{ fontSize: fontSize.micro, color: colors.text.muted }}>
                               {configuredSource
-                                ? t('nomaflow.runParams.fileHint', 'Leave empty to load {{source}}', { source: configuredSource })
-                                : t('nomaflow.runParams.fileRequired', 'This step has no path or watched folder: pick a file.')}
+                                ? t('nomaflow.runParams.fileHint', { source: configuredSource })
+                                : t('nomaflow.runParams.fileRequired')}
                             </span>
                           </div>
                         </ParamRow>
@@ -1076,11 +1073,11 @@ function RunWithParamsModal({
         <ModalFooter>
           {uploadError && <Banner $tone="error" style={{ flex: 1 }}>{uploadError}</Banner>}
           <Button $variant="ghost" onClick={onCancel} disabled={busy}>
-            {t('common.cancel', 'Cancel')}
+            {t('common.cancel')}
           </Button>
           <Button $variant="primary" onClick={submit} disabled={busy}>
             {busy ? <SpinnerRing size={13} thickness={2} /> : <Play size={13} />}{' '}
-            {t('nomaflow.runParams.run', 'Run')}
+            {t('nomaflow.runParams.run')}
           </Button>
         </ModalFooter>
       </Modal>

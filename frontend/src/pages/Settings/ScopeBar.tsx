@@ -52,16 +52,16 @@ export function ScopeBar({
   return (
     <Bar>
       {leading}
-      <Label>{label ?? t('settings.scope', 'Scope')}:</Label>
+      <Label>{label ?? t('settings.scope')}:</Label>
       {scopes.length === 0
-        ? <Empty>{emptyHint ?? t('settings.scopeEmpty', '—')}</Empty>
+        ? <Empty>{emptyHint ?? t('settings.scopeEmpty')}</Empty>
         : scopes.map((s) => (
             <Chip key={s.value || '_'} type="button" $active={s.value === value} onClick={() => onChange(s.value)}>{s.label}</Chip>
           ))}
       {onAddScope && (
         <Chip type="button" disabled={addScopeDisabled} title={addScopeTitle}
           onClick={() => { if (!addScopeDisabled) onAddScope() }}>
-          <Plus size={12} /> {t('settings.addScope', 'Add scope')}
+          <Plus size={12} /> {t('settings.addScope')}
         </Chip>
       )}
       {right && <Right>{right}</Right>}

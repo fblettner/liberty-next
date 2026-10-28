@@ -313,7 +313,7 @@ export function SearchSelect({
           ref={searchRef}
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder={allowCustom ? t('common.searchOrType', 'Search or type a value…') : t('table.search')}
+          placeholder={allowCustom ? t('common.searchOrType') : t('table.search')}
           onKeyDown={(e) => { if (e.key === 'Enter' && allowCustom) { e.preventDefault(); commitCustom() } }}
         />
       </SearchRow>
@@ -359,11 +359,11 @@ export function SearchSelect({
             )
           })}
         </div>
-        {filtered.length === 0 && <Empty>{t('table.noMatches', 'No matches')}</Empty>}
+        {filtered.length === 0 && <Empty>{t('table.noMatches')}</Empty>}
       </List>
       {showCreateRow && (
         <CreateRow type="button" onClick={commitCustom}>
-          {t('common.useCustom', 'Use')} <span className="mono">{q.trim()}</span>
+          {t('common.useCustom')} <span className="mono">{q.trim()}</span>
         </CreateRow>
       )}
     </Panel>

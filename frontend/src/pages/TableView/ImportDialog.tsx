@@ -108,7 +108,7 @@ export function ImportDialog({
   const takeFile = useCallback(async (f: File) => {
     resetReport(); setFile(f); setRows(null)
     const parsed = await parseFile(f)
-    if (!parsed || parsed.length === 0) { setError(t('import.noRows', 'No rows matched this screen’s columns.')); setFile(null); return }
+    if (!parsed || parsed.length === 0) { setError(t('import.noRows')); setFile(null); return }
     setRows(parsed)
   }, [parseFile, resetReport, t])
 
@@ -129,7 +129,7 @@ export function ImportDialog({
     try {
       // Pass 1 — screen rules (client-side, instant). Reuses the grid's own per-row resolution so
       // bad lookup/enum/boolean values are caught (the DB can't tell — JDE CHAR accepts anything).
-      setProgressLabel(t('import.checkingRules', 'Checking screen rules…'))
+      setProgressLabel(t('import.checkingRules'))
       const ruleErr = new Map<number, string>()
       for (let i = 0; i < rows.length; i++) {
         const e = validateRow(rows[i])
@@ -137,7 +137,7 @@ export function ImportDialog({
       }
       setProgress(0.3)
       // Pass 2 — DB dry-run for the rows that passed the rule check (the real save path, rolled back).
-      setProgressLabel(t('import.checkingDb', 'Checking against the database…'))
+      setProgressLabel(t('import.checkingDb'))
       const dbIdx = rows.map((_, i) => i).filter((i) => !ruleErr.has(i))
       const dbRes = new Map<number, RowResult>()
       for (let s = 0; s < dbIdx.length; s += CHUNK) {
@@ -163,7 +163,7 @@ export function ImportDialog({
     if (!report || !rows) return
     const validIdx = report.results.filter((r) => r.ok).map((r) => r.index)
     if (validIdx.length === 0) return
-    setPhase('committing'); setError(null); setProgress(0); setProgressLabel(t('import.saving', 'Saving…'))
+    setPhase('committing'); setError(null); setProgress(0); setProgressLabel(t('import.saving'))
     try {
       let savedOk = 0
       const failed: RowResult[] = []
@@ -185,9 +185,9 @@ export function ImportDialog({
 
   const modeOpts = useMemo(() => {
     const o: { value: ImportMode; label: string }[] = []
-    if (insertQuery && updateQuery) o.push({ value: 'upsert', label: t('import.modeUpsert', 'Update or insert') })
-    if (insertQuery) o.push({ value: 'insert', label: t('import.modeInsert', 'Insert only') })
-    if (updateQuery) o.push({ value: 'update', label: t('import.modeUpdate', 'Update only') })
+    if (insertQuery && updateQuery) o.push({ value: 'upsert', label: t('import.modeUpsert') })
+    if (insertQuery) o.push({ value: 'insert', label: t('import.modeInsert') })
+    if (updateQuery) o.push({ value: 'update', label: t('import.modeUpdate') })
     return o
   }, [insertQuery, updateQuery, t])
 
@@ -204,11 +204,11 @@ export function ImportDialog({
   return createPortal(
     <Overlay onClick={onClose} style={{ zIndex: 2000 }}>
       <Modal style={{ width: 720, maxWidth: '94vw' }} onClick={(e) => e.stopPropagation()}>
-        <ModalHeader>{t('import.title', 'Import from Excel')}</ModalHeader>
+        <ModalHeader>{t('import.title')}</ModalHeader>
         <ModalBody>
           {modeOpts.length > 1 && (
             <>
-              <Label>{t('import.mode', 'Existing rows')}</Label>
+              <Label>{t('import.mode')}</Label>
               <ModeRow>
                 {modeOpts.map((m) => (
                   <ModeBtn key={m.value} $active={mode === m.value} onClick={() => pickMode(m.value)} disabled={busy}>
@@ -228,8 +228,8 @@ export function ImportDialog({
           >
             <Upload size={20} />
             {file
-              ? <span><span className="file">{file.name}</span>{rows ? ` · ${t('import.total', { count: rows.length, defaultValue: '{{count}} rows' })}` : ''}</span>
-              : <span>{t('import.drop', 'Drop a .xlsx / .csv here, or click to browse')}</span>}
+              ? <span><span className="file">{file.name}</span>{rows ? ` · ${t('import.total', { count: rows.length })}` : ''}</span>
+              : <span>{t('import.drop')}</span>}
             <input
               ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }}
               onChange={(e) => { const f = e.target.files?.[0]; if (f) void takeFile(f); e.target.value = '' }}
@@ -237,7 +237,7 @@ export function ImportDialog({
           </Drop>
 
           {error && <Banner $tone="error">{error}</Banner>}
-          {committedCount != null && <Banner $tone="ok">{t('import.committedSome', { count: committedCount, defaultValue: '{{count}} rows saved.' })}</Banner>}
+          {committedCount != null && <Banner $tone="ok">{t('import.committedSome', { count: committedCount })}</Banner>}
 
           {busy && (
             <Progress>
@@ -249,17 +249,17 @@ export function ImportDialog({
           {report && !busy && (
             <>
               <Summary>
-                <span style={{ color: colors.text.secondary }}>{t('import.total', { count: report.results.length, defaultValue: '{{count}} rows' })}</span>
-                <Pill $tone="ok">✓ {t('import.valid', { count: validCount, defaultValue: '{{count}} valid' })}</Pill>
-                {report.invalid > 0 && <Pill $tone="bad">✕ {t('import.invalid', { count: report.invalid, defaultValue: '{{count}} invalid' })}</Pill>}
+                <span style={{ color: colors.text.secondary }}>{t('import.total', { count: report.results.length })}</span>
+                <Pill $tone="ok">✓ {t('import.valid', { count: validCount })}</Pill>
+                {report.invalid > 0 && <Pill $tone="bad">✕ {t('import.invalid', { count: report.invalid })}</Pill>}
               </Summary>
               {invalidResults.length > 0 && (
                 <ErrList>
                   {invalidResults.map((r) => (
                     <ErrItem key={r.index}>
                       <ErrHead>
-                        <span className="label"><b>{t('import.rowNum', { n: r.index + 1, defaultValue: 'Row {{n}}' })}</b> · {rowLabel(r.index)}</span>
-                        <span className="action">{r.action ?? t('import.ruleError', 'rule')}</span>
+                        <span className="label"><b>{t('import.rowNum', { n: r.index + 1 })}</b> · {rowLabel(r.index)}</span>
+                        <span className="action">{r.action ?? t('import.ruleError')}</span>
                       </ErrHead>
                       <ErrMsg>{r.error}</ErrMsg>
                     </ErrItem>
@@ -276,15 +276,15 @@ export function ImportDialog({
             onClick={() => (committedCount != null ? onCommitted(committedCount) : onClose())}
             disabled={busy}
           >
-            {committedCount != null ? t('common.close', 'Close') : t('common.cancel')}
+            {committedCount != null ? t('common.close') : t('common.cancel')}
           </Button>
           {report && committedCount == null ? (
             <Button $size="sm" $variant="primary" onClick={commit} disabled={busy || validCount === 0}>
-              {t('import.saveValid', { count: validCount, defaultValue: 'Save {{count}} valid rows' })}
+              {t('import.saveValid', { count: validCount })}
             </Button>
           ) : (
             <Button $size="sm" $variant="primary" onClick={check} disabled={busy || !rows || committedCount != null}>
-              {t('import.check', 'Check')}
+              {t('import.check')}
             </Button>
           )}
         </ModalFooter>

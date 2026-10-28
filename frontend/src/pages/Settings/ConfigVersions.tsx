@@ -234,7 +234,7 @@ export default function ConfigVersions() {
     setConfirmV(null); setBusy(true); setMsg(null)
     try {
       await api.post(`/admin/config/versions/${v.id}/restore`)
-      setMsg({ tone: 'ok', text: t('versions.restored', { file: v.file, v: v.version, defaultValue: 'Restored {{file}} to v{{v}} and reloaded.' }) })
+      setMsg({ tone: 'ok', text: t('versions.restored', { file: v.file, v: v.version }) })
       setOpenId(null); setFileDiffs({}); await load()
     } catch (e) { setMsg({ tone: 'err', text: e instanceof Error ? e.message : String(e) }) } finally { setBusy(false) }
   }, [t, load])
@@ -242,7 +242,7 @@ export default function ConfigVersions() {
     setConfirmB(null); setBusy(true); setMsg(null)
     try {
       await api.post(`/admin/config/screen-versions/${v.id}/restore`)
-      setMsg({ tone: 'ok', text: t('versions.bundleRestored', { app: b.app, screen: b.screen, v: v.version, defaultValue: 'Restored {{app}}.{{screen}} (+ dependencies) to v{{v}} and reloaded.' }) })
+      setMsg({ tone: 'ok', text: t('versions.bundleRestored', { app: b.app, screen: b.screen, v: v.version }) })
       setOpenId(null); await loadBundles()
     } catch (e) { setMsg({ tone: 'err', text: e instanceof Error ? e.message : String(e) }) } finally { setBusy(false) }
   }, [t, loadBundles])
@@ -253,7 +253,7 @@ export default function ConfigVersions() {
       const base = target.kind === 'bundle' ? '/admin/config/screen-versions' : '/admin/config/versions'
       await api.del(`${base}/${target.v.id}`)
       if (openId === target.v.id) setOpenId(null)
-      setMsg({ tone: 'ok', text: t('versions.deleted', { v: target.v.version, defaultValue: 'Deleted v{{v}}.' }) })
+      setMsg({ tone: 'ok', text: t('versions.deleted', { v: target.v.version }) })
       if (target.kind === 'bundle') await loadBundles(); else await load()
     } catch (e) { setMsg({ tone: 'err', text: e instanceof Error ? e.message : String(e) }) } finally { setBusy(false) }
   }, [t, load, loadBundles, openId])
@@ -276,15 +276,15 @@ export default function ConfigVersions() {
           <Acts>
             {kind === 'file' ? (
               <>
-                <Button $size="sm" $variant="ghost" onClick={() => download(v)} title={t('versions.download', 'Download')}><Download size={13} /></Button>
-                <Button $size="sm" $variant="ghost" onClick={() => setConfirmV(v)} disabled={busy} title={t('versions.restore', 'Restore')}><RotateCcw size={13} /></Button>
-                <Button $size="sm" $variant="ghost" onClick={() => setConfirmDel({ kind: 'file', v })} disabled={busy} title={t('versions.delete', 'Delete this version')}><Trash2 size={13} /></Button>
+                <Button $size="sm" $variant="ghost" onClick={() => download(v)} title={t('versions.download')}><Download size={13} /></Button>
+                <Button $size="sm" $variant="ghost" onClick={() => setConfirmV(v)} disabled={busy} title={t('versions.restore')}><RotateCcw size={13} /></Button>
+                <Button $size="sm" $variant="ghost" onClick={() => setConfirmDel({ kind: 'file', v })} disabled={busy} title={t('versions.delete')}><Trash2 size={13} /></Button>
               </>
             ) : (
               <>
-                <Button $size="sm" $variant="ghost" onClick={() => b && downloadBundle(b, v)} title={t('versions.downloadBundle', 'Download bundle (.zip)')}><Download size={13} /></Button>
-                <Button $size="sm" $variant="ghost" onClick={() => b && setConfirmB({ bundle: b, v })} disabled={busy} title={t('versions.restoreBundle', 'Restore screen + dependencies')}><RotateCcw size={13} /></Button>
-                <Button $size="sm" $variant="ghost" onClick={() => b && setConfirmDel({ kind: 'bundle', v, b })} disabled={busy} title={t('versions.delete', 'Delete this version')}><Trash2 size={13} /></Button>
+                <Button $size="sm" $variant="ghost" onClick={() => b && downloadBundle(b, v)} title={t('versions.downloadBundle')}><Download size={13} /></Button>
+                <Button $size="sm" $variant="ghost" onClick={() => b && setConfirmB({ bundle: b, v })} disabled={busy} title={t('versions.restoreBundle')}><RotateCcw size={13} /></Button>
+                <Button $size="sm" $variant="ghost" onClick={() => b && setConfirmDel({ kind: 'bundle', v, b })} disabled={busy} title={t('versions.delete')}><Trash2 size={13} /></Button>
               </>
             )}
           </Acts>
@@ -298,7 +298,7 @@ export default function ConfigVersions() {
                 <>
                   <DiffBar>
                     <GitCompare size={13} />
-                    <span><span className="l">v{v.version}</span> → <span className="r">{t('versions.live', 'live')}</span></span>
+                    <span><span className="l">v{v.version}</span> → <span className="r">{t('versions.live')}</span></span>
                   </DiffBar>
                   <DiffEditor
                     height="48vh" language="ini" original={d.left} modified={d.right}
@@ -312,7 +312,7 @@ export default function ConfigVersions() {
               if (c === 'loading' || c === undefined) return <SpinnerRing />
               const m = c.manifest
               const groups = KIND_ORDER.filter((k) => (m.by_kind[k]?.length ?? 0) > 0)
-              if (groups.length === 0 && (m.missing?.length ?? 0) === 0) return <Muted>{t('versions.bundleNoContents', 'No content recorded for this version.')}</Muted>
+              if (groups.length === 0 && (m.missing?.length ?? 0) === 0) return <Muted>{t('versions.bundleNoContents')}</Muted>
               return (
                 <Tree>
                   {groups.map((kindKey) => (
@@ -328,7 +328,7 @@ export default function ConfigVersions() {
                   ))}
                   {(m.missing?.length ?? 0) > 0 && (
                     <Group>
-                      <GroupHead style={{ color: colors.red.main }}>{t('versions.bundleMissing', 'Missing references')} · {m.missing.length}</GroupHead>
+                      <GroupHead style={{ color: colors.red.main }}>{t('versions.bundleMissing')} · {m.missing.length}</GroupHead>
                       {m.missing.map((mm, i) => (
                         <DepRow key={`miss:${mm.name}:${i}`}>
                           <span className="nm" style={{ color: colors.red.main }}>{mm.name}</span>
@@ -351,26 +351,26 @@ export default function ConfigVersions() {
       {msg && <Banner $tone={msg.tone === 'ok' ? 'ok' : 'error'}>{msg.text}</Banner>}
       <Seg>
         <SegBtn $active={mode === 'files'} onClick={() => { setMode('files'); setOpenId(null) }}>
-          <FileText size={13} /> {t('versions.modeFiles', 'Files')}
+          <FileText size={13} /> {t('versions.modeFiles')}
         </SegBtn>
         <SegBtn $active={mode === 'screens'} onClick={() => { setMode('screens'); setOpenId(null) }}>
-          <LayoutGrid size={13} /> {t('versions.modeScreens', 'Screens')}
+          <LayoutGrid size={13} /> {t('versions.modeScreens')}
         </SegBtn>
         <SegBtn $active={mode === 'upgrades'} onClick={() => { setMode('upgrades'); setOpenId(null) }}>
-          <ArrowUpCircle size={13} /> {t('versions.modeUpgrades', 'Upgrades')}
+          <ArrowUpCircle size={13} /> {t('versions.modeUpgrades')}
         </SegBtn>
       </Seg>
 
       {mode === 'upgrades' ? (
         upgrades === null ? <SpinnerRing /> : upgrades.length === 0 ? (
-          <Muted>{t('versions.upgradesEmpty', 'No upgrade history yet — an entry is recorded each time the application version changes.')}</Muted>
+          <Muted>{t('versions.upgradesEmpty')}</Muted>
         ) : (() => {
           // framework / apps = the version bumps the server records at startup; stack = a `liberty
           // upgrade|rollback` run (with its report); <app>-schema = `liberty-admin migrate`.
-          const compLabel = (c: string) => c === 'apps' ? t('versions.compApps', 'Apps')
-            : c === 'framework' ? t('versions.compFramework', 'Framework')
-            : c === 'stack' ? t('versions.compStack', 'Stack')
-            : c.endsWith('-schema') ? t('versions.compSchema', '{{app}} schema', { app: c.slice(0, -'-schema'.length) })
+          const compLabel = (c: string) => c === 'apps' ? t('versions.compApps')
+            : c === 'framework' ? t('versions.compFramework')
+            : c === 'stack' ? t('versions.compStack')
+            : c.endsWith('-schema') ? t('versions.compSchema', { app: c.slice(0, -'-schema'.length) })
             : c
           const u = upgrades.find((x) => x.id === selUpgrade) ?? upgrades[0]
           const section = u ? releaseSection(releaseByComp[u.component] ?? '', u.to_version) : ''
@@ -399,11 +399,11 @@ export default function ConfigVersions() {
                     <PanelBody style={{ padding: '12px 14px' }}>
                       {u.report ? (
                         report === undefined ? <SpinnerRing />
-                          : report === null ? <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('versions.reportMissing', 'The report file is missing.')}</span>
+                          : report === null ? <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('versions.reportMissing')}</span>
                           : <Markdown>{report.markdown}</Markdown>
                       ) : u.summary && !section ? (
                         <span style={{ fontSize: fontSize.sm }}>{u.summary}</span>
-                      ) : section ? <Markdown>{section}</Markdown> : <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('versions.noNotes', 'No release notes for {{v}}.', { v: u.to_version })}</span>}
+                      ) : section ? <Markdown>{section}</Markdown> : <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('versions.noNotes', { v: u.to_version })}</span>}
                     </PanelBody>
                   </Panel>
                 </Stack>
@@ -413,7 +413,7 @@ export default function ConfigVersions() {
         })()
       ) : mode === 'screens' ? (
         bundles === null ? <SpinnerRing /> : bundles.length === 0 ? (
-          <Muted>{t('versions.bundleEmpty', 'No screen history yet — a screen + its dependencies are snapshotted the next time you save it in the Designer.')}</Muted>
+          <Muted>{t('versions.bundleEmpty')}</Muted>
         ) : (
           <Wrap>
             <Rail>
@@ -429,7 +429,7 @@ export default function ConfigVersions() {
           </Wrap>
         )
       ) : files.length === 0 ? (
-        <Muted>{t('versions.empty', 'No config history yet — versions are captured the next time you save a config file.')}</Muted>
+        <Muted>{t('versions.empty')}</Muted>
       ) : (
         <Wrap>
           <Rail>
@@ -447,18 +447,18 @@ export default function ConfigVersions() {
 
       {confirmV && (
         <ConfirmModal
-          title={t('versions.restoreTitle', 'Restore config version')}
-          message={t('versions.restoreMsg', { file: confirmV.file, v: confirmV.version, defaultValue: 'Write {{file}} back to v{{v}} and reload? The current file is snapshotted first, so this is undoable.' })}
-          confirmLabel={t('versions.restore', 'Restore')}
+          title={t('versions.restoreTitle')}
+          message={t('versions.restoreMsg', { file: confirmV.file, v: confirmV.version })}
+          confirmLabel={t('versions.restore')}
           onConfirm={() => restore(confirmV)}
           onCancel={() => setConfirmV(null)}
         />
       )}
       {confirmB && (
         <ConfirmModal
-          title={t('versions.restoreBundleTitle', 'Restore screen + dependencies')}
-          message={t('versions.restoreBundleMsg', { app: confirmB.bundle.app, screen: confirmB.bundle.screen, v: confirmB.v.version, defaultValue: 'Re-apply {{app}}.{{screen}} and its captured dependencies at v{{v}}? All config is snapshotted first (undoable) and entities you marked override = true are preserved.' })}
-          confirmLabel={t('versions.restore', 'Restore')}
+          title={t('versions.restoreBundleTitle')}
+          message={t('versions.restoreBundleMsg', { app: confirmB.bundle.app, screen: confirmB.bundle.screen, v: confirmB.v.version })}
+          confirmLabel={t('versions.restore')}
           onConfirm={() => restoreBundle(confirmB.bundle, confirmB.v)}
           onCancel={() => setConfirmB(null)}
         />
@@ -466,11 +466,11 @@ export default function ConfigVersions() {
       {confirmDel && (
         <ConfirmModal
           variant="danger"
-          title={t('versions.deleteTitle', 'Delete version')}
+          title={t('versions.deleteTitle')}
           message={confirmDel.kind === 'bundle'
-            ? t('versions.deleteBundleMsg', { app: confirmDel.b?.app, screen: confirmDel.b?.screen, v: confirmDel.v.version, defaultValue: 'Permanently delete the {{app}}.{{screen}} bundle v{{v}}? This removes the snapshot for good — it cannot be restored afterwards.' })
-            : t('versions.deleteMsg', { file: confirmDel.v.file, v: confirmDel.v.version, defaultValue: 'Permanently delete {{file}} v{{v}}? This removes the snapshot for good — it cannot be restored afterwards. The live file is untouched.' })}
-          confirmLabel={t('versions.delete', 'Delete')}
+            ? t('versions.deleteBundleMsg', { app: confirmDel.b?.app, screen: confirmDel.b?.screen, v: confirmDel.v.version })
+            : t('versions.deleteMsg', { file: confirmDel.v.file, v: confirmDel.v.version })}
+          confirmLabel={t('versions.delete')}
           onConfirm={() => deleteVersion({ kind: confirmDel.kind, v: confirmDel.v })}
           onCancel={() => setConfirmDel(null)}
         />

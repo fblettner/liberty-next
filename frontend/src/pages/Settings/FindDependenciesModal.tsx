@@ -215,18 +215,18 @@ export function FindDependenciesModal({
 
   const titleEntity = seeds.length === 1
     ? (seeds[0].label ?? `${seeds[0].kind} ${seeds[0].name}${seeds[0].scope && seeds[0].scope !== 'shared' ? ` (${seeds[0].scope})` : ''}`)
-    : t('findDeps.titleMulti', '{{count}} seeds', { count: seeds.length })
+    : t('findDeps.titleMulti', { count: seeds.length })
 
   return (
     <Overlay onClick={onClose}>
       <Modal onClick={(e) => e.stopPropagation()} style={{ width: 'min(720px, 96vw)' }}>
         <Header>
           <GitMerge size={16} />
-          <span>{t('findDeps.title', 'Find dependencies')}</span>
+          <span>{t('findDeps.title')}</span>
           <span className="count">· {titleEntity}</span>
           {manifest && (
             <span className="count" style={{ marginLeft: 'auto' }}>
-              {totalIncluded}/{total} {t('findDeps.included', 'included')}
+              {totalIncluded}/{total} {t('findDeps.included')}
             </span>
           )}
         </Header>
@@ -234,13 +234,13 @@ export function FindDependenciesModal({
           {loading && <div style={{ padding: 20, textAlign: 'center' }}><SpinnerRing size={16} thickness={2} /></div>}
           {error && <Banner $tone="error"><AlertCircle size={14} style={{ marginRight: 6, verticalAlign: -2 }} />{error}</Banner>}
           {!loading && !error && manifest && total === 0 && (
-            <Empty>{t('findDeps.empty', 'No dependencies resolved — the seed may not exist or be a self-contained leaf.')}</Empty>
+            <Empty>{t('findDeps.empty')}</Empty>
           )}
           {!loading && !error && manifest && total > 0 && (
             <>
               {manifest.missing.length > 0 && (
                 <Banner $tone="error">
-                  <strong>{t('findDeps.missing', '{{count}} missing references', { count: manifest.missing.length })}</strong>
+                  <strong>{t('findDeps.missing', { count: manifest.missing.length })}</strong>
                   <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
                     {manifest.missing.slice(0, 6).map((m, i) => (
                       <li key={i}><Mono>{m.kind} · {m.scope ?? '-'} · {m.name}</Mono>{m.reason ? ` — ${m.reason}` : ''}</li>
@@ -256,7 +256,7 @@ export function FindDependenciesModal({
                     <GroupHead>
                       {g.title} · {groupTicked}/{g.deps.length}
                       <button className="toggle" onClick={() => toggleGroup(g.kind, !allOn)}>
-                        {allOn ? t('findDeps.deselectAll', 'deselect all') : t('findDeps.selectAll', 'select all')}
+                        {allOn ? t('findDeps.deselectAll') : t('findDeps.selectAll')}
                       </button>
                     </GroupHead>
                     {g.deps.map((d, i) => {
@@ -283,11 +283,11 @@ export function FindDependenciesModal({
           )}
         </Body>
         <ModalFooter>
-          <Button $size="sm" $variant="ghost" onClick={onClose}>{t('common.close', 'Close')}</Button>
+          <Button $size="sm" $variant="ghost" onClick={onClose}>{t('common.close')}</Button>
           {manifest && totalIncluded > 0 && (
             <Button $size="sm" $variant="primary" onClick={() => void download()} disabled={downloading}>
               {downloading ? <SpinnerRing size={13} thickness={2} /> : <Download size={13} />}
-              {t('findDeps.downloadZip', 'Download ZIP ({{n}})', { n: totalIncluded })}
+              {t('findDeps.downloadZip', { n: totalIncluded })}
             </Button>
           )}
         </ModalFooter>

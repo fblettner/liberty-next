@@ -58,7 +58,7 @@ export function ApplyBundlePanel({ onApplied }: { onApplied?: () => void }) {
     if (!f) return
     setError(null); setReport(null); setForce(new Set()); setFileName(f.name)
     try { setBundle(JSON.parse(await f.text())) }
-    catch { setError(t('settings.changes.badBundle', 'Not a valid JSON bundle.')); setBundle(null) }
+    catch { setError(t('settings.changes.badBundle')); setBundle(null) }
   }
 
   const run = async (dry: boolean) => {
@@ -78,28 +78,26 @@ export function ApplyBundlePanel({ onApplied }: { onApplied?: () => void }) {
 
   return (
     <div>
-      <Intro>{t('settings.changes.applyIntro',
-        'Apply a promotion bundle exported from another install (or this one) to THIS environment. Dry-run first to see the per-op drift report; tick “force” on any conflict you want to override.')}</Intro>
+      <Intro>{t('settings.changes.applyIntro')}</Intro>
       <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={(e) => void onFile(e)} />
       <Drop type="button" onClick={() => fileRef.current?.click()}>
-        <Upload size={15} /> {fileName ?? t('settings.changes.pickBundle', 'Click to pick a bundle.json')}
+        <Upload size={15} /> {fileName ?? t('settings.changes.pickBundle')}
       </Drop>
       {bundle && (
-        <Meta>{bundle.package?.name} · {t('settings.changes.opsCount', '{{n}} op(s)', { n: bundle.op_count ?? 0 })} · {bundle.package?.application}</Meta>
+        <Meta>{bundle.package?.name} · {t('settings.changes.opsCount', { n: bundle.op_count ?? 0 })} · {bundle.package?.application}</Meta>
       )}
       <Actions>
         <Button $size="sm" $variant="ghost" disabled={!bundle || busy} onClick={() => void run(true)}>
-          {t('settings.changes.dryRun', 'Dry run')}
+          {t('settings.changes.dryRun')}
         </Button>
         <Button $size="sm" $variant="primary" disabled={!bundle || busy || !report} onClick={() => void run(false)}>
-          {hasConflicts && force.size === 0 ? t('settings.changes.applyAnyway', 'Apply (skip conflicts)') : t('settings.changes.apply', 'Apply')}
+          {hasConflicts && force.size === 0 ? t('settings.changes.applyAnyway') : t('settings.changes.apply')}
         </Button>
       </Actions>
       {error && <Banner $tone="error" style={{ marginTop: 8 }}>{error}</Banner>}
       {report?.already_applied && (
         <Banner $tone="warning" style={{ marginTop: 8 }}>
           {t('settings.changes.alreadyApplied',
-            'This bundle was already applied on {{date}}{{by}}.',
             {
               date: report.already_applied.applied_at ? new Date(report.already_applied.applied_at).toLocaleString() : '?',
               by: report.already_applied.applied_by ? ` by ${report.already_applied.applied_by}` : '',
@@ -109,17 +107,17 @@ export function ApplyBundlePanel({ onApplied }: { onApplied?: () => void }) {
       {report && (
         <>
           <Banner $tone={report.summary.conflict || report.summary.error ? 'warning' : 'ok'} style={{ margin: '8px 0' }}>
-            {report.dry_run ? t('settings.changes.dryRunReport', 'Dry run — nothing written. ') : t('settings.changes.applied', 'Applied. ')}{summaryText}
+            {report.dry_run ? t('settings.changes.dryRunReport') : t('settings.changes.applied')}{summaryText}
           </Banner>
           {report.results.map((r) => (
             <Op key={r.index}>
               <div className="top">
                 <Badge $tone={STATUS_TONE[r.status] ?? colors.text.muted}>{r.status.replace('_', ' ')}</Badge>
-                {r.op.post_apply && <Badge $tone={colors.blue.main}>{t('settings.changes.postApply', 'post-apply')}</Badge>}
+                {r.op.post_apply && <Badge $tone={colors.blue.main}>{t('settings.changes.postApply')}</Badge>}
                 <span className="key">{r.op.post_apply ? (r.op.label || r.op.operation) : `${r.op.operation} ${r.op.entity_key ? Object.entries(r.op.entity_key).map(([k, v]) => `${k}=${v}`).join(' · ') : ''}`}</span>
                 <span className="q">{r.op.connector}.{r.op.query}</span>
                 {r.status === 'conflict' && report.dry_run && (
-                  <label><input type="checkbox" checked={force.has(r.index)} onChange={() => toggleForce(r.index)} /> {t('settings.changes.force', 'force')}</label>
+                  <label><input type="checkbox" checked={force.has(r.index)} onChange={() => toggleForce(r.index)} /> {t('settings.changes.force')}</label>
                 )}
               </div>
               {r.detail && <div className="detail">{r.detail}</div>}

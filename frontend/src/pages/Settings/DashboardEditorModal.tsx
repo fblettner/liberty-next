@@ -3,11 +3,13 @@
 // 1–12 / height in rows), reorder (← →), edit (opens the per-widget WidgetEditorModal — which
 // reuses the chart builder for chart widgets), and delete. Add widgets from the toolbar. Plus the
 // dashboard meta (label / description) and the filter bar. Save persists the whole dashboard.
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, BarChart3, Hash, Table as TableIcon, LayoutDashboard, List as ListIcon, BarChartHorizontal } from 'lucide-react'
 import { Button, Input, Field, Banner, SearchSelect, useModals, type SearchSelectOption } from '../../common'
+import { api } from '../../api/client'
+import type { QueryResult } from '../../types/connectors'
 import { EditorModalShell } from '../../common/EditorModalShell'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { ChartWidget } from '../DashboardView/ChartWidget'
@@ -57,6 +59,10 @@ const Placeholder = styled.div`
   color: ${colors.text.muted}; font-size: ${fontSize.sm};
 `
 const FiltersPanel = styled.div`border: 1px solid ${colors.border}; border-radius: ${radius.md}; padding: 12px; display: flex; flex-direction: column; gap: 10px;`
+const Reach = styled.div`
+  font-size: ${fontSize.micro}; color: ${colors.text.secondary}; font-family: ${fonts.sans}; margin: -4px 0 4px 2px;
+  & .warn { color: ${colors.orange.main}; } & .muted { color: ${colors.text.muted}; }
+`
 const FilterRow = styled.div`display: grid; grid-template-columns: repeat(7, 1fr) auto; gap: 8px; align-items: end;`
 
 const snum = (v: unknown, d: number) => (typeof v === 'number' ? v : d)
@@ -125,7 +131,7 @@ export function DashboardEditorModal({
 }) {
   const { t } = useTranslation()
   const modals = useModals()
-  const { connectors } = useWorkspace()
+  const { connectors, findScreen } = useWorkspace()
   // Connector + query dropdown options for the filter rows (replacing the old free-text inputs).
   const sqlConnectors = (connectors ?? []).filter((c) => c.type === 'sql')
   const connectorOpts: SearchSelectOption[] = sqlConnectors.map((c) => ({ value: c.name, label: c.name, mono: c.name }))
@@ -146,6 +152,36 @@ export function DashboardEditorModal({
   const [error, setError] = useState<string | null>(null)
 
   const patchWidget = (i: number, patch: Raw) => setWidgets((ws) => ws.map((w, j) => (j === i ? { ...w, ...patch } : w)))
+
+  // Which widgets a filter reaches: a widget's screen carries the dictionary key (dd map), or the
+  // query's result has a column named like it (a dictionary bind). The result columns come from
+  // a one-row sample per distinct (connector, query), fetched once.
+  const [columnsOf, setColumnsOf] = useState<Record<string, string[]>>({})
+  const widgetQueries = widgets.map((w) => `${sstr(w.connector)}/${sstr(w.query)}`).filter((k) => k !== '/').join('|')
+  useEffect(() => {
+    const keys = widgetQueries ? widgetQueries.split('|') : []
+    keys.forEach((key) => {
+      if (key in columnsOf) return
+      const [c, q] = key.split('/')
+      api.get<QueryResult>(`/api/sql/${encodeURIComponent(c)}/${encodeURIComponent(q)}?_limit=1`)
+        .then((r) => setColumnsOf((cur) => ({ ...cur, [key]: r.columns.map((col) => col.name.toUpperCase()) })))
+        .catch(() => setColumnsOf((cur) => ({ ...cur, [key]: [] })))
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- columnsOf is read, not followed
+  }, [widgetQueries])
+  const reachOf = (dictKey: string): { reached: string[]; missed: string[] } => {
+    const reached: string[] = [], missed: string[] = []
+    const key = dictKey.trim().toUpperCase()
+    widgets.forEach((w, i) => {
+      const c = sstr(w.connector), q = sstr(w.query)
+      const name = sstr(w.label) || `#${i + 1}`
+      if (!key || !c || !q) { missed.push(name); return }
+      const viaScreen = Object.keys(findScreen(c, q)?.dd_map ?? {}).some((k) => k.toUpperCase() === key)
+      const viaColumn = (columnsOf[`${c}/${q}`] ?? []).includes(key)
+      ;(viaScreen || viaColumn ? reached : missed).push(name)
+    })
+    return { reached, missed }
+  }
   const resize = (i: number, dCol: number, dRow: number) => setWidgets((ws) => ws.map((w, j) =>
     j === i ? { ...w, col_span: Math.min(12, Math.max(1, snum(w.col_span, 6) + dCol)), row_span: Math.min(8, Math.max(1, snum(w.row_span, 2) + dRow)) } : w))
   const move = (i: number, dir: -1 | 1) => setWidgets((ws) => {
@@ -168,7 +204,7 @@ export function DashboardEditorModal({
 
   const save = () => {
     setError(null)
-    if (!id) return setError(t('settings.dash.errId', 'Dashboard id missing.'))
+    if (!id) return setError(t('settings.dash.errId'))
     const rec: Raw = { id, label: label.trim() || id, widgets }
     if (description.trim()) rec.description = description.trim()
     // `connector` (the owning scope) is the dict path key — the builder places the record under
@@ -201,12 +237,12 @@ export function DashboardEditorModal({
   const requestClose = async () => {
     if (!dirty) { onClose(); return }
     const choice = await modals.choose<'discard' | 'save' | 'keep'>({
-      title: t('settings.screens.designer.unsavedTitle', 'Unsaved changes'),
-      message: t('settings.screens.designer.unsavedMsg', 'You have unsaved changes. Save them, discard them, or keep editing?'),
+      title: t('settings.screens.designer.unsavedTitle'),
+      message: t('settings.screens.designer.unsavedMsg'),
       options: [
-        { value: 'discard', label: t('settings.screens.designer.discard', 'Discard'), variant: 'danger' },
+        { value: 'discard', label: t('settings.screens.designer.discard'), variant: 'danger' },
         { value: 'save', label: t('common.save'), variant: 'primary' },
-        { value: 'keep', label: t('settings.screens.designer.keepEditing', 'Keep editing'), variant: 'ghost', autoFocus: true },
+        { value: 'keep', label: t('settings.screens.designer.keepEditing'), variant: 'ghost', autoFocus: true },
       ],
       cancelValue: 'keep',
     })
@@ -229,30 +265,30 @@ export function DashboardEditorModal({
         onSave={save}
         dirty={dirty}
         frameStyle={{ width: '98vw', height: '96vh', maxWidth: '98vw' }}
-        footerLeft={<span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.dash.widgetCount', '{{n}} widget(s)', { n: widgets.length })}</span>}
+        footerLeft={<span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.dash.widgetCount', { n: widgets.length })}</span>}
       >
           {error && <Banner $tone="error">{error}</Banner>}
           <MetaRow>
-            <Field label={t('settings.dash.dLabel', 'Title')}>
+            <Field label={t('settings.dash.dLabel')}>
               <Input value={label} onChange={(e) => setLabel(e.target.value)} />
             </Field>
-            <Field label={t('settings.dash.description', 'Description')}>
+            <Field label={t('settings.dash.description')}>
               <Input value={description} onChange={(e) => setDescription(e.target.value)} />
             </Field>
           </MetaRow>
 
           <AddBar>
-            <span style={{ fontSize: fontSize.sm, color: colors.text.muted, fontWeight: 600 }}>{t('settings.dash.addWidget', 'Add widget')}:</span>
-            <Button $size="sm" $variant="ghost" onClick={() => addWidget('chart')}><BarChart3 size={13} /> {t('settings.dash.kindChart', 'Chart')}</Button>
-            <Button $size="sm" $variant="ghost" onClick={() => addWidget('kpi')}><Hash size={13} /> {t('settings.dash.kindKpi', 'KPI')}</Button>
-            <Button $size="sm" $variant="ghost" onClick={() => addWidget('table')}><TableIcon size={13} /> {t('settings.dash.kindTable', 'Table')}</Button>
-            <Button $size="sm" $variant="ghost" onClick={() => addWidget('stat')}><Hash size={13} /> {t('settings.dash.kindStat', 'Figure')}</Button>
-            <Button $size="sm" $variant="ghost" onClick={() => addWidget('list')}><ListIcon size={13} /> {t('settings.dash.kindList', 'List')}</Button>
-            <Button $size="sm" $variant="ghost" onClick={() => addWidget('bars')}><BarChartHorizontal size={13} /> {t('settings.dash.kindBars', 'Bars')}</Button>
+            <span style={{ fontSize: fontSize.sm, color: colors.text.muted, fontWeight: 600 }}>{t('settings.dash.addWidget')}:</span>
+            <Button $size="sm" $variant="ghost" onClick={() => addWidget('chart')}><BarChart3 size={13} /> {t('settings.dash.kindChart')}</Button>
+            <Button $size="sm" $variant="ghost" onClick={() => addWidget('kpi')}><Hash size={13} /> {t('settings.dash.kindKpi')}</Button>
+            <Button $size="sm" $variant="ghost" onClick={() => addWidget('table')}><TableIcon size={13} /> {t('settings.dash.kindTable')}</Button>
+            <Button $size="sm" $variant="ghost" onClick={() => addWidget('stat')}><Hash size={13} /> {t('settings.dash.kindStat')}</Button>
+            <Button $size="sm" $variant="ghost" onClick={() => addWidget('list')}><ListIcon size={13} /> {t('settings.dash.kindList')}</Button>
+            <Button $size="sm" $variant="ghost" onClick={() => addWidget('bars')}><BarChartHorizontal size={13} /> {t('settings.dash.kindBars')}</Button>
           </AddBar>
 
           {widgets.length === 0 ? (
-            <Placeholder style={{ minHeight: 160 }}>{t('settings.dash.noWidgets', 'No widgets yet — add a chart, KPI or table above.')}</Placeholder>
+            <Placeholder style={{ minHeight: 160 }}>{t('settings.dash.noWidgets')}</Placeholder>
           ) : (
             <Grid>
               {widgets.map((w, i) => {
@@ -264,15 +300,15 @@ export function DashboardEditorModal({
                   <Cell key={i} $cs={cs} $rs={rs}>
                     {sstr(w.label) && <Title>{sstr(w.label)}</Title>}
                     <Chrome className="chrome">
-                      <button title={t('settings.dash.narrower', 'Narrower')} onClick={() => resize(i, -1, 0)}>W−</button>
-                      <button title={t('settings.dash.wider', 'Wider')} onClick={() => resize(i, +1, 0)}>W+</button>
-                      <button title={t('settings.dash.shorter', 'Shorter')} onClick={() => resize(i, 0, -1)}>H−</button>
-                      <button title={t('settings.dash.taller', 'Taller')} onClick={() => resize(i, 0, +1)}>H+</button>
+                      <button title={t('settings.dash.narrower')} onClick={() => resize(i, -1, 0)}>W−</button>
+                      <button title={t('settings.dash.wider')} onClick={() => resize(i, +1, 0)}>W+</button>
+                      <button title={t('settings.dash.shorter')} onClick={() => resize(i, 0, -1)}>H−</button>
+                      <button title={t('settings.dash.taller')} onClick={() => resize(i, 0, +1)}>H+</button>
                       <span className="sep" />
-                      <button title={t('settings.dash.moveLeft', 'Move earlier')} onClick={() => move(i, -1)}><ChevronLeft size={13} /></button>
-                      <button title={t('settings.dash.moveRight', 'Move later')} onClick={() => move(i, +1)}><ChevronRight size={13} /></button>
+                      <button title={t('settings.dash.moveLeft')} onClick={() => move(i, -1)}><ChevronLeft size={13} /></button>
+                      <button title={t('settings.dash.moveRight')} onClick={() => move(i, +1)}><ChevronRight size={13} /></button>
                       <span className="sep" />
-                      <button title={t('common.edit', 'Edit')} onClick={() => { setEditIdx(i); setNewIdx(null) }}><Pencil size={13} /></button>
+                      <button title={t('common.edit')} onClick={() => { setEditIdx(i); setNewIdx(null) }}><Pencil size={13} /></button>
                       <button className="del" title={t('common.delete')} onClick={() => del(i)}><Trash2 size={13} /></button>
                     </Chrome>
                     <Host>
@@ -284,7 +320,7 @@ export function DashboardEditorModal({
                           : wire.type === 'bars' ? <BarsWidget widget={wire} filters={[]} filterValues={{}} />
                           : <KpiWidget widget={wire} filters={[]} filterValues={{}} />
                       ) : (
-                        <Placeholder><span><Icon size={18} /><br />{t('settings.dash.configurePrompt', 'Click ✎ to configure this {{kind}}', { kind })}</span></Placeholder>
+                        <Placeholder><span><Icon size={18} /><br />{t('settings.dash.configurePrompt', { kind })}</span></Placeholder>
                       )}
                     </Host>
                   </Cell>
@@ -297,38 +333,38 @@ export function DashboardEditorModal({
               (and PREV_*) as binds, and the named date column is range-wrapped server-side. */}
           <FiltersPanel>
             <AddBar>
-              <span style={{ fontSize: fontSize.sm, color: colors.text.muted, fontWeight: 600 }}>{t('settings.dash.period', 'Period')}</span>
+              <span style={{ fontSize: fontSize.sm, color: colors.text.muted, fontWeight: 600 }}>{t('settings.dash.period')}</span>
               {period
-                ? <Button $size="sm" $variant="ghost" onClick={() => setPeriod(null)}><Trash2 size={13} /> {t('settings.dash.removePeriod', 'Remove the period')}</Button>
-                : <Button $size="sm" $variant="ghost" onClick={() => setPeriod({ default: '', basis: [] })}><Plus size={13} /> {t('settings.dash.addPeriod', 'Add a period')}</Button>}
+                ? <Button $size="sm" $variant="ghost" onClick={() => setPeriod(null)}><Trash2 size={13} /> {t('settings.dash.removePeriod')}</Button>
+                : <Button $size="sm" $variant="ghost" onClick={() => setPeriod({ default: '', basis: [] })}><Plus size={13} /> {t('settings.dash.addPeriod')}</Button>}
             </AddBar>
             {period && (
               <>
                 <FilterRow>
-                  <Field label={t('settings.dash.periodDefault', 'Opens on')}>
+                  <Field label={t('settings.dash.periodDefault')}>
                     <SearchSelect value={sstr(period.default)} onChange={(v) => setPeriod({ ...period, default: v })}
                       options={PRESET_KEYS.map((k) => ({ value: k, label: t(`period.${k}`) }))}
-                      anyLabel={t('settings.dash.periodAppDefault', 'App default (Settings → App)')} />
+                      anyLabel={t('settings.dash.periodAppDefault')} />
                   </Field>
-                  <Field label={t('settings.dash.periodColumn', 'Date column')}>
+                  <Field label={t('settings.dash.periodColumn')}>
                     <Input value={sstr(period.column)} onChange={(e) => setPeriod({ ...period, column: e.target.value })} placeholder="SOLD_ON" />
                   </Field>
-                  <Field label={t('settings.dash.periodDd', 'or dictionary item')}>
+                  <Field label={t('settings.dash.periodDd')}>
                     <Input value={sstr(period.dd)} onChange={(e) => setPeriod({ ...period, dd: e.target.value })} placeholder="SALES_DATE" />
                   </Field>
                 </FilterRow>
                 <AddBar>
-                  <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.dash.periodBasis', 'Date bases (optional: which date the period applies to)')}</span>
-                  <Button $size="sm" $variant="ghost" onClick={() => setPeriod({ ...period, basis: [...((period.basis as Raw[]) ?? []), { value: '', label: '', column: '', dd: '' }] })}><Plus size={13} /> {t('settings.dash.addBasis', 'Add a basis')}</Button>
+                  <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.dash.periodBasis')}</span>
+                  <Button $size="sm" $variant="ghost" onClick={() => setPeriod({ ...period, basis: [...((period.basis as Raw[]) ?? []), { value: '', label: '', column: '', dd: '' }] })}><Plus size={13} /> {t('settings.dash.addBasis')}</Button>
                 </AddBar>
                 {((period.basis as Raw[]) ?? []).map((b, i) => {
                   const patchBasis = (patch: Raw) => setPeriod({ ...period, basis: ((period.basis as Raw[]) ?? []).map((x, j) => (j === i ? { ...x, ...patch } : x)) })
                   return (
                     <FilterRow key={i}>
-                      <Field label={t('settings.dash.basisValue', 'Key')}><Input value={sstr(b.value)} onChange={(e) => patchBasis({ value: e.target.value })} placeholder="document" /></Field>
-                      <Field label={t('settings.dash.dLabel', 'Label')}><Input value={sstr(b.label)} onChange={(e) => patchBasis({ label: e.target.value })} placeholder={t('settings.dash.basisLabelPh', 'Document date')} /></Field>
-                      <Field label={t('settings.dash.periodColumn', 'Date column')}><Input value={sstr(b.column)} onChange={(e) => patchBasis({ column: e.target.value })} placeholder="DOC_DATE" /></Field>
-                      <Field label={t('settings.dash.periodDd', 'or dictionary item')}><Input value={sstr(b.dd)} onChange={(e) => patchBasis({ dd: e.target.value })} /></Field>
+                      <Field label={t('settings.dash.basisValue')}><Input value={sstr(b.value)} onChange={(e) => patchBasis({ value: e.target.value })} placeholder="document" /></Field>
+                      <Field label={t('settings.dash.dLabel')}><Input value={sstr(b.label)} onChange={(e) => patchBasis({ label: e.target.value })} placeholder={t('settings.dash.basisLabelPh')} /></Field>
+                      <Field label={t('settings.dash.periodColumn')}><Input value={sstr(b.column)} onChange={(e) => patchBasis({ column: e.target.value })} placeholder="DOC_DATE" /></Field>
+                      <Field label={t('settings.dash.periodDd')}><Input value={sstr(b.dd)} onChange={(e) => patchBasis({ dd: e.target.value })} /></Field>
                       <CloseBtn onClick={() => setPeriod({ ...period, basis: ((period.basis as Raw[]) ?? []).filter((_, j) => j !== i) })} title={t('common.delete')}><Trash2 size={14} /></CloseBtn>
                     </FilterRow>
                   )
@@ -341,41 +377,55 @@ export function DashboardEditorModal({
               dictionary key + the options query that fills the dropdown). */}
           <FiltersPanel>
             <AddBar>
-              <span style={{ fontSize: fontSize.sm, color: colors.text.muted, fontWeight: 600 }}>{t('settings.dash.filters', 'Filters')}</span>
-              <Button $size="sm" $variant="ghost" onClick={addFilter}><Plus size={13} /> {t('settings.dash.addFilter', 'Add filter')}</Button>
+              <span style={{ fontSize: fontSize.sm, color: colors.text.muted, fontWeight: 600 }}>{t('settings.dash.filters')}</span>
+              <Button $size="sm" $variant="ghost" onClick={addFilter}><Plus size={13} /> {t('settings.dash.addFilter')}</Button>
             </AddBar>
             {filters.map((f, i) => {
               const o = (f.options as Raw) ?? {}
               return (
-                <FilterRow key={i}>
-                  <Field label={t('settings.dash.filter.id', 'Id')}>
+                <div key={i}>
+                <FilterRow>
+                  <Field label={t('settings.dash.filter.id')}>
                     <Input value={sstr(f.id)} onChange={(e) => patchFilter(i, { id: e.target.value })} placeholder="application" />
                   </Field>
-                  <Field label={t('settings.dash.filter.label', 'Label')}>
-                    <Input value={sstr(f.label)} onChange={(e) => patchFilter(i, { label: e.target.value })} placeholder={t('settings.dash.dLabel', 'Label')} />
+                  <Field label={t('settings.dash.filter.label')}>
+                    <Input value={sstr(f.label)} onChange={(e) => patchFilter(i, { label: e.target.value })} placeholder={t('settings.dash.dLabel')} />
                   </Field>
-                  <Field label={t('settings.dash.filter.dictKey', 'Dictionary key')}>
+                  <Field label={t('settings.dash.filter.dictKey')}>
                     <Input value={sstr(f.dictionary_key)} onChange={(e) => patchFilter(i, { dictionary_key: e.target.value })} placeholder="APPS_ID" />
                   </Field>
-                  <Field label={t('settings.dash.filter.connector', 'Connector')}>
+                  <Field label={t('settings.dash.filter.connector')}>
                     <SearchSelect value={sstr(o.connector)}
                       onChange={(v) => patchFilterOpt(i, { connector: v, query: '' })}
-                      options={connectorOpts} placeholder={t('common.pick', 'Pick…')} allowCustom />
+                      options={connectorOpts} placeholder={t('common.pick')} allowCustom />
                   </Field>
-                  <Field label={t('settings.dash.filter.query', 'Query')}>
+                  <Field label={t('settings.dash.filter.query')}>
                     <SearchSelect value={sstr(o.query)}
                       onChange={(v) => patchFilterOpt(i, { query: v })}
                       options={queryOptsFor(sstr(o.connector))}
-                      placeholder={sstr(o.connector) ? t('common.pick', 'Pick…') : t('settings.charts.pickConnFirst', 'Pick a connector first')} allowCustom />
+                      placeholder={sstr(o.connector) ? t('common.pick') : t('settings.charts.pickConnFirst')} allowCustom />
                   </Field>
-                  <Field label={t('settings.dash.filter.valueColumn', 'Value column')}>
+                  <Field label={t('settings.dash.filter.valueColumn')}>
                     <Input value={sstr(o.value_column)} onChange={(e) => patchFilterOpt(i, { value_column: e.target.value })} placeholder="APPS_ID" />
                   </Field>
-                  <Field label={t('settings.dash.filter.labelColumn', 'Label column')}>
+                  <Field label={t('settings.dash.filter.labelColumn')}>
                     <Input value={sstr(o.label_column)} onChange={(e) => patchFilterOpt(i, { label_column: e.target.value })} placeholder="APPS_NAME" />
                   </Field>
                   <CloseBtn onClick={() => setFilters((fs) => fs.filter((_, j) => j !== i))} title={t('common.delete')}><Trash2 size={14} /></CloseBtn>
                 </FilterRow>
+                {(() => {
+                  if (!sstr(f.dictionary_key) || widgets.length === 0) return null
+                  const { reached, missed } = reachOf(sstr(f.dictionary_key))
+                  return (
+                    <Reach>
+                      {reached.length
+                        ? <span>{t('settings.dash.filter.reaches', { list: reached.join(', ') })}</span>
+                        : <span className="warn">{t('settings.dash.filter.reachesNone', { key: sstr(f.dictionary_key) })}</span>}
+                      {reached.length > 0 && missed.length > 0 && <span className="muted"> · {t('settings.dash.filter.notReached', { list: missed.join(', ') })}</span>}
+                    </Reach>
+                  )
+                })()}
+                </div>
               )
             })}
           </FiltersPanel>

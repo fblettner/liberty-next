@@ -51,32 +51,32 @@ export default function MenuTree({ forest, effects, onSetState }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const toggle = (key: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n })
 
-  const word = (s: NodeState | null) => (s === 'allow' ? t('settings.access.allowed', 'allowed') : s === 'deny' ? t('settings.access.denied', 'denied') : t('settings.access.none', 'no access'))
+  const word = (s: NodeState | null) => (s === 'allow' ? t('settings.access.allowed') : s === 'deny' ? t('settings.access.denied') : t('settings.access.none'))
 
   const renderNode = (n: MenuNode, depth: number): React.ReactNode => {
     const e = effects[n.key] ?? { own: null, inherited: null, visible: null }
     const eff = e.own ?? e.inherited
     const leaf = isLeaf(n)
     const open = !collapsed.has(n.key)
-    const runs = n.type === 'page' ? t('settings.access.page', 'page') : n.targetPerm ?? (n.type ? `${n.type} · ${n.target ?? ''}` : '')
+    const runs = n.type === 'page' ? t('settings.access.page') : n.targetPerm ?? (n.type ? `${n.type} · ${n.target ?? ''}` : '')
     return (
       <div key={n.key}>
         <Row $depth={depth} $eff={eff}>
           {!leaf && n.children.length > 0
-            ? <button type="button" className="chev" onClick={() => toggle(n.key)} title={open ? t('settings.access.collapse', 'Collapse') : t('settings.access.expand', 'Expand')}>{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button>
+            ? <button type="button" className="chev" onClick={() => toggle(n.key)} title={open ? t('settings.access.collapse') : t('settings.access.expand')}>{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button>
             : <span className="chev" />}
           <span className="label">
             <span className="name" title={n.id}>{n.label}</span>
             {runs && <span className="runs" title={runs}>{runs}</span>}
           </span>
-          {e.own == null && <span className="inh">{t('settings.access.inherits', 'inherits')}: {word(e.inherited)}</span>}
-          <span className="eye" title={leaf ? (e.visible ? t('settings.access.shown', 'Shown in the sidebar') : t('settings.access.hidden', 'Hidden')) : ''}>
+          {e.own == null && <span className="inh">{t('settings.access.inherits')}: {word(e.inherited)}</span>}
+          <span className="eye" title={leaf ? (e.visible ? t('settings.access.shown') : t('settings.access.hidden')) : ''}>
             {leaf ? (e.visible ? <Eye size={13} color={colors.green.main} /> : <EyeOff size={13} color={colors.text.muted} />) : null}
           </span>
           <Seg>
-            <SegBtn $active={e.own == null} $tone="none" title={t('settings.access.inherit', 'Inherit')} onClick={() => onSetState(n.key, null)}><Minus size={12} /></SegBtn>
-            <SegBtn $active={e.own === 'allow'} $tone="allow" title={t('settings.access.allow', 'Allow')} onClick={() => onSetState(n.key, 'allow')}><Check size={12} /></SegBtn>
-            <SegBtn $active={e.own === 'deny'} $tone="deny" title={t('settings.access.deny', 'Deny')} onClick={() => onSetState(n.key, 'deny')}><Ban size={12} /></SegBtn>
+            <SegBtn $active={e.own == null} $tone="none" title={t('settings.access.inherit')} onClick={() => onSetState(n.key, null)}><Minus size={12} /></SegBtn>
+            <SegBtn $active={e.own === 'allow'} $tone="allow" title={t('settings.access.allow')} onClick={() => onSetState(n.key, 'allow')}><Check size={12} /></SegBtn>
+            <SegBtn $active={e.own === 'deny'} $tone="deny" title={t('settings.access.deny')} onClick={() => onSetState(n.key, 'deny')}><Ban size={12} /></SegBtn>
           </Seg>
         </Row>
         {open && n.children.map((c) => renderNode(c, depth + 1))}
@@ -85,7 +85,7 @@ export default function MenuTree({ forest, effects, onSetState }: Props) {
   }
 
   const apps = Object.entries(forest)
-  if (apps.length === 0) return <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.access.noMenus', 'No menus defined yet.')}</span>
+  if (apps.length === 0) return <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.access.noMenus')}</span>
   return (
     <div>
       {apps.map(([app, roots]) => {
@@ -93,7 +93,7 @@ export default function MenuTree({ forest, effects, onSetState }: Props) {
         const shown = leaves.filter((l) => effects[l.key]?.visible).length
         return (
           <AppBlock key={app}>
-            <AppHead>{app} <span className="count">· {t('settings.access.shownCount', '{{shown}} of {{total}} shown', { shown, total: leaves.length })}</span></AppHead>
+            <AppHead>{app} <span className="count">· {t('settings.access.shownCount', { shown, total: leaves.length })}</span></AppHead>
             {roots.map((r) => renderNode(r, 0))}
           </AppBlock>
         )

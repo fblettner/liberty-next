@@ -327,8 +327,8 @@ function SourcePathInput({
         type="button"
         $open={open}
         onClick={(e) => { e.preventDefault(); captureCursor(); setOpen((o) => !o) }}
-        title={t('settings.screens.paramBinds.pickerHint', 'Insert a suggestion at the cursor')}
-        aria-label={t('settings.screens.paramBinds.pickerHint', 'Insert a suggestion at the cursor') as string}
+        title={t('settings.screens.paramBinds.pickerHint')}
+        aria-label={t('settings.screens.paramBinds.pickerHint') as string}
       >
         <ChevronDown size={14} />
       </PickerBtn>
@@ -342,7 +342,7 @@ function SourcePathInput({
               <input
                 ref={searchRef}
                 value={query}
-                placeholder={t('settings.screens.paramBinds.pickerFilter', 'Filter suggestions…')}
+                placeholder={t('settings.screens.paramBinds.pickerFilter')}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => {
                   // Enter picks the first match — fast path for a filtered list of one.
@@ -353,9 +353,9 @@ function SourcePathInput({
           )}
           <PathList onMouseDown={(e) => e.preventDefault() /* keep focus while clicking an item */}>
             {options.length === 0 ? (
-              <PathEmpty>{t('settings.screens.paramBinds.pickerEmpty', 'No suggestions — type the path directly.')}</PathEmpty>
+              <PathEmpty>{t('settings.screens.paramBinds.pickerEmpty')}</PathEmpty>
             ) : visible.length === 0 ? (
-              <PathEmpty>{t('settings.screens.paramBinds.pickerNoMatch', 'No match — type the path directly.')}</PathEmpty>
+              <PathEmpty>{t('settings.screens.paramBinds.pickerNoMatch')}</PathEmpty>
             ) : (
               Array.from(grouped.entries()).map(([groupKey, items]) => (
                 <PathGroup key={groupKey ?? '_default'}>

@@ -49,3 +49,17 @@ def test_starter_groups_by_key() -> None:
                                          "screens": {"orders": {"groups": [{"label": "Orders", "starters": ["c"]}]}, "items": {"starters": ["d"]}}}}})
     assert f.starter_groups() == {"shop": [{"label": "Sales", "starters": ["a", "b"]}], "shop/orders": [{"label": "Orders", "starters": ["c"]}]}
     assert f.starters() == {"shop": ["flat"], "shop/items": ["d"]}
+
+
+def test_starters_follow_the_language() -> None:
+    from liberty.ai.appconfig import merged_starters, parse_ai_config
+    f = parse_ai_config({"ai": {"demo": {
+        "starters": ["Who sold the most?"], "groups": [{"label": "Sales", "starters": ["Who sold the most?"]}],
+        "screens": {"sales": {"starters": ["Sum this list"]}, "periods": {"starters": ["Which periods are open?"]}},
+        "l": {"fr": {"starters": ["Qui a le plus vendu ?"], "groups": [{"label": "Ventes", "starters": ["Qui a le plus vendu ?"]}], "screens": {"sales": {"starters": ["Additionner cette liste"]}}}},
+    }}})
+    assert f.starters() == {"demo": ["Who sold the most?"], "demo/sales": ["Sum this list"], "demo/periods": ["Which periods are open?"]}
+    fr = f.starters("fr-FR")
+    assert fr["demo"] == ["Qui a le plus vendu ?"] and fr["demo/sales"] == ["Additionner cette liste"] and fr["demo/periods"] == ["Which periods are open?"]   # untranslated screen keeps English
+    assert f.starter_groups("fr")["demo"][0]["label"] == "Ventes" and f.starter_groups("de") == f.starter_groups()
+    assert merged_starters(f, {"*": ["Hello"]}, "fr")["demo"] == ["Qui a le plus vendu ?"]

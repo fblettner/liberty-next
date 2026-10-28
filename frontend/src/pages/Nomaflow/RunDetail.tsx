@@ -196,7 +196,7 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
             relying on browser history is unreliable when these open as workspace
             tabs (history may not exist). Two compact ghost buttons solve it. */}
         <Button $variant="ghost" $size="sm" onClick={() => navigate('/sql/nomaflow/list_runs')}>
-          <ArrowLeft size={14} /> {t('nomaflow.run.backToRuns', 'Job Runs')}
+          <ArrowLeft size={14} /> {t('nomaflow.run.backToRuns')}
         </Button>
         <Button $variant="ghost" $size="sm" onClick={() => navigate('/nomaflow')}>
           <ArrowLeft size={14} /> {t('nomaflow.editor.backToJobs')}
@@ -278,7 +278,7 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
                 const reportFile = s.step_type === 'report' ? s.extras?.file : undefined
                 const attached = s.step_type === 'notify' && Array.isArray(s.extras?.attached) ? (s.extras.attached as string[]) : []
                 const loadCounts = s.step_type === 'file_load' && s.extras && typeof s.extras.read === 'number'
-                  ? t('nomaflow.run.loadCounts', '{{read}} read · {{inserted}} inserted · {{rejected}} rejected', { read: s.extras.read, inserted: s.extras.inserted ?? 0, rejected: s.extras.rejected ?? 0 })
+                  ? t('nomaflow.run.loadCounts', { read: s.extras.read, inserted: s.extras.inserted ?? 0, rejected: s.extras.rejected ?? 0 })
                   : null
                 return (
                   <StepRow key={key}>
@@ -290,7 +290,7 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
                           {' '}
                           <ChildRunLink
                             onClick={() => navigate(`/nomaflow/runs/${encodeURIComponent(childRunId)}`)}
-                            title={t('nomaflow.run.openChildRun', 'Open the child run this step spawned')}
+                            title={t('nomaflow.run.openChildRun')}
                           >
                             → {childJobId ?? 'child'}
                           </ChildRunLink>
@@ -300,7 +300,7 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
                       {rejectsFile && (
                         <div>
                           <ChildRunLink onClick={() => { if (runId) void downloadRunFile(runId, rejectsFile).catch(() => undefined) }} title={rejectsFile}>
-                            <Download size={11} /> {t('nomaflow.run.rejects', 'Rejected rows (csv)')}
+                            <Download size={11} /> {t('nomaflow.run.rejects')}
                           </ChildRunLink>
                         </div>
                       )}
@@ -322,7 +322,7 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
                     <ErrorCell
                       $expanded={expanded && err.length > 0}
                       onClick={err ? () => toggleError(key) : undefined}
-                      title={!expanded && err ? t('nomaflow.run.clickToExpand', 'Click to expand') : undefined}
+                      title={!expanded && err ? t('nomaflow.run.clickToExpand') : undefined}
                     >
                       {err}
                     </ErrorCell>
@@ -409,7 +409,7 @@ function OverridesSection({ overrides }: { overrides: RunDetailResponse['overrid
       : String(v)
   return (
     <Section>
-      <SectionTitle>{t('nomaflow.run.overrides', 'Run with parameters')}</SectionTitle>
+      <SectionTitle>{t('nomaflow.run.overrides')}</SectionTitle>
       <OverridesGrid>
         {hasLogLevel && (
           <>
@@ -454,8 +454,7 @@ function OverridesSection({ overrides }: { overrides: RunDetailResponse['overrid
           </>
         )}
       </OverridesGrid>
-      <OverridesSubHead>{t('nomaflow.run.overridesHint',
-        'Snapshot of what was picked in the Run-with-parameters modal at fire time.')}</OverridesSubHead>
+      <OverridesSubHead>{t('nomaflow.run.overridesHint')}</OverridesSubHead>
     </Section>
   )
 }

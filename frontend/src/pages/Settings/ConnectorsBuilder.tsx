@@ -270,8 +270,8 @@ export default function ConnectorsBuilder() {
     if (!sel) return
     const existing = customQueries.map((q) => String(q.name ?? ''))
     const name = (await modals.prompt({
-      title: t('settings.connectors.addQuery', 'Add query'),
-      message: t('settings.connectors.queryNamePrompt', 'Query name (e.g. post_invoice, customer_balance):'),
+      title: t('settings.connectors.addQuery'),
+      message: t('settings.connectors.queryNamePrompt'),
       placeholder: 'snake_case',
       validate: (v) => validateId({ kind: 'query', proposed: v, existing, mode: 'add' }),
     }))?.trim()
@@ -316,12 +316,12 @@ export default function ConnectorsBuilder() {
     if (!src) return
     const existing = arr.map((qq) => String(qq.name ?? ''))
     const next = (await modals.prompt({
-      title: t('common.clone', 'Clone'),
+      title: t('common.clone'),
       message: t('settings.tables.duplicatePrompt', { name }),
       defaultValue: suggestCloneId(name, existing),
-      submitLabel: t('common.clone', 'Clone'),
+      submitLabel: t('common.clone'),
       validate: (v) => {
-        if (v === name) return { error: t('settings.tables.duplicateSameName', 'Pick a different name.') }
+        if (v === name) return { error: t('settings.tables.duplicateSameName') }
         return validateId({ kind: 'query', proposed: v, existing, mode: 'clone' })
       },
     }))?.trim()
@@ -332,8 +332,8 @@ export default function ConnectorsBuilder() {
   const deleteQuery = async (name: string) => {
     if (!sel) return
     const ok = await modals.confirm({
-      title: t('settings.connectors.deleteQuery', 'Delete query'),
-      message: t('settings.connectors.confirmDeleteQuery', 'Delete query {{name}}?', { name }),
+      title: t('settings.connectors.deleteQuery'),
+      message: t('settings.connectors.confirmDeleteQuery', { name }),
       variant: 'danger',
       confirmLabel: t('common.delete'),
     })
@@ -365,14 +365,12 @@ export default function ConnectorsBuilder() {
   // in Settings → Pools, and may be shared). One confirmation — deleting a connector is a big deal.
   const deleteApp = async (appName: string) => {
     const ok = await modals.confirm({
-      title: t('settings.connectors.delete', 'Delete'),
-      message: t(
-        'settings.connectors.confirmDeleteApp',
-        'Delete connector {{name}} and everything that belongs to it?',
+      title: t('settings.connectors.delete'),
+      message: t('settings.connectors.confirmDeleteApp',
         { name: appName },
       ),
       variant: 'danger',
-      confirmLabel: t('common.delete', 'Delete'),
+      confirmLabel: t('common.delete'),
     })
     if (!ok) return
     setBusy(true); setStatus(null); setError(null)
@@ -382,7 +380,7 @@ export default function ConnectorsBuilder() {
       refreshWorkspace()
       setSel((s) => (s === appName ? null : s))
       load()
-      setStatus(t('settings.connectors.deleteAppSuccess', 'Deleted connector {{name}}.', { name: appName }))
+      setStatus(t('settings.connectors.deleteAppSuccess', { name: appName }))
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
     } finally {
@@ -400,9 +398,7 @@ export default function ConnectorsBuilder() {
       await api.post('/admin/reload')
       load()
       setCloneModalOpen(false)
-      setStatus(t(
-        'settings.connectors.cloneSuccess',
-        'Cloned {{src}} → {{dst}} ({{n}} entries; reload applied)',
+      setStatus(t('settings.connectors.cloneSuccess',
         { src: cloneSource, dst: cloneNewApp, n: result.total_entries },
       ))
     } catch (e) {
@@ -528,13 +524,13 @@ export default function ConnectorsBuilder() {
   const renameQuery = async (oldName: string) => {
     if (!sel) return
     const existing = curSection().arr.map((q) => String(q.name))
-    const next = await promptRename(oldName, t('settings.connectors.renameQuery', 'Rename query'), t('settings.connectors.renameQueryPrompt', { name: oldName }), existing)
+    const next = await promptRename(oldName, t('settings.connectors.renameQuery'), t('settings.connectors.renameQueryPrompt', { name: oldName }), existing)
     if (next) await runCrossRename('query', oldName, next, (n) => setSelQuery(n))
   }
   const renameTable = async (oldBase: string) => {
     if (!sel) return
     const existing = tablesArr.map((tb) => tb.name)
-    const next = await promptRename(oldBase, t('settings.connectors.renameTable', 'Rename table'), t('settings.connectors.renameTablePrompt', { name: oldBase }), existing)
+    const next = await promptRename(oldBase, t('settings.connectors.renameTable'), t('settings.connectors.renameTablePrompt', { name: oldBase }), existing)
     if (next) await runCrossRename('table', oldBase, next, (n) => setSelTable(n))
   }
   const addTable = async (connectorName: string) => {
@@ -547,10 +543,10 @@ export default function ConnectorsBuilder() {
     //     to hand-write each query.
     const choice = await modals.choose({
       title: t('settings.tables.addTable'),
-      message: t('settings.crudWizard.howAdd', 'How do you want to add this table?'),
+      message: t('settings.crudWizard.howAdd'),
       options: [
-        { value: 'wizard', label: t('settings.crudWizard.generateFromDb', 'Generate from DB'), variant: 'primary', autoFocus: true },
-        { value: 'empty', label: t('settings.crudWizard.emptyStub', 'Empty stub'), variant: 'ghost' },
+        { value: 'wizard', label: t('settings.crudWizard.generateFromDb'), variant: 'primary', autoFocus: true },
+        { value: 'empty', label: t('settings.crudWizard.emptyStub'), variant: 'ghost' },
       ],
       cancelValue: 'cancel',
       cancelLabel: t('common.cancel'),
@@ -612,9 +608,9 @@ export default function ConnectorsBuilder() {
   type SectionKind = 'tables' | 'queries' | 'sequences' | 'lookups'
   const sectionLabel = (k: SectionKind): string => ({
     tables: t('settings.tables.tablesView'),
-    queries: t('settings.tables.looseSectionLabel', 'Queries'),
-    sequences: t('settings.connectors.sequencesView', 'Sequences'),
-    lookups: t('settings.connectors.lookupsView', 'Lookups'),
+    queries: t('settings.tables.looseSectionLabel'),
+    sequences: t('settings.connectors.sequencesView'),
+    lookups: t('settings.connectors.lookupsView'),
   }[k])
   const modeFor = (k: SectionKind): 'tables' | 'custom' | 'sequences' | 'lookups' => (k === 'queries' ? 'custom' : k)
   const changeType = async (fromKind: SectionKind, name: string) => {
@@ -622,8 +618,8 @@ export default function ConnectorsBuilder() {
     const conn = conns[sel] ?? {}
     const arrOf = (k: SectionKind) => (Array.isArray(conn[k]) ? conn[k] : []) as Record<string, unknown>[]
     const choice = await modals.choose({
-      title: t('settings.connectors.changeTypeTitle', 'Change type'),
-      message: t('settings.connectors.changeTypePrompt', 'Move "{{name}}" to which kind?', { name }),
+      title: t('settings.connectors.changeTypeTitle'),
+      message: t('settings.connectors.changeTypePrompt', { name }),
       options: (['tables', 'queries', 'sequences', 'lookups'] as SectionKind[])
         .filter((k) => k !== fromKind)
         .map((k) => ({ value: k, label: sectionLabel(k) })),
@@ -644,8 +640,8 @@ export default function ConnectorsBuilder() {
       const filled = CRUD_KINDS.filter((c) => tb[c])
       if (filled.length > 1) {
         await modals.alert({
-          title: t('settings.connectors.changeTypeTitle', 'Change type'),
-          message: t('settings.connectors.changeTypeMultiSlot', 'This table has more than one CRUD slot, so it is a real CRUD set — not a single query. Delete the extra slots first if it is really just one query.'),
+          title: t('settings.connectors.changeTypeTitle'),
+          message: t('settings.connectors.changeTypeMultiSlot'),
           variant: 'danger',
         })
         return
@@ -683,9 +679,9 @@ export default function ConnectorsBuilder() {
       const oldRef = fromKind === 'tables' ? `${name}_get` : name
       const newRef = toKind === 'tables' ? `${name}_get` : name
       const ok = await modals.confirm({
-        title: t('settings.connectors.changeTypeTitle', 'Change type'),
-        message: t('settings.connectors.changeTypeRenameWarn', 'This changes the query\'s runtime name from "{{old}}" to "{{new}}". Update any screen / action / dictionary reference to the new name afterwards. Continue?', { old: oldRef, new: newRef }),
-        confirmLabel: t('settings.connectors.changeTypeTitle', 'Change type'),
+        title: t('settings.connectors.changeTypeTitle'),
+        message: t('settings.connectors.changeTypeRenameWarn', { old: oldRef, new: newRef }),
+        confirmLabel: t('settings.connectors.changeTypeTitle'),
       })
       if (!ok) return
     }
@@ -821,19 +817,19 @@ export default function ConnectorsBuilder() {
         <Button $variant="ghost" $size="sm" onClick={() => sel && setUsagesTarget({
           kind: 'query', name: String(picked.name), scope: sel, label: `query ${sel}.${picked.name}`,
         })} disabled={busy}>
-          <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
+          <GitBranch size={13} /> {t('findUsages.button')}
         </Button>
         <Button $variant="ghost" $size="sm" onClick={() => renameQuery(String(picked.name))} disabled={busy}>
           <Edit3 size={13} /> {t('settings.rename.button')}
         </Button>
         <Button $variant="ghost" $size="sm" onClick={() => changeType(curSection().key as SectionKind, String(picked.name))} disabled={busy}>
-          <Shuffle size={13} /> {t('settings.connectors.changeTypeButton', 'Change type')}
+          <Shuffle size={13} /> {t('settings.connectors.changeTypeButton')}
         </Button>
         <Button $variant="ghost" $size="sm" onClick={() => {
           const k = curSection().key
           setMoveTarget({ kind: k === 'sequences' ? 'sequence' : k === 'lookups' ? 'lookup' : 'query', name: String(picked.name) })
         }} disabled={busy}>
-          <ArrowRightLeft size={13} /> {t('settings.connectors.moveButton', 'Move')}
+          <ArrowRightLeft size={13} /> {t('settings.connectors.moveButton')}
         </Button>
         <Button $variant="ghost" $size="sm" onClick={() => duplicateQuery(String(picked.name))} disabled={busy}>
           <Copy size={13} /> {t('settings.tables.duplicate')}
@@ -876,11 +872,11 @@ export default function ConnectorsBuilder() {
               actions (Clone, Rename, Delete) live in the right panel's Settings tab where they
               target the selected connector. */}
           <Button $variant="ghost" $size="sm" onClick={openAddConnector} disabled={busy}>
-            <Plus size={13} /> {t('settings.connectors.addConnector', 'Connector')}
+            <Plus size={13} /> {t('settings.connectors.addConnector')}
           </Button>
           <ToolbarDivider />
-          <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty} title={t('common.discard', 'Discard')}>
-            <Undo2 size={13} /> {t('common.discard', 'Discard')}
+          <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty} title={t('common.discard')}>
+            <Undo2 size={13} /> {t('common.discard')}
           </Button>
           <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
             {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
@@ -896,13 +892,13 @@ export default function ConnectorsBuilder() {
             </NavSearch>
           )}
           <NavList>
-            {shownAppNames.length > 0 && <NavGroupLabel>{t('settings.connectors.groupApps', 'Apps')}</NavGroupLabel>}
+            {shownAppNames.length > 0 && <NavGroupLabel>{t('settings.connectors.groupApps')}</NavGroupLabel>}
             {shownAppNames.map((n) => (
               <NavItem key={n} $active={n === sel} onClick={() => { setSel(n); setStatus(null) }}>
                 {conns[n].type === 'api' ? <Globe size={13} /> : <Database size={13} />} <span className="name">{n}</span>
               </NavItem>
             ))}
-            {shownDataNames.length > 0 && <NavGroupLabel>{t('settings.connectors.groupData', 'Data sources')}</NavGroupLabel>}
+            {shownDataNames.length > 0 && <NavGroupLabel>{t('settings.connectors.groupData')}</NavGroupLabel>}
             {shownDataNames.map((n) => (
               <NavItem key={n} $active={n === sel} onClick={() => { setSel(n); setStatus(null) }}>
                 {conns[n].type === 'api' ? <Globe size={13} /> : <Database size={13} />} <span className="name">{n}</span>
@@ -931,19 +927,19 @@ export default function ConnectorsBuilder() {
                   {isSql && (
                     <ModeBar>
                       <ModeBtn type="button" $active={mode === 'settings'} onClick={() => setMode('settings')}>
-                        <FileCog size={13} /> {t('settings.connectors.settings', 'Settings')}
+                        <FileCog size={13} /> {t('settings.connectors.settings')}
                       </ModeBtn>
                       <ModeBtn type="button" $active={mode === 'tables'} onClick={() => setMode('tables')}>
                         {t('settings.tables.tablesView')}
                       </ModeBtn>
                       <ModeBtn type="button" $active={mode === 'custom'} onClick={() => setMode('custom')}>
-                        {t('settings.tables.looseSectionLabel', 'Queries')}
+                        {t('settings.tables.looseSectionLabel')}
                       </ModeBtn>
                       <ModeBtn type="button" $active={mode === 'sequences'} onClick={() => setMode('sequences')}>
-                        {t('settings.connectors.sequencesView', 'Sequences')}
+                        {t('settings.connectors.sequencesView')}
                       </ModeBtn>
                       <ModeBtn type="button" $active={mode === 'lookups'} onClick={() => setMode('lookups')}>
-                        {t('settings.connectors.lookupsView', 'Lookups')}
+                        {t('settings.connectors.lookupsView')}
                       </ModeBtn>
                     </ModeBar>
                   )}
@@ -963,17 +959,17 @@ export default function ConnectorsBuilder() {
                   )}
                   {isSql && mode === 'custom' && !selQuery && (
                     <Button $variant="ghost" $size="sm" onClick={addCustomQuery} disabled={busy}>
-                      <Plus size={13} /> {t('settings.connectors.addQuery', 'Add query')}
+                      <Plus size={13} /> {t('settings.connectors.addQuery')}
                     </Button>
                   )}
                   {isSql && mode === 'sequences' && !selQuery && (
                     <Button $variant="ghost" $size="sm" onClick={() => setScaffoldKind('sequence')} disabled={busy}>
-                      <Plus size={13} /> {t('settings.connectors.addSequence', 'Add sequence')}
+                      <Plus size={13} /> {t('settings.connectors.addSequence')}
                     </Button>
                   )}
                   {isSql && mode === 'lookups' && !selQuery && (
                     <Button $variant="ghost" $size="sm" onClick={() => setScaffoldKind('lookup')} disabled={busy}>
-                      <Plus size={13} /> {t('settings.connectors.addLookup', 'Add lookup')}
+                      <Plus size={13} /> {t('settings.connectors.addLookup')}
                     </Button>
                   )}
                   {/* Connector-level actions (Clone / Rename / Delete) sit at the top-right of the
@@ -986,19 +982,19 @@ export default function ConnectorsBuilder() {
                       <Button $variant="ghost" $size="sm" onClick={() => sel && setUsagesTarget({
                         kind: 'connector', name: sel, label: `connector ${sel}`,
                       })} disabled={busy}>
-                        <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
+                        <GitBranch size={13} /> {t('findUsages.button')}
                       </Button>
                       <Button $variant="ghost" $size="sm" onClick={openCloneApp} disabled={busy || dirty}
-                        title={dirty ? t('settings.connectors.cloneRequiresSave', 'Save current edits first') : t('settings.connectors.clone', 'Clone')}>
-                        <Layers size={13} /> {t('settings.connectors.clone', 'Clone')}
+                        title={dirty ? t('settings.connectors.cloneRequiresSave') : t('settings.connectors.clone')}>
+                        <Layers size={13} /> {t('settings.connectors.clone')}
                       </Button>
                       <Button $variant="ghost" $size="sm" onClick={() => sel && renameConnector(sel)} disabled={busy}>
                         <Edit3 size={13} /> {t('settings.rename.button')}
                       </Button>
                       <Button $variant="ghost" $size="sm" onClick={() => sel && deleteApp(sel)} disabled={busy || dirty}
-                        title={dirty ? t('settings.connectors.deleteRequiresSave', 'Save current edits first') : t('settings.connectors.delete', 'Delete')}
+                        title={dirty ? t('settings.connectors.deleteRequiresSave') : t('settings.connectors.delete')}
                         style={{ color: colors.red.main }}>
-                        <Trash2 size={13} /> {t('common.delete', 'Delete')}
+                        <Trash2 size={13} /> {t('common.delete')}
                       </Button>
                     </>
                   )}
@@ -1122,10 +1118,10 @@ export default function ConnectorsBuilder() {
                     {matches.length === 0 ? (
                       <Empty>
                         {mode === 'custom'
-                          ? t('settings.connectors.emptyCustom', 'No unclassified queries. These are queries not tied to a table’s get/put/post/delete set and not used as a sequence or lookup — click "Add query" to create one.')
+                          ? t('settings.connectors.emptyCustom')
                           : mode === 'sequences'
-                            ? t('settings.connectors.emptySequences', 'No sequences defined for this connector. Add one in Dictionary → Sequences and point its `query` at a query here.')
-                            : t('settings.connectors.emptyLookups', 'No lookups defined for this connector. Add one in Dictionary → Lookups and point its `query` at a query here.')}
+                            ? t('settings.connectors.emptySequences')
+                            : t('settings.connectors.emptyLookups')}
                       </Empty>
                     ) : (
                       <TableList>
@@ -1167,9 +1163,7 @@ export default function ConnectorsBuilder() {
                   <SqlConnectorContext.Provider value={sel ?? undefined}>
                     {locked && (
                       <Banner $tone="info">
-                        {t(
-                          'settings.connectors.alwaysLicensed',
-                          'License: required (this connector is always licensed — the checkbox is locked).',
+                        {t('settings.connectors.alwaysLicensed',
                         )}
                       </Banner>
                     )}
@@ -1258,26 +1252,24 @@ export default function ConnectorsBuilder() {
         // No backdrop-click-to-close — outside clicks must not abandon the clone form mid-fill.
         <Overlay>
           <Modal style={{ width: 'min(560px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
-            <ModalHeader>{t('settings.connectors.clone', 'Clone')}</ModalHeader>
+            <ModalHeader>{t('settings.connectors.clone')}</ModalHeader>
             <ModalBody>
               <div style={{ color: colors.text.muted, fontSize: fontSize.sm }}>
-                {t(
-                  'settings.connectors.cloneHint',
-                  'Duplicates the source app\'s connector, dictionary overlay, menus, and screens under a new name. The new connector points at the new pool — create that pool first via Settings → Pools (and the underlying database via CREATE DATABASE on Postgres).',
+                {t('settings.connectors.cloneHint',
                 )}
               </div>
               <Row style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12 }}>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: fontSize.sm }}>
-                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.cloneSource', 'Source connector')}</span>
+                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.cloneSource')}</span>
                   <SearchSelect
                     value={cloneSource}
                     options={Object.keys(conns ?? {}).map((n) => ({ value: n, label: n, mono: n }))}
                     onChange={(v) => setCloneSource(v)}
-                    placeholder={t('common.pick', 'Pick…')}
+                    placeholder={t('common.pick')}
                   />
                 </label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: fontSize.sm }}>
-                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.cloneNewApp', 'New name')}</span>
+                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.cloneNewApp')}</span>
                   <Input
                     value={cloneNewApp}
                     onChange={(e) => setCloneNewApp(e.target.value)}
@@ -1285,12 +1277,12 @@ export default function ConnectorsBuilder() {
                   />
                 </label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: fontSize.sm }}>
-                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.cloneNewPool', 'Pool')}</span>
+                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.cloneNewPool')}</span>
                   <SearchSelect
                     value={cloneNewPool}
                     options={pools.map((n) => ({ value: n, label: n, mono: n }))}
                     onChange={(v) => setCloneNewPool(v)}
-                    placeholder={t('common.pick', 'Pick…')}
+                    placeholder={t('common.pick')}
                   />
                 </label>
               </Row>
@@ -1298,7 +1290,7 @@ export default function ConnectorsBuilder() {
             </ModalBody>
             <ModalFooter>
               <Button $variant="ghost" onClick={() => setCloneModalOpen(false)} disabled={cloneBusy}>
-                {t('common.cancel', 'Cancel')}
+                {t('common.cancel')}
               </Button>
               <Button
                 $variant="primary"
@@ -1306,7 +1298,7 @@ export default function ConnectorsBuilder() {
                 disabled={cloneBusy || !cloneSource || !cloneNewApp || !cloneNewPool}
               >
                 {cloneBusy ? <SpinnerRing size={13} thickness={2} /> : <Copy size={13} />}{' '}
-                {t('settings.connectors.cloneAppRun', 'Clone')}
+                {t('settings.connectors.cloneAppRun')}
               </Button>
             </ModalFooter>
           </Modal>
@@ -1318,22 +1310,22 @@ export default function ConnectorsBuilder() {
         // No backdrop-click-to-close — outside clicks must not abandon the new-connector form.
         <Overlay>
           <Modal style={{ width: 'min(440px, 94vw)' }} onClick={(e) => e.stopPropagation()}>
-            <ModalHeader>{t('settings.connectors.addConnectorTitle', 'Add a connector')}</ModalHeader>
+            <ModalHeader>{t('settings.connectors.addConnectorTitle')}</ModalHeader>
             <ModalBody>
               <Row style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12 }}>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: fontSize.sm }}>
-                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.type', 'Type')}</span>
+                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.type')}</span>
                   <SearchSelect
                     value={addConnType}
                     options={[
-                      { value: 'sql', label: t('settings.connectors.typeSql', 'SQL') },
-                      { value: 'api', label: t('settings.connectors.typeApi', 'API') },
+                      { value: 'sql', label: t('settings.connectors.typeSql') },
+                      { value: 'api', label: t('settings.connectors.typeApi') },
                     ]}
                     onChange={(v) => setAddConnType(v === 'api' ? 'api' : 'sql')}
                   />
                 </label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: fontSize.sm }}>
-                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.name', 'Name')}</span>
+                  <span style={{ color: colors.text.muted }}>{t('settings.connectors.name')}</span>
                   <Input value={addConnName} onChange={(e) => { setAddConnName(e.target.value); setAddConnError(null) }}
                     placeholder="nomasx1" autoFocus
                     onKeyDown={(e) => { if (e.key === 'Enter') submitAddConnector() }} />
@@ -1342,8 +1334,8 @@ export default function ConnectorsBuilder() {
               {addConnError && <Banner $tone="error">{addConnError}</Banner>}
             </ModalBody>
             <ModalFooter>
-              <Button $variant="ghost" $size="sm" onClick={() => setAddConnOpen(false)}>{t('common.cancel', 'Cancel')}</Button>
-              <Button $variant="primary" $size="sm" onClick={submitAddConnector}>{t('common.ok', 'OK')}</Button>
+              <Button $variant="ghost" $size="sm" onClick={() => setAddConnOpen(false)}>{t('common.cancel')}</Button>
+              <Button $variant="primary" $size="sm" onClick={submitAddConnector}>{t('common.ok')}</Button>
             </ModalFooter>
           </Modal>
         </Overlay>

@@ -265,7 +265,7 @@ function TagsField(
                   </SuggestionItem>
                 ))
               ) : !showCreate ? (
-                <SuggestionEmpty>{t('nomaflow.editor.tagsNoMatch', 'No matching tags.')}</SuggestionEmpty>
+                <SuggestionEmpty>{t('nomaflow.editor.tagsNoMatch')}</SuggestionEmpty>
               ) : null}
             </SuggestionScroll>
             {showCreate && (
@@ -274,7 +274,7 @@ function TagsField(
                 onMouseDown={(e) => { e.preventDefault(); addTag(typedTrimmed) }}
               >
                 <Plus size={13} />
-                {t('nomaflow.editor.tagsCreate', 'Add')}
+                {t('nomaflow.editor.tagsCreate')}
                 <span className="mono">{typedTrimmed}</span>
               </SuggestionCreateRow>
             )}
@@ -449,7 +449,7 @@ export default function JobEditor() {
                   value={job.tags ?? []}
                   allTags={allTagsCatalog}
                   onChange={(next) => patch({ tags: next })}
-                  placeholder={t('nomaflow.editor.tagsPlaceholder', 'Type to add a tag, or pick from existing…')}
+                  placeholder={t('nomaflow.editor.tagsPlaceholder')}
                 />
               </FieldWrap>
               <FieldWrap>
@@ -464,15 +464,15 @@ export default function JobEditor() {
 
           {/* ── presets & schedules ─────────────────────────────────────────── */}
           <Section>
-            <SectionTitle><Layers size={15} /> {t('nomaflow.editor.presetsSection', 'Presets & schedules')}</SectionTitle>
+            <SectionTitle><Layers size={15} /> {t('nomaflow.editor.presetsSection')}</SectionTitle>
             {(job.presets?.length ?? 0) === 0 ? (
               <FieldHint>
-                {t('nomaflow.editor.presetsEmpty', 'No presets yet. Save one from a job’s Run → Save preset, then give it a schedule here to fire this job on a cron with those parameters — no cloning.')}
+                {t('nomaflow.editor.presetsEmpty')}
               </FieldHint>
             ) : (
               <>
                 <FieldHint>
-                  {t('nomaflow.editor.presetsHint', 'Give a preset its own cron to run this job on that schedule with the preset’s parameters. Leave the schedule empty to keep it manual-only (Run → pick preset).')}
+                  {t('nomaflow.editor.presetsHint')}
                 </FieldHint>
                 {(job.presets ?? []).map((p, i) => (
                   <PresetCard key={p.name}>
@@ -484,7 +484,7 @@ export default function JobEditor() {
                           <Checkbox
                             checked={p.enabled ?? true}
                             onChange={(checked) => patchPreset(i, { enabled: checked })}
-                            label={t('nomaflow.editor.presetEnabled', 'Schedule enabled')}
+                            label={t('nomaflow.editor.presetEnabled')}
                           />
                         </span>
                       )}
@@ -609,11 +609,9 @@ export default function JobEditor() {
               jobs (nomasx1-security, nomasx1-database, ...) that fire N module
               callables all sharing apps_id / source_connector / target_connector. */}
           <Section>
-            <SectionTitle>{t('nomaflow.editor.paramsSection', 'Shared params')}</SectionTitle>
+            <SectionTitle>{t('nomaflow.editor.paramsSection')}</SectionTitle>
             <div style={{ color: colors.text.muted, fontSize: fontSize.sm, marginBottom: 4 }}>
-              {t(
-                'nomaflow.editor.paramsHint',
-                'Merged under every python step\'s op_kwargs (step wins on conflict). Use for values shared across all steps — apps_id, source_connector, target_connector, etc.',
+              {t('nomaflow.editor.paramsHint',
               )}
             </div>
             <KeyValueEditor

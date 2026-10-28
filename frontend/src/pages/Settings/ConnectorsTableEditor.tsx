@@ -142,8 +142,8 @@ export default function ConnectorsTableEditor({
   // referenced elsewhere; deleting it can leave a dangling ref (the Integrity tab flags those).
   const removeSlot = async (crud: CrudKind) => {
     const ok = await modals.confirm({
-      title: t('settings.tables.deleteSlot', 'Delete query'),
-      message: t('settings.tables.confirmDeleteSlot', 'Delete the {{crud}} query "{{name}}"? Any screen / action / dictionary reference to it will break until updated.', { crud: crud.toUpperCase(), name: `${table.name}_${crud}` }),
+      title: t('settings.tables.deleteSlot'),
+      message: t('settings.tables.confirmDeleteSlot', { crud: crud.toUpperCase(), name: `${table.name}_${crud}` }),
       variant: 'danger',
       confirmLabel: t('common.delete'),
     })
@@ -177,7 +177,7 @@ export default function ConnectorsTableEditor({
         <Row style={{ alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
           <Sub style={{ marginBottom: 0 }}><code style={{ fontFamily: fonts.mono }}>{`${table.name}_${crud}`}</code></Sub>
           <Button $variant="ghost" $size="sm" onClick={() => removeSlot(crud)} style={{ color: colors.red.main }}>
-            <Trash2 size={13} /> {t('common.delete', 'Delete')}
+            <Trash2 size={13} /> {t('common.delete')}
           </Button>
         </Row>
         <SqlStatementContext.Provider value={CRUD_TO_STMT[crud]}>
@@ -239,7 +239,7 @@ export default function ConnectorsTableEditor({
           )}
           {onFindUsages && (
             <Button $variant="ghost" $size="sm" onClick={onFindUsages}>
-              <GitBranch size={13} /> {t('findUsages.button', 'Find usages')}
+              <GitBranch size={13} /> {t('findUsages.button')}
             </Button>
           )}
           {onRename && (
@@ -249,12 +249,12 @@ export default function ConnectorsTableEditor({
           )}
           {onChangeType && (
             <Button $variant="ghost" $size="sm" onClick={onChangeType}>
-              <Shuffle size={13} /> {t('settings.connectors.changeTypeButton', 'Change type')}
+              <Shuffle size={13} /> {t('settings.connectors.changeTypeButton')}
             </Button>
           )}
           {onMove && (
             <Button $variant="ghost" $size="sm" onClick={onMove}>
-              <ArrowRightLeft size={13} /> {t('settings.connectors.moveButton', 'Move')}
+              <ArrowRightLeft size={13} /> {t('settings.connectors.moveButton')}
             </Button>
           )}
           {onDuplicate && (
@@ -263,7 +263,7 @@ export default function ConnectorsTableEditor({
             </Button>
           )}
           <Button $variant="ghost" $size="sm" onClick={removeWholeTable} style={{ color: colors.red.main }}>
-            <Trash2 size={13} /> {t('common.delete', 'Delete')}
+            <Trash2 size={13} /> {t('common.delete')}
           </Button>
         </Row>
         )}

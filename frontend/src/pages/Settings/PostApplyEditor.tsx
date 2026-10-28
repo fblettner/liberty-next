@@ -89,32 +89,31 @@ export function PostApplyEditor({ onSaved }: { onSaved?: () => void }) {
       <button type="button" className="head" onClick={() => setOpen((v) => !v)}>
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <Settings2 size={14} />
-        <span>{t('settings.changes.postApplyTitle', 'Post-apply steps')}</span>
+        <span>{t('settings.changes.postApplyTitle')}</span>
         {steps.length > 0 && <span className="count">{steps.length}</span>}
       </button>
       {open && (
         <div className="body">
-          <div className="hint">{t('settings.changes.postApplyHint',
-            'Run-once steps appended to a connector’s exported bundle and executed once on the target after every change op applies — e.g. a JD Edwards security remerge. The batch alternative to a per-row change_replay action.')}</div>
+          <div className="hint">{t('settings.changes.postApplyHint')}</div>
           {error && <Banner $tone="error" style={{ marginBottom: 8 }}>{error}</Banner>}
-          {saved && <Banner $tone="ok" style={{ marginBottom: 8 }}>{t('common.done', 'Done')}</Banner>}
+          {saved && <Banner $tone="ok" style={{ marginBottom: 8 }}>{t('common.done')}</Banner>}
           {steps.map((st, i) => (
             <Row key={i}>
               <div>
-                <Lbl>{t('settings.changes.paId', 'Id')}</Lbl>
+                <Lbl>{t('settings.changes.paId')}</Lbl>
                 <Input value={st.id} onChange={(e) => update(i, { id: e.target.value })} placeholder="remerge" />
               </div>
               <div>
-                <Lbl>{t('settings.changes.paType', 'Type')}</Lbl>
+                <Lbl>{t('settings.changes.paType')}</Lbl>
                 <Select value={st.type} onChange={(e) => update(i, { type: e.target.value as StepType })}>
                   {(cfg?.types ?? ['call_plugin', 'call_api', 'run_query']).map((ty) => <option key={ty} value={ty}>{ty}</option>)}
                 </Select>
               </div>
               <div>
-                <Lbl>{t('settings.changes.paConnector', 'Connector')}</Lbl>
+                <Lbl>{t('settings.changes.paConnector')}</Lbl>
                 <Select value={st.connector ?? ''} onChange={(e) => update(i, { connector: e.target.value || null })}
                   disabled={st.type === 'call_plugin'}>
-                  <option value="">{t('settings.changes.paSameAsApp', '(application)')}</option>
+                  <option value="">{t('settings.changes.paSameAsApp')}</option>
                   {connectorOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </Select>
               </div>
@@ -128,18 +127,18 @@ export function PostApplyEditor({ onSaved }: { onSaved?: () => void }) {
                 )}
               </div>
               <div>
-                <Lbl>{t('settings.changes.paLabel', 'Label')}</Lbl>
+                <Lbl>{t('settings.changes.paLabel')}</Lbl>
                 <Input value={st.label ?? ''} onChange={(e) => update(i, { label: e.target.value || null })} />
               </div>
-              <Del type="button" title={t('common.delete', 'Delete')} onClick={() => remove(i)}><Trash2 size={13} /></Del>
+              <Del type="button" title={t('common.delete')} onClick={() => remove(i)}><Trash2 size={13} /></Del>
             </Row>
           ))}
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
             <Button $size="sm" $variant="ghost" onClick={add} disabled={!cfg}>
-              <Plus size={13} /> {t('settings.changes.paAdd', 'Add step')}
+              <Plus size={13} /> {t('settings.changes.paAdd')}
             </Button>
             <Button $size="sm" $variant="primary" onClick={() => void save()} disabled={busy || !cfg}>
-              <Save size={13} /> {t('common.save', 'Save')}
+              <Save size={13} /> {t('common.save')}
             </Button>
           </div>
         </div>

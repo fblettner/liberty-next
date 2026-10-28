@@ -409,7 +409,7 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
           </div>
         )}
         <IconBtn type="button" onClick={reset} title={t('chat.newConversation')} disabled={busy || entries.length === 0}><Plus size={14} /></IconBtn>
-        {onClose && <IconBtn type="button" onClick={onClose} title={t('common.close', 'Close')}><X size={14} /></IconBtn>}
+        {onClose && <IconBtn type="button" onClick={onClose} title={t('common.close')}><X size={14} /></IconBtn>}
       </Header>
       {available === false && <Unavailable>{t('chat.unavailable')}</Unavailable>}
       {liveCtx && (() => {
@@ -513,11 +513,11 @@ function ProposalEntry({
         <KindIcon size={16} />
         <span className="summary">{proposal.summary}</span>
         <Tag $tone={state === 'applied' ? 'green' : state === 'error' ? 'red' : state === 'skipped' ? 'neutral' : 'blue'}>
-          {state === 'applied' ? t('chat.proposal.applied', 'applied')
-            : state === 'skipped' ? t('chat.proposal.skipped', 'skipped')
-            : state === 'error' ? t('chat.proposal.error', 'error')
-            : state === 'applying' ? t('chat.proposal.applying', 'applying…')
-            : t('chat.proposal.pending', 'pending')}
+          {state === 'applied' ? t('chat.proposal.applied')
+            : state === 'skipped' ? t('chat.proposal.skipped')
+            : state === 'error' ? t('chat.proposal.error')
+            : state === 'applying' ? t('chat.proposal.applying')
+            : t('chat.proposal.pending')}
         </Tag>
       </ProposalHead>
       <ProposalMeta>
@@ -526,9 +526,9 @@ function ProposalEntry({
         <span>{proposal.kind}</span>
         <span>·</span>
         <Mono>{proposal.target_path}</Mono>
-        {proposal.app && <><span>·</span><span>{t('chat.proposal.app', 'app:')} <Mono>{proposal.app}</Mono></span></>}
+        {proposal.app && <><span>·</span><span>{t('chat.proposal.app')} <Mono>{proposal.app}</Mono></span></>}
         {proposal.connector && proposal.connector !== proposal.app && (
-          <><span>·</span><span>{t('chat.proposal.connector', 'conn:')} <Mono>{proposal.connector}</Mono></span></>
+          <><span>·</span><span>{t('chat.proposal.connector')} <Mono>{proposal.connector}</Mono></span></>
         )}
       </ProposalMeta>
       {proposal.notes && proposal.notes.length > 0 && (
@@ -538,16 +538,16 @@ function ProposalEntry({
       )}
       <ProposalActions>
         <PayloadToggle onClick={() => setShowPayload((v) => !v)}>
-          {showPayload ? t('chat.proposal.hidePayload', 'Hide payload') : t('chat.proposal.showPayload', 'Show payload')}
+          {showPayload ? t('chat.proposal.hidePayload') : t('chat.proposal.showPayload')}
         </PayloadToggle>
         {!decided && state !== 'applying' && (
           <>
             <span style={{ flex: 1 }} />
             <Button $variant="ghost" $size="sm" onClick={onSkip}>
-              <X size={12} /> {t('chat.proposal.skip', 'Skip')}
+              <X size={12} /> {t('chat.proposal.skip')}
             </Button>
             <Button $variant="primary" $size="sm" onClick={onApply}>
-              <Check size={12} /> {t('chat.proposal.apply', 'Apply')}
+              <Check size={12} /> {t('chat.proposal.apply')}
             </Button>
           </>
         )}

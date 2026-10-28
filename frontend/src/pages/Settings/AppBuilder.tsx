@@ -299,7 +299,7 @@ export default function AppBuilder() {
       // Reload — refreshes the _set flags from disk so the masked rows update from "not
       // configured" to dots immediately after a first-time Set.
       await load()
-      setStatus(t('settings.app.saved', 'Saved to {{path}}.', { path }))
+      setStatus(t('settings.app.saved', { path }))
       if (r?.requires_restart) setRestartHint(true)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
@@ -331,7 +331,7 @@ export default function AppBuilder() {
         </ToolbarLeft>
         <ToolbarRight>
           <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
-            <Undo2 size={13} /> {t('common.discard', 'Discard')}
+            <Undo2 size={13} /> {t('common.discard')}
           </Button>
           <Button $variant="primary" $size="sm" onClick={() => void save()} disabled={busy || !dirty}>
             {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
@@ -340,9 +340,7 @@ export default function AppBuilder() {
       </Toolbar>
 
       <Hint>
-        {t(
-          'settings.app.intro',
-          'Master settings (app.toml). Secrets stored here are encrypted at rest with the install master key. License key, AI api_key and OIDC client_secret take effect immediately on save — only host / port / log_level changes still need a server restart.',
+        {t('settings.app.intro',
         )}
         {path && <> · <span style={{ fontFamily: fonts.mono }}>{path}</span></>}
       </Hint>
@@ -350,78 +348,76 @@ export default function AppBuilder() {
       {restartHint && (
         <Banner $tone="info">
           <AlertTriangle size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
-          {t('settings.app.restart', 'Saved. Restart the server to apply the new settings.')}
+          {t('settings.app.restart')}
         </Banner>
       )}
 
       <Stack>
         {renderSection(
           'app',
-          t('settings.app.appSection', 'App'),
+          t('settings.app.appSection'),
           <SettingsIcon size={14} />,
           `${app.name} · :${app.port} · ${app.log_level}`,
           <>
-            <Field label={t('settings.app.name', 'App name')}>
+            <Field label={t('settings.app.name')}>
               <Input value={app.name} onChange={(e) => setApp({ ...app, name: e.target.value })} />
             </Field>
             <RowFlex>
-              <Field label={t('settings.app.host', 'Bind host')}>
+              <Field label={t('settings.app.host')}>
                 <Input value={app.host} onChange={(e) => setApp({ ...app, host: e.target.value })} style={{ width: 200 }} />
               </Field>
-              <Field label={t('settings.app.port', 'Port')}>
+              <Field label={t('settings.app.port')}>
                 <Input type="number" min={1} max={65535} value={app.port}
                   onChange={(e) => setApp({ ...app, port: Number(e.target.value) || 0 })} style={{ width: 110 }} />
               </Field>
             </RowFlex>
             <RowFlex>
-              <Field label={t('settings.app.logLevel', 'Log level')}>
+              <Field label={t('settings.app.logLevel')}>
                 <div style={{ minWidth: 160 }}>
                   <SearchSelect value={app.log_level} options={choices.log_levels.map((l) => ({ value: l, label: l }))} onChange={(v) => setApp({ ...app, log_level: v })} />
                 </div>
               </Field>
-              <Field label={t('settings.app.defaultLanguage', 'Default language')}>
+              <Field label={t('settings.app.defaultLanguage')}>
                 <Input value={app.default_language}
                   onChange={(e) => setApp({ ...app, default_language: e.target.value })} style={{ width: 110 }} />
               </Field>
             </RowFlex>
             <RowFlex>
-              <Field label={t('settings.app.defaultPeriod', 'Default period (dashboards)')}>
+              <Field label={t('settings.app.defaultPeriod')}>
                 <div style={{ width: 200 }}>
                   <SearchSelect value={app.default_period} onChange={(v) => setApp({ ...app, default_period: v })}
                     options={PERIOD_PRESETS.map((k) => ({ value: k, label: t(`period.${k}`) }))} />
                 </div>
               </Field>
-              <Field label={t('settings.app.defaultPageSize', 'Grid page size')}>
+              <Field label={t('settings.app.defaultPageSize')}>
                 <Input type="number" min={10} max={10000} value={app.default_page_size}
                   onChange={(e) => setApp({ ...app, default_page_size: Number(e.target.value) || 50 })} style={{ width: 110 }} />
               </Field>
-              <Field label={t('settings.app.dashboardCache', 'Dashboard cache (seconds, 0 = none)')}>
+              <Field label={t('settings.app.dashboardCache')}>
                 <Input type="number" min={0} max={3600} value={app.dashboard_cache_seconds}
                   onChange={(e) => setApp({ ...app, dashboard_cache_seconds: Math.max(0, Number(e.target.value) || 0) })} style={{ width: 110 }} />
               </Field>
             </RowFlex>
-            <Checkbox label={t('settings.app.hotReload', 'Hot-reload config TOML files on change')}
+            <Checkbox label={t('settings.app.hotReload')}
               checked={app.hot_reload} onChange={(c) => setApp({ ...app, hot_reload: c })} />
-            <Checkbox label={t('settings.app.oracleThick', 'Oracle thick mode (python-oracledb OCI — required for Native Network Encryption / NNE)')}
+            <Checkbox label={t('settings.app.oracleThick')}
               checked={app.oracle_thick} onChange={(c) => setApp({ ...app, oracle_thick: c })} />
           </>,
         )}
 
         {renderSection(
           'license',
-          t('settings.app.licenseSection', 'License'),
+          t('settings.app.licenseSection'),
           <ShieldCheck size={14} />,
           license.key
-            ? t('settings.app.licenseConfigured', 'configured')
-            : t('settings.app.licenseNotSet', 'not set — restricted mode'),
+            ? t('settings.app.licenseConfigured')
+            : t('settings.app.licenseNotSet'),
           <>
             <Hint>
-              {t(
-                'settings.app.licenseHint',
-                'Vendor-signed JWT that unlocks licensed connectors (nomasx1, nomajde, …). Empty → "restricted" mode: licensed connectors aren\'t loaded. Encrypted at rest with the install master key.',
+              {t('settings.app.licenseHint',
               )}
             </Hint>
-            <Field label={t('settings.app.licenseKey', 'License key')}>
+            <Field label={t('settings.app.licenseKey')}>
               <PasswordInput value={license.key}
                 onChange={(e) => setLicense({ ...license, key: e.target.value })}
                 placeholder="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9…"
@@ -432,16 +428,16 @@ export default function AppBuilder() {
 
         {renderSection(
           'ai',
-          t('settings.app.aiSection', 'AI Assistant'),
+          t('settings.app.aiSection'),
           <Sparkles size={14} />,
           ai.enabled
-            ? `${ai.model}${ai.api_key ? '' : ' · ' + t('settings.app.aiNoKey', 'no API key')}`
-            : t('settings.app.aiDisabled', 'disabled'),
+            ? `${ai.model}${ai.api_key ? '' : ' · ' + t('settings.app.aiNoKey')}`
+            : t('settings.app.aiDisabled'),
           <>
-            <Checkbox label={t('settings.app.aiEnabled', 'Enabled')}
+            <Checkbox label={t('settings.app.aiEnabled')}
               checked={ai.enabled} onChange={(c) => setAi({ ...ai, enabled: c })} />
 
-            <Field label={t('settings.app.aiApiKey', 'Anthropic API key')}>
+            <Field label={t('settings.app.aiApiKey')}>
               <PasswordInput value={ai.api_key}
                 onChange={(e) => setAi({ ...ai, api_key: e.target.value })}
                 placeholder="sk-ant-…"
@@ -449,7 +445,7 @@ export default function AppBuilder() {
             </Field>
 
             <RowFlex>
-              <Field label={t('settings.app.aiModel', 'Model')}>
+              <Field label={t('settings.app.aiModel')}>
                 {/* The dropdown always includes the saved value, even when it isn't in the
                     canonical list — useful for experimental / legacy ids the operator may
                     have pinned in app.toml. The label tells them when they're off-list. */}
@@ -466,45 +462,45 @@ export default function AppBuilder() {
                   )
                 })()}
               </Field>
-              <Field label={t('settings.app.aiEffort', 'Effort')}>
+              <Field label={t('settings.app.aiEffort')}>
                 <div style={{ minWidth: 140 }}>
                   <SearchSelect value={ai.effort} options={choices.effort_levels.filter(Boolean).map((l) => ({ value: l, label: l }))}
-                    anyLabel={t('settings.app.aiEffortDefault', '(default)')} onChange={(v) => setAi({ ...ai, effort: v })} />
+                    anyLabel={t('settings.app.aiEffortDefault')} onChange={(v) => setAi({ ...ai, effort: v })} />
                 </div>
               </Field>
             </RowFlex>
             <RowFlex>
-              <Field label={t('settings.app.aiMaxTokens', 'Max tokens')}>
+              <Field label={t('settings.app.aiMaxTokens')}>
                 <Input type="number" min={1} value={ai.max_tokens}
                   onChange={(e) => setAi({ ...ai, max_tokens: Number(e.target.value) || 0 })} style={{ width: 130 }} />
               </Field>
-              <Field label={t('settings.app.aiMaxIter', 'Max tool iterations')}>
+              <Field label={t('settings.app.aiMaxIter')}>
                 <Input type="number" min={1} value={ai.max_iterations}
                   onChange={(e) => setAi({ ...ai, max_iterations: Number(e.target.value) || 0 })} style={{ width: 130 }} />
               </Field>
-              <Field label={t('settings.app.aiTimeout', 'Request timeout (s)')}>
+              <Field label={t('settings.app.aiTimeout')}>
                 <Input type="number" min={1} value={ai.request_timeout}
                   onChange={(e) => setAi({ ...ai, request_timeout: Number(e.target.value) || 0 })} style={{ width: 130 }} />
               </Field>
             </RowFlex>
-            <Checkbox label={t('settings.app.aiThinking', 'Adaptive thinking')}
+            <Checkbox label={t('settings.app.aiThinking')}
               checked={ai.thinking} onChange={(c) => setAi({ ...ai, thinking: c })} />
-            <Field label={t('settings.app.aiSystemPrompt', 'System prompt (empty → built-in default)')}>
+            <Field label={t('settings.app.aiSystemPrompt')}>
               <Textarea rows={5} value={ai.system_prompt}
                 onChange={(e) => setAi({ ...ai, system_prompt: e.target.value })} />
             </Field>
 
-            <Hint>{t('settings.app.aiTools', 'Tool exposure — what the assistant can call.')}</Hint>
-            <Checkbox label={t('settings.app.aiConnectorTools', 'Connector tools (list_connectors, sql_query — read-only)')}
+            <Hint>{t('settings.app.aiTools')}</Hint>
+            <Checkbox label={t('settings.app.aiConnectorTools')}
               checked={ai.connector_tools} onChange={(c) => setAi({ ...ai, connector_tools: c })} />
-            <Checkbox label={t('settings.app.aiApiTool', 'API tool (api_call — endpoints may have side effects)')}
+            <Checkbox label={t('settings.app.aiApiTool')}
               checked={ai.api_tool} onChange={(c) => setAi({ ...ai, api_tool: c })} />
-            <Checkbox label={t('settings.app.aiScaffoldTools', 'Scaffold tools (propose new queries / dictionary / screens / menu items — propose-only, never writes directly)')}
+            <Checkbox label={t('settings.app.aiScaffoldTools')}
               checked={ai.scaffold_tools} onChange={(c) => setAi({ ...ai, scaffold_tools: c })} />
-            <Checkbox label={t('settings.app.aiOpsTools', 'Operations tools (jobs status, the server log tail, the integrity checks — for installations whose chat users are administrators)')}
+            <Checkbox label={t('settings.app.aiOpsTools')}
               checked={ai.ops_tools} onChange={(c) => setAi({ ...ai, ops_tools: c })} />
 
-            <Field label={t('settings.app.aiAllowedConnectors', 'Allowed connectors (empty → all)')}>
+            <Field label={t('settings.app.aiAllowedConnectors')}>
               <ConnectorPicker
                 value={ai.allowed_connectors}
                 options={choices.connectors}
@@ -512,23 +508,23 @@ export default function AppBuilder() {
               />
             </Field>
 
-            <Hint>{t('settings.app.aiChatHint', 'The chat drawer — what users may pick and the questions it suggests.')}</Hint>
-            <Field label={t('settings.app.aiAllowedModels', 'Models users may pick (empty → the model above only)')}>
+            <Hint>{t('settings.app.aiChatHint')}</Hint>
+            <Field label={t('settings.app.aiAllowedModels')}>
               <ModelsPicker value={ai.allowed_models} models={choices.models} onChange={(next) => setAi({ ...ai, allowed_models: next })} />
             </Field>
-            <Field label={t('settings.app.aiStarters', 'Starter questions — everywhere, per app, or per app/screen (the most specific wins)')}>
+            <Field label={t('settings.app.aiStarters')}>
               <AiStartersEditor value={ai.starters} apps={choices.connectors} onChange={(next) => setAi({ ...ai, starters: next })} />
             </Field>
 
-            <Hint>{t('settings.app.aiWebFetch', 'Server-side web fetch (Anthropic-hosted). Disabled until at least one domain is allowed.')}</Hint>
-            <Field label={t('settings.app.aiWebDomains', 'Allowed domains')}>
+            <Hint>{t('settings.app.aiWebFetch')}</Hint>
+            <Field label={t('settings.app.aiWebDomains')}>
               <ChipsInput
                 value={ai.web_fetch_domains}
                 onChange={(next) => setAi({ ...ai, web_fetch_domains: next })}
                 placeholder="example.com"
               />
             </Field>
-            <Field label={t('settings.app.aiWebMaxUses', 'Max fetches per turn')}>
+            <Field label={t('settings.app.aiWebMaxUses')}>
               <Input type="number" min={1} value={ai.web_fetch_max_uses}
                 onChange={(e) => setAi({ ...ai, web_fetch_max_uses: Number(e.target.value) || 0 })} style={{ width: 130 }} />
             </Field>
@@ -537,50 +533,50 @@ export default function AppBuilder() {
 
         {renderSection(
           'notify',
-          t('settings.app.notifySection', 'Notifications (email)'),
+          t('settings.app.notifySection'),
           <Bell size={14} />,
-          !notify.enabled ? t('settings.app.oidcDisabled', 'disabled') : notify.smtp_host ? `${notify.smtp_host}:${notify.smtp_port}` : t('settings.app.notifyNoSmtp', 'no SMTP — portal only'),
+          !notify.enabled ? t('settings.app.oidcDisabled') : notify.smtp_host ? `${notify.smtp_host}:${notify.smtp_port}` : t('settings.app.notifyNoSmtp'),
           <>
-            <Checkbox label={t('settings.app.notifyEnabled', 'Notifications enabled')} checked={notify.enabled} onChange={(c) => setNotify({ ...notify, enabled: c })} />
-            <Hint>{t('settings.app.smtpServer', 'Server')}</Hint>
+            <Checkbox label={t('settings.app.notifyEnabled')} checked={notify.enabled} onChange={(c) => setNotify({ ...notify, enabled: c })} />
+            <Hint>{t('settings.app.smtpServer')}</Hint>
             <RowFlex>
-              <Field label={t('settings.app.smtpHost', 'SMTP host')}>
+              <Field label={t('settings.app.smtpHost')}>
                 <Input value={notify.smtp_host} onChange={(e) => setNotify({ ...notify, smtp_host: e.target.value })} placeholder="smtp.example.com" style={{ width: 280 }} />
               </Field>
-              <Field label={t('settings.app.smtpPort', 'Port')}>
+              <Field label={t('settings.app.smtpPort')}>
                 <Input type="number" min={1} max={65535} value={notify.smtp_port} onChange={(e) => setNotify({ ...notify, smtp_port: Number(e.target.value) || 587 })} style={{ width: 110 }} />
               </Field>
-              <Field label={t('settings.app.smtpEncryption', 'Encryption')}>
+              <Field label={t('settings.app.smtpEncryption')}>
                 <div style={{ width: 240 }}>
                   <SearchSelect
                     value={notify.smtp_ssl ? 'ssl' : notify.smtp_tls ? 'starttls' : 'none'}
                     onChange={(v) => setNotify({ ...notify, smtp_tls: v === 'starttls', smtp_ssl: v === 'ssl', smtp_port: v === 'ssl' && notify.smtp_port === 587 ? 465 : v === 'starttls' && notify.smtp_port === 465 ? 587 : notify.smtp_port })}
                     options={[
-                      { value: 'starttls', label: t('settings.app.smtpStartTls', 'STARTTLS (usually port 587)') },
-                      { value: 'ssl', label: t('settings.app.smtpImplicitTls', 'SSL / implicit TLS (usually port 465)') },
-                      { value: 'none', label: t('settings.app.smtpNoTls', 'None (plain connection)') },
+                      { value: 'starttls', label: t('settings.app.smtpStartTls') },
+                      { value: 'ssl', label: t('settings.app.smtpImplicitTls') },
+                      { value: 'none', label: t('settings.app.smtpNoTls') },
                     ]} />
                 </div>
               </Field>
-              <Field label={t('settings.app.smtpTimeout', 'Timeout (s)')}>
+              <Field label={t('settings.app.smtpTimeout')}>
                 <Input type="number" min={1} value={notify.smtp_timeout} onChange={(e) => setNotify({ ...notify, smtp_timeout: Number(e.target.value) || 20 })} style={{ width: 90 }} />
               </Field>
             </RowFlex>
-            <Hint>{t('settings.app.smtpAccount', 'Account')}</Hint>
+            <Hint>{t('settings.app.smtpAccount')}</Hint>
             <RowFlex>
-              <Field label={t('settings.app.smtpUser', 'User')}>
+              <Field label={t('settings.app.smtpUser')}>
                 <Input value={notify.smtp_user} onChange={(e) => setNotify({ ...notify, smtp_user: e.target.value })} style={{ width: 280 }} />
               </Field>
-              <Field label={t('settings.app.smtpPassword', 'Password')}>
+              <Field label={t('settings.app.smtpPassword')}>
                 <PasswordInput value={notify.smtp_password} onChange={(e) => setNotify({ ...notify, smtp_password: e.target.value })} placeholder="…" style={{ fontFamily: fonts.mono, width: 280 }} />
               </Field>
             </RowFlex>
-            <Hint>{t('settings.app.smtpSending', 'Sending')}</Hint>
+            <Hint>{t('settings.app.smtpSending')}</Hint>
             <RowFlex>
-              <Field label={t('settings.app.smtpFrom', 'From address')}>
+              <Field label={t('settings.app.smtpFrom')}>
                 <Input value={notify.smtp_from} onChange={(e) => setNotify({ ...notify, smtp_from: e.target.value })} placeholder="liberty@example.com" style={{ width: 280 }} />
               </Field>
-              <Field label={t('settings.app.notifyRetention', 'Keep read notifications (days, 0 = forever)')}>
+              <Field label={t('settings.app.notifyRetention')}>
                 <Input type="number" min={0} value={notify.retention_days} onChange={(e) => setNotify({ ...notify, retention_days: Math.max(0, Number(e.target.value) || 0) })} style={{ width: 110 }} />
               </Field>
             </RowFlex>
@@ -589,65 +585,63 @@ export default function AppBuilder() {
 
         {renderSection(
           'oidc',
-          t('settings.app.oidcSection', 'OpenID Connect (SSO)'),
+          t('settings.app.oidcSection'),
           <KeyRound size={14} />,
           oidc.enabled
-            ? (oidc.discovery_url || t('settings.app.oidcNoDiscovery', 'no discovery URL'))
-            : t('settings.app.oidcDisabled', 'disabled'),
+            ? (oidc.discovery_url || t('settings.app.oidcNoDiscovery'))
+            : t('settings.app.oidcDisabled'),
           <>
             <Hint>
-              {t(
-                'settings.app.oidcHint',
-                'Single sign-on via any OIDC-compliant provider (Keycloak, Okta, Auth0, Azure AD, …). Register https://<your-host>/auth/oidc/callback as the redirect URI. The client_secret is encrypted at rest with the install master key.',
+              {t('settings.app.oidcHint',
               )}
             </Hint>
-            <Checkbox label={t('settings.app.oidcEnabled', 'Enabled')}
+            <Checkbox label={t('settings.app.oidcEnabled')}
               checked={oidc.enabled} onChange={(c) => setOidc({ ...oidc, enabled: c })} />
-            <Field label={t('settings.app.oidcDiscoveryUrl', 'Discovery URL (.well-known/openid-configuration)')}>
+            <Field label={t('settings.app.oidcDiscoveryUrl')}>
               <Input value={oidc.discovery_url}
                 onChange={(e) => setOidc({ ...oidc, discovery_url: e.target.value })}
                 placeholder="https://keycloak.example/realms/liberty/.well-known/openid-configuration" />
             </Field>
             <RowFlex>
-              <Field label={t('settings.app.oidcClientId', 'Client ID')}>
+              <Field label={t('settings.app.oidcClientId')}>
                 <Input value={oidc.client_id}
                   onChange={(e) => setOidc({ ...oidc, client_id: e.target.value })} style={{ width: 280 }} />
               </Field>
-              <Field label={t('settings.app.oidcScopes', 'Scopes')}>
+              <Field label={t('settings.app.oidcScopes')}>
                 <Input value={oidc.scopes}
                   onChange={(e) => setOidc({ ...oidc, scopes: e.target.value })} style={{ width: 240 }} />
               </Field>
             </RowFlex>
-            <Field label={t('settings.app.oidcClientSecret', 'Client secret')}>
+            <Field label={t('settings.app.oidcClientSecret')}>
               <PasswordInput value={oidc.client_secret}
                 onChange={(e) => setOidc({ ...oidc, client_secret: e.target.value })}
                 placeholder="…"
                 style={{ fontFamily: fonts.mono }} />
             </Field>
 
-            <Hint>{t('settings.app.oidcClaims', 'Which ID-token claims to read.')}</Hint>
+            <Hint>{t('settings.app.oidcClaims')}</Hint>
             <RowFlex>
-              <Field label={t('settings.app.oidcUsernameClaim', 'Username claim')}>
+              <Field label={t('settings.app.oidcUsernameClaim')}>
                 <Input value={oidc.username_claim}
                   onChange={(e) => setOidc({ ...oidc, username_claim: e.target.value })} style={{ width: 200 }} />
               </Field>
-              <Field label={t('settings.app.oidcEmailClaim', 'Email claim')}>
+              <Field label={t('settings.app.oidcEmailClaim')}>
                 <Input value={oidc.email_claim}
                   onChange={(e) => setOidc({ ...oidc, email_claim: e.target.value })} style={{ width: 160 }} />
               </Field>
-              <Field label={t('settings.app.oidcNameClaim', 'Name claim')}>
+              <Field label={t('settings.app.oidcNameClaim')}>
                 <Input value={oidc.name_claim}
                   onChange={(e) => setOidc({ ...oidc, name_claim: e.target.value })} style={{ width: 160 }} />
               </Field>
             </RowFlex>
 
-            <Hint>{t('settings.app.oidcRedirects', 'Optional — override the redirect targets when running behind a proxy or for SPA flows.')}</Hint>
-            <Field label={t('settings.app.oidcRedirectUrl', 'Redirect URL override (proxy)')}>
+            <Hint>{t('settings.app.oidcRedirects')}</Hint>
+            <Field label={t('settings.app.oidcRedirectUrl')}>
               <Input value={oidc.redirect_url}
                 onChange={(e) => setOidc({ ...oidc, redirect_url: e.target.value })}
                 placeholder="https://liberty.example.com/auth/oidc/callback" />
             </Field>
-            <Field label={t('settings.app.oidcFrontendRedirect', 'Frontend redirect (SPA — JWTs in URL fragment)')}>
+            <Field label={t('settings.app.oidcFrontendRedirect')}>
               <Input value={oidc.frontend_redirect}
                 onChange={(e) => setOidc({ ...oidc, frontend_redirect: e.target.value })}
                 placeholder="https://liberty.example.com/" />
@@ -657,35 +651,33 @@ export default function AppBuilder() {
 
         {renderSection(
           'branding',
-          t('settings.app.brandingSection', 'PDF branding'),
+          t('settings.app.brandingSection'),
           <FileText size={14} />,
-          branding.author || t('settings.app.brandingDefaults', 'framework defaults'),
+          branding.author || t('settings.app.brandingDefaults'),
           <>
             <Hint>
-              {t(
-                'settings.app.brandingHint',
-                'Applied to every report generated through the framework. Per-report pdf_options still wins; anything a report doesn\'t set inherits from here.',
+              {t('settings.app.brandingHint',
               )}
             </Hint>
             <InlineActions>
               <Button $size="sm" $variant="ghost" onClick={resetBrandingToDefaults} disabled={busy} type="button">
-                <RefreshCw size={13} /> {t('settings.reports.resetDefaults', 'Reset to defaults')}
+                <RefreshCw size={13} /> {t('settings.reports.resetDefaults')}
               </Button>
             </InlineActions>
             <RowFlex>
-              <Field label={t('settings.reports.fields.author', 'Author / company name')}>
+              <Field label={t('settings.reports.fields.author')}>
                 <Input value={branding.author}
                   onChange={(e) => setBranding({ ...branding, author: e.target.value })}
                   placeholder={brandingDefaults.author || 'NOMANA-IT'} style={{ width: 280 }} />
               </Field>
-              <Field label={t('settings.reports.fields.coverEyebrow', 'Cover eyebrow text')}>
+              <Field label={t('settings.reports.fields.coverEyebrow')}>
                 <Input value={branding.cover_eyebrow}
                   onChange={(e) => setBranding({ ...branding, cover_eyebrow: e.target.value })}
                   placeholder={brandingDefaults.cover_eyebrow} style={{ width: 280 }} />
               </Field>
             </RowFlex>
             <RowFlex>
-              <Field label={t('settings.reports.fields.primaryColor', 'Primary colour')}>
+              <Field label={t('settings.reports.fields.primaryColor')}>
                 <ColorRow>
                   <Input value={branding.primary_color}
                     onChange={(e) => setBranding({ ...branding, primary_color: e.target.value })}
@@ -694,7 +686,7 @@ export default function AppBuilder() {
                   <ColorSwatch $color={branding.primary_color} />
                 </ColorRow>
               </Field>
-              <Field label={t('settings.reports.fields.primaryColorLight', 'Primary colour (lighter)')}>
+              <Field label={t('settings.reports.fields.primaryColorLight')}>
                 <ColorRow>
                   <Input value={branding.primary_color_light}
                     onChange={(e) => setBranding({ ...branding, primary_color_light: e.target.value })}
@@ -705,12 +697,12 @@ export default function AppBuilder() {
               </Field>
             </RowFlex>
             <RowFlex>
-              <Field label={t('settings.reports.fields.coverRef', 'Cover footer reference')}>
+              <Field label={t('settings.reports.fields.coverRef')}>
                 <Input value={branding.cover_ref}
                   onChange={(e) => setBranding({ ...branding, cover_ref: e.target.value })}
                   placeholder={brandingDefaults.cover_ref} style={{ width: 280 }} />
               </Field>
-              <Field label={t('settings.reports.fields.footerLeft', 'Page footer (left)')}>
+              <Field label={t('settings.reports.fields.footerLeft')}>
                 <Input value={branding.footer_left}
                   onChange={(e) => setBranding({ ...branding, footer_left: e.target.value })}
                   placeholder={brandingDefaults.footer_left} style={{ width: 280 }} />

@@ -85,8 +85,8 @@ export default function RoleEditor({ initial, takenNames, forest, dashboardIds, 
 
   const save = async () => {
     const n = name.trim()
-    if (!n) { setError(t('settings.access.errName', 'A role name is required.')); return }
-    if (isNew && takenNames.includes(n)) { setError(t('settings.access.errNameTaken', 'That role name is taken.')); return }
+    if (!n) { setError(t('settings.access.errName')); return }
+    if (isNew && takenNames.includes(n)) { setError(t('settings.access.errNameTaken')); return }
     setBusy(true); setError(null)
     try {
       await api.put(`/admin/access/roles/${encodeURIComponent(n)}`, { permissions, description: description.trim() || null, scope })
@@ -98,12 +98,12 @@ export default function RoleEditor({ initial, takenNames, forest, dashboardIds, 
     <Panel>
       <Head>
         <Shield size={16} color={colors.blue.main} />
-        <span className="title">{isNew ? t('settings.access.addRole', 'Add role') : `[roles.${initial?.name}]`}</span>
-        {dirty && !isNew && <span className="dirty">{t('settings.access.unsaved', 'unsaved changes')}</span>}
+        <span className="title">{isNew ? t('settings.access.addRole') : `[roles.${initial?.name}]`}</span>
+        {dirty && !isNew && <span className="dirty">{t('settings.access.unsaved')}</span>}
       </Head>
       <Tabs>
-        <TabBtn $active={tab === 'access'} onClick={() => setTab('access')}><KeyRound size={13} /> {t('settings.access.tabAccess', 'Access')}</TabBtn>
-        <TabBtn $active={tab === 'scope'} onClick={() => setTab('scope')}><Database size={13} /> {t('settings.access.tabScope', 'Data scope')} <span className="n">{scope.length ? `· ${scope.length}` : ''}</span></TabBtn>
+        <TabBtn $active={tab === 'access'} onClick={() => setTab('access')}><KeyRound size={13} /> {t('settings.access.tabAccess')}</TabBtn>
+        <TabBtn $active={tab === 'scope'} onClick={() => setTab('scope')}><Database size={13} /> {t('settings.access.tabScope')} <span className="n">{scope.length ? `· ${scope.length}` : ''}</span></TabBtn>
       </Tabs>
       <Body>
         {error && <Banner $tone="error">{error}</Banner>}
@@ -114,32 +114,32 @@ export default function RoleEditor({ initial, takenNames, forest, dashboardIds, 
         ) : (
         <>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(160px, 1fr) 2fr', gap: 12 }}>
-          <Field label={t('settings.access.roleName', 'Role name')}>
+          <Field label={t('settings.access.roleName')}>
             <Input value={name} disabled={!isNew} onChange={(e) => setName(e.target.value)} placeholder="reader" />
           </Field>
-          <Field label={t('settings.access.description', 'Description')}>
+          <Field label={t('settings.access.description')}>
             <Input value={description} onChange={(e) => setDescription(e.target.value)} />
           </Field>
         </div>
 
         <Section>
           <div className="h">
-            {t('settings.access.baseline', 'Baseline')}
+            {t('settings.access.baseline')}
             <Seg>
-              <SegBtn $active={!model.full} onClick={() => setModel((m) => ({ ...m, full: false }))}><Ban size={13} /> {t('settings.access.noAccess', 'No access')}</SegBtn>
-              <SegBtn $active={model.full} $tone="allow" onClick={() => setModel((m) => ({ ...m, full: true }))}><Check size={13} /> {t('settings.access.fullAccess', 'Full access')}</SegBtn>
+              <SegBtn $active={!model.full} onClick={() => setModel((m) => ({ ...m, full: false }))}><Ban size={13} /> {t('settings.access.noAccess')}</SegBtn>
+              <SegBtn $active={model.full} $tone="allow" onClick={() => setModel((m) => ({ ...m, full: true }))}><Check size={13} /> {t('settings.access.fullAccess')}</SegBtn>
             </Seg>
-            <span className="hint">{model.full ? t('settings.access.fullHint', 'everything, minus what you deny below') : t('settings.access.noneHint', 'nothing, plus what you allow below')}</span>
+            <span className="hint">{model.full ? t('settings.access.fullHint') : t('settings.access.noneHint')}</span>
           </div>
         </Section>
 
         <Section>
-          <div className="h">{t('settings.access.menus', 'Menus')}</div>
+          <div className="h">{t('settings.access.menus')}</div>
           <MenuTree forest={forest} effects={effects} onSetState={setState} />
         </Section>
 
         <Section>
-          <div className="h">{t('settings.access.other', 'Beyond the menus')}</div>
+          <div className="h">{t('settings.access.other')}</div>
           <OtherAccess value={model.other} onChange={(other) => setModel((m) => ({ ...m, other }))} dashboardIds={dashboardIds} />
         </Section>
 
@@ -147,7 +147,7 @@ export default function RoleEditor({ initial, takenNames, forest, dashboardIds, 
         )}
       </Body>
       <Foot>
-        <Button $size="sm" $variant="ghost" onClick={onCancel}>{t('common.cancel', 'Cancel')}</Button>
+        <Button $size="sm" $variant="ghost" onClick={onCancel}>{t('common.cancel')}</Button>
         <Button $size="sm" $variant="primary" onClick={() => void save()} disabled={busy || (!dirty && !isNew)}>{busy ? <SpinnerRing size={13} thickness={2} /> : t('common.save')}</Button>
       </Foot>
     </Panel>

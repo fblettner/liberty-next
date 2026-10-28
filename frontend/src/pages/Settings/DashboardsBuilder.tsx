@@ -97,7 +97,7 @@ export default function DashboardsBuilder() {
     const byId = { ...(doc?.[scope] ?? {}) }
     if (prevId && prevId !== id) delete byId[prevId]
     byId[id] = record
-    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.dashboards.saved', 'Saved.'))
+    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.dashboards.saved'))
     setEditing(undefined)
   }
 
@@ -115,16 +115,16 @@ export default function DashboardsBuilder() {
   }
 
   const validateDashboardId = (v: string, oldId: string | null) => {
-    if (oldId && v === oldId) return { error: t('settings.tables.duplicateSameName', 'Pick a different name.') }
+    if (oldId && v === oldId) return { error: t('settings.tables.duplicateSameName') }
     const existing = Object.keys(doc?.[scope] ?? {}).filter((k) => k !== oldId)
     return validateIdShared({ kind: 'dashboard', proposed: v, existing, mode: oldId ? 'rename' : 'add', currentName: oldId ?? undefined })
   }
 
   const renameDashboard = async (oldId: string) => {
     const next = (await modals.prompt({
-      title: t('settings.rename.button', 'Rename'),
-      message: t('settings.dashboards.renamePrompt', 'New id for "{{name}}":', { name: oldId }),
-      defaultValue: oldId, submitLabel: t('settings.rename.button', 'Rename'),
+      title: t('settings.rename.button'),
+      message: t('settings.dashboards.renamePrompt', { name: oldId }),
+      defaultValue: oldId, submitLabel: t('settings.rename.button'),
       validate: (v) => validateDashboardId(v.trim(), oldId),
     }))?.trim()
     if (!next || next === oldId) return
@@ -132,7 +132,7 @@ export default function DashboardsBuilder() {
     const src = byId[oldId]
     delete byId[oldId]
     byId[next] = { ...src, id: next }
-    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.dashboards.renamed', 'Renamed.'))
+    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.dashboards.renamed'))
   }
 
   // CloneWithDepsModal — operator can opt to also duplicate every referenced query
@@ -182,7 +182,7 @@ export default function DashboardsBuilder() {
   return (
     <Shell>
       <ScopeBar scopes={scopes} value={scope} onChange={setScope}
-        emptyHint={t('settings.dashboards.noScopes', 'No dashboards yet — use "Add scope" to start.')}
+        emptyHint={t('settings.dashboards.noScopes')}
         onAddScope={() => setAddScopeOpen(true)} />
       <Toolbar>
         <ToolbarLeft>
@@ -201,7 +201,7 @@ export default function DashboardsBuilder() {
         <FilterBar>
           <Search size={14} />
           <input value={filter} onChange={(e) => setFilter(e.target.value)}
-            placeholder={t('settings.filterPlaceholder', 'Filter…')} />
+            placeholder={t('settings.filterPlaceholder')} />
         </FilterBar>
       )}
 
@@ -211,8 +211,8 @@ export default function DashboardsBuilder() {
           const widgetsN = Array.isArray(dash.widgets) ? dash.widgets.length : 0
           const filtersN = Array.isArray(dash.filters) ? dash.filters.length : 0
           const meta = [
-            t('settings.dash.widgetCount', '{{n}} widget(s)', { n: widgetsN }),
-            filtersN > 0 && t('settings.dash.filterCount', '{{n}} filter(s)', { n: filtersN }),
+            t('settings.dash.widgetCount', { n: widgetsN }),
+            filtersN > 0 && t('settings.dash.filterCount', { n: filtersN }),
             dash.description,
           ].filter(Boolean).join(' · ')
           // Customer-override badge — see ScreensBuilder for rationale.
@@ -225,7 +225,7 @@ export default function DashboardsBuilder() {
                   {id}
                   {isOverride && (
                     <Tag $tone="orange" style={{ marginLeft: 6, fontSize: fontSize.micro }}>
-                      {t('settings.override.badge', 'override')}
+                      {t('settings.override.badge')}
                     </Tag>
                   )}
                 </span>
@@ -236,16 +236,16 @@ export default function DashboardsBuilder() {
                 <Button $variant="ghost" $size="sm" onClick={() => setDepsSeeds([{
                   kind: 'dashboard', name: id, label: `dashboard ${id}`,
                 }])} disabled={busy}>
-                  <GitMerge size={13} /> {t('findDeps.button', 'Find dependencies')}
+                  <GitMerge size={13} /> {t('findDeps.button')}
                 </Button>
                 <Button $variant="ghost" $size="sm" onClick={() => void renameDashboard(id)} disabled={busy}>
-                  <Edit3 size={13} /> {t('settings.rename.button', 'Rename')}
+                  <Edit3 size={13} /> {t('settings.rename.button')}
                 </Button>
                 <Button $variant="ghost" $size="sm" onClick={() => void cloneDashboard(id)} disabled={busy}>
-                  <Copy size={13} /> {t('common.clone', 'Clone')}
+                  <Copy size={13} /> {t('common.clone')}
                 </Button>
                 <Button $variant="ghost" $size="sm" onClick={() => void removeDashboard(id)} disabled={busy} style={{ color: colors.red.main }}>
-                  <Trash2 size={13} /> {t('common.delete', 'Delete')}
+                  <Trash2 size={13} /> {t('common.delete')}
                 </Button>
               </span>
             </Item>
@@ -256,8 +256,8 @@ export default function DashboardsBuilder() {
             {!scope
               ? t('settings.dashboards.empty')
               : allIds.length === 0
-                ? t('settings.dashboards.emptyScope', 'No dashboards in "{{scope}}" yet.', { scope })
-                : t('common.noMatches', 'No matches')}
+                ? t('settings.dashboards.emptyScope', { scope })
+                : t('common.noMatches')}
           </Empty>
         )}
       </List>
@@ -274,8 +274,8 @@ export default function DashboardsBuilder() {
       {addScopeOpen && (
         <AddScopeModal
           candidates={addCandidates}
-          title={t('settings.dashboards.addScope', 'Add an owning connector')}
-          emptyHint={t('settings.dashboards.addScopeEmpty', 'Every connector already has a dashboards scope.')}
+          title={t('settings.dashboards.addScope')}
+          emptyHint={t('settings.dashboards.addScopeEmpty')}
           onPick={(c) => { setDoc((p) => ({ ...(p ?? {}), [c]: p?.[c] ?? {} })); setScope(c); setStatus(null) }}
           onClose={() => setAddScopeOpen(false)}
         />

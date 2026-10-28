@@ -10,7 +10,7 @@ const IntegrityBuilder = lazy(() => import('../Settings/IntegrityBuilder'))
 export default function IntegrityPage() {
   const { t } = useTranslation()
   return (
-    <PageLayout icon={<ShieldCheck size={18} />} title={t('settings.tabs.integrity', 'Integrity')}>
+    <PageLayout icon={<ShieldCheck size={18} />} title={t('settings.tabs.integrity')}>
       <Suspense fallback={<Centered />}><IntegrityBuilder /></Suspense>
     </PageLayout>
   )

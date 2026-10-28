@@ -163,18 +163,18 @@ export function TablePicker({ connector, onPick }: { connector: string; onPick: 
       {schemaOpts.length > 1 && (
         <div style={{ flex: '0 0 180px' }}>
           <SearchSelect value={noPicker ? '' : pickedSchema} onChange={setPickedSchema} options={schemaOpts}
-            placeholder={t('settings.sqlWizard.pickSchema', 'Schema')} />
+            placeholder={t('settings.sqlWizard.pickSchema')} />
         </div>
       )}
       {!noPicker && (
-        <Input style={{ flex: '0 0 150px' }} placeholder={t('settings.sqlWizard.filterTable', 'Filter (e.g. F009%)')}
+        <Input style={{ flex: '0 0 150px' }} placeholder={t('settings.sqlWizard.filterTable')}
           value={filterRaw} onChange={(e) => setFilterRaw(e.target.value)} />
       )}
       <div style={{ flex: 1, minWidth: 160 }}>
         <SearchSelect value=""
           onChange={(v) => { const tb = (tables ?? []).find((x) => x.name === v); if (tb) onPick({ schema: noPicker ? null : pickedSchema, name: tb.name, columns: tb.columns }) }}
           options={tableOpts}
-          placeholder={!noPicker && !filter ? t('settings.sqlWizard.typeFilter', 'Type a filter to list tables') : (tables === undefined ? t('common.loading') : t('settings.sqlWizard.pickTable'))}
+          placeholder={!noPicker && !filter ? t('settings.sqlWizard.typeFilter') : (tables === undefined ? t('common.loading') : t('settings.sqlWizard.pickTable'))}
           loading={shouldFetch && tables === undefined} />
       </div>
     </RowBar>
@@ -391,7 +391,7 @@ function SelectWizard({ connector, initialSql, onInsert, onCancel, forceReadOnly
             </Field>
           ) : (
             <Section>
-              <SectionTitle>{t('settings.sqlWizard.tables', 'Tables')}</SectionTitle>
+              <SectionTitle>{t('settings.sqlWizard.tables')}</SectionTitle>
               {joins.map((j, i) => (
                 <div key={`${j.alias}_${i}`}>
                   <RowBar>
@@ -419,10 +419,10 @@ function SelectWizard({ connector, initialSql, onInsert, onCancel, forceReadOnly
                     return (
                       <div style={{ marginTop: 4 }}>
                         <RowBar>
-                          <OnLabel style={{ flex: 1, marginBottom: 0 }}>{t('settings.sqlWizard.joinOn', 'ON')}</OnLabel>
+                          <OnLabel style={{ flex: 1, marginBottom: 0 }}>{t('settings.sqlWizard.joinOn')}</OnLabel>
                           {!readOnly && (
                             <MiniBtn type="button" onClick={() => toggleJoinRaw(i)}>
-                              {isRaw ? t('settings.sqlWizard.joinUseBuilder', 'Use builder') : t('settings.sqlWizard.joinEditText', 'Edit as text')}
+                              {isRaw ? t('settings.sqlWizard.joinUseBuilder') : t('settings.sqlWizard.joinEditText')}
                             </MiniBtn>
                           )}
                         </RowBar>
@@ -431,18 +431,18 @@ function SelectWizard({ connector, initialSql, onInsert, onCancel, forceReadOnly
                         ) : isRaw ? (
                           <Input style={{ marginTop: 4, fontFamily: fonts.mono }}
                             value={j.join?.raw ?? ''} onChange={(e) => setJoinRaw(i, e.target.value)}
-                            placeholder={t('settings.sqlWizard.joinOnExpr', 'e.g. a.KEY = b.KEY AND TRIM(b.X) IS NULL')} />
+                            placeholder={t('settings.sqlWizard.joinOnExpr')} />
                         ) : (<>
                           {conds.map((c, k) => (
                             <RowBar key={k} style={{ marginTop: 4 }}>
                               <div style={{ flex: 1 }}>
                                 <SearchSelect value={c.left} onChange={(v) => setCond(k, { left: v })}
-                                  options={leftOpts} placeholder={t('settings.sqlWizard.joinSource', 'Source column')} />
+                                  options={leftOpts} placeholder={t('settings.sqlWizard.joinSource')} />
                               </div>
                               <span style={{ color: colors.text.muted }}>=</span>
                               <div style={{ flex: 1 }}>
                                 <SearchSelect value={c.right} onChange={(v) => setCond(k, { right: v })}
-                                  options={rightOpts} placeholder={t('settings.sqlWizard.joinTarget', 'Target column')} />
+                                  options={rightOpts} placeholder={t('settings.sqlWizard.joinTarget')} />
                               </div>
                               {conds.length > 1 && (
                                 <SmallX type="button" title={t('common.remove')}
@@ -451,7 +451,7 @@ function SelectWizard({ connector, initialSql, onInsert, onCancel, forceReadOnly
                             </RowBar>
                           ))}
                           <MiniBtn type="button" onClick={() => setJoinConds(i, [...conds, { left: '', right: '' }])}>
-                            <Plus size={12} /> {t('settings.sqlWizard.addJoinCond', 'Add condition')}
+                            <Plus size={12} /> {t('settings.sqlWizard.addJoinCond')}
                           </MiniBtn>
                         </>)}
                       </div>
@@ -461,14 +461,14 @@ function SelectWizard({ connector, initialSql, onInsert, onCancel, forceReadOnly
               ))}
               {!readOnly && (adding
                 ? <TablePicker connector={connector} onPick={addJoin} />
-                : <MiniBtn type="button" onClick={() => setAdding(true)}><Plus size={12} /> {t('settings.sqlWizard.addJoin', 'Add a joined table')}</MiniBtn>)}
+                : <MiniBtn type="button" onClick={() => setAdding(true)}><Plus size={12} /> {t('settings.sqlWizard.addJoin')}</MiniBtn>)}
             </Section>
           )}
           {readOnly && (
             <Banner $tone="warning" style={{ marginBottom: 12 }}>
               {forceReadOnly
-                ? t('settings.sqlWizard.notSelectNote', "This isn't a simple SELECT the builder can edit — edit it directly as SQL.")
-                : t('settings.sqlWizard.readOnlyNote', "This query's SELECT list uses column aliases or expressions the builder can't edit. The joins are shown above for reference — edit the query directly in SQL.")}
+                ? t('settings.sqlWizard.notSelectNote')
+                : t('settings.sqlWizard.readOnlyNote')}
             </Banner>
           )}
           {/* ── columns, grouped per table ── */}
@@ -476,7 +476,7 @@ function SelectWizard({ connector, initialSql, onInsert, onCancel, forceReadOnly
             <Section key={`cols_${j.alias}_${ji}`}>
               <RowBar>
                 <SectionTitle style={{ flex: 1 }}>
-                  {(single ? t('settings.sqlWizard.columnsTitle', 'Columns') : j.alias)} — {j.columns.filter((c) => cols.has(`${j.alias}.${c.name}`)).length}/{j.columns.length}
+                  {(single ? t('settings.sqlWizard.columnsTitle') : j.alias)} — {j.columns.filter((c) => cols.has(`${j.alias}.${c.name}`)).length}/{j.columns.length}
                 </SectionTitle>
                 <MiniBtn type="button" onClick={() => onColsChange(new Set([...cols, ...j.columns.map((c) => `${j.alias}.${c.name}`)]))}>{t('common.selectAll')}</MiniBtn>
                 <MiniBtn type="button" onClick={() => onColsChange(new Set([...cols].filter((id) => !id.startsWith(`${j.alias}.`))))}>{t('common.selectNone')}</MiniBtn>
@@ -603,7 +603,7 @@ function MutationWizard({ connector, initialSql, crud, expected, forceReadOnly, 
         <ModalBody>
           {readOnly ? (
             <Banner $tone="warning" style={{ marginBottom: 12 }}>
-              {t('settings.sqlWizard.notMatchNote', "This statement doesn't start with {{kw}} — edit it directly as SQL.", { kw: expected })}
+              {t('settings.sqlWizard.notMatchNote', { kw: expected })}
             </Banner>
           ) : !base ? (
             <Field label={t('settings.sqlWizard.table')}>
@@ -614,16 +614,16 @@ function MutationWizard({ connector, initialSql, crud, expected, forceReadOnly, 
               <Section>
                 <RowBar>
                   <SectionTitle style={{ flex: 1 }}>
-                    {t('settings.sqlWizard.tables', 'Tables')} — <span style={{ fontFamily: fonts.mono, textTransform: 'none' }}>{(base.schema ? `${base.schema}.` : '') + base.name}</span>
+                    {t('settings.sqlWizard.tables')} — <span style={{ fontFamily: fonts.mono, textTransform: 'none' }}>{(base.schema ? `${base.schema}.` : '') + base.name}</span>
                   </SectionTitle>
-                  <MiniBtn type="button" onClick={() => { setBase(null); touch() }}>{t('settings.sqlWizard.changeTable', 'Change table')}</MiniBtn>
+                  <MiniBtn type="button" onClick={() => { setBase(null); touch() }}>{t('settings.sqlWizard.changeTable')}</MiniBtn>
                 </RowBar>
               </Section>
               <Section>
                 <SectionTitle>
-                  {crud === 'post' ? t('settings.sqlWizard.insertCols', 'Columns to insert')
-                    : crud === 'put' ? t('settings.sqlWizard.updateCols', 'Columns to set · key columns drive WHERE')
-                      : t('settings.sqlWizard.deleteCols', 'Key columns (drive WHERE)')}
+                  {crud === 'post' ? t('settings.sqlWizard.insertCols')
+                    : crud === 'put' ? t('settings.sqlWizard.updateCols')
+                      : t('settings.sqlWizard.deleteCols')}
                 </SectionTitle>
                 <ColGrid>
                   {base.columns.map((c) => (
@@ -637,7 +637,7 @@ function MutationWizard({ connector, initialSql, crud, expected, forceReadOnly, 
                       {needsKey && (
                         <span className="key">
                           <Checkbox checked={keys.has(c.name)} onChange={() => toggleKey(c.name)} disabled={needsInclude && !included.has(c.name)} />
-                          {t('settings.sqlWizard.key', 'key')}
+                          {t('settings.sqlWizard.key')}
                         </span>
                       )}
                     </MutCol>

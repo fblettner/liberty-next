@@ -672,13 +672,13 @@ export default function ActionTreeView({
     // call_action: a single ``ref`` picker (the shared action id) — no connector / query target.
     if (aType === 'call_action') {
       return (
-        <Field label={t('settings.screens.action.sharedRef', 'Shared action *')}>
+        <Field label={t('settings.screens.action.sharedRef')}>
           <SearchSelect
             value={(a.ref as string | undefined) ?? ''}
             options={sharedActionOptions}
             onChange={(v) => onPatch({ ref: v || '' })}
             allowCustom
-            placeholder={t('settings.screens.action.sharedRefPick', 'Pick a shared action…')}
+            placeholder={t('settings.screens.action.sharedRefPick')}
           />
         </Field>
       )
@@ -686,13 +686,13 @@ export default function ActionTreeView({
     // call_plugin: a single ``callable`` picker (module:function) — no connector / query target.
     if (aType === 'call_plugin') {
       return (
-        <Field label={t('settings.screens.action.callable', 'Plugin callable *')}>
+        <Field label={t('settings.screens.action.callable')}>
           <SearchSelect
             value={(a.callable as string | undefined) ?? ''}
             options={pluginCallableOptions}
             onChange={(v) => onPatch({ callable: v || '' })}
             allowCustom
-            placeholder={t('settings.screens.action.callablePick', 'Pick a plugin callable…')}
+            placeholder={t('settings.screens.action.callablePick')}
             loading={pluginCallablesLoading}
           />
         </Field>
@@ -756,7 +756,7 @@ export default function ActionTreeView({
                   $variant="ghost"
                   $size="sm"
                   onClick={() => onEditQuery(actionConn, String(a[targetKey]))}
-                  title={t('settings.editQuery.edit', 'Edit query')}
+                  title={t('settings.editQuery.edit')}
                 >
                   <Edit3 size={13} />
                 </Button>
@@ -1226,8 +1226,8 @@ export default function ActionTreeView({
               paramOptions={sType === 'call_plugin' ? []
                 : sType === 'call_action' ? (sharedActionParams[String(selected.ref ?? '')] ?? [])
                 : mergeCandidates(selectedDeclaredParamOptions, targetScreenColumnOptions)}
-              paramPlaceholder={sType === 'call_plugin' ? t('settings.screens.action.kwarg', 'kwarg')
-                : sType === 'call_action' ? t('settings.screens.action.inputName', 'input') : undefined}
+              paramPlaceholder={sType === 'call_plugin' ? t('settings.screens.action.kwarg')
+                : sType === 'call_action' ? t('settings.screens.action.inputName') : undefined}
             />
           </Stack>
         )}

@@ -99,7 +99,7 @@ export default function Schedule() {
       </JobId>
       <Cell>
         {e.schedule ? <Mono>{e.schedule}</Mono> : t('nomaflow.jobs.manualOnly')}
-        {e.schedule && !e.enabled && <Off>{t('nomaflow.scheduleView.disabled', '(disabled)')}</Off>}
+        {e.schedule && !e.enabled && <Off>{t('nomaflow.scheduleView.disabled')}</Off>}
       </Cell>
       <Cell>
         {e.nextRun

@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from liberty.ai.appconfig import AiFile, merged_starters
+from liberty.web.deps import request_language
 from liberty.ai.assistant import AiAssistant
 from liberty.ai.catalog import label_for
 from liberty.auth.dependencies import require_permission
@@ -83,8 +84,8 @@ async def tools(
         "model": assistant.settings.model,
         "tools": assistant.tool_catalog(),
         "models": [{"id": m, "label": label_for(m)} for m in _allowed_models(assistant)],
-        "starters": merged_starters(getattr(request.app.state, "ai_config", None), assistant.settings.starters),
-        "starter_groups": (getattr(request.app.state, "ai_config", None) or AiFile()).starter_groups(),
+        "starters": merged_starters(getattr(request.app.state, "ai_config", None), assistant.settings.starters, request_language(request)),
+        "starter_groups": (getattr(request.app.state, "ai_config", None) or AiFile()).starter_groups(request_language(request)),
     }
 
 

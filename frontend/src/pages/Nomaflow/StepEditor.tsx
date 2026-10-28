@@ -409,15 +409,15 @@ function ParamAddPicker({
               return (
                 <PickerRow key={s.key} type="button" $disabled={used} disabled={used}
                   onClick={() => { if (!used) { onPickPredefined(s.key); setOpen(false) } }}>
-                  <span className="key">{s.label}{used ? ` · ${t('nomaflow.steps.alreadyAdded', '(already added)')}` : ''}</span>
+                  <span className="key">{s.label}{used ? ` · ${t('nomaflow.steps.alreadyAdded')}` : ''}</span>
                   {s.description && <span className="desc">{s.description}</span>}
                 </PickerRow>
               )
             })}
             <PickerDivider />
             <PickerRow type="button" onClick={() => { onPickCustom(); setOpen(false) }}>
-              <span className="key">{t('nomaflow.steps.addCustomParam', 'Custom key…')}</span>
-              <span className="desc">{t('nomaflow.steps.addCustomParamDesc', 'Free-text key not in the catalog above.')}</span>
+              <span className="key">{t('nomaflow.steps.addCustomParam')}</span>
+              <span className="desc">{t('nomaflow.steps.addCustomParamDesc')}</span>
             </PickerRow>
           </PickerPanel>
         </>,
@@ -542,7 +542,7 @@ function SqlCopyForm({ step, patch, sqlConnectors }: FormProps) {
             strings get dropped at save time below (where we strip the field entirely when the
             list is empty) and never reach the runner. */}
         <Field $span={3}>
-          <FieldLabel>{t('nomaflow.steps.stripBothColumns', 'Full-strip columns (left + right padding)')}</FieldLabel>
+          <FieldLabel>{t('nomaflow.steps.stripBothColumns')}</FieldLabel>
           <StringListEditor
             value={Array.isArray(f.strip_both_columns) ? (f.strip_both_columns as string[]) : []}
             onChange={(v) => patch({ strip_both_columns: v } as Partial<StepConfig>)}
@@ -646,7 +646,7 @@ function PythonForm({ step, patch }: FormProps) {
           onChange={(v) => patch({ callable: v } as Partial<StepConfig>)}
           options={options}
           allowCustom
-          placeholder={t('nomaflow.steps.callablePlaceholder', 'Pick a callable, or type a module:function…')}
+          placeholder={t('nomaflow.steps.callablePlaceholder')}
           loading={catalog.length === 0 && _callablesPromise !== null}
         />
       </Field>
@@ -930,13 +930,13 @@ function CallJobForm({ step, patch }: FormProps) {
   return (
     <Grid>
       <Field $span={3}>
-        <FieldLabel>{t('nomaflow.steps.targetJobId', 'Target job')}</FieldLabel>
+        <FieldLabel>{t('nomaflow.steps.targetJobId')}</FieldLabel>
         <SearchSelect
           value={String(f.target_job_id ?? '')}
           onChange={(v) => patch({ target_job_id: v } as Partial<StepConfig>)}
           options={options}
           allowCustom
-          placeholder={t('nomaflow.steps.targetJobIdPlaceholder', 'Pick the job this step calls…')}
+          placeholder={t('nomaflow.steps.targetJobIdPlaceholder')}
           loading={catalog.length === 0 && _jobIdsPromise !== null}
         />
       </Field>
@@ -1036,7 +1036,7 @@ function ReportForm({ step, patch }: FormProps) {
           <>
             <Field>
               <FieldLabel>{t('nomaflow.steps.reportModel')}</FieldLabel>
-              <SearchSelect value={app && model ? `${app}/${model}` : ''} options={modelOpts} placeholder={t('common.pick', 'Pick…')}
+              <SearchSelect value={app && model ? `${app}/${model}` : ''} options={modelOpts} placeholder={t('common.pick')}
                 onChange={(v) => { const [a, m] = v.split('/'); patch({ app: a, model: m } as Partial<StepConfig>) }} />
             </Field>
             <Field>

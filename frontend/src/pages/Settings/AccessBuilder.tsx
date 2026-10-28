@@ -71,7 +71,7 @@ function UserModal({ initial, roleNames, attributeNames, onSaved, onClose }: { i
 
   const save = async () => {
     const u = username.trim()
-    if (!u) { setError(t('settings.access.errUsername', 'A username is required.')); return }
+    if (!u) { setError(t('settings.access.errUsername')); return }
     if (isNew && password.length < 8) { setError(t('profile.passwordTooShort')); return }
     setBusy(true); setError(null)
     try {
@@ -88,7 +88,7 @@ function UserModal({ initial, roleNames, attributeNames, onSaved, onClose }: { i
   return (
     <Overlay onClick={onClose}>
       <Box onClick={(e) => e.stopPropagation()}>
-        <Header><Users size={16} color={colors.blue.main} /><span className="title">{isNew ? t('settings.access.addUser', 'Add user') : initial?.username}</span></Header>
+        <Header><Users size={16} color={colors.blue.main} /><span className="title">{isNew ? t('settings.access.addUser') : initial?.username}</span></Header>
         <ModalBody>
           {error && <Banner $tone="error">{error}</Banner>}
           <Field label={t('login.username')}>
@@ -102,11 +102,11 @@ function UserModal({ initial, roleNames, attributeNames, onSaved, onClose }: { i
             <Chips>
               {roles.map((r) => <PermChip key={r}>{r}<button type="button" onClick={() => setRoles(roles.filter((x) => x !== r))}><X size={11} /></button></PermChip>)}
               <div style={{ minWidth: 200 }}>
-                <SearchSelect value="" onChange={addRole} options={roleOpts.filter((o) => !roles.includes(o.value))} placeholder={t('settings.access.addRole', 'Add role…')} />
+                <SearchSelect value="" onChange={addRole} options={roleOpts.filter((o) => !roles.includes(o.value))} placeholder={t('settings.access.addRole')} />
               </div>
             </Chips>
           </Field>
-          <Field label={t('settings.access.attributes', 'Data-scope attributes')}>
+          <Field label={t('settings.access.attributes')}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {attrs.map((a, i) => (
                 <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 2fr auto', gap: 8, alignItems: 'center' }}>
@@ -117,22 +117,22 @@ function UserModal({ initial, roleNames, attributeNames, onSaved, onClose }: { i
               ))}
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <div style={{ minWidth: 220 }}>
-                  <SearchSelect value="" onChange={(k) => { if (k.trim()) setAttrs([...attrs, { key: k.trim(), text: '' }]) }} options={attrOpts} allowCustom placeholder={t('settings.access.addAttribute', 'Add an attribute…')} />
+                  <SearchSelect value="" onChange={(k) => { if (k.trim()) setAttrs([...attrs, { key: k.trim(), text: '' }]) }} options={attrOpts} allowCustom placeholder={t('settings.access.addAttribute')} />
                 </div>
               </div>
             </div>
           </Field>
           <div style={{ display: 'flex', gap: 20 }}>
-            <Checkbox checked={isActive} onChange={setIsActive} label={t('settings.access.active', 'Active')} />
+            <Checkbox checked={isActive} onChange={setIsActive} label={t('settings.access.active')} />
             <Checkbox checked={isSuperuser} onChange={setIsSuperuser} label={t('profile.superuser')} />
           </div>
-          <Field label={isNew ? t('login.password') : t('profile.newPassword') + ' (' + t('settings.access.optional', 'optional') + ')'}>
+          <Field label={isNew ? t('login.password') : t('profile.newPassword') + ' (' + t('settings.access.optional') + ')'}>
             <PasswordInput value={password} autoComplete="new-password" onChange={(e) => setPassword(e.target.value)}
-              placeholder={isNew ? '' : t('settings.access.leaveBlankKeep', 'Leave blank to keep current')} />
+              placeholder={isNew ? '' : t('settings.access.leaveBlankKeep')} />
           </Field>
         </ModalBody>
         <ModalFooter>
-          <Button $size="sm" $variant="ghost" onClick={onClose}>{t('common.cancel', 'Cancel')}</Button>
+          <Button $size="sm" $variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
           <Button $size="sm" $variant="primary" onClick={() => void save()} disabled={busy}>{busy ? <SpinnerRing size={13} thickness={2} /> : t('common.save')}</Button>
         </ModalFooter>
       </Box>
@@ -185,14 +185,14 @@ export default function AccessBuilder() {
   return (
     <Shell>
       <Tabs>
-        <TabBtn $active={tab === 'users'} onClick={() => setTab('users')}><Users size={15} /> {t('settings.access.users', 'Users')}</TabBtn>
-        <TabBtn $active={tab === 'roles'} onClick={() => setTab('roles')}><Shield size={15} /> {t('settings.access.roles', 'Roles')}</TabBtn>
+        <TabBtn $active={tab === 'users'} onClick={() => setTab('users')}><Users size={15} /> {t('settings.access.users')}</TabBtn>
+        <TabBtn $active={tab === 'roles'} onClick={() => setTab('roles')}><Shield size={15} /> {t('settings.access.roles')}</TabBtn>
       </Tabs>
       {error && <Banner $tone="error">{error}</Banner>}
 
       {tab === 'users' ? (
         <>
-          <Bar><div style={{ flex: 1 }} /><Button $size="sm" $variant="primary" onClick={() => setUserEdit(null)}><Plus size={13} /> {t('settings.access.addUser', 'Add user')}</Button></Bar>
+          <Bar><div style={{ flex: 1 }} /><Button $size="sm" $variant="primary" onClick={() => setUserEdit(null)}><Plus size={13} /> {t('settings.access.addUser')}</Button></Bar>
           <List>
             {users.map((u) => (
               <Item key={u.username} onClick={() => setUserEdit(u)}>
@@ -200,7 +200,7 @@ export default function AccessBuilder() {
                 <span className="text">
                   <span className="name">{u.username}{u.full_name ? ` — ${u.full_name}` : ''}</span>
                   <span className="sub">
-                    {!u.is_active && <Tag $tone="red">{t('settings.access.inactive', 'inactive')}</Tag>}
+                    {!u.is_active && <Tag $tone="red">{t('settings.access.inactive')}</Tag>}
                     {u.is_superuser && <Tag $tone="orange">{t('profile.superuser')}</Tag>}
                     {u.roles.map((r) => <Tag key={r} $tone="blue">{r}</Tag>)}
                     {u.roles.length === 0 && !u.is_superuser && <span>{t('profile.noRoles')}</span>}
@@ -214,7 +214,7 @@ export default function AccessBuilder() {
       ) : (
         <Split>
           <Side>
-            <Bar><div style={{ flex: 1 }} /><Button $size="sm" $variant="primary" onClick={() => setRoleEdit(null)}><Plus size={13} /> {t('settings.access.addRole', 'Add role')}</Button></Bar>
+            <Bar><div style={{ flex: 1 }} /><Button $size="sm" $variant="primary" onClick={() => setRoleEdit(null)}><Plus size={13} /> {t('settings.access.addRole')}</Button></Bar>
             <List>
               {roles.map((r) => (
                 <Item key={r.name} $selected={roleEdit === r.name} onClick={() => setRoleEdit(r.name)}>
@@ -223,8 +223,8 @@ export default function AccessBuilder() {
                     <span className="name">{r.name}</span>
                     <span className="sub">
                       {r.description || ''}{r.description ? ' · ' : ''}
-                      {r.permissions.includes('*') ? <Tag $tone="green">{t('settings.access.fullAccess', 'Full access')}</Tag> : null}
-                      {t('settings.access.permCount', '{{n}} rule(s)', { n: r.permissions.filter((p) => p !== '*').length })}
+                      {r.permissions.includes('*') ? <Tag $tone="green">{t('settings.access.fullAccess')}</Tag> : null}
+                      {t('settings.access.permCount', { n: r.permissions.filter((p) => p !== '*').length })}
                     </span>
                   </span>
                 </Item>
@@ -235,7 +235,7 @@ export default function AccessBuilder() {
             <RoleEditor key={roleEdit ?? '__new__'} initial={editing} takenNames={roleNames} forest={forest} dashboardIds={dashboardIds} dictionary={dictionary} attributeNames={attributeNames} columnNames={columnNames}
               onCancel={() => setRoleEdit(undefined)} onSaved={(name) => { setRoleEdit(name); load() }} />
           ) : (
-            <Placeholder>{t('settings.access.pickRole', 'Pick a role to edit, or add one.')}</Placeholder>
+            <Placeholder>{t('settings.access.pickRole')}</Placeholder>
           )}
         </Split>
       )}

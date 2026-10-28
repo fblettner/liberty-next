@@ -129,7 +129,7 @@ export function RetentionPanel({ onChanged }: RetentionPanelProps) {
       await api.post('/admin/reload')
       await load()
       onChanged?.()
-      setToast(t('nomaflow.retention.saved', 'Policy saved + scheduler reloaded.'))
+      setToast(t('nomaflow.retention.saved'))
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
     } finally {
@@ -161,7 +161,7 @@ export function RetentionPanel({ onChanged }: RetentionPanelProps) {
       ? t('nomaflow.retention.summary',
           `${status.policy.days}d · cap ${status.policy.keep_last_per_job}/job · every ${status.policy.sweep_interval_minutes} min`,
           { days: status.policy.days, cap: status.policy.keep_last_per_job, interval: status.policy.sweep_interval_minutes })
-      : t('nomaflow.retention.disabled', 'Auto-sweep disabled')
+      : t('nomaflow.retention.disabled')
     : '…'
 
   const lastSweepPill = status?.last_sweep ? (
@@ -176,7 +176,7 @@ export function RetentionPanel({ onChanged }: RetentionPanelProps) {
       <Header type="button" onClick={() => setOpen((v) => !v)}>
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <Archive size={14} />
-        <HeaderLabel>{t('nomaflow.retention.title', 'Run history retention')}</HeaderLabel>
+        <HeaderLabel>{t('nomaflow.retention.title')}</HeaderLabel>
         <HeaderSummary>· {headerSummary}</HeaderSummary>
         <HeaderSpacer />
         {lastSweepPill}
@@ -193,24 +193,24 @@ export function RetentionPanel({ onChanged }: RetentionPanelProps) {
             <>
               <Body>
                 <Field>
-                  <FieldLabel>{t('nomaflow.retention.enabledLabel', 'Auto-sweep')}</FieldLabel>
+                  <FieldLabel>{t('nomaflow.retention.enabledLabel')}</FieldLabel>
                   <Toggle type="button" $on={draft.enabled}
                     onClick={() => setDraft({ ...draft, enabled: !draft.enabled })}>
-                    {draft.enabled ? t('nomaflow.retention.on', 'On') : t('nomaflow.retention.off', 'Off')}
+                    {draft.enabled ? t('nomaflow.retention.on') : t('nomaflow.retention.off')}
                   </Toggle>
                 </Field>
                 <Field>
-                  <FieldLabel>{t('nomaflow.retention.daysLabel', 'Days kept')}</FieldLabel>
+                  <FieldLabel>{t('nomaflow.retention.daysLabel')}</FieldLabel>
                   <Input type="number" min={1} max={3650} value={draft.days}
                     onChange={(e) => setDraft({ ...draft, days: clamp(parseInt(e.target.value || '0', 10), 1, 3650) })} />
                 </Field>
                 <Field>
-                  <FieldLabel>{t('nomaflow.retention.capLabel', 'Cap per job')}</FieldLabel>
+                  <FieldLabel>{t('nomaflow.retention.capLabel')}</FieldLabel>
                   <Input type="number" min={1} max={100000} value={draft.keep_last_per_job}
                     onChange={(e) => setDraft({ ...draft, keep_last_per_job: clamp(parseInt(e.target.value || '0', 10), 1, 100000) })} />
                 </Field>
                 <Field>
-                  <FieldLabel>{t('nomaflow.retention.intervalLabel', 'Sweep interval (min)')}</FieldLabel>
+                  <FieldLabel>{t('nomaflow.retention.intervalLabel')}</FieldLabel>
                   <Input type="number" min={5} max={1440} value={draft.sweep_interval_minutes}
                     onChange={(e) => setDraft({ ...draft, sweep_interval_minutes: clamp(parseInt(e.target.value || '0', 10), 5, 1440) })} />
                 </Field>
@@ -223,7 +223,7 @@ export function RetentionPanel({ onChanged }: RetentionPanelProps) {
                 </Button>
                 <Button $variant="ghost" $size="sm" onClick={onSweep} disabled={busy !== null}>
                   {busy === 'sweep' ? <SpinnerRing size={13} thickness={2} /> : <Trash2 size={13} />}
-                  {t('nomaflow.retention.sweepNow', 'Clean now')}
+                  {t('nomaflow.retention.sweepNow')}
                 </Button>
                 {toast && (
                   <Mono style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{toast}</Mono>

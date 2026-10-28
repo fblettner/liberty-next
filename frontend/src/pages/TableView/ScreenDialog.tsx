@@ -366,8 +366,8 @@ export function ScreenDialog({
   // already drive re-renders frequently enough that no setInterval is needed.
   const formatLockTime = (ts: number): string => {
     const diff = Date.now() / 1000 - ts
-    if (diff < 60) return t('dialog.lockedSecondsAgo', { count: Math.max(1, Math.floor(diff)), defaultValue: '{{count}}s ago' })
-    if (diff < 3600) return t('dialog.lockedMinutesAgo', { count: Math.floor(diff / 60), defaultValue: '{{count}}m ago' })
+    if (diff < 60) return t('dialog.lockedSecondsAgo', { count: Math.max(1, Math.floor(diff)) })
+    if (diff < 3600) return t('dialog.lockedMinutesAgo', { count: Math.floor(diff / 60) })
     return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   }
 
@@ -547,7 +547,7 @@ export function ScreenDialog({
     void (async () => {
       const ctx: Row = { ...savedRow, ...formValues }
       const result = await runOnSaveActions(actions, ctx)
-      if (!result.ok) setActionStatus({ message: result.error || t('dialog.onLoadFailed', { defaultValue: 'on_load failed' }), tone: 'error' })
+      if (!result.ok) setActionStatus({ message: result.error || t('dialog.onLoadFailed'), tone: 'error' })
       else if (result.errors.length > 0) setActionStatus({ message: result.errors.join(' · '), tone: 'error' })
       if (result.refresh) onSaved()
     })()
@@ -599,7 +599,7 @@ export function ScreenDialog({
     const result = await runOnSaveActions(actions, ctx)
     setClosing(false)
     if (!result.ok || result.errors.length > 0) {
-      const msg = result.error || result.errors.join(' · ') || t('dialog.onCancelFailed', { defaultValue: 'on_cancel failed' })
+      const msg = result.error || result.errors.join(' · ') || t('dialog.onCancelFailed')
       setActionStatus({ message: msg, tone: 'error' })
       return false   // block the close
     }
@@ -657,8 +657,7 @@ export function ScreenDialog({
       if (resp?.rowcount === 0) {
         setDeleting(false)
         setError(t('dialog.deleteNoMatch', {
-          defaultValue: 'Delete affected 0 rows — the row may have already been removed, or the WHERE clause didn\'t match. Try refreshing.',
-        }))
+          }))
         return
       }
       // Row-level on_delete hook — fires once with the deleted row's values as context.
@@ -773,8 +772,7 @@ export function ScreenDialog({
       if (effMode === 'edit' && mainRowcount === 0) {
         setSaving(false)
         setError(t('dialog.updateNoMatch', {
-          defaultValue: 'Update affected 0 rows — the row may have already been modified or removed. Try refreshing.',
-        }))
+          }))
         return
       }
       // Reference-mode nested-form saves — walk the registry of NestedFormView savers in
@@ -1007,7 +1005,6 @@ export function ScreenDialog({
                 <LockIcon size={14} />
                 {t('dialog.lockedBy', {
                   user: foreignLock.username, when: formatLockTime(foreignLock.acquired_at),
-                  defaultValue: 'Locked by {{user}} ({{when}}) — read-only',
                 })}
               </span>
             </Banner>
@@ -1076,9 +1073,9 @@ export function ScreenDialog({
                 $variant="ghost"
                 onClick={handleDuplicate}
                 disabled={saving || closing || deleting}
-                title={t('dialog.duplicate', { defaultValue: 'Duplicate' })}
+                title={t('dialog.duplicate')}
               >
-                <Copy size={13} /> {t('dialog.duplicate', { defaultValue: 'Duplicate' })}
+                <Copy size={13} /> {t('dialog.duplicate')}
               </Button>
             )}
             <Button $size="sm" $variant="ghost" onClick={() => { void handleClose() }} disabled={saving || closing || deleting}>
@@ -1104,12 +1101,12 @@ export function ScreenDialog({
     {confirmClose && (
       <Overlay onClick={(e) => { e.stopPropagation(); setConfirmClose(false) }} style={{ zIndex: 600 }}>
         <Modal style={{ width: 'min(440px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
-          <ModalHeader>{t('dialog.unsavedTitle', { defaultValue: 'Unsaved changes' })}</ModalHeader>
-          <ModalBody>{t('dialog.unsavedMessage', { defaultValue: 'You have unsaved changes. What would you like to do?' })}</ModalBody>
+          <ModalHeader>{t('dialog.unsavedTitle')}</ModalHeader>
+          <ModalBody>{t('dialog.unsavedMessage')}</ModalBody>
           <ModalFooter>
             <FlexRow gap={8}>
               <Button $size="sm" $variant="ghost" onClick={() => setConfirmClose(false)} disabled={saving || closing}>
-                {t('dialog.unsavedStay', { defaultValue: 'Stay' })}
+                {t('dialog.unsavedStay')}
               </Button>
               <Button
                 $size="sm"
@@ -1121,7 +1118,7 @@ export function ScreenDialog({
                 }}
                 disabled={saving || closing}
               >
-                {closing ? <SpinnerRing size={13} thickness={2} /> : <X size={13} />} {t('dialog.unsavedDiscard', { defaultValue: 'Discard' })}
+                {closing ? <SpinnerRing size={13} thickness={2} /> : <X size={13} />} {t('dialog.unsavedDiscard')}
               </Button>
               <Button
                 $size="sm"
@@ -1139,8 +1136,8 @@ export function ScreenDialog({
     {/* Delete-row guard — single confirm, fires ``handleDelete`` on Yes. */}
     {confirmDelete && (
       <ConfirmModal
-        title={t('dialog.deleteTitle', { defaultValue: 'Delete this row?' })}
-        message={t('dialog.deleteMessage', { defaultValue: 'The row will be removed and any on_delete actions will fire. This cannot be undone.' })}
+        title={t('dialog.deleteTitle')}
+        message={t('dialog.deleteMessage')}
         confirmLabel={t('common.delete')}
         variant="danger"
         onConfirm={() => { setConfirmDelete(false); void handleDelete() }}

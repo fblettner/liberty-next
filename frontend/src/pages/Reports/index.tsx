@@ -406,8 +406,8 @@ function DropdownParamInput({
       options={options}
       onChange={(v) => onChange(v)}
       loading={loading}
-      placeholder={t('reports.selectPlaceholder', 'Select…')}
-      anyLabel={param.required ? undefined : t('common.any', '(any)')}
+      placeholder={t('reports.selectPlaceholder')}
+      anyLabel={param.required ? undefined : t('common.any')}
     />
   )
 }

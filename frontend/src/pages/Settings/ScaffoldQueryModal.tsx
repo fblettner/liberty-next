@@ -148,18 +148,18 @@ export function ScaffoldQueryModal({
 
   // ── validation — surface errors inline, gate the Save button.
   const error: string | null = (() => {
-    if (!tableName) return t('settings.scaffold.errors.tableRequired', 'Pick a table.')
-    if (kind === 'sequence' && !keyCol) return t('settings.scaffold.errors.columnRequired', 'Pick a column.')
-    if (kind === 'lookup' && !valueCol) return t('settings.scaffold.errors.valueColRequired', 'Pick a value column.')
-    if (!queryName.trim()) return t('settings.scaffold.errors.queryNameRequired', 'Name the query.')
-    if (!dictId.trim()) return t('settings.scaffold.errors.dictIdRequired', 'Name the dictionary entry.')
+    if (!tableName) return t('settings.scaffold.errors.tableRequired')
+    if (kind === 'sequence' && !keyCol) return t('settings.scaffold.errors.columnRequired')
+    if (kind === 'lookup' && !valueCol) return t('settings.scaffold.errors.valueColRequired')
+    if (!queryName.trim()) return t('settings.scaffold.errors.queryNameRequired')
+    if (!dictId.trim()) return t('settings.scaffold.errors.dictIdRequired')
     if (existingQueryNames.has(queryName.trim())) {
-      return t('settings.scaffold.errors.queryNameExists', 'A query named "{{name}}" already exists.', { name: queryName.trim() })
+      return t('settings.scaffold.errors.queryNameExists', { name: queryName.trim() })
     }
     if (existingDictIds.has(dictId.trim())) {
-      return t('settings.scaffold.errors.dictIdExists', 'A {{kind}} with id "{{id}}" already exists in this scope.', { kind, id: dictId.trim() })
+      return t('settings.scaffold.errors.dictIdExists', { kind, id: dictId.trim() })
     }
-    if (!effectiveSql.trim()) return t('settings.scaffold.errors.sqlEmpty', 'The generated SQL is empty — fill in the fields above.')
+    if (!effectiveSql.trim()) return t('settings.scaffold.errors.sqlEmpty')
     return null
   })()
 
@@ -188,8 +188,8 @@ export function ScaffoldQueryModal({
   }
 
   const titleText = kind === 'sequence'
-    ? t('settings.scaffold.sequence.title', 'New sequence')
-    : t('settings.scaffold.lookup.title', 'New lookup')
+    ? t('settings.scaffold.sequence.title')
+    : t('settings.scaffold.lookup.title')
 
   // No backdrop-click-to-close — outside clicks must not discard form input (Cancel / Escape).
   const modalNode: ReactNode = (
@@ -209,15 +209,15 @@ export function ScaffoldQueryModal({
           )}
           {schema === null && (
             <ErrorLine>
-              {t('settings.scaffold.errors.noSchema', "Couldn't introspect this connector's pool. Make sure it's reachable (a 502 here usually means the pool URL is wrong) and you have superuser rights.")}
+              {t('settings.scaffold.errors.noSchema')}
             </ErrorLine>
           )}
           {schema && schema.tables.length === 0 && (
-            <Hint>{t('settings.scaffold.errors.noTables', 'No tables in the introspected schema. Check the pool config.')}</Hint>
+            <Hint>{t('settings.scaffold.errors.noTables')}</Hint>
           )}
           {schema && schema.tables.length > 0 && (
             <>
-              <Field label={t('settings.scaffold.table', 'Table')}>
+              <Field label={t('settings.scaffold.table')}>
                 <SearchSelect
                   value={tableName}
                   onChange={(v) => { setTableName(v); setKeyCol(''); setValueCol(''); setLabelCol(''); setSqlOverride(null); setQueryName(''); setDictId(''); setDescription('') }}
@@ -226,7 +226,7 @@ export function ScaffoldQueryModal({
                 />
               </Field>
               {kind === 'sequence' && (
-                <Field label={t('settings.scaffold.sequence.keyCol', 'Key column (MAX returns the next +1)')}>
+                <Field label={t('settings.scaffold.sequence.keyCol')}>
                   <SearchSelect
                     value={keyCol}
                     onChange={(v) => { setKeyCol(v); setSqlOverride(null) }}
@@ -237,7 +237,7 @@ export function ScaffoldQueryModal({
               )}
               {kind === 'lookup' && (
                 <>
-                  <Field label={t('settings.scaffold.lookup.valueCol', 'Value column (the code stored on the row)')}>
+                  <Field label={t('settings.scaffold.lookup.valueCol')}>
                     <SearchSelect
                       value={valueCol}
                       onChange={(v) => { setValueCol(v); setSqlOverride(null) }}
@@ -245,34 +245,34 @@ export function ScaffoldQueryModal({
                       placeholder={t('common.pick')}
                     />
                   </Field>
-                  <Field label={t('settings.scaffold.lookup.labelCol', 'Label column (the description shown to the user)')}>
+                  <Field label={t('settings.scaffold.lookup.labelCol')}>
                     <SearchSelect
                       value={labelCol}
                       onChange={(v) => { setLabelCol(v); setSqlOverride(null) }}
                       options={colOpts}
-                      anyLabel={t('settings.scaffold.lookup.sameAsValue', 'Same as value column')}
+                      anyLabel={t('settings.scaffold.lookup.sameAsValue')}
                       placeholder={t('common.pick')}
                     />
                   </Field>
                 </>
               )}
-              <Field label={t('settings.scaffold.where', 'Optional WHERE clause (without the keyword)')}>
+              <Field label={t('settings.scaffold.where')}>
                 <Input
                   value={where}
                   onChange={(e) => { setWhere(e.target.value); setSqlOverride(null) }}
-                  placeholder={t('settings.scaffold.wherePlaceholder', 'e.g. ULUGRP != \'*GROUP\'')}
+                  placeholder={t('settings.scaffold.wherePlaceholder')}
                 />
               </Field>
-              <Field label={t('settings.scaffold.queryName', 'Query name')}>
+              <Field label={t('settings.scaffold.queryName')}>
                 <Input value={queryName} onChange={(e) => setQueryName(e.target.value)} placeholder={suggestedQuery} />
               </Field>
               <Field label={t('settings.scaffold.dictId', kind === 'sequence' ? 'Sequence id' : 'Lookup id')}>
                 <Input value={dictId} onChange={(e) => setDictId(e.target.value)} placeholder={suggestedDictId} />
               </Field>
-              <Field label={t('settings.scaffold.description', 'Description')}>
-                <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('settings.scaffold.descriptionPlaceholder', 'Shown in listings + tooltips')} />
+              <Field label={t('settings.scaffold.description')}>
+                <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('settings.scaffold.descriptionPlaceholder')} />
               </Field>
-              <Field label={t('settings.scaffold.sqlPreview', 'Generated SQL — editable')}>
+              <Field label={t('settings.scaffold.sqlPreview')}>
                 <PreviewWrap>
                   <SqlConnectorContext.Provider value={connector}>
                     <SqlEditor value={effectiveSql} onChange={(v) => setSqlOverride(v)} />

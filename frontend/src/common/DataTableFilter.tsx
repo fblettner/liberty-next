@@ -201,7 +201,7 @@ function OpPicker({ kind, value, onChange }: { kind: 'text' | 'number' | 'date';
   }, [open])
   return (
     <OpWrap ref={ref}>
-      <OpBtn type="button" $open={open} onClick={() => setOpen((v) => !v)} title={`${t('table.filterOp', 'Operator')}: ${OP_NAME[value]}`}>
+      <OpBtn type="button" $open={open} onClick={() => setOpen((v) => !v)} title={`${t('table.filterOp')}: ${OP_NAME[value]}`}>
         {OP_LABEL[value]}
       </OpBtn>
       {open && (
@@ -232,7 +232,7 @@ export function ColumnFilterControl({ column }: { column: Column<any, unknown> }
     const cur = (column.getFilterValue() as string | undefined) ?? ''
     const opts =
       kind === 'boolean'
-        ? [{ value: 'true', label: t('common.true', 'true') }, { value: 'false', label: t('common.false', 'false') }]
+        ? [{ value: 'true', label: t('common.true') }, { value: 'false', label: t('common.false') }]
         : meta?.options ?? []
     // Themed SearchSelect (not a native <select>) so the dropdown portals out of the header
     // and matches the rest of the app — operators dealing with hundreds of UDC values need
@@ -244,7 +244,7 @@ export function ColumnFilterControl({ column }: { column: Column<any, unknown> }
           options={opts}
           cellColumns={meta?.cellColumns}
           onChange={(v) => column.setFilterValue(v || undefined)}
-          anyLabel={t('table.filterAny', '(any)')}
+          anyLabel={t('table.filterAny')}
         />
       </div>
     )

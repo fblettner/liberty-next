@@ -142,7 +142,7 @@ export default function AiBuilder() {
                   <span className="id">{id}</span>
                   {typeof appScreens[id]?.label === 'string' && <span>— {appScreens[id].label as string}</span>}
                   <span className="spacer" />
-                  <Button $variant="ghost" $size="sm" onClick={() => dropScreen(id)} style={{ color: colors.red.main }} title={t('common.remove', 'Remove')}><Trash2 size={12} /></Button>
+                  <Button $variant="ghost" $size="sm" onClick={() => dropScreen(id)} style={{ color: colors.red.main }} title={t('common.remove')}><Trash2 size={12} /></Button>
                 </ScreenHead>
                 <QuestionsList value={block.screens?.[id]?.starters ?? []} onChange={(starters) => setScreen(id, starters)} />
               </Section>
@@ -164,7 +164,7 @@ export default function AiBuilder() {
                     {pb.description && <span className="meta">{pb.description}</span>}
                   </span>
                   <span className="actions" onClick={(ev) => ev.stopPropagation()}>
-                    <Button $variant="ghost" $size="sm" onClick={() => setEditing({ ...pb, id })} disabled={busy}><Edit3 size={13} /> {t('common.edit', 'Edit')}</Button>
+                    <Button $variant="ghost" $size="sm" onClick={() => setEditing({ ...pb, id })} disabled={busy}><Edit3 size={13} /> {t('common.edit')}</Button>
                     <Button $variant="ghost" $size="sm" onClick={() => void dropPlaybook(id)} disabled={busy} style={{ color: colors.red.main }}><Trash2 size={13} /> {t('common.delete')}</Button>
                   </span>
                 </Item>

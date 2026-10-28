@@ -143,7 +143,7 @@ export function EditorModalShell({
                   {fs ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
                 </IconBtn>
               )}
-              <IconBtn type="button" onClick={onClose} title={t('common.close', 'Close')} aria-label={t('common.close', 'Close')}>
+              <IconBtn type="button" onClick={onClose} title={t('common.close')} aria-label={t('common.close')}>
                 <X size={15} />
               </IconBtn>
             </span>

@@ -104,7 +104,7 @@ export function NotificationBell({ className, children }: { className?: string; 
               {unread > 0 && <HeaderBtn type="button" onClick={() => void markAll()}>{t('notifications.markAllRead')}</HeaderBtn>}
             </PanelHeader>
             <ListBody>
-              {items === null ? <Empty>{t('common.loading', 'Loading…')}</Empty>
+              {items === null ? <Empty>{t('common.loading')}</Empty>
                 : items.length === 0 ? <Empty>{t('notifications.empty')}</Empty>
                 : items.map((n) => (
                   <Row key={n.id} type="button" $unread={!n.read} onClick={() => void openOne(n)}>

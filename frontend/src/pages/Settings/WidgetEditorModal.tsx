@@ -129,39 +129,39 @@ export function WidgetEditorModal({
     const put = (keys: string[]) => { for (const k of keys) if (plain[k]) base[k] = plain[k] }
     if (kind === 'chart') {
       if (chartMode === 'saved') {
-        if (!savedChartId) return setError(t('settings.dash.errSavedChart', 'Pick a saved chart.'))
+        if (!savedChartId) return setError(t('settings.dash.errSavedChart'))
         base.chart = savedChartId
       } else {
-        if (!connector || !query) return setError(t('settings.dash.errConnQuery', 'Pick a connector and a query.'))
-        if (!spec.x || spec.y.length === 0) return setError(t('settings.dash.errXY', 'Set the X column and at least one Y series.'))
+        if (!connector || !query) return setError(t('settings.dash.errConnQuery'))
+        if (!spec.x || spec.y.length === 0) return setError(t('settings.dash.errXY'))
         base.connector = connector; base.query = query; base.spec = toSavedSpec(spec)
       }
     } else if (kind === 'kpi') {
-      if (!connector || !query) return setError(t('settings.dash.errConnQuery', 'Pick a connector and a query.'))
-      if (!column) return setError(t('settings.dash.errColumn', 'Pick the column to aggregate.'))
+      if (!connector || !query) return setError(t('settings.dash.errConnQuery'))
+      if (!column) return setError(t('settings.dash.errColumn'))
       base.connector = connector; base.query = query; base.column = column; base.aggregation = aggregation
       if (comparePrevious) base.compare_previous = true
     } else if (kind === 'stat') {
-      if (!connector || !query) return setError(t('settings.dash.errConnQuery', 'Pick a connector and a query.'))
-      if (!plain.value_column) return setError(t('settings.dash.errValueColumn', 'Pick the value column.'))
+      if (!connector || !query) return setError(t('settings.dash.errConnQuery'))
+      if (!plain.value_column) return setError(t('settings.dash.errValueColumn'))
       base.connector = connector; base.query = query
       put(['value_column', 'format', 'unit', 'sub'])
     } else if (kind === 'list') {
-      if (!connector || !query) return setError(t('settings.dash.errConnQuery', 'Pick a connector and a query.'))
-      if (!plain.title_column) return setError(t('settings.dash.errTitleColumn', 'Pick the title column.'))
+      if (!connector || !query) return setError(t('settings.dash.errConnQuery'))
+      if (!plain.title_column) return setError(t('settings.dash.errTitleColumn'))
       base.connector = connector; base.query = query
       put(['title_column', 'subtitle_column', 'value_column', 'format', 'unit', 'count_column', 'count_label', 'tone_column', 'tag_column'])
       const mr = parseInt(maxRows, 10)
       if (Number.isFinite(mr) && mr > 0) base.max_rows = mr
     } else if (kind === 'bars') {
-      if (!connector || !query) return setError(t('settings.dash.errConnQuery', 'Pick a connector and a query.'))
-      if (!plain.label_column || !plain.value_column) return setError(t('settings.dash.errLabelValue', 'Pick the label and the value columns.'))
+      if (!connector || !query) return setError(t('settings.dash.errConnQuery'))
+      if (!plain.label_column || !plain.value_column) return setError(t('settings.dash.errLabelValue'))
       base.connector = connector; base.query = query
       put(['label_column', 'sub_label_column', 'value_column', 'format', 'unit', 'share', 'note'])
       const mr = parseInt(maxRows, 10)
       if (Number.isFinite(mr) && mr > 0) base.max_rows = mr
     } else {
-      if (!connector || !query) return setError(t('settings.dash.errConnQuery', 'Pick a connector and a query.'))
+      if (!connector || !query) return setError(t('settings.dash.errConnQuery'))
       base.connector = connector; base.query = query
       if (columns.length) base.columns = columns
       const mr = parseInt(maxRows, 10)
@@ -178,12 +178,12 @@ export function WidgetEditorModal({
   const requestClose = async () => {
     if (!dirty) { onClose(); return }
     const choice = await modals.choose<'discard' | 'save' | 'keep'>({
-      title: t('settings.screens.designer.unsavedTitle', 'Unsaved changes'),
-      message: t('settings.screens.designer.unsavedMsg', 'You have unsaved changes. Save them, discard them, or keep editing?'),
+      title: t('settings.screens.designer.unsavedTitle'),
+      message: t('settings.screens.designer.unsavedMsg'),
       options: [
-        { value: 'discard', label: t('settings.screens.designer.discard', 'Discard'), variant: 'danger' },
+        { value: 'discard', label: t('settings.screens.designer.discard'), variant: 'danger' },
         { value: 'save', label: t('common.save'), variant: 'primary' },
-        { value: 'keep', label: t('settings.screens.designer.keepEditing', 'Keep editing'), variant: 'ghost', autoFocus: true },
+        { value: 'keep', label: t('settings.screens.designer.keepEditing'), variant: 'ghost', autoFocus: true },
       ],
       cancelValue: 'keep',
     })
@@ -208,13 +208,13 @@ export function WidgetEditorModal({
     ? { type: 'bars', ...common, label_column: plain.label_column, sub_label_column: plain.sub_label_column || undefined, value_column: plain.value_column, format: fmt, unit: plain.unit || undefined,
         share: plain.share === 'max' ? 'max' : 'total', note: plain.note || undefined, max_rows: Number.isFinite(mr) && mr > 0 ? mr : 10 }
     : null
-  const formatOpts: SearchSelectOption[] = [{ value: 'number', label: t('settings.dash.fmtNumber', 'Number') }, { value: 'integer', label: t('settings.dash.fmtInteger', 'Integer') }, { value: 'currency', label: t('settings.dash.fmtCurrency', 'Currency') }, { value: 'percent', label: t('settings.dash.fmtPercent', 'Percent (0–1)') }]
+  const formatOpts: SearchSelectOption[] = [{ value: 'number', label: t('settings.dash.fmtNumber') }, { value: 'integer', label: t('settings.dash.fmtInteger') }, { value: 'currency', label: t('settings.dash.fmtCurrency') }, { value: 'percent', label: t('settings.dash.fmtPercent') }]
   // A configured column name may be spelled in another case than the sample returns it (TOML
   // upper-case, Postgres lower-case): the pickers show the sample's spelling so the match is found.
   const canon = (v: string) => (sample && v ? resolveColumnName(sample, v) : v)
   const colPick = (key: string, lbl: string) => (
     <Field label={lbl}>
-      <SearchSelect value={canon(plain[key])} onChange={(v) => setP(key, v)} options={colOpts} placeholder={t('chart.spec.pick', 'Pick…')} anyLabel={t('common.none', 'None')} allowCustom />
+      <SearchSelect value={canon(plain[key])} onChange={(v) => setP(key, v)} options={colOpts} placeholder={t('chart.spec.pick')} anyLabel={t('common.none')} allowCustom />
     </Field>
   )
   const tablePreview: TableWidgetWire | null = kind === 'table' && connector && query
@@ -223,7 +223,7 @@ export function WidgetEditorModal({
 
   return (
     <EditorModalShell
-      title={t('settings.dash.widget', 'Widget')}
+      title={t('settings.dash.widget')}
       onClose={() => void requestClose()}
       onSave={save}
       dirty={dirty}
@@ -232,49 +232,49 @@ export function WidgetEditorModal({
     >
       {error && <Banner $tone="error">{error}</Banner>}
           <KindBar>
-            <KindBtn $active={kind === 'chart'} onClick={() => setKind('chart')}><BarChart3 size={14} /> {t('settings.dash.kindChart', 'Chart')}</KindBtn>
-            <KindBtn $active={kind === 'kpi'} onClick={() => setKind('kpi')}><Hash size={14} /> {t('settings.dash.kindKpi', 'KPI')}</KindBtn>
-            <KindBtn $active={kind === 'table'} onClick={() => setKind('table')}><TableIcon size={14} /> {t('settings.dash.kindTable', 'Table')}</KindBtn>
-            <KindBtn $active={kind === 'stat'} onClick={() => setKind('stat')}><Hash size={14} /> {t('settings.dash.kindStat', 'Figure')}</KindBtn>
-            <KindBtn $active={kind === 'list'} onClick={() => setKind('list')}><ListIcon size={14} /> {t('settings.dash.kindList', 'List')}</KindBtn>
-            <KindBtn $active={kind === 'bars'} onClick={() => setKind('bars')}><BarChartHorizontal size={14} /> {t('settings.dash.kindBars', 'Bars')}</KindBtn>
+            <KindBtn $active={kind === 'chart'} onClick={() => setKind('chart')}><BarChart3 size={14} /> {t('settings.dash.kindChart')}</KindBtn>
+            <KindBtn $active={kind === 'kpi'} onClick={() => setKind('kpi')}><Hash size={14} /> {t('settings.dash.kindKpi')}</KindBtn>
+            <KindBtn $active={kind === 'table'} onClick={() => setKind('table')}><TableIcon size={14} /> {t('settings.dash.kindTable')}</KindBtn>
+            <KindBtn $active={kind === 'stat'} onClick={() => setKind('stat')}><Hash size={14} /> {t('settings.dash.kindStat')}</KindBtn>
+            <KindBtn $active={kind === 'list'} onClick={() => setKind('list')}><ListIcon size={14} /> {t('settings.dash.kindList')}</KindBtn>
+            <KindBtn $active={kind === 'bars'} onClick={() => setKind('bars')}><BarChartHorizontal size={14} /> {t('settings.dash.kindBars')}</KindBtn>
           </KindBar>
 
           <Grid3>
-            <Field label={t('settings.dash.wLabel', 'Label')}>
-              <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('settings.dash.wLabel', 'Label')} />
+            <Field label={t('settings.dash.wLabel')}>
+              <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('settings.dash.wLabel')} />
             </Field>
-            <Field label={t('settings.dash.width', 'Width (1–12)')}>
+            <Field label={t('settings.dash.width')}>
               <Input type="number" min={1} max={12} value={colSpan} onChange={(e) => setColSpan(Math.min(12, Math.max(1, Number(e.target.value) || 1)))} />
             </Field>
-            <Field label={t('settings.dash.height', 'Height (rows)')}>
+            <Field label={t('settings.dash.height')}>
               <Input type="number" min={1} max={8} value={rowSpan} onChange={(e) => setRowSpan(Math.min(8, Math.max(1, Number(e.target.value) || 1)))} />
             </Field>
           </Grid3>
-          <Field label={t('settings.dash.wDescription', 'Subtitle')}>
-            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('settings.dash.wDescriptionHint', 'What the figure covers — shown under the title')} />
+          <Field label={t('settings.dash.wDescription')}>
+            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('settings.dash.wDescriptionHint')} />
           </Field>
 
           {/* chart: saved vs inline */}
           {kind === 'chart' && (
             <KindBar>
-              <KindBtn $active={chartMode === 'inline'} onClick={() => setChartMode('inline')}>{t('settings.dash.inline', 'Inline spec')}</KindBtn>
-              <KindBtn $active={chartMode === 'saved'} onClick={() => setChartMode('saved')}>{t('settings.dash.savedChart', 'Saved chart')}</KindBtn>
+              <KindBtn $active={chartMode === 'inline'} onClick={() => setChartMode('inline')}>{t('settings.dash.inline')}</KindBtn>
+              <KindBtn $active={chartMode === 'saved'} onClick={() => setChartMode('saved')}>{t('settings.dash.savedChart')}</KindBtn>
             </KindBar>
           )}
           {kind === 'chart' && chartMode === 'saved' ? (
-            <Field label={t('settings.dash.savedChart', 'Saved chart')}>
+            <Field label={t('settings.dash.savedChart')}>
               <SearchSelect value={savedChartId} onChange={setSavedChartId} options={savedChartOpts}
-                placeholder={savedChartOpts.length ? t('chart.spec.pick', 'Pick…') : t('settings.dash.noCharts', 'No saved charts — create one in the Charts tab')} />
+                placeholder={savedChartOpts.length ? t('chart.spec.pick') : t('settings.dash.noCharts')} />
             </Field>
           ) : (
             <Grid2>
-              <Field label={t('settings.charts.connector', 'Connector')}>
-                <SearchSelect value={connector} onChange={(v) => { setConnector(v); setQuery('') }} options={connectorOpts} placeholder={t('chart.spec.pick', 'Pick…')} allowCustom />
+              <Field label={t('settings.charts.connector')}>
+                <SearchSelect value={connector} onChange={(v) => { setConnector(v); setQuery('') }} options={connectorOpts} placeholder={t('chart.spec.pick')} allowCustom />
               </Field>
-              <Field label={t('settings.charts.query', 'Query')}>
+              <Field label={t('settings.charts.query')}>
                 <SearchSelect value={query} onChange={setQuery} options={queryOpts}
-                  placeholder={connector ? t('chart.spec.pick', 'Pick…') : t('settings.charts.pickConnFirst', 'Pick a connector first')} allowCustom />
+                  placeholder={connector ? t('chart.spec.pick') : t('settings.charts.pickConnFirst')} allowCustom />
               </Field>
             </Grid2>
           )}
@@ -282,13 +282,13 @@ export function WidgetEditorModal({
           {/* kind-specific config */}
           {kind === 'chart' && chartMode === 'inline' && (
             <PreviewWrap>
-              {!connector || !query ? <Msg>{t('settings.charts.previewNeedQuery', 'Set a connector + query to build the chart.')}</Msg>
+              {!connector || !query ? <Msg>{t('settings.charts.previewNeedQuery')}</Msg>
                 : sampleErr ? <Msg style={{ color: colors.red.main }}>{sampleErr}</Msg>
                 : !sample ? <Msg><SpinnerRing size={20} thickness={2} /></Msg>
                 : (<>
                     <ChartSpecEditor result={sample} spec={spec} onChange={setSpec} />
                     <div style={{ flex: 1, minHeight: 200, marginTop: 10, display: 'flex' }}>
-                      <ChartCanvas result={sample} spec={spec} connector={connector} emptyMessage={t('settings.charts.previewSetXY', 'Set X + at least one Y series.')} />
+                      <ChartCanvas result={sample} spec={spec} connector={connector} emptyMessage={t('settings.charts.previewSetXY')} />
                     </div>
                   </>)}
             </PreviewWrap>
@@ -297,17 +297,17 @@ export function WidgetEditorModal({
           {kind === 'kpi' && (
             <>
               <Grid2>
-                <Field label={t('settings.dash.column', 'Column')}>
-                  <SearchSelect value={canon(column)} onChange={setColumn} options={colOpts} placeholder={t('chart.spec.pick', 'Pick…')} allowCustom />
+                <Field label={t('settings.dash.column')}>
+                  <SearchSelect value={canon(column)} onChange={setColumn} options={colOpts} placeholder={t('chart.spec.pick')} allowCustom />
                 </Field>
-                <Field label={t('chart.spec.aggregation', 'Aggregation')}>
+                <Field label={t('chart.spec.aggregation')}>
                   <SearchSelect value={aggregation} onChange={setAggregation} options={aggOpts} />
                 </Field>
               </Grid2>
-              <Checkbox checked={comparePrevious} onChange={setComparePrevious} label={t('settings.dash.comparePrevious', 'Compare with the previous period (needs a period on the dashboard)')} />
+              <Checkbox checked={comparePrevious} onChange={setComparePrevious} label={t('settings.dash.comparePrevious')} />
               <PreviewWrap>
                 {kpiPreview ? <div style={{ flex: 1, minHeight: 0, display: 'flex' }}><KpiWidget widget={kpiPreview} filters={[]} filterValues={{}} /></div>
-                  : <Msg>{t('settings.dash.kpiNeed', 'Pick connector, query and column to preview.')}</Msg>}
+                  : <Msg>{t('settings.dash.kpiNeed')}</Msg>}
               </PreviewWrap>
             </>
           )}
@@ -315,20 +315,20 @@ export function WidgetEditorModal({
           {kind === 'stat' && (
             <>
               <Grid3>
-                {colPick('value_column', t('settings.dash.valueColumn', 'Value column'))}
-                <Field label={t('settings.dash.format', 'Format')}>
-                  <SearchSelect value={plain.format} onChange={(v) => setP('format', v)} options={formatOpts} anyLabel={t('settings.dash.fmtNumber', 'Number')} />
+                {colPick('value_column', t('settings.dash.valueColumn'))}
+                <Field label={t('settings.dash.format')}>
+                  <SearchSelect value={plain.format} onChange={(v) => setP('format', v)} options={formatOpts} anyLabel={t('settings.dash.fmtNumber')} />
                 </Field>
-                <Field label={t('settings.dash.unit', 'Unit')}>
+                <Field label={t('settings.dash.unit')}>
                   <Input value={plain.unit} onChange={(e) => setP('unit', e.target.value)} placeholder="€, users…" />
                 </Field>
               </Grid3>
-              <Field label={t('settings.dash.sub', 'Sub line')}>
-                <Input value={plain.sub} onChange={(e) => setP('sub', e.target.value)} placeholder={t('settings.dash.subHint', '{ENABLED:integer} enabled · {AMOUNT:currency} — placeholders from the first row')} />
+              <Field label={t('settings.dash.sub')}>
+                <Input value={plain.sub} onChange={(e) => setP('sub', e.target.value)} placeholder={t('settings.dash.subHint')} />
               </Field>
               <PreviewWrap>
                 {statPreview ? <div style={{ flex: 1, minHeight: 0, display: 'flex' }}><StatWidget widget={statPreview} filters={[]} filterValues={{}} /></div>
-                  : <Msg>{t('settings.dash.statNeed', 'Pick connector, query and the value column to preview.')}</Msg>}
+                  : <Msg>{t('settings.dash.statNeed')}</Msg>}
               </PreviewWrap>
             </>
           )}
@@ -336,35 +336,35 @@ export function WidgetEditorModal({
           {kind === 'list' && (
             <>
               <Grid3>
-                {colPick('title_column', t('settings.dash.titleColumn', 'Title column'))}
-                {colPick('subtitle_column', t('settings.dash.subtitleColumn', 'Subtitle column'))}
-                {colPick('tone_column', t('settings.dash.toneColumn', 'Tone column (ok / warn / error / info)'))}
+                {colPick('title_column', t('settings.dash.titleColumn'))}
+                {colPick('subtitle_column', t('settings.dash.subtitleColumn'))}
+                {colPick('tone_column', t('settings.dash.toneColumn'))}
               </Grid3>
               <Grid3>
-                {colPick('value_column', t('settings.dash.valueColumn', 'Value column'))}
-                <Field label={t('settings.dash.format', 'Format')}>
-                  <SearchSelect value={plain.format} onChange={(v) => setP('format', v)} options={formatOpts} anyLabel={t('settings.dash.fmtNumber', 'Number')} />
+                {colPick('value_column', t('settings.dash.valueColumn'))}
+                <Field label={t('settings.dash.format')}>
+                  <SearchSelect value={plain.format} onChange={(v) => setP('format', v)} options={formatOpts} anyLabel={t('settings.dash.fmtNumber')} />
                 </Field>
-                <Field label={t('settings.dash.unit', 'Unit')}>
+                <Field label={t('settings.dash.unit')}>
                   <Input value={plain.unit} onChange={(e) => setP('unit', e.target.value)} placeholder="€, users…" />
                 </Field>
               </Grid3>
               <Grid3>
-                {colPick('count_column', t('settings.dash.countColumn', 'Count column'))}
-                <Field label={t('settings.dash.countLabel', 'Count wording')}>
+                {colPick('count_column', t('settings.dash.countColumn'))}
+                <Field label={t('settings.dash.countLabel')}>
                   <Input value={plain.count_label} onChange={(e) => setP('count_label', e.target.value)} placeholder="{n} invoices" />
                 </Field>
-                {colPick('tag_column', t('settings.dash.tagColumn', 'Tag column (a pill)'))}
+                {colPick('tag_column', t('settings.dash.tagColumn'))}
               </Grid3>
               <Grid2>
-                <Field label={t('settings.dash.maxRowsShown', 'Rows shown')}>
+                <Field label={t('settings.dash.maxRowsShown')}>
                   <Input type="number" min={1} max={100} value={maxRows} onChange={(e) => setMaxRows(e.target.value)} placeholder="10" />
                 </Field>
                 <div />
               </Grid2>
               <PreviewWrap>
                 {listPreview ? <div style={{ flex: 1, minHeight: 0, display: 'flex' }}><ListWidget widget={listPreview} filters={[]} filterValues={{}} /></div>
-                  : <Msg>{t('settings.dash.listNeed', 'Pick connector, query and the title column to preview.')}</Msg>}
+                  : <Msg>{t('settings.dash.listNeed')}</Msg>}
               </PreviewWrap>
             </>
           )}
@@ -372,58 +372,58 @@ export function WidgetEditorModal({
           {kind === 'bars' && (
             <>
               <Grid3>
-                {colPick('label_column', t('settings.dash.labelColumn', 'Label column'))}
-                {colPick('sub_label_column', t('settings.dash.subLabelColumn', 'Sub label column'))}
-                {colPick('value_column', t('settings.dash.valueColumn', 'Value column'))}
+                {colPick('label_column', t('settings.dash.labelColumn'))}
+                {colPick('sub_label_column', t('settings.dash.subLabelColumn'))}
+                {colPick('value_column', t('settings.dash.valueColumn'))}
               </Grid3>
               <Grid3>
-                <Field label={t('settings.dash.format', 'Format')}>
-                  <SearchSelect value={plain.format} onChange={(v) => setP('format', v)} options={formatOpts} anyLabel={t('settings.dash.fmtNumber', 'Number')} />
+                <Field label={t('settings.dash.format')}>
+                  <SearchSelect value={plain.format} onChange={(v) => setP('format', v)} options={formatOpts} anyLabel={t('settings.dash.fmtNumber')} />
                 </Field>
-                <Field label={t('settings.dash.unit', 'Unit')}>
+                <Field label={t('settings.dash.unit')}>
                   <Input value={plain.unit} onChange={(e) => setP('unit', e.target.value)} placeholder="€, users…" />
                 </Field>
-                <Field label={t('settings.dash.share', 'Bar as a share of')}>
-                  <SearchSelect value={plain.share} onChange={(v) => setP('share', v)} options={[{ value: 'total', label: t('settings.dash.shareTotal', 'The total of the rows') }, { value: 'max', label: t('settings.dash.shareMax', 'The largest row') }]} />
+                <Field label={t('settings.dash.share')}>
+                  <SearchSelect value={plain.share} onChange={(v) => setP('share', v)} options={[{ value: 'total', label: t('settings.dash.shareTotal') }, { value: 'max', label: t('settings.dash.shareMax') }]} />
                 </Field>
               </Grid3>
               <Grid2>
-                <Field label={t('settings.dash.note', 'Note under the bars')}>
+                <Field label={t('settings.dash.note')}>
                   <Input value={plain.note} onChange={(e) => setP('note', e.target.value)} />
                 </Field>
-                <Field label={t('settings.dash.maxRowsShown', 'Rows shown')}>
+                <Field label={t('settings.dash.maxRowsShown')}>
                   <Input type="number" min={1} max={100} value={maxRows} onChange={(e) => setMaxRows(e.target.value)} placeholder="10" />
                 </Field>
               </Grid2>
               <PreviewWrap>
                 {barsPreview ? <div style={{ flex: 1, minHeight: 0, display: 'flex' }}><BarsWidget widget={barsPreview} filters={[]} filterValues={{}} /></div>
-                  : <Msg>{t('settings.dash.barsNeed', 'Pick connector, query, the label and the value columns to preview.')}</Msg>}
+                  : <Msg>{t('settings.dash.barsNeed')}</Msg>}
               </PreviewWrap>
             </>
           )}
 
           {kind === 'table' && (
             <>
-              <Field label={t('settings.dash.columns', 'Columns (blank = all)')}>
+              <Field label={t('settings.dash.columns')}>
                 <Chips>
                   {columns.map((c, i) => (
                     <Chip key={c}>{c}<button type="button" onClick={() => setColumns(columns.filter((_, j) => j !== i))} title={t('common.delete')}><X size={11} /></button></Chip>
                   ))}
                   <div style={{ minWidth: 180 }}>
                     <SearchSelect value="" onChange={(v) => { if (v && !columns.includes(v)) setColumns([...columns, v]) }}
-                      options={colOpts.filter((o) => !columns.some((c) => c.toLowerCase() === o.value.toLowerCase()))} placeholder={t('settings.dash.addColumn', 'Add column…')} allowCustom />
+                      options={colOpts.filter((o) => !columns.some((c) => c.toLowerCase() === o.value.toLowerCase()))} placeholder={t('settings.dash.addColumn')} allowCustom />
                   </div>
                 </Chips>
               </Field>
               <Grid2>
-                <Field label={t('settings.dash.maxRows', 'Max rows (blank = all)')}>
+                <Field label={t('settings.dash.maxRows')}>
                   <Input type="number" min={1} value={maxRows} onChange={(e) => setMaxRows(e.target.value)} placeholder="15" />
                 </Field>
                 <div />
               </Grid2>
               <PreviewWrap>
                 {tablePreview ? <div style={{ flex: 1, minHeight: 0, display: 'flex' }}><TableWidget widget={tablePreview} filters={[]} filterValues={{}} /></div>
-                  : <Msg>{t('settings.dash.tableNeed', 'Pick a connector and query to preview.')}</Msg>}
+                  : <Msg>{t('settings.dash.tableNeed')}</Msg>}
               </PreviewWrap>
             </>
           )}

@@ -10,7 +10,7 @@ const ChangePackagesBuilder = lazy(() => import('../Settings/ChangePackagesBuild
 export default function ChangesPage() {
   const { t } = useTranslation()
   return (
-    <PageLayout icon={<GitCompare size={18} />} title={t('settings.tabs.changes', 'Changes')}>
+    <PageLayout icon={<GitCompare size={18} />} title={t('settings.tabs.changes')}>
       <Suspense fallback={<Centered />}><ChangePackagesBuilder /></Suspense>
     </PageLayout>
   )

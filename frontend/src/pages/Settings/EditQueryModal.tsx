@@ -135,11 +135,11 @@ export function EditQueryModal({ connector, queryName, onClose, onSaved, seed, s
   const cancel = async () => {
     if (dirty) {
       const choice = await modals.choose({
-        title: t('settings.editQuery.unsavedTitle', 'Unsaved changes'),
-        message: t('settings.editQuery.unsavedMsg', 'Discard your edits to this query?'),
+        title: t('settings.editQuery.unsavedTitle'),
+        message: t('settings.editQuery.unsavedMsg'),
         options: [
-          { value: 'discard', label: t('settings.screens.designer.discard', 'Discard'), variant: 'danger' },
-          { value: 'keep', label: t('settings.screens.designer.keepEditing', 'Keep editing'), variant: 'ghost', autoFocus: true },
+          { value: 'discard', label: t('settings.screens.designer.discard'), variant: 'danger' },
+          { value: 'keep', label: t('settings.screens.designer.keepEditing'), variant: 'ghost', autoFocus: true },
         ],
         cancelValue: 'keep',
       })
@@ -170,7 +170,7 @@ export function EditQueryModal({ connector, queryName, onClose, onSaved, seed, s
     <EditorModalShell
       title={(
         <>
-          {seed ? t('settings.editQuery.titleNew', 'New query') : t('settings.editQuery.title', 'Edit query')} ·{' '}
+          {seed ? t('settings.editQuery.titleNew') : t('settings.editQuery.title')} ·{' '}
           <Mono style={{ display: 'inline', color: colors.text.muted, fontSize: fontSize.sm, fontWeight: 400 }}>
             {connector}.{queryName}
           </Mono>
@@ -189,7 +189,7 @@ export function EditQueryModal({ connector, queryName, onClose, onSaved, seed, s
         <Centered />
       ) : query == null ? (
         <Banner $tone="info">
-          {t('settings.editQuery.notFound', 'Query "{{q}}" not found on connector "{{c}}".', { q: queryName, c: connector })}
+          {t('settings.editQuery.notFound', { q: queryName, c: connector })}
         </Banner>
       ) : (
         <SqlConnectorContext.Provider value={connector}>

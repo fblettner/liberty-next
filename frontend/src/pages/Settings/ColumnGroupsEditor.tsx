@@ -127,7 +127,7 @@ export default function ColumnGroupsEditor({
         />
       ))}
       <Button $variant="ghost" $size="sm" onClick={add} style={{ alignSelf: 'flex-start' }}>
-        <Plus size={13} /> {t('settings.screens.editor.columnGroupsAdd', 'Add column group')}
+        <Plus size={13} /> {t('settings.screens.editor.columnGroupsAdd')}
       </Button>
     </div>
   )
@@ -190,8 +190,8 @@ function GroupCard({
         <Toggle as="span" aria-hidden>
           {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </Toggle>
-        <span className="grow id">{id || t('settings.screens.editor.columnGroupUntitled', '(unnamed group)')}</span>
-        <span className="count">{t('settings.screens.editor.columnGroupCount', '{{n}} column(s)', { n: attachedColumns.length })}</span>
+        <span className="grow id">{id || t('settings.screens.editor.columnGroupUntitled')}</span>
+        <span className="count">{t('settings.screens.editor.columnGroupCount', { n: attachedColumns.length })}</span>
         <RemoveBtn type="button" onClick={(e) => { e.stopPropagation(); onRemove() }} aria-label="Remove group"><Trash2 size={15} /></RemoveBtn>
       </CardHead>
 
@@ -199,37 +199,37 @@ function GroupCard({
         <Body>
           <Two>
             <div>
-              <SubLabel>{t('settings.screens.editor.columnGroupId', 'Group id')}</SubLabel>
+              <SubLabel>{t('settings.screens.editor.columnGroupId')}</SubLabel>
               <Input value={id} placeholder="addr"
                 onChange={(e) => onPatch({ id: e.target.value })} />
             </div>
             <div>
-              <SubLabel>{t('settings.screens.editor.columnGroupLabel', 'Label')}</SubLabel>
-              <Input value={typeof group.label === 'string' ? group.label : ''} placeholder={t('settings.screens.editor.columnGroupLabelPh', 'Address Book')}
+              <SubLabel>{t('settings.screens.editor.columnGroupLabel')}</SubLabel>
+              <Input value={typeof group.label === 'string' ? group.label : ''} placeholder={t('settings.screens.editor.columnGroupLabelPh')}
                 onChange={(e) => onPatch({ label: e.target.value })} />
             </div>
           </Two>
 
           <div>
-            <SubLabel>{t('settings.screens.editor.columnGroupConnector', 'Connector')}</SubLabel>
+            <SubLabel>{t('settings.screens.editor.columnGroupConnector')}</SubLabel>
             <SearchSelect
               value={typeof group.connector === 'string' ? group.connector : ''}
               onChange={(v) => onPatch({ connector: v })}
               options={connectorOptions}
-              anyLabel={t('settings.screens.editor.columnGroupConnectorAny', '(use screen’s — {{c}})', { c: screenConnector })}
+              anyLabel={t('settings.screens.editor.columnGroupConnectorAny', { c: screenConnector })}
               placeholder={screenConnector}
             />
           </div>
 
           <div>
-            <SubLabel>{t('settings.screens.editor.columnGroupUpdate', 'Update query')}</SubLabel>
+            <SubLabel>{t('settings.screens.editor.columnGroupUpdate')}</SubLabel>
             <QueryRow>
               <div className="grow">
                 <SearchSelect
                   value={typeof group.update_query === 'string' ? group.update_query : ''}
                   onChange={(v) => onPatch({ update_query: v })}
                   options={writableQueryOptions} allowCustom
-                  placeholder={t('settings.screens.editor.columnGroupPickQuery', 'Pick a query…')}
+                  placeholder={t('settings.screens.editor.columnGroupPickQuery')}
                 />
               </div>
               <EditQueryButton connector={conn} queryName={typeof group.update_query === 'string' ? group.update_query : ''} />
@@ -238,15 +238,15 @@ function GroupCard({
             </QueryRow>
           </div>
           <div>
-            <SubLabel>{t('settings.screens.editor.columnGroupInsert', 'Insert query')}</SubLabel>
+            <SubLabel>{t('settings.screens.editor.columnGroupInsert')}</SubLabel>
             <QueryRow>
               <div className="grow">
                 <SearchSelect
                   value={typeof group.insert_query === 'string' ? group.insert_query : ''}
                   onChange={(v) => onPatch({ insert_query: v })}
                   options={writableQueryOptions} allowCustom
-                  anyLabel={t('settings.screens.editor.columnGroupNoInsert', '(no insert — update only)')}
-                  placeholder={t('settings.screens.editor.columnGroupPickQuery', 'Pick a query…')}
+                  anyLabel={t('settings.screens.editor.columnGroupNoInsert')}
+                  placeholder={t('settings.screens.editor.columnGroupPickQuery')}
                 />
               </div>
               <EditQueryButton connector={conn} queryName={typeof group.insert_query === 'string' ? group.insert_query : ''} />
@@ -255,17 +255,16 @@ function GroupCard({
             </QueryRow>
           </div>
           <div>
-            <SubLabel>{t('settings.screens.editor.columnGroupDelete', 'Delete query')}</SubLabel>
-            <Hint>{t('settings.screens.editor.columnGroupDeleteHint',
-              'Removes the related row when the main row is deleted (grid or dialog). Leave blank to keep it.')}</Hint>
+            <SubLabel>{t('settings.screens.editor.columnGroupDelete')}</SubLabel>
+            <Hint>{t('settings.screens.editor.columnGroupDeleteHint')}</Hint>
             <QueryRow>
               <div className="grow">
                 <SearchSelect
                   value={typeof group.delete_query === 'string' ? group.delete_query : ''}
                   onChange={(v) => onPatch({ delete_query: v })}
                   options={writableQueryOptions} allowCustom
-                  anyLabel={t('settings.screens.editor.columnGroupNoDelete', '(no delete — leave related row)')}
-                  placeholder={t('settings.screens.editor.columnGroupPickQuery', 'Pick a query…')}
+                  anyLabel={t('settings.screens.editor.columnGroupNoDelete')}
+                  placeholder={t('settings.screens.editor.columnGroupPickQuery')}
                 />
               </div>
               <EditQueryButton connector={conn} queryName={typeof group.delete_query === 'string' ? group.delete_query : ''} />
@@ -275,9 +274,8 @@ function GroupCard({
           </div>
 
           <div>
-            <SubLabel>{t('settings.screens.editor.columnGroupKeys', 'Key columns')}</SubLabel>
-            <Hint>{t('settings.screens.editor.columnGroupKeysHint',
-              'The related row’s key as it appears in the JOINed result — non-null ⇒ the row exists ⇒ UPDATE, else INSERT.')}</Hint>
+            <SubLabel>{t('settings.screens.editor.columnGroupKeys')}</SubLabel>
+            <Hint>{t('settings.screens.editor.columnGroupKeysHint')}</Hint>
             {keyColumns.length > 0 && (
               <ChipRow>
                 {keyColumns.map((k) => (
@@ -286,13 +284,12 @@ function GroupCard({
               </ChipRow>
             )}
             <SearchSelect value="" onChange={addKeyColumn} options={keyColumnChoices}
-              placeholder={t('settings.screens.editor.columnGroupAddKey', '+ add key column')} />
+              placeholder={t('settings.screens.editor.columnGroupAddKey')} />
           </div>
 
           <div>
-            <SubLabel>{t('settings.screens.editor.columnGroupBinds', 'FK binds (parent → related)')}</SubLabel>
-            <Hint>{t('settings.screens.editor.columnGroupBindsHint',
-              'Link the parent row into the related write: source = a main column, param = the related query’s :placeholder.')}</Hint>
+            <SubLabel>{t('settings.screens.editor.columnGroupBinds')}</SubLabel>
+            <Hint>{t('settings.screens.editor.columnGroupBindsHint')}</Hint>
             <ParamBindList
               value={(Array.isArray(group.param_binds) ? group.param_binds : []) as ParamBind[]}
               onChange={(next) => onPatch({ param_binds: next })}
@@ -305,19 +302,17 @@ function GroupCard({
             <Checkbox
               checked={group.insert_on_add === true}
               onChange={(v) => onPatch({ insert_on_add: v })}
-              label={t('settings.screens.editor.columnGroupInsertOnAdd', 'Always insert on Add (mandatory 1:1 companion)')}
+              label={t('settings.screens.editor.columnGroupInsertOnAdd')}
             />
-            <Hint>{t('settings.screens.editor.columnGroupInsertOnAddHint',
-              'Insert the related row on every Add even if none of its fields were filled — the FK bind + server-side dictionary defaults populate it. Off: only inserted when a field has a value (so an optional companion isn’t created blank). No effect on Edit.')}</Hint>
+            <Hint>{t('settings.screens.editor.columnGroupInsertOnAddHint')}</Hint>
           </div>
 
           <div>
-            <SubLabel>{t('settings.screens.editor.columnGroupColumns', 'Columns in this group')}</SubLabel>
+            <SubLabel>{t('settings.screens.editor.columnGroupColumns')}</SubLabel>
             {attachedColumns.length > 0 ? (
               <ChipRow>{attachedColumns.map((c) => <Chip key={c}>{c}</Chip>)}</ChipRow>
             ) : (
-              <Hint>{t('settings.screens.editor.columnGroupNoColumns',
-                'No columns tagged yet — set a column’s Group to “{{id}}” in the list below.', { id: id || '…' })}</Hint>
+              <Hint>{t('settings.screens.editor.columnGroupNoColumns', { id: id || '…' })}</Hint>
             )}
           </div>
         </Body>

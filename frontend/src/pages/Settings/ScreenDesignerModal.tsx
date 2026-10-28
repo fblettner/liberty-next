@@ -55,7 +55,7 @@ export function ScreenDesignerModal({ app, screenId, onClose, onSaved }: Props) 
         setDoc(d.screens)
         const v = d.screens[app]?.[screenId] as unknown as Record<string, unknown> | undefined
         if (v) { setValue(v); setOriginal(JSON.stringify(v)) }
-        else setError(t('settings.screens.notFound', 'Screen [{{app}}.{{id}}] not found.', { app, id: screenId }))
+        else setError(t('settings.screens.notFound', { app, id: screenId }))
       })
       .catch((e) => { if (!cancelled) setError(e instanceof ApiError ? e.message : String(e)) })
     return () => { cancelled = true }
@@ -118,12 +118,12 @@ export function ScreenDesignerModal({ app, screenId, onClose, onSaved }: Props) 
     if (closedRef.current) return
     if (!dirty) { onClose(); return }
     const choice = await modals.choose<'discard' | 'save' | 'keep'>({
-      title: t('settings.screens.designer.unsavedTitle', 'Unsaved changes'),
-      message: t('settings.screens.designer.unsavedMsg', 'You have unsaved changes in this screen. Save them, discard them, or keep editing?'),
+      title: t('settings.screens.designer.unsavedTitle'),
+      message: t('settings.screens.designer.unsavedMsg'),
       options: [
-        { value: 'discard', label: t('settings.screens.designer.discard', 'Discard'), variant: 'danger' },
+        { value: 'discard', label: t('settings.screens.designer.discard'), variant: 'danger' },
         { value: 'save', label: t('common.save'), variant: 'primary' },
-        { value: 'keep', label: t('settings.screens.designer.keepEditing', 'Keep editing'), variant: 'ghost', autoFocus: true },
+        { value: 'keep', label: t('settings.screens.designer.keepEditing'), variant: 'ghost', autoFocus: true },
       ],
       cancelValue: 'keep',
     })

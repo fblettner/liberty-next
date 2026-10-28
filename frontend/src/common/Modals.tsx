@@ -297,7 +297,7 @@ function PromptModalContent({
   const liveResult: ValidateResult = useMemo(() => {
     const trimmed = value.trim()
     if (!opts.allowEmpty && trimmed === '') {
-      return value === '' ? {} : { error: t('settings.rename.empty', 'Name cannot be empty.') }
+      return value === '' ? {} : { error: t('settings.rename.empty') }
     }
     if (opts.validate) return normaliseValidate(opts.validate(trimmed))
     return {}
@@ -340,7 +340,7 @@ function PromptModalContent({
             {opts.cancelLabel ?? t('common.cancel')}
           </Button>
           <Button $size="sm" $variant="primary" onClick={submit} disabled={!!liveResult.error || (!opts.allowEmpty && value.trim() === '')}>
-            {opts.submitLabel ?? t('common.ok', 'OK')}
+            {opts.submitLabel ?? t('common.ok')}
           </Button>
         </ModalFooter>
       </Modal>
@@ -369,7 +369,7 @@ function AlertModalContent({
         <ModalBody>{opts.message}</ModalBody>
         <ModalFooter>
           <Button $size="sm" $variant={opts.variant ?? 'primary'} onClick={onClose} autoFocus>
-            {opts.okLabel ?? t('common.ok', 'OK')}
+            {opts.okLabel ?? t('common.ok')}
           </Button>
         </ModalFooter>
       </Modal>

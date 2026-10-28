@@ -42,12 +42,12 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
   const apiConns = useMemo(() => (connectors ?? []).filter((c) => c.type === 'api'), [connectors])
 
   const itemOpts = useMemo<SearchSelectOption[]>(() => {
-    if (type === 'connector') return sqlConns.map((c) => ({ value: `sql:${c.name}:*`, label: `${c.name}  (${t('settings.access.allQueries', 'all queries')})`, mono: `sql:${c.name}:*` }))
+    if (type === 'connector') return sqlConns.map((c) => ({ value: `sql:${c.name}:*`, label: `${c.name}  (${t('settings.access.allQueries')})`, mono: `sql:${c.name}:*` }))
     if (type === 'query') return sqlConns.flatMap((c) => c.queries.map((q) => ({ value: `sql:${c.name}:${q.name}`, label: `${c.name} · ${q.label || q.name}`, mono: `sql:${c.name}:${q.name}` })))
     if (type === 'api') return apiConns.flatMap((c) => c.endpoints.map((e) => ({ value: `api:${c.name}:${e.name}`, label: `${c.name} · ${e.label || e.name}`, mono: `api:${c.name}:${e.name}` })))
     if (type === 'dashboard') return dashboardIds.map((d) => ({ value: `dashboard:${d}`, label: d, mono: `dashboard:${d}` }))
-    if (type === 'explorer') return sqlConns.map((c) => ({ value: `explorer:${c.name}:*`, label: `${c.name}  (${t('settings.access.allModels', 'all models')})`, mono: `explorer:${c.name}:*` }))
-    if (type === 'ai') return [{ value: 'ai:chat', label: t('settings.access.aiChat', 'AI assistant'), mono: 'ai:chat' }]
+    if (type === 'explorer') return sqlConns.map((c) => ({ value: `explorer:${c.name}:*`, label: `${c.name}  (${t('settings.access.allModels')})`, mono: `explorer:${c.name}:*` }))
+    if (type === 'ai') return [{ value: 'ai:chat', label: t('settings.access.aiChat'), mono: 'ai:chat' }]
     return []
   }, [type, sqlConns, apiConns, dashboardIds, t])
 
@@ -60,13 +60,13 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
   }
 
   const typeOpts: SearchSelectOption[] = [
-    { value: 'connector', label: t('settings.access.tConnector', 'Connector (all queries)') },
-    { value: 'query', label: t('settings.access.tQuery', 'Query') },
-    { value: 'api', label: t('settings.access.tApi', 'API endpoint') },
-    { value: 'dashboard', label: t('settings.access.tDashboard', 'Dashboard') },
-    { value: 'explorer', label: t('settings.access.tExplorer', 'Data Explorer') },
-    { value: 'ai', label: t('settings.access.tAi', 'AI assistant') },
-    { value: 'pattern', label: t('settings.access.tPattern', 'Pattern (expert)') },
+    { value: 'connector', label: t('settings.access.tConnector') },
+    { value: 'query', label: t('settings.access.tQuery') },
+    { value: 'api', label: t('settings.access.tApi') },
+    { value: 'dashboard', label: t('settings.access.tDashboard') },
+    { value: 'explorer', label: t('settings.access.tExplorer') },
+    { value: 'ai', label: t('settings.access.tAi') },
+    { value: 'pattern', label: t('settings.access.tPattern') },
   ]
 
   return (
@@ -76,21 +76,21 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
           const deny = p.startsWith('!')
           return <PermChip key={p} $deny={deny}>{deny ? p.slice(1) : p}<button type="button" onClick={() => onChange(value.filter((x) => x !== p))} title={t('common.delete')}><X size={11} /></button></PermChip>
         })}
-        {value.length === 0 && <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.access.noOther', 'Nothing beyond the menus.')}</span>}
+        {value.length === 0 && <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.access.noOther')}</span>}
       </Chips>
       <AddRow>
         <Seg>
-          <SegBtn $active={effect === 'allow'} $tone="allow" onClick={() => setEffect('allow')}><Check size={13} /> {t('settings.access.allow', 'Allow')}</SegBtn>
-          <SegBtn $active={effect === 'deny'} $tone="deny" onClick={() => setEffect('deny')}><Ban size={13} /> {t('settings.access.deny', 'Deny')}</SegBtn>
+          <SegBtn $active={effect === 'allow'} $tone="allow" onClick={() => setEffect('allow')}><Check size={13} /> {t('settings.access.allow')}</SegBtn>
+          <SegBtn $active={effect === 'deny'} $tone="deny" onClick={() => setEffect('deny')}><Ban size={13} /> {t('settings.access.deny')}</SegBtn>
         </Seg>
         <div style={{ minWidth: 170 }}>
           <SearchSelect value={type} onChange={(v) => { setType(v as RuleType); setItem('') }} options={typeOpts} />
         </div>
         <div style={{ minWidth: 240, flex: 1 }}>
           <SearchSelect value={item} onChange={setItem} options={itemOpts} allowCustom={type === 'pattern' || type === 'query' || type === 'api' || type === 'explorer'}
-            placeholder={type === 'pattern' ? 'sql:nomasx1:security_*' : t('settings.access.pickItem', 'Pick…')} />
+            placeholder={type === 'pattern' ? 'sql:nomasx1:security_*' : t('settings.access.pickItem')} />
         </div>
-        <Button $size="sm" $variant="ghost" onClick={add} disabled={!item.trim()}><Plus size={13} /> {t('settings.access.addRule', 'Add')}</Button>
+        <Button $size="sm" $variant="ghost" onClick={add} disabled={!item.trim()}><Plus size={13} /> {t('settings.access.addRule')}</Button>
       </AddRow>
     </div>
   )

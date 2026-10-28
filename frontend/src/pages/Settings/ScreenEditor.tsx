@@ -486,8 +486,8 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       properties: {
         value_diff: {
           ...obj,
-          title: t('settings.screens.valueDiff.label', 'Audit Trail Settings'),
-          description: t('settings.screens.valueDiff.intro', 'Row value diff — name a column that holds a DML statement (the audit redo SQL); each row then expands to its field-level BEFORE / AFTER values, parsed in flight. No values table needed. Leave the SQL column blank to disable.'),
+          title: t('settings.screens.valueDiff.label'),
+          description: t('settings.screens.valueDiff.intro'),
         },
       },
       $defs: defs,
@@ -641,52 +641,51 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
 
     return (
       <>
-        <RowClickHeader>{t('settings.screens.editor.rowClickHeader', 'When a row is clicked')}</RowClickHeader>
-        <Field label={t('settings.screens.editor.rowClickModeLabel', 'Behavior')}>
+        <RowClickHeader>{t('settings.screens.editor.rowClickHeader')}</RowClickHeader>
+        <Field label={t('settings.screens.editor.rowClickModeLabel')}>
           <Select
             value={currentMode}
             onChange={(e) => setMode(e.target.value as RowClickMode)}
           >
-            <option value="none">{t('settings.screens.editor.rowClickModeNone', 'Do nothing (or fall through to the screen\'s own dialog)')}</option>
-            <option value="dialog">{t('settings.screens.editor.rowClickModeDialog', 'Open a sibling Screen as a modal dialog')}</option>
-            <option value="route">{t('settings.screens.editor.rowClickModeRoute', 'Open a page route in a new browser tab')}</option>
+            <option value="none">{t('settings.screens.editor.rowClickModeNone')}</option>
+            <option value="dialog">{t('settings.screens.editor.rowClickModeDialog')}</option>
+            <option value="route">{t('settings.screens.editor.rowClickModeRoute')}</option>
           </Select>
         </Field>
 
         {currentMode === 'dialog' && (
           <>
-            <Field label={t('settings.screens.editor.rowClickScreenLabel', 'Target screen')}>
+            <Field label={t('settings.screens.editor.rowClickScreenLabel')}>
               <SearchSelect
                 value={(value.row_click_screen as string | undefined) ?? ''}
                 options={[...siblingScreenIds].sort((a, b) => a.localeCompare(b)).map((sid) => ({ value: sid, label: sid, mono: sid }))}
                 onChange={(v) => setProp('row_click_screen', v || null)}
-                placeholder={t('settings.screens.editor.rowClickScreenPlaceholder', 'Pick a sibling screen…')}
+                placeholder={t('settings.screens.editor.rowClickScreenPlaceholder')}
               />
             </Field>
-            <Field label={t('settings.screens.editor.rowClickConnectorLabel', 'Target connector')}>
+            <Field label={t('settings.screens.editor.rowClickConnectorLabel')}>
               <SearchSelect
                 value={(value.row_click_connector as string | undefined) ?? ''}
                 options={sqlConnectorOptions}
                 onChange={(v) => setProp('row_click_connector', v || null)}
-                anyLabel={t('settings.screens.editor.rowClickConnectorInherit', '(inherit — {{conn}})', { conn: rowClickTarget?.connector || effectiveConnector })}
-                placeholder={t('settings.screens.editor.rowClickConnectorPlaceholder', 'Inherit from target screen')}
+                anyLabel={t('settings.screens.editor.rowClickConnectorInherit', { conn: rowClickTarget?.connector || effectiveConnector })}
+                placeholder={t('settings.screens.editor.rowClickConnectorPlaceholder')}
               />
-              <RowClickHint>{t('settings.screens.editor.rowClickConnectorHelp', 'Connector hosting the target screen; blank → the target screen’s own (or this screen’s) connector.')}</RowClickHint>
+              <RowClickHint>{t('settings.screens.editor.rowClickConnectorHelp')}</RowClickHint>
             </Field>
-            <Field label={t('settings.screens.editor.rowClickBindsLabel', 'Pass these values to the target')}>
+            <Field label={t('settings.screens.editor.rowClickBindsLabel')}>
               <ParamBindList
                 value={Array.isArray(value.row_click_binds) ? (value.row_click_binds as ParamBind[]) : []}
                 onChange={(next) => setProp('row_click_binds', next.length ? next : null)}
                 sourceOptions={rowClickSourceOptions}
                 paramOptions={rowClickParamOptions}
-                paramPlaceholder={t('settings.screens.editor.rowClickParamPlaceholder', 'Target param (:placeholder)')}
+                paramPlaceholder={t('settings.screens.editor.rowClickParamPlaceholder')}
               />
-              <RowClickHint>{t('settings.screens.editor.rowClickBindsHelp', 'Bind the clicked row’s columns into the target screen’s read_query. “source” reads a column on this screen’s row; “value” is a literal.')}</RowClickHint>
+              <RowClickHint>{t('settings.screens.editor.rowClickBindsHelp')}</RowClickHint>
             </Field>
             {rowClickUnmatchedParams.length > 0 && (
               <Banner $tone="warning">
                 {t('settings.screens.editor.rowClickUnmatchedWarning',
-                  'These binds target a param the read_query “{{q}}” doesn’t declare, so they won’t filter the row: {{params}}. Add the matching “:{{first}}” placeholder to that query (Edit query), or remove the bind.',
                   {
                     q: rowClickTarget?.read_query ?? '',
                     params: rowClickUnmatchedParams.join(', '),
@@ -725,7 +724,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
           }
           return (
             <>
-              <Field label={t('settings.screens.editor.rowClickRouteLabel', 'Page route')}>
+              <Field label={t('settings.screens.editor.rowClickRouteLabel')}>
                 <Input
                   id="row-click-route-input"
                   value={routeValue}
@@ -735,7 +734,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
               </Field>
               {ROW_CLICK_ROUTE_OPTIONS.length > 0 && (
                 <PlaceholderChipRow>
-                  <PlaceholderHint>{t('settings.screens.editor.rowClickRoutePresets', 'Presets:')}</PlaceholderHint>
+                  <PlaceholderHint>{t('settings.screens.editor.rowClickRoutePresets')}</PlaceholderHint>
                   {ROW_CLICK_ROUTE_OPTIONS.map((preset) => (
                     <PlaceholderChip
                       key={preset.value}
@@ -751,8 +750,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
               {screenColumns && screenColumns.length > 0 && (
                 <PlaceholderChipRow>
                   <PlaceholderHint>
-                    {t('settings.screens.editor.rowClickRouteColumnHint',
-                      'Click a column to insert it as a placeholder:')}
+                    {t('settings.screens.editor.rowClickRouteColumnHint')}
                   </PlaceholderHint>
                   {screenColumns.map((c) => (
                     <PlaceholderChip
@@ -812,12 +810,12 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     <>
       <Sub>{t('settings.screens.editor.queriesHint')}</Sub>
       {tableOptions.length > 0 && (
-        <Field label={t('settings.screens.editor.queries.fromTable', 'Fill from table')}>
+        <Field label={t('settings.screens.editor.queries.fromTable')}>
           <SearchSelect
             value=""
             options={tableOptions}
             onChange={(v) => v && applyTable(v)}
-            anyLabel={t('settings.screens.editor.queries.fromTableHint', 'Pick a table to fill all four CRUD queries…')}
+            anyLabel={t('settings.screens.editor.queries.fromTableHint')}
             placeholder={t('common.pick')}
             loading={!selectedConnectorMeta}
           />
@@ -848,10 +846,10 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
           >
             <Plus size={13} />{' '}
             {!screenColumns
-              ? t('settings.screens.editor.importColumnsLoading', 'Import from read query…')
+              ? t('settings.screens.editor.importColumnsLoading')
               : missing.length === 0
-                ? t('settings.screens.editor.importColumnsNone', 'All read-query columns added')
-                : t('settings.screens.editor.importColumns', 'Import {{n}} column(s) from the read query', { n: missing.length })}
+                ? t('settings.screens.editor.importColumnsNone')
+                : t('settings.screens.editor.importColumns', { n: missing.length })}
           </Button>
         )
       })()}
@@ -860,8 +858,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
           it lives here, not on the Columns tab; columns are tagged into a group via their "Group"
           field in the column list. */}
       <GroupsHr />
-      <Sub>{t('settings.screens.editor.columnGroupsHint',
-        'Column groups — related 1:1 tables whose columns are edited inline and written back on Save. Define a group here, then tag each related column with it (its “Group” field) on the Columns tab.')}</Sub>
+      <Sub>{t('settings.screens.editor.columnGroupsHint')}</Sub>
       <ColumnGroupsEditor
         value={Array.isArray(value.column_groups) ? (value.column_groups as Record<string, unknown>[]) : []}
         onChange={(next) => setProp('column_groups', next.length ? next : null)}
@@ -973,7 +970,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
                   fieldNotes: !override && ddRule
                     ? { rules: (
                         <div style={{ fontSize: fontSize.micro, color: colors.text.muted, marginTop: 4 }}>
-                          {t('settings.screens.editor.ddDefaultRule', 'Data dictionary default: {{rule}}',
+                          {t('settings.screens.editor.ddDefaultRule',
                             { rule: ddRuleVal ? `${ddRule} (${ddRuleVal})` : ddRule })}
                         </div>
                       ) }
@@ -997,20 +994,20 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     if (!props || !('name' in props) || !('default' in props)) return null
     const name = typeof v.name === 'string' ? v.name : ''
     if (!name) return null
-    return v.default === true ? `${name} · ${t('settings.screens.views.defaultTag', 'default')}` : name
+    return v.default === true ? `${name} · ${t('settings.screens.views.defaultTag')}` : name
   }
   const renderViews = (): ReactNode => {
     const currentViews = Array.isArray(value.views) ? (value.views as unknown[]) : []
     return (
       <>
         <div style={{ fontSize: fontSize.sm, color: colors.text.muted, marginBottom: 8 }}>
-          {t('settings.screens.views.intro', 'Named grid views (grid formats) shared with all users — each a saved set of visible columns, sort, grouping and page size. Mark one as the default to set the layout the grid opens with. Users can still save their own personal views on top.')}
+          {t('settings.screens.views.intro')}
         </div>
         <FrameworkEnumsContext.Provider value={augmentedEnums}>
          <ListRowSummaryContext.Provider value={viewRowLabel}>
           <SchemaNavigator
             root={{
-              label: t('settings.screens.editor.viewsCrumb', { id, defaultValue: `Views — ${id}` }),
+              label: t('settings.screens.editor.viewsCrumb', { id }),
               schema: viewsSchema,
               value: { views: currentViews },
               onChange: (v) => {
@@ -1034,7 +1031,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     const vd = (value.value_diff && typeof value.value_diff === 'object') ? (value.value_diff as Row) : {}
     return (
       <FrameworkEnumsContext.Provider value={augmentedEnums}>
-        <Sub>{t('settings.screens.summaryView.intro', 'When set, the screen gains a Summary toggle: one parent row per GROUP BY <dimensions> with a count, and a chevron that lazily loads the underlying rows. Counts come from the database over the whole result. Bucket a date/timestamp dimension (day/month/year) to roll a period into one row. Leave empty for no summary.')}</Sub>
+        <Sub>{t('settings.screens.summaryView.intro')}</Sub>
         {/* Inline edit of the single ScreenSummary object. ``augmentedEnums`` resolves the
             dimension column picker against SCREEN_COLUMNS. An empty dimensions list clears the
             whole summary (so the Summary toggle disappears from the screen). */}
@@ -1053,7 +1050,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
         <div style={{ borderTop: `1px solid ${colors.border}`, margin: '16px 0 12px' }} />
         <SchemaNavigator
           root={{
-            label: t('settings.screens.editor.summaryCrumb', { id, defaultValue: `Summary — ${id}` }),
+            label: t('settings.screens.editor.summaryCrumb', { id }),
             schema: valueDiffNavSchema,
             value: { value_diff: vd },
             onChange: (v) => {
@@ -1239,9 +1236,9 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       )}
       {renderHookList(
         'on_duplicate', screenHookList('on_duplicate'), (n) => setScreenHook('on_duplicate', n),
-        t('settings.screens.onDuplicate.heading', 'On duplicate (row hook)'),
-        t('settings.screens.onDuplicate.hint', 'Runs when a row is duplicated (Duplicate → Save), instead of on_insert. The source record is exposed as SOURCE_<col> so actions can copy related-table rows (roles, menus…) from the original to the new row.'),
-        t('settings.screens.onDuplicate.empty', 'No on-duplicate actions yet — duplicating just writes the cloned row.'),
+        t('settings.screens.onDuplicate.heading'),
+        t('settings.screens.onDuplicate.hint'),
+        t('settings.screens.onDuplicate.empty'),
       )}
     </>
   )
@@ -1281,8 +1278,8 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   const createExport = () => setExport({ sheets: [] })
   const deleteExport = async () => {
     const ok = await modals.confirm({
-      title: t('settings.screens.export.deleteTitle', 'Delete export config?'),
-      message: t('settings.screens.export.deleteMsg', "Remove the screen's workbook export configuration. The Export button disappears from the TableView."),
+      title: t('settings.screens.export.deleteTitle'),
+      message: t('settings.screens.export.deleteMsg'),
       variant: 'danger',
       confirmLabel: t('common.delete'),
     })
@@ -1293,13 +1290,12 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     if (!exportValue) {
       return (
         <Stack gap={14}>
-          <Sub>{t('settings.screens.export.hint',
-            'Configure multi-file / multi-sheet xlsx export. Set ``split_by`` to a column on the read query and the export produces one xlsx per distinct value; each sheet runs its own query with the running ``split_value`` bound through its ParamBinds. Leave ``split_by`` blank for a single xlsx with all sheets.')}</Sub>
+          <Sub>{t('settings.screens.export.hint')}</Sub>
           <Empty>
             <Stack gap={12} style={{ alignItems: 'center' }}>
-              <div>{t('settings.screens.export.empty', 'No export configured.')}</div>
+              <div>{t('settings.screens.export.empty')}</div>
               <Button $variant="primary" $size="sm" onClick={createExport}>
-                <Plus size={13} /> {t('settings.screens.export.create', 'Configure export')}
+                <Plus size={13} /> {t('settings.screens.export.create')}
               </Button>
             </Stack>
           </Empty>
@@ -1312,7 +1308,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       <Stack gap={14}>
         <Row gap={8} style={{ justifyContent: 'flex-end' }}>
           <Button $variant="danger" $size="sm" onClick={deleteExport}>
-            <Trash2 size={13} /> {t('settings.screens.export.delete', 'Delete export config')}
+            <Trash2 size={13} /> {t('settings.screens.export.delete')}
           </Button>
         </Row>
         <ExportEditor
@@ -1333,8 +1329,8 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // snapshot, OR Reload from disk after committing).
   const deleteDialog = async () => {
     const ok = await modals.confirm({
-      title: t('settings.screens.editor.dialogDeleteTitle', 'Delete dialog?'),
-      message: t('settings.screens.editor.dialogDeleteMsg', 'Remove the screen\'s dialog (every tab + field + lookup_param_bind). The screen becomes read-only / grid-edit only.'),
+      title: t('settings.screens.editor.dialogDeleteTitle'),
+      message: t('settings.screens.editor.dialogDeleteMsg'),
       variant: 'danger',
       confirmLabel: t('common.delete'),
     })
@@ -1368,7 +1364,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <Row gap={8} style={{ justifyContent: 'flex-end', marginBottom: 8 }}>
           <Button $variant="danger" $size="sm" onClick={deleteDialog}>
-            <Trash2 size={13} /> {t('settings.screens.editor.dialogDelete', 'Delete dialog')}
+            <Trash2 size={13} /> {t('settings.screens.editor.dialogDelete')}
           </Button>
         </Row>
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
@@ -1465,7 +1461,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
           on_insert: { list: screenHookList('on_insert'), setList: (n) => setScreenHook('on_insert', n), label: t('settings.screens.onInsert.heading') },
           on_update: { list: screenHookList('on_update'), setList: (n) => setScreenHook('on_update', n), label: t('settings.screens.onUpdate.heading') },
           on_delete: { list: screenHookList('on_delete'), setList: (n) => setScreenHook('on_delete', n), label: t('settings.screens.onDelete.heading') },
-          on_duplicate: { list: screenHookList('on_duplicate'), setList: (n) => setScreenHook('on_duplicate', n), label: t('settings.screens.onDuplicate.heading', 'On duplicate (row hook)') },
+          on_duplicate: { list: screenHookList('on_duplicate'), setList: (n) => setScreenHook('on_duplicate', n), label: t('settings.screens.onDuplicate.heading') },
           row_menu:  { list: rowMenu,   setList: setRowMenu,                          label: t('settings.screens.rowmenu.heading') },
         }
         const cfg = lookup[openEditor.listKey]

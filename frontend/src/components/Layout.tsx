@@ -253,7 +253,7 @@ export default function Layout() {
             the toolbar's look & feel. Only shown when there's more than one tab to close. */}
         {tabs.length >= 2 && (
           <>
-            <UtilBtn $danger onClick={() => { closeAll(); navigate('/') }} title={t('tabs.closeAll', 'Close all tabs')} aria-label={t('tabs.closeAll', 'Close all tabs')}>
+            <UtilBtn $danger onClick={() => { closeAll(); navigate('/') }} title={t('tabs.closeAll')} aria-label={t('tabs.closeAll')}>
               <X size={15} />
             </UtilBtn>
             <Sep />
@@ -297,8 +297,8 @@ export default function Layout() {
         )}
         <Sep />
         {/* AI assistant — labeled pill at the end of the bar; toggles the right-side drawer. */}
-        <AiBtn $active={aiOpen} onClick={() => setAiOpen((v) => !v)} title={t('nav.assistant', 'AI Assistant')}>
-          <Sparkles size={14} /> {t('nav.assistant', 'AI Assistant')}
+        <AiBtn $active={aiOpen} onClick={() => setAiOpen((v) => !v)} title={t('nav.assistant')}>
+          <Sparkles size={14} /> {t('nav.assistant')}
         </AiBtn>
       </UtilityBar>
 

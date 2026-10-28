@@ -78,7 +78,7 @@ export default function ScopeRulesEditor({ value, onChange, dictionary, attribut
 
   const itemOpts = useMemo<SearchSelectOption[]>(() => items.map((i) => ({
     value: `${i.section}\u0000${i.key}`, label: i.label ? `${i.key} — ${i.label}` : i.key, mono: i.key,
-    group: i.section === 'shared' ? t('settings.access.sharedDictionary', 'Shared dictionary') : i.section,
+    group: i.section === 'shared' ? t('settings.access.sharedDictionary') : i.section,
   })), [items, t])
   const itemValue = item ? `${item.section}\u0000${item.key}` : ''
   const pickItem = (v: string) => {
@@ -133,51 +133,51 @@ export default function ScopeRulesEditor({ value, onChange, dictionary, attribut
       <Rows>
         {value.map((r, idx) => (
           <RuleRow key={idx} $editing={editing === idx} role="button" tabIndex={0} onClick={() => start(idx)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); start(idx) } }}>
-            <span className="and">{idx === 0 ? '' : t('settings.access.and', 'and')}</span>
+            <span className="and">{idx === 0 ? '' : t('settings.access.and')}</span>
             <span className="text" title={describeRule(r, labels)}>{describeRule(r, labels)}</span>
-            {r.mode === 'deny' && <Tag $tone="red">{t('settings.access.denyAbsent', 'deny if absent')}</Tag>}
+            {r.mode === 'deny' && <Tag $tone="red">{t('settings.access.denyAbsent')}</Tag>}
             {r.connector && <Tag $tone="blue">{r.connector}</Tag>}
             <button type="button" className="icon" title={t('common.delete')} onClick={(e) => { e.stopPropagation(); remove(idx) }}><Trash2 size={13} /></button>
           </RuleRow>
         ))}
-        {value.length === 0 && <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.access.noScope', 'No rule: this role sees every row.')}</span>}
+        {value.length === 0 && <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.access.noScope')}</span>}
       </Rows>
 
       <Form>
         <div className="inline">
-          <span style={{ fontSize: fontSize.sm, fontWeight: 700, color: colors.text.primary }}>{editing == null ? t('settings.access.newRule', 'New rule') : t('settings.access.editRule', 'Edit rule')}</span>
+          <span style={{ fontSize: fontSize.sm, fontWeight: 700, color: colors.text.primary }}>{editing == null ? t('settings.access.newRule') : t('settings.access.editRule')}</span>
           <Seg>
-            <SegBtn $active={!byColumn} onClick={() => switchTarget(false)}>{t('settings.access.byItem', 'Dictionary item')}</SegBtn>
-            <SegBtn $active={byColumn} onClick={() => switchTarget(true)}>{t('settings.access.byColumn', 'Column name')}</SegBtn>
+            <SegBtn $active={!byColumn} onClick={() => switchTarget(false)}>{t('settings.access.byItem')}</SegBtn>
+            <SegBtn $active={byColumn} onClick={() => switchTarget(true)}>{t('settings.access.byColumn')}</SegBtn>
           </Seg>
         </div>
         <div className="grid">
           {byColumn ? (
-            <Field label={t('settings.access.scopeColumn', 'Column (from the screens, or type one)')}>
+            <Field label={t('settings.access.scopeColumn')}>
               <SearchSelect value={draft.column ?? ''} onChange={pickColumn} options={columnOpts} allowCustom placeholder="COMPANY" />
             </Field>
           ) : (
-            <Field label={t('settings.access.scopeItem', 'Dictionary item')}>
-              <SearchSelect value={itemValue} onChange={pickItem} options={itemOpts} allowCustom placeholder={t('settings.access.pickItemScope', 'CO — Company…')} />
+            <Field label={t('settings.access.scopeItem')}>
+              <SearchSelect value={itemValue} onChange={pickItem} options={itemOpts} allowCustom placeholder={t('settings.access.pickItemScope')} />
             </Field>
           )}
-          <Field label={t('settings.access.scopeConnector', 'Connector')}>
-            <SearchSelect value={draft.connector ?? ''} onChange={(v) => setDraft((d) => ({ ...d, connector: v || null }))} options={connOpts} anyLabel={t('settings.access.anyConnector', 'Any connector')} />
+          <Field label={t('settings.access.scopeConnector')}>
+            <SearchSelect value={draft.connector ?? ''} onChange={(v) => setDraft((d) => ({ ...d, connector: v || null }))} options={connOpts} anyLabel={t('settings.access.anyConnector')} />
           </Field>
         </div>
         <div className="inline">
           <Seg>
-            <SegBtn $active={!byAttribute} onClick={() => setByAttribute(false)}>{t('settings.access.fixedValues', 'Fixed values')}</SegBtn>
-            <SegBtn $active={byAttribute} onClick={() => setByAttribute(true)}>{t('settings.access.fromAttribute', "From the user's attribute")}</SegBtn>
+            <SegBtn $active={!byAttribute} onClick={() => setByAttribute(false)}>{t('settings.access.fixedValues')}</SegBtn>
+            <SegBtn $active={byAttribute} onClick={() => setByAttribute(true)}>{t('settings.access.fromAttribute')}</SegBtn>
           </Seg>
-          <Checkbox checked={!!draft.exclude} onChange={(v: boolean) => setDraft((d) => ({ ...d, exclude: v }))} label={t('settings.access.exclude', 'Exclude these values instead')} />
+          <Checkbox checked={!!draft.exclude} onChange={(v: boolean) => setDraft((d) => ({ ...d, exclude: v }))} label={t('settings.access.exclude')} />
         </div>
         {byAttribute ? (
-          <Field label={t('settings.access.attribute', 'User attribute')}>
+          <Field label={t('settings.access.attribute')}>
             <SearchSelect value={attributeOf(draft.source) ?? ''} onChange={(v) => setDraft((d) => ({ ...d, source: v ? sourceFor(v.trim()) : null }))} options={attrOpts} allowCustom placeholder="company" />
           </Field>
         ) : (
-          <Field label={t('settings.access.values', 'Values')}>
+          <Field label={t('settings.access.values')}>
             <Chips>
               {(draft.values ?? []).map((v) => (
                 <PermChip key={v} $deny={!!draft.exclude}>{v}{valueOpts.find((o) => o.value === v)?.label && valueOpts.find((o) => o.value === v)!.label !== v ? ` · ${valueOpts.find((o) => o.value === v)!.label}` : ''}
@@ -185,21 +185,21 @@ export default function ScopeRulesEditor({ value, onChange, dictionary, attribut
               ))}
               <div style={{ minWidth: 240, flex: 1 }}>
                 <SearchSelect value={valueText} onChange={addValue} options={valueOpts.filter((o) => !(draft.values ?? []).includes(o.value))} allowCustom
-                  placeholder={valueOpts.length ? t('settings.access.pickValue', 'Pick or type a value…') : t('settings.access.typeValue', 'Type a value and press Enter')} />
+                  placeholder={valueOpts.length ? t('settings.access.pickValue') : t('settings.access.typeValue')} />
               </div>
             </Chips>
           </Field>
         )}
         <div className="inline">
-          <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.access.whenAbsent', 'A query without this item:')}</span>
+          <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.access.whenAbsent')}</span>
           <Seg>
-            <SegBtn $active={draft.mode !== 'deny'} onClick={() => setDraft((d) => ({ ...d, mode: 'ignore' }))}>{t('settings.access.modeIgnore', 'is unrestricted')}</SegBtn>
-            <SegBtn $active={draft.mode === 'deny'} onClick={() => setDraft((d) => ({ ...d, mode: 'deny' }))}>{t('settings.access.modeDeny', 'returns nothing')}</SegBtn>
+            <SegBtn $active={draft.mode !== 'deny'} onClick={() => setDraft((d) => ({ ...d, mode: 'ignore' }))}>{t('settings.access.modeIgnore')}</SegBtn>
+            <SegBtn $active={draft.mode === 'deny'} onClick={() => setDraft((d) => ({ ...d, mode: 'deny' }))}>{t('settings.access.modeDeny')}</SegBtn>
           </Seg>
           <div style={{ flex: 1 }} />
-          {editing != null && <Button $size="sm" $variant="ghost" onClick={() => { setEditing(null); start(null) }}>{t('common.cancel', 'Cancel')}</Button>}
+          {editing != null && <Button $size="sm" $variant="ghost" onClick={() => { setEditing(null); start(null) }}>{t('common.cancel')}</Button>}
           <Button $size="sm" $variant="primary" onClick={commit} disabled={!target || (byAttribute && !draft.source)}>
-            {editing == null ? <><Plus size={13} /> {t('settings.access.addRule', 'Add')}</> : t('settings.access.updateRule', 'Update rule')}
+            {editing == null ? <><Plus size={13} /> {t('settings.access.addRule')}</> : t('settings.access.updateRule')}
           </Button>
         </div>
       </Form>

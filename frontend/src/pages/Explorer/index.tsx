@@ -367,13 +367,13 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
               <DrillBar>
                 <Button $size="sm" $variant="ghost" onClick={() => { setDrill(null); setPage(1) }}><ArrowLeft size={13} /> {t('explorer.backToAnalysis')}</Button>
                 {drill.map((c) => <Pill key={c.field}>{fields.get(c.field)?.label ?? c.field}: {c.value === null ? t('explorer.emptyValue') : String(c.value)}</Pill>)}
-                <Button $size="sm" $variant="ghost" onClick={() => { setDrill(null); setPage(1) }} title={t('common.close', 'Close')}><X size={13} /></Button>
+                <Button $size="sm" $variant="ghost" onClick={() => { setDrill(null); setPage(1) }} title={t('common.close')}><X size={13} /></Button>
               </DrillBar>
             )}
             {showingDetail ? (
               detail ? (
                 <ResultTable columns={detail.columns} rows={detail.rows} lang={lang} paging={{ page, pageSize: PAGE_SIZE, total: detail.total, onPage }} onRowClick={canOpenRecord ? openRecord : undefined} />
-              ) : <Empty>{running ? t('common.loading', 'Loading…') : t('explorer.detailHint')}</Empty>
+              ) : <Empty>{running ? t('common.loading') : t('explorer.detailHint')}</Empty>
             ) : !result ? (
               <Empty>{t('explorer.emptyHint')}</Empty>
             ) : def.view === 'table' ? (

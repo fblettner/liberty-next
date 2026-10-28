@@ -113,21 +113,21 @@ export default function IntegrityBuilder() {
     <div>
       <Bar>
         <Counts>
-          <span className="err"><b>{data.errors}</b> {t('settings.integrity.errors', { count: data.errors, defaultValue: 'errors' })}</span>
-          <span className="warn"><b>{data.warnings}</b> {t('settings.integrity.warnings', { count: data.warnings, defaultValue: 'warnings' })}</span>
+          <span className="err"><b>{data.errors}</b> {t('settings.integrity.errors', { count: data.errors })}</span>
+          <span className="warn"><b>{data.warnings}</b> {t('settings.integrity.warnings', { count: data.warnings })}</span>
         </Counts>
         <Row gap={8} style={{ alignItems: 'center', flexWrap: 'wrap' }}>
           <Chips>
-            <Chip $active={sev === 'all'} onClick={() => setSev('all')}>{t('common.all', 'All')}</Chip>
-            <Chip $active={sev === 'error'} onClick={() => setSev('error')}>{t('settings.integrity.errorsOnly', 'Errors')}</Chip>
-            <Chip $active={sev === 'warning'} onClick={() => setSev('warning')}>{t('settings.integrity.warningsOnly', 'Warnings')}</Chip>
+            <Chip $active={sev === 'all'} onClick={() => setSev('all')}>{t('common.all')}</Chip>
+            <Chip $active={sev === 'error'} onClick={() => setSev('error')}>{t('settings.integrity.errorsOnly')}</Chip>
+            <Chip $active={sev === 'warning'} onClick={() => setSev('warning')}>{t('settings.integrity.warningsOnly')}</Chip>
           </Chips>
           <FilterBox>
             <Search size={13} />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('settings.integrity.filter', 'Filter…')} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('settings.integrity.filter')} />
           </FilterBox>
           <Button $variant="ghost" $size="sm" onClick={load} disabled={busy}>
-            {busy ? <SpinnerRing size={13} /> : <RefreshCw size={13} />} {t('settings.integrity.recheck', 'Re-check')}
+            {busy ? <SpinnerRing size={13} /> : <RefreshCw size={13} />} {t('settings.integrity.recheck')}
           </Button>
         </Row>
       </Bar>
@@ -135,10 +135,10 @@ export default function IntegrityBuilder() {
       {data.issues.length === 0 ? (
         <Clean>
           <CheckCircle2 size={32} />
-          <div>{t('settings.integrity.clean', 'No integrity issues — every reference resolves.')}</div>
+          <div>{t('settings.integrity.clean')}</div>
         </Clean>
       ) : shownCount === 0 ? (
-        <Clean><div>{t('common.noMatches', 'No matches')}</div></Clean>
+        <Clean><div>{t('common.noMatches')}</div></Clean>
       ) : (
         <Stack gap={2}>
           {groups.map(([category, arr]) => (
@@ -153,8 +153,8 @@ export default function IntegrityBuilder() {
                   <IssueRow key={`${category}:${idx}`} $severity={i.severity}>
                     <span className="dot">{i.severity === 'error' ? <XCircle size={14} /> : <AlertTriangle size={14} />}</span>
                     <span className="msg">{i.message}</span>
-                    <GoBtn disabled={!url} onClick={() => url && navigate(url)} title={t('settings.integrity.goto', 'Go to')}>
-                      {t('settings.integrity.goto', 'Go to')} <ArrowRight size={12} />
+                    <GoBtn disabled={!url} onClick={() => url && navigate(url)} title={t('settings.integrity.goto')}>
+                      {t('settings.integrity.goto')} <ArrowRight size={12} />
                     </GoBtn>
                   </IssueRow>
                 )

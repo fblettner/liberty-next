@@ -224,19 +224,19 @@ export default function ApiConnectorEditor({ name, value, hasMenu, onChange }: A
     <Stack gap={0}>
       <TabsBar>
         <TabBtn type="button" $active={tab === 'connection'} onClick={() => setTab('connection')}>
-          {t('settings.api.tab.connection', 'Connection')}
+          {t('settings.api.tab.connection')}
         </TabBtn>
         <TabBtn type="button" $active={tab === 'auth'} onClick={() => setTab('auth')}>
-          {t('settings.api.tab.authentication', 'Authentication')}
+          {t('settings.api.tab.authentication')}
         </TabBtn>
         <TabBtn type="button" $active={tab === 'endpoints'} onClick={() => setTab('endpoints')}>
-          {t('settings.api.tab.endpoints', 'Endpoints')}
+          {t('settings.api.tab.endpoints')}
         </TabBtn>
         <TabBtn type="button" $active={tab === 'webhooks'} onClick={() => setTab('webhooks')}>
-          {t('settings.api.tab.webhooks', 'Webhooks')}
+          {t('settings.api.tab.webhooks')}
         </TabBtn>
         <TabBtn type="button" $active={tab === 'test'} onClick={() => setTab('test')}>
-          {t('settings.api.tab.test', 'Test')}
+          {t('settings.api.tab.test')}
         </TabBtn>
       </TabsBar>
       {tab === 'connection' && <ConnectionTab value={value} patch={patch} hasMenu={hasMenu} />}
@@ -266,9 +266,9 @@ function ConnectionTab({
   const homeOpts = ((enums?.MENU_HOME_ITEMS?.values ?? []) as Array<{ value: string; label: string; mono?: string }>)
   return (
     <Stack gap={4}>
-      <SectionHead>{t('settings.api.app.section', 'App')}</SectionHead>
+      <SectionHead>{t('settings.api.app.section')}</SectionHead>
       <FieldRow>
-        <label>{t('settings.api.app.showInSwitcher', 'Show in switcher')}</label>
+        <label>{t('settings.api.app.showInSwitcher')}</label>
         {/* Effective state, not stored state. A connector only shows in the switcher when it has
             BOTH show_in_switcher != false AND a menu in menus.toml. Without a menu the runtime
             filters it out regardless, so the checkbox would lie if it reflected the stored flag
@@ -284,17 +284,17 @@ function ConnectionTab({
         />
       </FieldRow>
       <FieldRow>
-        <label>{t('settings.api.app.home', 'Home')}</label>
+        <label>{t('settings.api.app.home')}</label>
         <SearchSelect
           value={value.home ?? ''}
           options={homeOpts}
           onChange={(v) => patch({ home: v || null })}
-          placeholder={t('common.pick', 'Pick…')}
+          placeholder={t('common.pick')}
         />
       </FieldRow>
-      <SectionHead>{t('settings.api.connection.section', 'Connection')}</SectionHead>
+      <SectionHead>{t('settings.api.connection.section')}</SectionHead>
       <FieldRow>
-        <label>{t('settings.api.connection.baseUrl', 'Base URL')}</label>
+        <label>{t('settings.api.connection.baseUrl')}</label>
         <Input
           value={value.base_url ?? ''}
           onChange={(e) => patch({ base_url: e.target.value || undefined })}
@@ -302,7 +302,7 @@ function ConnectionTab({
         />
       </FieldRow>
       <FieldRow>
-        <label>{t('settings.api.connection.timeout', 'Timeout (ms)')}</label>
+        <label>{t('settings.api.connection.timeout')}</label>
         <Input
           type="number"
           value={String(timeoutMs)}
@@ -313,19 +313,19 @@ function ConnectionTab({
         />
       </FieldRow>
       <FieldRow>
-        <label>{t('settings.api.connection.sslVerify', 'SSL Verify')}</label>
+        <label>{t('settings.api.connection.sslVerify')}</label>
         <SearchSelect
           value={value.verify_ssl === false ? 'false' : 'true'}
           options={[
-            { value: 'true', label: t('settings.api.connection.sslOn', 'true (verify cert)') },
-            { value: 'false', label: t('settings.api.connection.sslOff', 'false (disable cert check)') },
+            { value: 'true', label: t('settings.api.connection.sslOn') },
+            { value: 'false', label: t('settings.api.connection.sslOff') },
           ]}
           onChange={(v) => patch({ verify_ssl: v === 'false' ? false : undefined })}
         />
       </FieldRow>
-      <SectionHead>{t('settings.api.connection.defaultHeaders', 'Default headers')}</SectionHead>
+      <SectionHead>{t('settings.api.connection.defaultHeaders')}</SectionHead>
       <FieldRowTop>
-        <label>{t('settings.api.connection.headers', 'Headers')}</label>
+        <label>{t('settings.api.connection.headers')}</label>
         <div>
           <Textarea
             value={headersText}
@@ -335,8 +335,7 @@ function ConnectionTab({
             }}
             placeholder="Content-Type:application/json"
           />
-          <Hint>{t('settings.api.connection.headersHint',
-            'Semicolon-separated Key:Value pairs applied to every request. Endpoint headers can override these.')}</Hint>
+          <Hint>{t('settings.api.connection.headersHint')}</Hint>
         </div>
       </FieldRowTop>
     </Stack>
@@ -360,17 +359,17 @@ function AuthTab({
   const showTokenEndpoint = authType === 'oauth2'
   return (
     <Stack gap={4}>
-      <SectionHead>{t('settings.api.auth.section', 'Auth type')}</SectionHead>
+      <SectionHead>{t('settings.api.auth.section')}</SectionHead>
       <FieldRow>
-        <label>{t('settings.api.auth.method', 'Method')}</label>
+        <label>{t('settings.api.auth.method')}</label>
         <SearchSelect
           value={authType}
           options={[
-            { value: 'none', label: t('settings.api.auth.methodNone', 'None') },
-            { value: 'basic', label: t('settings.api.auth.methodBasic', 'Basic (username + password)') },
-            { value: 'bearer', label: t('settings.api.auth.methodBearer', 'Bearer (static token)') },
-            { value: 'api_key', label: t('settings.api.auth.methodApiKey', 'API Key (header)') },
-            { value: 'oauth2', label: t('settings.api.auth.methodOauth2', 'OAuth2 / JWT (token endpoint)') },
+            { value: 'none', label: t('settings.api.auth.methodNone') },
+            { value: 'basic', label: t('settings.api.auth.methodBasic') },
+            { value: 'bearer', label: t('settings.api.auth.methodBearer') },
+            { value: 'api_key', label: t('settings.api.auth.methodApiKey') },
+            { value: 'oauth2', label: t('settings.api.auth.methodOauth2') },
           ]}
           onChange={(v) => patch({ auth_type: (v as ApiConnector['auth_type']) ?? 'none' })}
         />
@@ -378,22 +377,22 @@ function AuthTab({
 
       {showCredentials && (
         <>
-          <SectionHead>{t('settings.api.auth.credentials', 'Credentials')}</SectionHead>
+          <SectionHead>{t('settings.api.auth.credentials')}</SectionHead>
           <FieldRow>
-            <label>{t('settings.api.auth.username', 'Username')}</label>
+            <label>{t('settings.api.auth.username')}</label>
             <Input
               value={value.auth_username ?? ''}
               onChange={(e) => patch({ auth_username: e.target.value || undefined })}
-              placeholder={t('settings.api.auth.usernamePlaceholder', 'used in {{username}} placeholder + basic auth')}
+              placeholder={t('settings.api.auth.usernamePlaceholder')}
             />
           </FieldRow>
           <FieldRow>
-            <label>{t('settings.api.auth.password', 'Password')}</label>
+            <label>{t('settings.api.auth.password')}</label>
             <Input
               type="password"
               value={value.auth_password ?? ''}
               onChange={(e) => patch({ auth_password: e.target.value || undefined })}
-              placeholder={t('settings.api.auth.passwordPlaceholder', 'used in {{password}} placeholder + basic auth (may be an ENC: value)')}
+              placeholder={t('settings.api.auth.passwordPlaceholder')}
             />
           </FieldRow>
         </>
@@ -401,14 +400,14 @@ function AuthTab({
 
       {showToken && (
         <>
-          <SectionHead>{t('settings.api.auth.token', 'Token')}</SectionHead>
+          <SectionHead>{t('settings.api.auth.token')}</SectionHead>
           <FieldRow>
-            <label>{t('settings.api.auth.tokenLabel', 'Token')}</label>
+            <label>{t('settings.api.auth.tokenLabel')}</label>
             <Input
               type="password"
               value={value.auth_token ?? ''}
               onChange={(e) => patch({ auth_token: e.target.value || undefined })}
-              placeholder={t('settings.api.auth.tokenPlaceholder', 'static bearer / API key — also available as {{token}}')}
+              placeholder={t('settings.api.auth.tokenPlaceholder')}
             />
           </FieldRow>
         </>
@@ -416,7 +415,7 @@ function AuthTab({
 
       {showApiKeyHeader && (
         <FieldRow>
-          <label>{t('settings.api.auth.apiKeyHeader', 'Header name')}</label>
+          <label>{t('settings.api.auth.apiKeyHeader')}</label>
           <Input
             value={value.auth_api_key_header ?? 'X-Api-Key'}
             onChange={(e) => patch({ auth_api_key_header: e.target.value || undefined })}
@@ -427,9 +426,9 @@ function AuthTab({
 
       {showTokenEndpoint && (
         <>
-          <SectionHead>{t('settings.api.auth.tokenEndpointSection', 'Token endpoint')}</SectionHead>
+          <SectionHead>{t('settings.api.auth.tokenEndpointSection')}</SectionHead>
           <FieldRow>
-            <label>{t('settings.api.auth.tokenEndpoint', 'Endpoint path')}</label>
+            <label>{t('settings.api.auth.tokenEndpoint')}</label>
             <Input
               value={value.auth_token_endpoint ?? ''}
               onChange={(e) => patch({ auth_token_endpoint: e.target.value || undefined })}
@@ -437,19 +436,18 @@ function AuthTab({
             />
           </FieldRow>
           <FieldRowTop>
-            <label>{t('settings.api.auth.tokenField', 'Token field')}</label>
+            <label>{t('settings.api.auth.tokenField')}</label>
             <div>
               <Input
                 value={value.auth_token_field ?? ''}
                 onChange={(e) => patch({ auth_token_field: e.target.value || undefined })}
                 placeholder="access_token"
               />
-              <Hint>{t('settings.api.auth.tokenFieldHint',
-                'Dot-notation JSON path to extract the token from the response (e.g. userInfo.token for JD Edwards AIS). Leave empty to auto-detect access_token then token.')}</Hint>
+              <Hint>{t('settings.api.auth.tokenFieldHint')}</Hint>
             </div>
           </FieldRowTop>
           <FieldRowTop>
-            <label>{t('settings.api.auth.tokenTtl', 'Token TTL (minutes)')}</label>
+            <label>{t('settings.api.auth.tokenTtl')}</label>
             <div>
               <Input
                 type="number"
@@ -459,12 +457,11 @@ function AuthTab({
                   patch({ auth_token_ttl: Number.isFinite(m) && m > 0 ? m * 60 : undefined })
                 }}
               />
-              <Hint>{t('settings.api.auth.tokenTtlHint',
-                'How long the token is cached before a new one is fetched. Default: 55 minutes.')}</Hint>
+              <Hint>{t('settings.api.auth.tokenTtlHint')}</Hint>
             </div>
           </FieldRowTop>
           <FieldRow>
-            <label>{t('settings.api.auth.tokenContentType', 'Body Content-Type')}</label>
+            <label>{t('settings.api.auth.tokenContentType')}</label>
             <SearchSelect
               value={value.auth_token_content_type ?? 'application/json'}
               options={[
@@ -476,19 +473,18 @@ function AuthTab({
             />
           </FieldRow>
           <FieldRowTop>
-            <label>{t('settings.api.auth.tokenBody', 'Body template')}</label>
+            <label>{t('settings.api.auth.tokenBody')}</label>
             <div>
               <Textarea
                 value={value.auth_token_body ?? ''}
                 onChange={(e) => patch({ auth_token_body: e.target.value || undefined })}
                 placeholder='{"deviceName":"ais"}'
               />
-              <Hint>{t('settings.api.auth.tokenBodyHint',
-                'JSON: leave empty to use the default { username, password, deviceName } payload (JD Edwards AIS). Form-urlencoded: leave empty for grant_type=client_credentials with {{username}} / {{password}}.')}</Hint>
+              <Hint>{t('settings.api.auth.tokenBodyHint')}</Hint>
             </div>
           </FieldRowTop>
           <FieldRowTop>
-            <label>{t('settings.api.auth.tokenHeaders', 'Token request headers')}</label>
+            <label>{t('settings.api.auth.tokenHeaders')}</label>
             <div>
               <Textarea
                 value={tokenHeadersText}
@@ -498,8 +494,7 @@ function AuthTab({
                 }}
                 placeholder="customer-id:CUST123;X-Tenant:acme"
               />
-              <Hint>{t('settings.api.auth.tokenHeadersHint',
-                'Extra headers for the token request (e.g. a client-id header). Same Semicolon-separated Key:Value pairs.')}</Hint>
+              <Hint>{t('settings.api.auth.tokenHeadersHint')}</Hint>
             </div>
           </FieldRowTop>
         </>
@@ -522,12 +517,12 @@ function EndpointsTab({
 
   const addEndpoint = async () => {
     const name = (await modals.prompt({
-      title: t('settings.api.endpoint.add', 'Add endpoint'),
-      message: t('settings.api.endpoint.namePrompt', 'Endpoint name (used by actions):'),
+      title: t('settings.api.endpoint.add'),
+      message: t('settings.api.endpoint.namePrompt'),
       validate: (v) => {
         if (!v) return null
-        if (endpoints.some((e) => e.name === v)) return t('settings.api.endpoint.nameExists', { defaultValue: '"{{name}}" already exists.', name: v })
-        if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(v)) return t('settings.api.endpoint.invalidName', 'Letters / digits / underscores only; start with a letter.')
+        if (endpoints.some((e) => e.name === v)) return t('settings.api.endpoint.nameExists', { name: v })
+        if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(v)) return t('settings.api.endpoint.invalidName')
         return null
       },
     }))?.trim()
@@ -538,8 +533,8 @@ function EndpointsTab({
   const removeEndpoint = async (idx: number) => {
     const ep = endpoints[idx]
     const ok = await modals.confirm({
-      title: t('settings.api.endpoint.delete', 'Delete endpoint'),
-      message: t('settings.api.endpoint.confirmDelete', { defaultValue: 'Delete endpoint "{{name}}"?', name: ep.name }),
+      title: t('settings.api.endpoint.delete'),
+      message: t('settings.api.endpoint.confirmDelete', { name: ep.name }),
       variant: 'danger',
     })
     if (!ok) return
@@ -554,7 +549,7 @@ function EndpointsTab({
   return (
     <Stack gap={6}>
       {endpoints.length === 0 && (
-        <Hint>{t('settings.api.endpoint.empty', 'No endpoints yet — add one to expose a callable HTTP request.')}</Hint>
+        <Hint>{t('settings.api.endpoint.empty')}</Hint>
       )}
       {endpoints.map((ep, i) => {
         const open = openIdx === i
@@ -577,7 +572,7 @@ function EndpointsTab({
         )
       })}
       <Button $variant="ghost" $size="sm" onClick={addEndpoint} style={{ alignSelf: 'flex-start' }}>
-        <Plus size={13} /> {t('settings.api.endpoint.add', 'Add endpoint')}
+        <Plus size={13} /> {t('settings.api.endpoint.add')}
       </Button>
     </Stack>
   )
@@ -618,19 +613,19 @@ function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: En
   return (
     <Stack gap={4}>
       <FieldRow>
-        <label>{t('settings.api.endpoint.name', 'Name')}</label>
+        <label>{t('settings.api.endpoint.name')}</label>
         <Row gap={10}>
           <Input value={value.name} onChange={(e) => set({ name: e.target.value })} />
-          <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.api.endpoint.label', 'Label')}</span>
+          <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.api.endpoint.label')}</span>
           <Input
             value={value.label ?? ''}
             onChange={(e) => set({ label: e.target.value || undefined })}
-            placeholder={t('settings.api.endpoint.labelPlaceholder', 'Short label shown in listings')}
+            placeholder={t('settings.api.endpoint.labelPlaceholder')}
           />
         </Row>
       </FieldRow>
       <FieldRow>
-        <label>{t('settings.api.endpoint.method', 'Method')}</label>
+        <label>{t('settings.api.endpoint.method')}</label>
         <Row gap={10}>
           <div style={{ width: 160 }}>
             <SearchSelect
@@ -639,7 +634,7 @@ function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: En
               onChange={(v) => set({ method: v ?? 'GET' })}
             />
           </div>
-          <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.api.endpoint.urlPath', 'URL path')}</span>
+          <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.api.endpoint.urlPath')}</span>
           <div style={{ flex: 1 }}>
             <Input
               value={value.path ?? ''}
@@ -650,7 +645,7 @@ function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: En
         </Row>
       </FieldRow>
       <FieldRow>
-        <label>{t('settings.api.endpoint.headers', 'Extra headers')}</label>
+        <label>{t('settings.api.endpoint.headers')}</label>
         <Input
           value={headersText}
           onChange={(e) => {
@@ -661,7 +656,7 @@ function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: En
         />
       </FieldRow>
       <FieldRow>
-        <label>{t('settings.api.endpoint.contentType', 'Content-Type')}</label>
+        <label>{t('settings.api.endpoint.contentType')}</label>
         <SearchSelect
           value={value.content_type ?? 'application/json'}
           options={[
@@ -676,7 +671,7 @@ function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: En
         />
       </FieldRow>
       <FieldRowTop>
-        <label>{t('settings.api.endpoint.body', 'Body')}</label>
+        <label>{t('settings.api.endpoint.body')}</label>
         <div>
           <Textarea
             style={{ minHeight: 160 }}
@@ -685,13 +680,13 @@ function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: En
             placeholder='{"reportName":"{{reportName}}"}'
           />
           <Row gap={10} style={{ marginTop: 4 }}>
-            <Button $variant="ghost" $size="sm" onClick={formatBody}>{t('settings.api.endpoint.formatJson', 'Format JSON')}</Button>
-            <Hint>{t('settings.api.endpoint.bodyHint', 'Use {{param}} placeholders for variables')}</Hint>
+            <Button $variant="ghost" $size="sm" onClick={formatBody}>{t('settings.api.endpoint.formatJson')}</Button>
+            <Hint>{t('settings.api.endpoint.bodyHint')}</Hint>
           </Row>
         </div>
       </FieldRowTop>
       <FieldRow>
-        <label>{t('settings.api.endpoint.queryParams', 'Query params')}</label>
+        <label>{t('settings.api.endpoint.queryParams')}</label>
         <Input
           value={queryText}
           onChange={(e) => {
@@ -702,7 +697,7 @@ function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: En
         />
       </FieldRow>
       <FieldRow>
-        <label>{t('settings.api.endpoint.responseField', 'Response field')}</label>
+        <label>{t('settings.api.endpoint.responseField')}</label>
         <Input
           value={value.response_field ?? ''}
           onChange={(e) => set({ response_field: e.target.value || undefined })}
@@ -710,23 +705,23 @@ function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: En
         />
       </FieldRow>
       <FieldRow>
-        <label>{t('settings.api.endpoint.description', 'Description')}</label>
+        <label>{t('settings.api.endpoint.description')}</label>
         <Input
           value={value.description ?? ''}
           onChange={(e) => set({ description: e.target.value || undefined })}
-          placeholder={t('settings.api.endpoint.descriptionPlaceholder', 'Short description')}
+          placeholder={t('settings.api.endpoint.descriptionPlaceholder')}
         />
       </FieldRow>
 
       <SectionHead>
-        {t('settings.api.endpoint.responseMappings', 'Response mappings')}
+        {t('settings.api.endpoint.responseMappings')}
         {' — '}
         <span style={{ textTransform: 'none', letterSpacing: 0 }}>
-          {t('settings.api.endpoint.responseMappingsHint', 'map logical names to JSON dot-notation paths in the response')}
+          {t('settings.api.endpoint.responseMappingsHint')}
         </span>
       </SectionHead>
       {respMapEntries.length === 0 && (
-        <Hint>{t('settings.api.endpoint.responseMappingsEmpty', 'No mappings — the whole response (or the response_field path) is returned as-is.')}</Hint>
+        <Hint>{t('settings.api.endpoint.responseMappingsEmpty')}</Hint>
       )}
       {respMapEntries.map(([key, val], i) => (
         <MapRow key={`${key}-${i}`}>
@@ -753,7 +748,7 @@ function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: En
               delete copy[key]
               set({ response_map: Object.keys(copy).length ? copy : undefined })
             }}
-            title={t('common.remove', 'Remove')}
+            title={t('common.remove')}
           >
             <Trash2 size={13} />
           </Button>
@@ -768,24 +763,24 @@ function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: En
           set({ response_map: { ...respMap, [k]: '' } })
         }}
       >
-        <Plus size={13} /> {t('settings.api.endpoint.addMapping', 'Add mapping')}
+        <Plus size={13} /> {t('settings.api.endpoint.addMapping')}
       </Button>
 
       <SectionHead>
-        {t('settings.api.endpoint.parameters', 'Parameters')}
+        {t('settings.api.endpoint.parameters')}
         {' — '}
         <span style={{ textTransform: 'none', letterSpacing: 0 }}>
-          {t('settings.api.endpoint.parametersHint', 'declare {{placeholder}} variables used in URL / headers / body')}
+          {t('settings.api.endpoint.parametersHint')}
         </span>
       </SectionHead>
       <TableHead>
-        <span>{t('settings.api.endpoint.paramName', 'Name')}</span>
-        <span>{t('settings.api.endpoint.paramLabel', 'Label')}</span>
-        <span>{t('settings.api.endpoint.paramDefault', 'Default value')}</span>
+        <span>{t('settings.api.endpoint.paramName')}</span>
+        <span>{t('settings.api.endpoint.paramLabel')}</span>
+        <span>{t('settings.api.endpoint.paramDefault')}</span>
         <span />
       </TableHead>
       {params.length === 0 && (
-        <Hint>{t('settings.api.endpoint.parametersEmpty', 'No parameters declared.')}</Hint>
+        <Hint>{t('settings.api.endpoint.parametersEmpty')}</Hint>
       )}
       {params.map((p, i) => (
         <TableRow key={i}>
@@ -819,7 +814,7 @@ function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: En
           <Button
             $variant="ghost" $size="sm"
             onClick={() => setParams(params.filter((_, j) => j !== i))}
-            title={t('common.remove', 'Remove')}
+            title={t('common.remove')}
           >
             <Trash2 size={13} />
           </Button>
@@ -829,7 +824,7 @@ function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: En
         $variant="ghost" $size="sm" style={{ alignSelf: 'flex-start' }}
         onClick={() => setParams([...params, { name: '' }])}
       >
-        <Plus size={13} /> {t('settings.api.endpoint.addParam', 'Add parameter')}
+        <Plus size={13} /> {t('settings.api.endpoint.addParam')}
       </Button>
     </Stack>
   )
@@ -840,7 +835,7 @@ function WebhooksTab() {
   const { t } = useTranslation()
   return (
     <Stack gap={10}>
-      <Hint>{t('settings.api.webhooks.coming', 'Inbound webhooks (HMAC signature + dedup + status mapping) — coming in a follow-up slice. Today, external systems can call ``POST /api/http/...`` against API connectors but cannot push events INTO Liberty.')}</Hint>
+      <Hint>{t('settings.api.webhooks.coming')}</Hint>
     </Stack>
   )
 }
@@ -898,21 +893,21 @@ function TestTab({ connectorName, value }: { connectorName: string; value: ApiCo
   }
   return (
     <Stack gap={4}>
-      <SectionHead>{t('settings.api.test.section', 'Select endpoint')}</SectionHead>
+      <SectionHead>{t('settings.api.test.section')}</SectionHead>
       {endpoints.length === 0 ? (
         <>
-          <Hint>{t('settings.api.test.noEndpoints', 'No endpoints declared yet. You can still validate the connector\'s connection / authentication.')}</Hint>
+          <Hint>{t('settings.api.test.noEndpoints')}</Hint>
           <Row gap={10} style={{ marginTop: 8 }}>
             <Button $variant="primary" $size="sm" disabled={busy} onClick={runConnectorOnly}>
-              <Activity size={13} /> {t('settings.api.test.runConnector', 'Test connection')}
+              <Activity size={13} /> {t('settings.api.test.runConnector')}
             </Button>
-            {busy && <Hint>{t('common.loading', 'Loading…')}</Hint>}
+            {busy && <Hint>{t('common.loading')}</Hint>}
           </Row>
         </>
       ) : (
         <>
           <FieldRow>
-            <label>{t('settings.api.test.endpoint', 'Endpoint')}</label>
+            <label>{t('settings.api.test.endpoint')}</label>
             <SearchSelect
               value={selEndpoint}
               options={endpoints.map((e) => ({
@@ -923,8 +918,8 @@ function TestTab({ connectorName, value }: { connectorName: string; value: ApiCo
               onChange={(v) => setSelEndpoint(v ?? '')}
             />
           </FieldRow>
-          <SectionHead>{t('settings.api.test.parameters', 'Parameters')}</SectionHead>
-          <Hint>{t('settings.api.test.paramsHint', 'Override or supply {{placeholder}} values at runtime.')}</Hint>
+          <SectionHead>{t('settings.api.test.parameters')}</SectionHead>
+          <Hint>{t('settings.api.test.paramsHint')}</Hint>
           {(ep?.params ?? []).map((p) => (
             <TestParamRow key={p.name}>
               <Input value={p.name} readOnly />
@@ -966,14 +961,14 @@ function TestTab({ connectorName, value }: { connectorName: string; value: ApiCo
             $variant="ghost" $size="sm" style={{ alignSelf: 'flex-start' }}
             onClick={() => setExtraParams([...extraParams, { name: '', value: '' }])}
           >
-            <Plus size={13} /> {t('settings.api.test.addParam', 'Add param')}
+            <Plus size={13} /> {t('settings.api.test.addParam')}
           </Button>
-          <SectionHead>{t('settings.api.test.result', 'Result')}</SectionHead>
+          <SectionHead>{t('settings.api.test.result')}</SectionHead>
           <Row gap={10}>
             <Button $variant="primary" $size="sm" disabled={busy || !ep} onClick={run}>
-              <Activity size={13} /> {t('settings.api.test.run', 'Run')}
+              <Activity size={13} /> {t('settings.api.test.run')}
             </Button>
-            {busy && <Hint>{t('common.loading', 'Loading…')}</Hint>}
+            {busy && <Hint>{t('common.loading')}</Hint>}
           </Row>
         </>
       )}
@@ -982,7 +977,7 @@ function TestTab({ connectorName, value }: { connectorName: string; value: ApiCo
         <ResultBox>{JSON.stringify(result, null, 2)}</ResultBox>
       )}
       {/* Use `connectorName` so it isn't an unused prop; surfaces in the panel header. */}
-      <Hint style={{ marginTop: 12 }}>{t('settings.api.test.runsAgainst', { defaultValue: 'Runs against connector "{{name}}" without saving.', name: connectorName })}</Hint>
+      <Hint style={{ marginTop: 12 }}>{t('settings.api.test.runsAgainst', { name: connectorName })}</Hint>
     </Stack>
   )
 }

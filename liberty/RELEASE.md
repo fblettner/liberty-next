@@ -76,6 +76,15 @@
   become cards; the numbers follow the reader's language (`1 234,5` / `1,234.5`); the
   template's own words (cover labels, confidential lines) follow it too. Excel keeps the data
   only.
+- **Every UI string in both languages (C10).** The 870-odd strings the newer builders carried
+  only as inline English defaults (`t('key', 'Default')` and `defaultValue:` options) now live
+  in `locales/en.ts` and `locales/fr.ts`, translated; the lint forbids a new inline default so
+  the French file never silently misses a key. The assistant's starter questions take a
+  language block in `ai.toml` (`[ai.<app>.l.fr]` with `starters`, `groups`, `screens`), served
+  by `/ai/tools` in the request language; the three apps ship their French starters.
+- **Settings → Dashboards says which widgets a filter reaches.** Under each filter, the editor
+  lists the widgets whose screen carries the dictionary key or whose result has a column named
+  like it (the dictionary bind), and the ones it misses.
 - **Dashboards in the reader's language.** A dashboard, a filter and a widget take an `l`
   block of per-language overrides for their texts — `l.fr = { label = "…", description = "…",
   sub = "…", count_label = "…" }` — including the column a list reads a text from

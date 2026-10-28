@@ -142,7 +142,7 @@ export function ChartView({ result, connector, query, screen }: ChartViewProps) 
               when nothing matches (empty charts.toml or no matches for this query). */}
           {matchingSavedCharts.length > 0 && (
             <SpecCell style={{ marginLeft: 'auto' }}>
-              <Field label={t('chart.load.label', 'Load saved')}>
+              <Field label={t('chart.load.label')}>
                 <SearchSelect
                   value=""  /* unselected — the picker is for switching, not state */
                   onChange={(id) => {
@@ -151,7 +151,7 @@ export function ChartView({ result, connector, query, screen }: ChartViewProps) 
                     if (hit?.spec) setSpec(fromSavedSpec(hit.spec))
                   }}
                   options={matchingSavedCharts.map((c) => ({ value: c.id, label: c.label, mono: c.id }))}
-                  placeholder={t('chart.load.placeholder', 'Apply a saved chart…')}
+                  placeholder={t('chart.load.placeholder')}
                 />
               </Field>
             </SpecCell>

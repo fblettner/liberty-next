@@ -53,8 +53,8 @@ type Tr = (key: string, defaultValue?: string) => string
 function triggerSummary(r: NotificationRule, t: Tr): string {
   const tr = r.trigger
   if (tr.kind === 'screen') return `${tr.app}.${tr.screen} · ${(tr.events ?? SCREEN_EVENTS).join(', ')}${tr.when?.length ? ' · when' : ''}`
-  if (tr.kind === 'job') return `${t('settings.notify.job', 'job')} ${(tr.jobs ?? []).join(', ') || '*'} · ${(tr.events ?? ['failure']).join(', ')}`
-  return t('settings.notify.byAction', 'fired by a screen action')
+  if (tr.kind === 'job') return `${t('settings.notify.job')} ${(tr.jobs ?? []).join(', ') || '*'} · ${(tr.events ?? ['failure']).join(', ')}`
+  return t('settings.notify.byAction')
 }
 
 function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, onDelete }: {
@@ -95,8 +95,8 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
   const save = async () => {
     const check = validateId({ kind: 'actions', proposed: rid, existing: takenIds, mode: isNew ? 'add' : 'rename', currentName: id })
     if (check.error) { setError(check.error); return }
-    if (!rule.subject.trim()) { setError(t('settings.notify.errSubject', 'A subject is required.')); return }
-    if (tr.kind === 'screen' && (!tr.app || !tr.screen)) { setError(t('settings.notify.errScreen', 'Pick the app and the screen.')); return }
+    if (!rule.subject.trim()) { setError(t('settings.notify.errSubject')); return }
+    if (tr.kind === 'screen' && (!tr.app || !tr.screen)) { setError(t('settings.notify.errScreen')); return }
     setBusy(true); setError(null)
     try { await onSaved(rid.trim(), rule) } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) } finally { setBusy(false) }
   }
@@ -111,40 +111,40 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
 
   return (
     <Panel>
-      <Head><Bell size={16} color={colors.blue.main} /><span className="title">{isNew ? t('settings.notify.newRule', 'New rule') : `[notifications.${id}]`}</span>{dirty && !isNew && <span className="dirty">{t('settings.access.unsaved', 'unsaved changes')}</span>}</Head>
+      <Head><Bell size={16} color={colors.blue.main} /><span className="title">{isNew ? t('settings.notify.newRule') : `[notifications.${id}]`}</span>{dirty && !isNew && <span className="dirty">{t('settings.access.unsaved')}</span>}</Head>
       <Body>
         {error && <Banner $tone="error">{error}</Banner>}
         {testReport && (
           <Banner $tone={Object.keys(testReport.errors).length ? 'error' : 'ok'}>
-            {t('settings.notify.testResult', 'Test sent — portal: {{portal}} · email: {{email}} · action: {{action}}', { portal: testReport.portal_users.join(', ') || '—', email: testReport.emails.join(', ') || '—', action: testReport.action_ran ? 'ok' : '—' })}
+            {t('settings.notify.testResult', { portal: testReport.portal_users.join(', ') || '—', email: testReport.emails.join(', ') || '—', action: testReport.action_ran ? 'ok' : '—' })}
             {Object.entries(testReport.errors).map(([k, v]) => <div key={k}>{k}: {v}</div>)}
           </Banner>
         )}
         <Grid>
-          <Field label={t('settings.notify.id', 'Rule id')}><Input value={rid} disabled={!isNew} onChange={(e) => setRid(e.target.value)} placeholder="period_closed" /></Field>
-          <Field label={t('settings.notify.label', 'Label')}><Input value={rule.label ?? ''} onChange={(e) => patch({ label: e.target.value || null })} /></Field>
-          <div style={{ display: 'flex', alignItems: 'end', paddingBottom: 6 }}><Checkbox checked={rule.enabled !== false} onChange={(v: boolean) => patch({ enabled: v })} label={t('settings.notify.enabled', 'Enabled')} /></div>
+          <Field label={t('settings.notify.id')}><Input value={rid} disabled={!isNew} onChange={(e) => setRid(e.target.value)} placeholder="period_closed" /></Field>
+          <Field label={t('settings.notify.label')}><Input value={rule.label ?? ''} onChange={(e) => patch({ label: e.target.value || null })} /></Field>
+          <div style={{ display: 'flex', alignItems: 'end', paddingBottom: 6 }}><Checkbox checked={rule.enabled !== false} onChange={(v: boolean) => patch({ enabled: v })} label={t('settings.notify.enabled')} /></div>
         </Grid>
 
         <Section>
-          <div className="h">{t('settings.notify.trigger', 'Trigger')}</div>
+          <div className="h">{t('settings.notify.trigger')}</div>
           <Seg style={{ marginBottom: 10 }}>
-            <SegBtn $active={tr.kind === 'screen'} onClick={() => setTrigger({ kind: 'screen', app: apps[0] ?? '', screen: '', events: ['update'], when: [] })}>{t('settings.notify.kindScreen', 'A screen event')}</SegBtn>
-            <SegBtn $active={tr.kind === 'job'} onClick={() => setTrigger({ kind: 'job', events: ['failure'], jobs: [] })}>{t('settings.notify.kindJob', 'A job event')}</SegBtn>
-            <SegBtn $active={tr.kind === 'action'} onClick={() => setTrigger({ kind: 'action' })}>{t('settings.notify.kindAction', 'A screen action')}</SegBtn>
+            <SegBtn $active={tr.kind === 'screen'} onClick={() => setTrigger({ kind: 'screen', app: apps[0] ?? '', screen: '', events: ['update'], when: [] })}>{t('settings.notify.kindScreen')}</SegBtn>
+            <SegBtn $active={tr.kind === 'job'} onClick={() => setTrigger({ kind: 'job', events: ['failure'], jobs: [] })}>{t('settings.notify.kindJob')}</SegBtn>
+            <SegBtn $active={tr.kind === 'action'} onClick={() => setTrigger({ kind: 'action' })}>{t('settings.notify.kindAction')}</SegBtn>
           </Seg>
           {tr.kind === 'screen' && (
             <>
               <Grid>
-                <Field label={t('settings.notify.app', 'App')}><SearchSelect value={tr.app} onChange={(v) => setTrigger({ ...tr, app: v, screen: '' })} options={appOpts} /></Field>
-                <Field label={t('settings.notify.screen', 'Screen')}><SearchSelect value={tr.screen} onChange={(v) => setTrigger({ ...tr, screen: v })} options={screenOpts} allowCustom /></Field>
-                <Field label={t('settings.notify.events', 'Events')}>
+                <Field label={t('settings.notify.app')}><SearchSelect value={tr.app} onChange={(v) => setTrigger({ ...tr, app: v, screen: '' })} options={appOpts} /></Field>
+                <Field label={t('settings.notify.screen')}><SearchSelect value={tr.screen} onChange={(v) => setTrigger({ ...tr, screen: v })} options={screenOpts} allowCustom /></Field>
+                <Field label={t('settings.notify.events')}>
                   <div style={{ display: 'flex', gap: 12, paddingTop: 8 }}>
                     {SCREEN_EVENTS.map((ev) => <Checkbox key={ev} checked={(tr.events ?? SCREEN_EVENTS).includes(ev)} onChange={() => setTrigger({ ...tr, events: toggleIn(tr.events, ev, SCREEN_EVENTS) })} label={ev} />)}
                   </div>
                 </Field>
               </Grid>
-              <Field label={t('settings.notify.when', 'Only when the written row has (AND)')}>
+              <Field label={t('settings.notify.when')}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {(tr.when ?? []).map((w: RuleWhen, i: number) => (
                     <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 2fr auto', gap: 8 }}>
@@ -153,25 +153,25 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
                       <Button $size="sm" $variant="ghost" onClick={() => setTrigger({ ...tr, when: (tr.when ?? []).filter((_, j) => j !== i) })}><X size={13} /></Button>
                     </div>
                   ))}
-                  <div><Button $size="sm" $variant="ghost" onClick={() => setTrigger({ ...tr, when: [...(tr.when ?? []), { field: '', value: '' }] })}><Plus size={13} /> {t('settings.notify.addWhen', 'Add a condition')}</Button></div>
+                  <div><Button $size="sm" $variant="ghost" onClick={() => setTrigger({ ...tr, when: [...(tr.when ?? []), { field: '', value: '' }] })}><Plus size={13} /> {t('settings.notify.addWhen')}</Button></div>
                 </div>
               </Field>
             </>
           )}
           {tr.kind === 'job' && (
             <Grid>
-              <Field label={t('settings.notify.jobs', 'Jobs (empty = every job)')}>
+              <Field label={t('settings.notify.jobs')}>
                 <Chips>
                   {(tr.jobs ?? []).map((j) => <PermChip key={j}>{j}<button type="button" onClick={() => setTrigger({ ...tr, jobs: (tr.jobs ?? []).filter((x) => x !== j) })}><X size={11} /></button></PermChip>)}
-                  <div style={{ minWidth: 160 }}><SearchSelect value="" onChange={(v) => { if (v && !(tr.jobs ?? []).includes(v)) setTrigger({ ...tr, jobs: [...(tr.jobs ?? []), v] }) }} options={jobOpts.filter((o) => !(tr.jobs ?? []).includes(o.value))} allowCustom placeholder={t('settings.notify.addJob', 'Add a job…')} /></div>
+                  <div style={{ minWidth: 160 }}><SearchSelect value="" onChange={(v) => { if (v && !(tr.jobs ?? []).includes(v)) setTrigger({ ...tr, jobs: [...(tr.jobs ?? []), v] }) }} options={jobOpts.filter((o) => !(tr.jobs ?? []).includes(o.value))} allowCustom placeholder={t('settings.notify.addJob')} /></div>
                 </Chips>
               </Field>
-              <Field label={t('settings.notify.events', 'Events')}>
+              <Field label={t('settings.notify.events')}>
                 <div style={{ display: 'flex', gap: 12, paddingTop: 8, flexWrap: 'wrap' }}>
                   {JOB_EVENTS.map((ev) => <Checkbox key={ev} checked={(tr.events ?? ['failure']).includes(ev)} onChange={() => setTrigger({ ...tr, events: toggleIn(tr.events, ev, ['failure']) })} label={ev} />)}
                 </div>
               </Field>
-              <Field label={t('settings.notify.longRun', 'Long run threshold (minutes)')}>
+              <Field label={t('settings.notify.longRun')}>
                 <Input type="number" min={1} value={tr.long_run_minutes ?? ''} onChange={(e) => setTrigger({ ...tr, long_run_minutes: e.target.value ? Number(e.target.value) : null })} disabled={!(tr.events ?? []).includes('long_run')} />
               </Field>
             </Grid>
@@ -179,42 +179,42 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
         </Section>
 
         <Section>
-          <div className="h">{t('settings.notify.delivery', 'Delivery')}</div>
+          <div className="h">{t('settings.notify.delivery')}</div>
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 10 }}>
             {CHANNELS.map((c) => <Checkbox key={c} checked={channels.includes(c)} onChange={() => patch({ channels: toggleIn(rule.channels, c, ['portal']) })} label={t(`settings.notify.channel_${c}`, c)} />)}
           </div>
-          <Field label={t('settings.notify.recipients', 'Recipients')}>
+          <Field label={t('settings.notify.recipients')}>
             <Chips>
               {(rule.recipients ?? []).map((r) => <PermChip key={r}>{r}<button type="button" onClick={() => patch({ recipients: (rule.recipients ?? []).filter((x) => x !== r) })}><X size={11} /></button></PermChip>)}
               <Seg>
                 {(['role', 'user', 'email'] as const).map((k) => <SegBtn key={k} $active={recipientKind === k} onClick={() => { setRecipientKind(k); setRecipientText('') }}>{t(`settings.notify.rk_${k}`, k)}</SegBtn>)}
               </Seg>
               <div style={{ minWidth: 220, flex: 1 }}>
-                <SearchSelect value={recipientText} onChange={addRecipient} options={recipientOpts} allowCustom placeholder={recipientKind === 'email' ? 'name@example.com' : t('settings.notify.pickRecipient', 'Pick or type…')} />
+                <SearchSelect value={recipientText} onChange={addRecipient} options={recipientOpts} allowCustom placeholder={recipientKind === 'email' ? 'name@example.com' : t('settings.notify.pickRecipient')} />
               </div>
             </Chips>
           </Field>
           {channels.includes('action') && (
             <Grid style={{ marginTop: 10 }}>
-              <Field label={t('settings.notify.actionConnector', 'Action: connector')}><SearchSelect value={rule.action?.connector ?? ''} onChange={(v) => patch({ action: { ...(rule.action ?? { connector: '' }), connector: v } })} options={connOpts} /></Field>
-              <Field label={t('settings.notify.actionQuery', 'Query (SQL connector)')}><Input value={rule.action?.query ?? ''} onChange={(e) => patch({ action: { ...(rule.action ?? { connector: '' }), query: e.target.value || null } })} disabled={!sqlConns.some((c) => c.name === rule.action?.connector)} /></Field>
-              <Field label={t('settings.notify.actionEndpoint', 'Endpoint (API connector)')}><Input value={rule.action?.endpoint ?? ''} onChange={(e) => patch({ action: { ...(rule.action ?? { connector: '' }), endpoint: e.target.value || null } })} /></Field>
+              <Field label={t('settings.notify.actionConnector')}><SearchSelect value={rule.action?.connector ?? ''} onChange={(v) => patch({ action: { ...(rule.action ?? { connector: '' }), connector: v } })} options={connOpts} /></Field>
+              <Field label={t('settings.notify.actionQuery')}><Input value={rule.action?.query ?? ''} onChange={(e) => patch({ action: { ...(rule.action ?? { connector: '' }), query: e.target.value || null } })} disabled={!sqlConns.some((c) => c.name === rule.action?.connector)} /></Field>
+              <Field label={t('settings.notify.actionEndpoint')}><Input value={rule.action?.endpoint ?? ''} onChange={(e) => patch({ action: { ...(rule.action ?? { connector: '' }), endpoint: e.target.value || null } })} /></Field>
             </Grid>
           )}
         </Section>
 
         <Section>
-          <div className="h">{t('settings.notify.message', 'Message')}</div>
-          <Field label={t('settings.notify.subject', 'Subject')}><Input value={rule.subject} onChange={(e) => patch({ subject: e.target.value })} placeholder="Period {PERIOD} closed by {USER}" /></Field>
-          <Field label={t('settings.notify.body', 'Body')}><Textarea value={rule.body ?? ''} onChange={(e) => patch({ body: e.target.value || null })} rows={3} /></Field>
-          <Field label={t('settings.notify.link', 'Link (a route the notification opens)')}><Input value={rule.link ?? ''} onChange={(e) => patch({ link: e.target.value || null })} placeholder="/screen/nomajde/period_status" /></Field>
+          <div className="h">{t('settings.notify.message')}</div>
+          <Field label={t('settings.notify.subject')}><Input value={rule.subject} onChange={(e) => patch({ subject: e.target.value })} placeholder="Period {PERIOD} closed by {USER}" /></Field>
+          <Field label={t('settings.notify.body')}><Textarea value={rule.body ?? ''} onChange={(e) => patch({ body: e.target.value || null })} rows={3} /></Field>
+          <Field label={t('settings.notify.link')}><Input value={rule.link ?? ''} onChange={(e) => patch({ link: e.target.value || null })} placeholder="/screen/nomajde/period_status" /></Field>
         </Section>
       </Body>
       <Foot>
         {onDelete && <Button $size="sm" $variant="ghost" onClick={onDelete}><Trash2 size={13} /> {t('common.delete')}</Button>}
-        <Button $size="sm" $variant="ghost" onClick={() => void sendTest()} disabled={busy} title={t('settings.notify.sendTestTitle', 'Dispatch this rule with sample values to its recipients')}><Send size={13} /> {t('settings.notify.sendTest', 'Send a test')}</Button>
+        <Button $size="sm" $variant="ghost" onClick={() => void sendTest()} disabled={busy} title={t('settings.notify.sendTestTitle')}><Send size={13} /> {t('settings.notify.sendTest')}</Button>
         <div style={{ flex: 1 }} />
-        <Button $size="sm" $variant="ghost" onClick={onCancel}>{t('common.cancel', 'Cancel')}</Button>
+        <Button $size="sm" $variant="ghost" onClick={onCancel}>{t('common.cancel')}</Button>
         <Button $size="sm" $variant="primary" onClick={() => void save()} disabled={busy || !dirty}>{busy ? <SpinnerRing size={13} thickness={2} /> : t('common.save')}</Button>
       </Foot>
     </Panel>
@@ -241,7 +241,7 @@ export default function NotificationsBuilder() {
   }
   const onSaved = async (id: string, rule: NotificationRule) => { await persist({ ...(doc ?? {}), [id]: rule }); setEditing(id) }
   const remove = async (id: string) => {
-    if (!(await confirm({ title: t('common.delete'), message: t('settings.notify.confirmDelete', 'Delete the rule {{id}}?', { id }), variant: 'danger' }))) return
+    if (!(await confirm({ title: t('common.delete'), message: t('settings.notify.confirmDelete', { id }), variant: 'danger' }))) return
     const next = { ...(doc ?? {}) }; delete next[id]
     try { await persist(next); setEditing(undefined) } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) }
   }
@@ -254,10 +254,10 @@ export default function NotificationsBuilder() {
   return (
     <Split>
       <Side>
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}><Button $size="sm" $variant="primary" onClick={() => setEditing(null)}><Plus size={13} /> {t('settings.notify.addRule', 'Add rule')}</Button></div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}><Button $size="sm" $variant="primary" onClick={() => setEditing(null)}><Plus size={13} /> {t('settings.notify.addRule')}</Button></div>
         {error && <Banner $tone="error">{error}</Banner>}
         <List>
-          {ids.length === 0 && <span style={{ fontSize: fontSize.sm, color: colors.text.muted, padding: 8 }}>{t('settings.notify.none', 'No rule yet.')}</span>}
+          {ids.length === 0 && <span style={{ fontSize: fontSize.sm, color: colors.text.muted, padding: 8 }}>{t('settings.notify.none')}</span>}
           {ids.map((id) => {
             const r = doc[id]
             return (
@@ -266,7 +266,7 @@ export default function NotificationsBuilder() {
                 <span className="text">
                   <span className="name">{id}</span>
                   <span className="sub">
-                    {r.enabled === false && <Tag $tone="red">{t('settings.notify.disabled', 'disabled')}</Tag>}
+                    {r.enabled === false && <Tag $tone="red">{t('settings.notify.disabled')}</Tag>}
                     <span>{triggerSummary(r, (k, d) => t(k, d ?? k))}</span>
                     {(r.channels ?? ['portal']).map((c) => <Tag key={c} $tone="blue">{c}</Tag>)}
                   </span>
@@ -280,7 +280,7 @@ export default function NotificationsBuilder() {
         <RuleEditor key={editing ?? '__new__'} id={editing ?? ''} initial={editing ? doc[editing] : blank} isNew={editing == null} takenIds={ids} jobIds={jobIds}
           onSaved={onSaved} onCancel={() => setEditing(undefined)} onDelete={editing ? () => void remove(editing) : undefined} />
       ) : (
-        <Placeholder>{t('settings.notify.pick', 'Pick a rule to edit, or add one.')}</Placeholder>
+        <Placeholder>{t('settings.notify.pick')}</Placeholder>
       )}
     </Split>
   )

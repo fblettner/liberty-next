@@ -84,13 +84,13 @@ export function ChartSpecEditor({ result, spec, onChange, trailing }: ChartSpecE
       </SpecCell>
       {spec.type !== 'pie' && (
         <SpecCell>
-          <Field label={t('chart.spec.pivot', 'Pivot by')}>
+          <Field label={t('chart.spec.pivot')}>
             <SearchSelect value={spec.series ? resolveColumnName(result, spec.series) : ''} onChange={(v) => onChange({ ...spec, series: v || undefined })} options={colOpts}
-              anyLabel={t('common.none', 'None')} placeholder={t('chart.spec.pivotHint', 'One series per value')} />
+              anyLabel={t('common.none')} placeholder={t('chart.spec.pivotHint')} />
           </Field>
         </SpecCell>
       )}
-      <Field label={t('chart.spec.series', 'Series')}>
+      <Field label={t('chart.spec.series')}>
         <SeriesList>
           {spec.y.map((yName, i) => (
             <SeriesRow key={`${yName}-${i}`}>
@@ -100,7 +100,7 @@ export function ChartSpecEditor({ result, spec, onChange, trailing }: ChartSpecE
                 options={colOpts} placeholder={t('chart.spec.pick')}
               />
               <ColorSwatch $color={seriesColorAt(i, spec)}
-                title={t('chart.spec.colorTitle', 'Pick this series’ colour')}>
+                title={t('chart.spec.colorTitle')}>
                 <input type="color"
                   value={normaliseHex(spec.colors?.[i] ?? seriesColorAt(i, spec))}
                   onChange={(e) => onChange(updateSeriesColor(spec, i, e.target.value))} />
@@ -110,16 +110,16 @@ export function ChartSpecEditor({ result, spec, onChange, trailing }: ChartSpecE
                   <AxisToggle type="button"
                     $active={(spec.yAxis?.[i] ?? 'left') === 'left'}
                     onClick={() => onChange(updateSeriesAxis(spec, i, 'left'))}
-                    title={t('chart.spec.axisLeft', 'Bind to left Y axis')}>L</AxisToggle>
+                    title={t('chart.spec.axisLeft')}>L</AxisToggle>
                   <AxisToggle type="button"
                     $active={spec.yAxis?.[i] === 'right'}
                     onClick={() => onChange(updateSeriesAxis(spec, i, 'right'))}
-                    title={t('chart.spec.axisRight', 'Bind to right Y axis')}>R</AxisToggle>
+                    title={t('chart.spec.axisRight')}>R</AxisToggle>
                 </>
               )}
               {spec.y.length > 1 && (
                 <IconBtn type="button" onClick={() => onChange(removeSeries(spec, i))}
-                  title={t('chart.spec.removeSeries', 'Remove this series')}>
+                  title={t('chart.spec.removeSeries')}>
                   <X size={12} />
                 </IconBtn>
               )}
@@ -127,7 +127,7 @@ export function ChartSpecEditor({ result, spec, onChange, trailing }: ChartSpecE
           ))}
           {spec.type !== 'pie' && hasUnusedColumn(spec.y, allCols) && (
             <IconBtn type="button" onClick={() => onChange(addSeries(spec, allCols))}
-              title={t('chart.spec.addSeries', 'Add a series')}>
+              title={t('chart.spec.addSeries')}>
               <Plus size={14} />
             </IconBtn>
           )}

@@ -107,7 +107,7 @@ export function TreeView({ result, screen }: TreeViewProps) {
   // Defensive: bail with a hint if it isn't (no crash, just useful diagnostics).
   const cfg = screen.treeview ?? null
   if (!cfg) {
-    return <Empty>{t('table.tree.noConfig', 'No treeview config on this screen')}</Empty>
+    return <Empty>{t('table.tree.noConfig')}</Empty>
   }
 
   return <TreeViewInner result={result} cfg={cfg} />
@@ -248,7 +248,7 @@ function TreeViewInner({ result, cfg }: { result: QueryResult; cfg: ScreenTreevi
   if (roots.length === 0) {
     return (
       <Frame>
-        <Empty>{t('table.tree.empty', 'No rows returned — nothing to render as a tree.')}</Empty>
+        <Empty>{t('table.tree.empty')}</Empty>
       </Frame>
     )
   }
@@ -261,18 +261,18 @@ function TreeViewInner({ result, cfg }: { result: QueryResult; cfg: ScreenTreevi
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={t('table.tree.searchPlaceholder', 'Filter the tree…')}
-            aria-label={t('table.tree.searchAriaLabel', 'Filter tree nodes by label')}
+            placeholder={t('table.tree.searchPlaceholder')}
+            aria-label={t('table.tree.searchAriaLabel')}
           />
         </SearchWrap>
-        <Pill type="button" onClick={expandAll}>{t('table.tree.expandAll', 'Expand all')}</Pill>
-        <Pill type="button" onClick={collapseAll}>{t('table.tree.collapseAll', 'Collapse all')}</Pill>
+        <Pill type="button" onClick={expandAll}>{t('table.tree.expandAll')}</Pill>
+        <Pill type="button" onClick={collapseAll}>{t('table.tree.collapseAll')}</Pill>
         <Meta>
-          {t('table.tree.summary', '{{nodes}} nodes · {{roots}} roots{{orphanSuffix}}', {
+          {t('table.tree.summary', {
             nodes: totalNodes,
             roots: roots.length,
             orphanSuffix: orphans > 0
-              ? ` · ${t('table.tree.orphans', '{{count}} orphan(s)', { count: orphans })}`
+              ? ` · ${t('table.tree.orphans', { count: orphans })}`
               : '',
           })}
         </Meta>

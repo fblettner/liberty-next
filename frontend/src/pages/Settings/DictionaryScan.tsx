@@ -147,7 +147,7 @@ export function DictionaryScan({
       }
       await api.put('/admin/config/dictionary/parsed', { dictionary: doc })
       await api.post('/admin/reload')
-      setStatus(t('settings.dictscan.saved', 'Added {{n}} dictionary item(s) to “{{scope}}”.', { n: chosen.length, scope: result.scope }))
+      setStatus(t('settings.dictscan.saved', { n: chosen.length, scope: result.scope }))
       onSaved?.()
       // Refresh existing-flags so a second save doesn't re-add.
       await scan()
@@ -159,7 +159,7 @@ export function DictionaryScan({
       <Box onClick={(e) => e.stopPropagation()}>
         <Header>
           <BookText size={17} color={colors.blue.main} />
-          <span className="title">{t('settings.dictscan.title', 'Generate dictionary items')}</span>
+          <span className="title">{t('settings.dictscan.title')}</span>
           <CloseBtn onClick={onClose} title={t('common.close')}><X size={16} /></CloseBtn>
         </Header>
         <ModalBody>
@@ -169,22 +169,22 @@ export function DictionaryScan({
           {!preset && (
             <>
               <PickRow>
-                <Field label={t('settings.charts.connector', 'Connector')}>
+                <Field label={t('settings.charts.connector')}>
                   <SearchSelect value={connector} onChange={(v) => { setConnector(v); setPickedTable(''); setPickedSchema(null); setScope(v); setResult(null); setJde(/jde/i.test(v)) }}
-                    options={sqlConns.map((c) => ({ value: c, label: c, mono: c }))} placeholder={t('chart.spec.pick', 'Pick…')} />
+                    options={sqlConns.map((c) => ({ value: c, label: c, mono: c }))} placeholder={t('chart.spec.pick')} />
                 </Field>
-                <Field label={t('settings.dictscan.scope', 'Store under (app)')}>
+                <Field label={t('settings.dictscan.scope')}>
                   <SearchSelect value={scope} onChange={(v) => { setScope(v); setResult(null) }}
                     options={sqlConns.map((c) => ({ value: c, label: c, mono: c }))} allowCustom
-                    placeholder={t('chart.spec.pick', 'Pick…')} />
+                    placeholder={t('chart.spec.pick')} />
                 </Field>
               </PickRow>
               {/* Lazy table picker — schema -> filter -> table, no full-catalog walk. */}
               <div style={{ marginTop: 8 }}>
-                <Field label={t('settings.dictscan.table', 'Table to scan')}>
+                <Field label={t('settings.dictscan.table')}>
                   {connector
                     ? <TablePicker connector={connector} onPick={(p) => { setPickedSchema(p.schema); setPickedTable(p.name); setResult(null) }} />
-                    : <Muted>{t('settings.charts.pickConnFirst', 'Pick a connector first')}</Muted>}
+                    : <Muted>{t('settings.charts.pickConnFirst')}</Muted>}
                   {pickedTable && <div style={{ marginTop: 4, fontSize: fontSize.sm, color: colors.text.muted }}>{pickedSchema ? `${pickedSchema}.` : ''}{pickedTable}</div>}
                 </Field>
               </div>
@@ -192,10 +192,10 @@ export function DictionaryScan({
           )}
           {/* JD Edwards toggle — strips the 2-char table prefix so entries key on the shared data item. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
-            <Checkbox checked={jde} onChange={setJde} label={t('settings.dictscan.jde', 'JD Edwards connector (strip 2-char prefix → shared data item)')} />
+            <Checkbox checked={jde} onChange={setJde} label={t('settings.dictscan.jde')} />
             {!preset && (
               <Button $size="sm" $variant="primary" onClick={() => void scan()} disabled={!connector || !pickedTable || busy} style={{ marginLeft: 'auto' }}>
-                {busy ? <SpinnerRing size={13} thickness={2} /> : <Search size={13} />} {t('settings.dictscan.scan', 'Scan')}
+                {busy ? <SpinnerRing size={13} thickness={2} /> : <Search size={13} />} {t('settings.dictscan.scan')}
               </Button>
             )}
           </div>
@@ -204,7 +204,7 @@ export function DictionaryScan({
             <>
               <div style={{ fontSize: fontSize.sm, color: colors.text.muted, marginTop: 4 }}>
                 {result.jde ? <Tag $tone="orange">JDE</Tag> : null}{' '}
-                {t('settings.dictscan.summary', '{{missing}} missing of {{total}} columns → scope “{{scope}}”', {
+                {t('settings.dictscan.summary', {
                   ...summarizeProposals(proposals), scope: result.scope,
                 })}
               </div>
@@ -213,15 +213,15 @@ export function DictionaryScan({
               </div>
             </>
           )}
-          {!result && !preset && <Muted>{t('settings.dictscan.hint', 'Pick a connector + table, then Scan to find columns without a dictionary entry.')}</Muted>}
+          {!result && !preset && <Muted>{t('settings.dictscan.hint')}</Muted>}
           {!result && preset && busy && <Muted><SpinnerRing size={18} thickness={2} /></Muted>}
         </ModalBody>
         <ModalFooter>
-          <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{result ? t('settings.dictscan.selected', '{{n}} selected', { n: chosen.length }) : ''}</span>
+          <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{result ? t('settings.dictscan.selected', { n: chosen.length }) : ''}</span>
           <div style={{ flex: 1 }} />
           <Button $size="sm" $variant="ghost" onClick={onClose}>{t('common.close')}</Button>
           <Button $size="sm" $variant="primary" onClick={() => void save()} disabled={busy || chosen.length === 0}>
-            {busy ? <SpinnerRing size={13} thickness={2} /> : null} {t('settings.dictscan.add', 'Add {{n}} item(s)', { n: chosen.length })}
+            {busy ? <SpinnerRing size={13} thickness={2} /> : null} {t('settings.dictscan.add', { n: chosen.length })}
           </Button>
         </ModalFooter>
       </Box>

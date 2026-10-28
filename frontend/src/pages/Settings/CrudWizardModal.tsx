@@ -247,19 +247,19 @@ export function CrudWizardModal({
 
   // ── validation ──
   const error: string | null = (() => {
-    if (!tableName) return t('settings.crudWizard.errors.tableRequired', 'Pick a table.')
-    if (!baseName.trim()) return t('settings.crudWizard.errors.baseRequired', 'Name the table.')
-    if (included.size === 0) return t('settings.crudWizard.errors.noCols', 'Include at least one column.')
-    if (!emit.get) return t('settings.crudWizard.errors.getRequired', 'The read (_get) query is required.')
+    if (!tableName) return t('settings.crudWizard.errors.tableRequired')
+    if (!baseName.trim()) return t('settings.crudWizard.errors.baseRequired')
+    if (included.size === 0) return t('settings.crudWizard.errors.noCols')
+    if (!emit.get) return t('settings.crudWizard.errors.getRequired')
     if ((emit.put || emit.delete) && keys.size === 0) {
-      return t('settings.crudWizard.errors.keysRequired', 'Pick at least one key column for UPDATE / DELETE — they drive the WHERE clause.')
+      return t('settings.crudWizard.errors.keysRequired')
     }
     // Per-CRUD name collisions
     const toEmit = cruds.filter((c) => emit[c] && effective(c).trim().length > 0)
     for (const c of toEmit) {
       const name = `${slugify(baseName)}_${c}`
       if (existingQueryNames.has(name)) {
-        return t('settings.crudWizard.errors.queryNameExists', 'A query named "{{name}}" already exists.', { name })
+        return t('settings.crudWizard.errors.queryNameExists', { name })
       }
     }
     return null
@@ -315,7 +315,7 @@ export function CrudWizardModal({
       <Modal style={{ width: 'min(820px, 95vw)', height: 'min(720px, 90vh)' }} onClick={(e) => e.stopPropagation()}>
         <ModalHeader>
           <span>
-            {t('settings.crudWizard.title', 'Generate table from DB')} ·{' '}
+            {t('settings.crudWizard.title')} ·{' '}
             <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>
               [connectors.{connector}]
             </span>
@@ -328,10 +328,10 @@ export function CrudWizardModal({
               pick, a "Loading tables…" message replaces the table picker until that fetch
               resolves. Most pools resolve in <100ms; Oracle with many schemas / tables can
               take a couple of seconds per schema — much less than the 10+s full walk. */}
-          {schemasInfo === undefined && <Hint>{t('settings.crudWizard.loadingSchemas', 'Loading schemas…')}</Hint>}
+          {schemasInfo === undefined && <Hint>{t('settings.crudWizard.loadingSchemas')}</Hint>}
           {schemasInfo === null && (
             <ErrorLine>
-              {t('settings.scaffold.errors.noSchema', "Couldn't introspect this connector's pool. Make sure it's reachable and you have superuser rights.")}
+              {t('settings.scaffold.errors.noSchema')}
             </ErrorLine>
           )}
           {schemasInfo && (
@@ -342,7 +342,7 @@ export function CrudWizardModal({
                   SearchSelect). Switching the schema clears the table selection and triggers
                   a fresh tables fetch. */}
               {schemaOpts.length > 1 && (
-                <Field label={t('settings.crudWizard.schema', 'Schema')}>
+                <Field label={t('settings.crudWizard.schema')}>
                   <SearchSelect
                     value={pickedSchema && pickedSchema !== '__nopicker__' ? pickedSchema : ''}
                     onChange={(v) => { setPickedSchema(v); setTableName('') }}
@@ -356,25 +356,25 @@ export function CrudWizardModal({
                   per-table column walk (the slow step), so a 2000-table SY920 narrowed to a F009%
                   prefix returns under a second. Type ``%`` to list every table in the schema. */}
               {pickedSchema && pickedSchema !== '__nopicker__' && (
-                <Field label={t('settings.crudWizard.nameFilter', 'Table name filter')}>
+                <Field label={t('settings.crudWizard.nameFilter')}>
                   <Input
                     value={nameLikeRaw}
                     onChange={(e) => { setNameLikeRaw(e.target.value); setTableName('') }}
-                    placeholder={t('settings.crudWizard.nameFilterPlaceholder', 'e.g. F009%, USR_%, % for all')}
+                    placeholder={t('settings.crudWizard.nameFilterPlaceholder')}
                   />
                 </Field>
               )}
-              <Field label={t('settings.crudWizard.table', 'Table')}>
+              <Field label={t('settings.crudWizard.table')}>
                 <SearchSelect
                   value={tableName}
                   onChange={(v) => setTableName(v)}
                   options={tableOpts}
                   placeholder={!pickedSchema && schemaOpts.length > 1
-                    ? t('settings.crudWizard.pickSchemaFirst', 'Pick a schema first')
+                    ? t('settings.crudWizard.pickSchemaFirst')
                     : pickedSchema && pickedSchema !== '__nopicker__' && !nameLike
-                      ? t('settings.crudWizard.typeFilter', 'Type a filter to list tables')
+                      ? t('settings.crudWizard.typeFilter')
                       : schema === undefined && pickedSchema
-                        ? t('settings.crudWizard.loadingTables', 'Loading tables…')
+                        ? t('settings.crudWizard.loadingTables')
                         : t('common.pick')}
                   disabled={!pickedSchema && schemaOpts.length > 1}
                   loading={schema === undefined && !!pickedSchema}
@@ -382,25 +382,25 @@ export function CrudWizardModal({
               </Field>
               {schema === null && (
                 <ErrorLine>
-                  {t('settings.scaffold.errors.noSchema', "Couldn't introspect this connector's pool. Make sure it's reachable and you have superuser rights.")}
+                  {t('settings.scaffold.errors.noSchema')}
                 </ErrorLine>
               )}
               {schema && schema.tables.length === 0 && pickedSchema && (
-                <Hint>{t('settings.scaffold.errors.noTables', 'No tables in the introspected schema. Check the pool config.')}</Hint>
+                <Hint>{t('settings.scaffold.errors.noTables')}</Hint>
               )}
               {table && (
                 <>
-                  <Field label={t('settings.crudWizard.baseName', 'Base name (queries become <base>_get / _put / _post / _delete)')}>
+                  <Field label={t('settings.crudWizard.baseName')}>
                     <Input value={baseName} onChange={(e) => setBaseName(e.target.value)} placeholder={slugify(tableName)} />
                   </Field>
                   <Section>
                     <SectionTitle>
-                      {t('settings.crudWizard.colsTitle', 'Columns')}
+                      {t('settings.crudWizard.colsTitle')}
                       <span className="count">
                         ({included.size} / {table.columns.length} included · {keys.size} key)
                       </span>
                     </SectionTitle>
-                    <Hint>{t('settings.crudWizard.colsHint', 'Tick which columns to include in SELECT / INSERT. Tick the small "key" checkbox for the row\'s primary key columns — they drive the UPDATE / DELETE WHERE clause.')}</Hint>
+                    <Hint>{t('settings.crudWizard.colsHint')}</Hint>
                     <ColGrid>
                       {table.columns.map((c) => {
                         const inIn = included.has(c.name)
@@ -413,7 +413,7 @@ export function CrudWizardModal({
                             <span className="spacer" />
                             <span className="keyBox" onClick={(e) => e.preventDefault()}>
                               <Checkbox checked={isKey} onChange={(v) => toggleKey(c.name, v)} disabled={!inIn} />
-                              <span className="lbl">{t('settings.crudWizard.key', 'key')}</span>
+                              <span className="lbl">{t('settings.crudWizard.key')}</span>
                             </span>
                           </ColRow>
                         )
@@ -421,7 +421,7 @@ export function CrudWizardModal({
                     </ColGrid>
                   </Section>
                   <Section>
-                    <SectionTitle>{t('settings.crudWizard.emitTitle', 'Which queries to emit')}</SectionTitle>
+                    <SectionTitle>{t('settings.crudWizard.emitTitle')}</SectionTitle>
                     <EmitRow>
                       {cruds.map((c) => (
                         <EmitItem key={c} className={c === 'get' ? 'required' : ''}>

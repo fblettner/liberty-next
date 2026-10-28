@@ -91,18 +91,17 @@ export function DeleteWithDepsModal({ kind, name, scope, onDeleted, onClose }: D
         </ModalHeader>
         <ModalBody>
           <div style={{ marginBottom: 14, color: colors.text.secondary, fontFamily: fonts.sans }}>
-            {t('settings.deleteDeps.confirm', 'Are you sure you want to delete')}{' '}
+            {t('settings.deleteDeps.confirm')}{' '}
             <Mono>{scope ? `${scope}.${name}` : name}</Mono>?
           </div>
 
           <Checkbox
             checked={alsoDeleteQueries}
             onChange={setAlsoDeleteQueries}
-            label={t('settings.deleteDeps.alsoDeleteQueries', 'Also delete referenced queries that are exclusively used by this entity')}
+            label={t('settings.deleteDeps.alsoDeleteQueries')}
           />
           <div style={{ color: colors.text.muted, fontSize: fontSize.sm, marginTop: 4, paddingLeft: 24 }}>
-            {t('settings.deleteDeps.queriesHint',
-              'Queries also used by another screen / lookup / chart / dashboard widget will be preserved.')}
+            {t('settings.deleteDeps.queriesHint')}
           </div>
 
           {alsoDeleteQueries && (
@@ -111,11 +110,11 @@ export function DeleteWithDepsModal({ kind, name, scope, onDeleted, onClose }: D
               {plan && (
                 <>
                   <div style={{ fontSize: fontSize.sm, color: colors.text.primary, fontWeight: 600, marginBottom: 6 }}>
-                    {t('settings.deleteDeps.willDelete', 'Will be deleted')} ({plan.delete_queries.length}):
+                    {t('settings.deleteDeps.willDelete')} ({plan.delete_queries.length}):
                   </div>
                   {plan.delete_queries.length === 0 ? (
                     <div style={{ color: colors.text.muted, fontSize: fontSize.sm, paddingLeft: 8 }}>
-                      {t('settings.deleteDeps.noOrphans', 'No orphans — every referenced query is also used elsewhere.')}
+                      {t('settings.deleteDeps.noOrphans')}
                     </div>
                   ) : (
                     <ul style={{ margin: '0 0 12px 18px', padding: 0, fontSize: fontSize.sm }}>
@@ -127,7 +126,7 @@ export function DeleteWithDepsModal({ kind, name, scope, onDeleted, onClose }: D
                   {plan.preserved_queries.length > 0 && (
                     <>
                       <div style={{ fontSize: fontSize.sm, color: colors.text.primary, fontWeight: 600, marginBottom: 6 }}>
-                        {t('settings.deleteDeps.preserved', 'Preserved')} ({plan.preserved_queries.length}):
+                        {t('settings.deleteDeps.preserved')} ({plan.preserved_queries.length}):
                       </div>
                       <ul style={{ margin: '0 0 6px 18px', padding: 0, fontSize: fontSize.sm }}>
                         {plan.preserved_queries.map((q, i) => (
@@ -153,13 +152,13 @@ export function DeleteWithDepsModal({ kind, name, scope, onDeleted, onClose }: D
         </ModalBody>
         <ModalFooter>
           <Button $size="sm" $variant="ghost" onClick={onClose} disabled={busy}>
-            {t('common.cancel', 'Cancel')}
+            {t('common.cancel')}
           </Button>
           <Button $size="sm" $variant="danger" onClick={() => void submit()} disabled={busy}>
             {busy ? <SpinnerRing size={13} thickness={2} /> : <Trash2 size={13} />}
             {alsoDeleteQueries && plan && plan.delete_queries.length > 0
-              ? t('settings.deleteDeps.deleteWithCount', 'Delete + {{n}} quer(y/ies)', { n: plan.delete_queries.length })
-              : t('common.delete', 'Delete')}
+              ? t('settings.deleteDeps.deleteWithCount', { n: plan.delete_queries.length })
+              : t('common.delete')}
           </Button>
         </ModalFooter>
       </Modal>

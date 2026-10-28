@@ -35,12 +35,12 @@ export function NavigateTargetField({
 
   return (
     <>
-      <Field label={t('settings.screens.action.navTargetType', 'Target type')}>
+      <Field label={t('settings.screens.action.navTargetType')}>
         <SearchSelect
           value={navType}
           options={[
-            { value: 'query', label: t('settings.screens.action.navTargetQuery', 'Query') },
-            { value: 'screen', label: t('settings.screens.action.navTargetScreen', 'Screen') },
+            { value: 'query', label: t('settings.screens.action.navTargetQuery') },
+            { value: 'screen', label: t('settings.screens.action.navTargetScreen') },
           ]}
           onChange={(v) => {
             const next = v === 'screen' ? 'screen' : 'query'
@@ -51,7 +51,7 @@ export function NavigateTargetField({
         />
       </Field>
       {navType === 'screen' ? (
-        <Field label={t('settings.screens.action.navTargetScreen', 'Screen') + ' *'}>
+        <Field label={t('settings.screens.action.navTargetScreen') + ' *'}>
           <SearchSelect
             value={(action.screen as string | undefined) ?? ''}
             options={screenOptions}
@@ -61,7 +61,7 @@ export function NavigateTargetField({
           />
         </Field>
       ) : (
-        <Field label={t('settings.screens.action.navTargetQuery', 'Query') + ' *'}>
+        <Field label={t('settings.screens.action.navTargetQuery') + ' *'}>
           <Row gap={6} style={{ alignItems: 'center' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <SearchSelect
@@ -73,7 +73,7 @@ export function NavigateTargetField({
               />
             </div>
             {typeof action.to === 'string' && action.to && actionConn && (
-              <Button $variant="ghost" $size="sm" onClick={() => onEditQuery(actionConn, String(action.to))} title={t('settings.editQuery.edit', 'Edit query')}>
+              <Button $variant="ghost" $size="sm" onClick={() => onEditQuery(actionConn, String(action.to))} title={t('settings.editQuery.edit')}>
                 <Edit3 size={13} />
               </Button>
             )}
