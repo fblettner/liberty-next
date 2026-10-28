@@ -344,14 +344,11 @@ class JobScheduler:
         # in the new closure replaces the old one).
         days = policy.days
         cap = policy.keep_last_per_job
+        snap = policy.model_copy()      # the closure binds this policy; a reload re-registers
 
         async def _do_sweep() -> None:
-            # Build a fresh policy from the snapshot — the schema's defaults
-            # for the other fields are fine here (we only care about days +
-            # keep_last_per_job, the rest is meta about scheduling).
-            snap = RetentionPolicy(days=days, keep_last_per_job=cap)
             try:
-                self._last_retention = await sweep_run_history(self._runner._db, snap)  # noqa: SLF001 — same module-family
+                self._last_retention = await self._sweep(snap)
             except Exception:
                 _log.exception("nomaflow.retention sweep raised — will retry on next interval")
 
@@ -373,8 +370,24 @@ class JobScheduler:
         """Fire a one-shot retention sweep + return the report. Used by the
         ``POST /admin/jobs/retention/sweep`` admin endpoint when an operator
         wants to clean up immediately after changing the policy."""
-        self._last_retention = await sweep_run_history(self._runner._db, policy)  # noqa: SLF001 — same module-family
+        self._last_retention = await self._sweep(policy)
         return self._last_retention
+
+    async def _sweep(self, policy: RetentionPolicy) -> SweepReport:
+        """The run history (rows), then the job work area's old files (uploads, run files, the
+        watched folders' archives — liberty.jobs.retention.purge_work_area) when the settings
+        are reachable."""
+        from liberty.jobs.files import files_dir
+        from liberty.jobs.retention import files_days_of, purge_work_area, watched_archives
+        report = await sweep_run_history(self._runner._db, policy)  # noqa: SLF001 — same module-family
+        state = self._state() if callable(self._state) else self._state
+        settings = getattr(state, "settings", None)
+        if settings is not None:
+            n, size, cutoff = await asyncio.to_thread(
+                purge_work_area, files_dir(settings), watched_archives(self._registry), files_days_of(policy),
+            )
+            report.files_deleted, report.files_bytes, report.files_cutoff = n, size, cutoff
+        return report
 
     @property
     def last_retention(self) -> SweepReport | None:

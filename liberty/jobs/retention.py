@@ -32,6 +32,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
 
 from sqlalchemy import delete, select
 
@@ -63,6 +65,10 @@ class SweepReport:
     keep_last_per_job: int
     deleted_by_age: int
     deleted_by_cap: int
+    # the work-area files (purge_work_area) — filled by the scheduler's sweep
+    files_deleted: int = 0
+    files_bytes: int = 0
+    files_cutoff: datetime | None = None
 
     @property
     def total_deleted(self) -> int:
@@ -76,6 +82,9 @@ class SweepReport:
             "deleted_by_age": self.deleted_by_age,
             "deleted_by_cap": self.deleted_by_cap,
             "total_deleted": self.total_deleted,
+            "files_deleted": self.files_deleted,
+            "files_bytes": self.files_bytes,
+            "files_cutoff": self.files_cutoff.isoformat() if self.files_cutoff else None,
         }
 
 
@@ -180,3 +189,62 @@ def _ids_beyond_cap(
         for run_id, _ in entries[keep_last_per_job:]:
             to_delete.append(run_id)
     return to_delete
+
+
+# ── the job work area ──────────────────────────────────────────────────────────────────────
+
+def files_days_of(policy: RetentionPolicy) -> int:
+    """The age (days) past which work-area files go: ``files_days``, else the run history's
+    ``days``; 0 = never."""
+    return policy.days if policy.files_days is None else policy.files_days
+
+
+def watched_archives(registry: Any) -> list[Path]:
+    """The ``done/`` and ``failed/`` folders of every file_load step watching a folder (a
+    ``watch_dir`` with a ``${params.x}`` template is skipped — it names no single folder)."""
+    out: list[Path] = []
+    for job in registry.jobs():
+        for st in job.steps:
+            wd = getattr(st, "watch_dir", None)
+            if wd and "${" not in wd:
+                base = Path(wd).expanduser()
+                out += [base / "done", base / "failed"]
+    return out
+
+
+def purge_work_area(root: Path, archives: list[Path], days: int, *, now: datetime | None = None) -> tuple[int, int, datetime | None]:
+    """Delete the files older than *days* (by modification time) under the work area *root*
+    (every job's uploads and run files, recursively) and directly inside each *archives* folder
+    (the watched folders' done / failed). Nothing else is touched — an export's copy in its
+    ``export_dir`` is the operator's delivery. Returns ``(files deleted, bytes, cutoff)``; 0 days
+    deletes nothing."""
+    if days <= 0:
+        return 0, 0, None
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=days)
+    limit = cutoff.timestamp()
+    n = size = 0
+
+    def drop(p: Path) -> None:
+        nonlocal n, size
+        try:
+            st = p.stat()
+            if st.st_mtime < limit:
+                p.unlink()
+                n += 1
+                size += st.st_size
+        except OSError as exc:
+            _log.warning("nomaflow.retention: cannot delete %s: %s", p, exc)
+
+    if root.is_dir():
+        for p in root.rglob("*"):
+            if p.is_file():
+                drop(p)
+    for d in archives:
+        if d.is_dir():
+            for p in d.iterdir():
+                if p.is_file():
+                    drop(p)
+    if n:
+        _log.info("nomaflow.retention: %d work-area file(s) older than %d days deleted (%d bytes)", n, days, size)
+    return n, size, cutoff

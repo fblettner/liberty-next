@@ -6,6 +6,13 @@
   `file_load` step on Run detail, and on the user's job page ("File loaded"). Uploads are kept in
   the job's work area; `GET /admin/jobs/runs/{run}/inputs/{step}` and
   `GET /api/jobs/{job}/runs/{run}/inputs/{step}` serve them.
+- nomaflow: the retention sweep now also deletes the job work area's old files — uploads, rejects
+  reports, reports, exports, and the file_load watched folders' `done/` / `failed/` archives —
+  older than `[meta.retention] files_days` (blank = the runs' `days`, 30 by default; 0 = keep the
+  files). **On upgrade, files older than 30 days go at the first sweep** unless `files_days` is
+  set; an export's copy in its `export_dir` is never touched. Set it in the Retention panel; the
+  sweep reports the files and bytes deleted. Saving the retention policy no longer fails on a
+  blank field.
 
 ## 7.0.61 — unreleased
 

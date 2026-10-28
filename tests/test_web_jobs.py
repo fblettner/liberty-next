@@ -522,7 +522,7 @@ def test_get_jobs_parsed_includes_meta_with_defaults(env) -> None:
         # The retention defaults — without this the panel can't tell the operator
         # what's actually in effect.
         ret = body["meta"]["retention"]
-        assert ret == {"enabled": True, "days": 30, "keep_last_per_job": 100, "sweep_interval_minutes": 60}
+        assert ret == {"enabled": True, "days": 30, "keep_last_per_job": 100, "sweep_interval_minutes": 60, "files_days": None}
         assert body["meta"]["missed"] == {"enabled": True, "grace_minutes": 10, "check_interval_minutes": 5, "lookback_hours": 24}
 
 
@@ -1303,3 +1303,19 @@ def test_pause_and_resume_a_job(env) -> None:
         assert client.post("/admin/jobs/ping/enabled", json={"enabled": "no"}, headers=h).status_code == 422
         assert client.post("/admin/jobs/ghost/enabled", json={"enabled": True}, headers=h).status_code == 404
         assert client.post("/admin/jobs/ping/enabled", json={"enabled": True}, headers=_h(client, "loader")).status_code == 403
+
+
+def test_retention_policy_saves_with_a_blank_files_days(env) -> None:
+    """The Retention panel sends the whole policy back, ``files_days: null`` when left blank: the
+    save drops the null (TOML has none) and the status shows the policy as saved."""
+    app, jobs_toml = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        parsed = client.get("/admin/config/jobs/parsed", headers=h).json()
+        meta = {**(parsed.get("meta") or {}), "retention": {"enabled": True, "days": 45, "keep_last_per_job": 50, "sweep_interval_minutes": 60, "files_days": None}}
+        r = client.put("/admin/config/jobs/parsed", json={**parsed, "meta": meta}, headers=h)
+        assert r.status_code == 200, r.text
+        assert "files_days" not in jobs_toml.read_text() and "days = 45" in jobs_toml.read_text()
+        meta["retention"]["files_days"] = 7
+        assert client.put("/admin/config/jobs/parsed", json={**parsed, "meta": meta}, headers=h).status_code == 200
+        assert "files_days = 7" in jobs_toml.read_text()

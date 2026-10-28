@@ -602,6 +602,12 @@ class RetentionPolicy(BaseModel):
         default=60, ge=5, le=1440,
         description="How often the recurring sweep fires (minutes). 60 is a reasonable default.",
     )
+    files_days: int | None = Field(
+        default=None, ge=0, le=3650,
+        description="Delete the job work area's files older than this many days — uploads, rejects reports, "
+                    "reports, exports, and the file_load watched folders' done/ and failed/ archives. "
+                    "Blank = the run history's `days`; 0 = keep the files forever.",
+    )
 
 
 class MissedPolicy(BaseModel):

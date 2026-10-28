@@ -19,6 +19,8 @@ interface RetentionPolicy {
   days: number
   keep_last_per_job: number
   sweep_interval_minutes: number
+  /** Work-area files (uploads, run files, watched-folder archives) older than this go; null = `days`, 0 = never. */
+  files_days?: number | null
 }
 
 interface SweepReport {
@@ -28,6 +30,8 @@ interface SweepReport {
   deleted_by_age: number
   deleted_by_cap: number
   total_deleted: number
+  files_deleted?: number
+  files_bytes?: number
 }
 
 interface RetentionStatus {
@@ -147,7 +151,7 @@ export function RetentionPanel({ onChanged }: RetentionPanelProps) {
         'nomaflow.retention.swept',
         `Deleted ${r.total_deleted} run${r.total_deleted === 1 ? '' : 's'} (age: ${r.deleted_by_age}, cap: ${r.deleted_by_cap}).`,
         { total: r.total_deleted, age: r.deleted_by_age, cap: r.deleted_by_cap },
-      ))
+      ) + (r.files_deleted ? ' ' + t('nomaflow.retention.sweptFiles', { n: r.files_deleted, mb: ((r.files_bytes ?? 0) / 1_048_576).toFixed(1) }) : ''))
       onChanged?.()
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
@@ -210,6 +214,11 @@ export function RetentionPanel({ onChanged }: RetentionPanelProps) {
                     onChange={(e) => setDraft({ ...draft, keep_last_per_job: clamp(parseInt(e.target.value || '0', 10), 1, 100000) })} />
                 </Field>
                 <Field>
+                  <FieldLabel title={t('nomaflow.retention.filesDaysHint')}>{t('nomaflow.retention.filesDaysLabel')}</FieldLabel>
+                  <Input type="number" min={0} max={3650} value={draft.files_days ?? ''} placeholder={String(draft.days)}
+                    onChange={(e) => setDraft({ ...draft, files_days: e.target.value === '' ? null : clamp(parseInt(e.target.value, 10), 0, 3650) })} />
+                </Field>
+                <Field>
                   <FieldLabel>{t('nomaflow.retention.intervalLabel')}</FieldLabel>
                   <Input type="number" min={5} max={1440} value={draft.sweep_interval_minutes}
                     onChange={(e) => setDraft({ ...draft, sweep_interval_minutes: clamp(parseInt(e.target.value || '0', 10), 5, 1440) })} />
@@ -250,6 +259,7 @@ function policyChanged(draft: RetentionPolicy, current: RetentionPolicy | undefi
     || draft.days !== current.days
     || draft.keep_last_per_job !== current.keep_last_per_job
     || draft.sweep_interval_minutes !== current.sweep_interval_minutes
+    || (draft.files_days ?? null) !== (current.files_days ?? null)
 }
 
 /** Compact "5 min ago" / "2 h ago" / "Apr 12" — enough resolution to know whether

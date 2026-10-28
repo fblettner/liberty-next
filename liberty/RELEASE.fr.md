@@ -7,6 +7,14 @@
   chargé »). Les fichiers téléversés restent dans l'espace de travail de la tâche ;
   `GET /admin/jobs/runs/{run}/inputs/{step}` et `GET /api/jobs/{job}/runs/{run}/inputs/{step}`
   les servent.
+- nomaflow : le balayage de rétention supprime aussi les anciens fichiers de l'espace de travail
+  des tâches — fichiers téléversés, rapports de rejets, rapports, exports et archives `done/` /
+  `failed/` des dossiers surveillés par file_load — plus anciens que `[meta.retention] files_days`
+  (vide = les `days` des exécutions, 30 par défaut ; 0 = garder les fichiers). **À la mise à jour,
+  les fichiers de plus de 30 jours partent au premier balayage** si `files_days` n'est pas réglé ;
+  la copie d'un export dans son `export_dir` n'est jamais touchée. Réglage dans le panneau
+  Rétention ; le balayage indique les fichiers et octets supprimés. L'enregistrement de la
+  politique de rétention n'échoue plus sur un champ vide.
 
 ## 7.0.61 — non publiée
 

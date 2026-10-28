@@ -1687,7 +1687,7 @@ async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dic
     # same way a hand-authored file would; the round-trip parse below catches any
     # malformed shape before it touches disk.
     if body.meta is not None:
-        doc["meta"] = body.meta
+        doc["meta"] = _drop_none(body.meta)   # a policy field left blank (files_days) arrives as null
 
     new_text = tomlkit.dumps(doc)
     try:

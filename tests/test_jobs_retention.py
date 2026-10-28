@@ -293,7 +293,8 @@ async def test_report_serialises_to_dict(jobs_db):
     report = await sweep_run_history(jobs_db, RetentionPolicy(days=30), now=_NOW)
     payload = report.to_dict()
     assert set(payload) == {"swept_at", "cutoff", "keep_last_per_job",
-                            "deleted_by_age", "deleted_by_cap", "total_deleted"}
+                            "deleted_by_age", "deleted_by_cap", "total_deleted",
+                            "files_deleted", "files_bytes", "files_cutoff"}
     assert payload["deleted_by_age"] == 1
     assert payload["total_deleted"] == 1
     assert payload["cutoff"].startswith("2026-05-02")          # _NOW - 30 days
@@ -328,3 +329,76 @@ def test_ids_beyond_cap_treats_null_finished_as_oldest():
         ("r2", "a", datetime(2026, 1, 1, tzinfo=timezone.utc)),
     ]
     assert _ids_beyond_cap(rows, 1) == ["r1"]
+
+
+# ── the job work area ──────────────────────────────────────────────────────────────────────
+
+def _file(path, *, days_old: float, size: int = 10):
+    import os
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"x" * size)
+    t = (datetime.now(timezone.utc) - timedelta(days=days_old)).timestamp()
+    os.utime(path, (t, t))
+    return path
+
+
+def test_purge_work_area_by_age(tmp_path):
+    """Files older than the age go — uploads, run files, the watched folders' done / failed —
+    the recent ones and anything outside (a file in the watched folder itself, an export copy)
+    stay; 0 days deletes nothing."""
+    from liberty.jobs.retention import purge_work_area
+    root = tmp_path / "files"
+    old_upload = _file(root / "load-job" / "uploads" / "20260101-000000-sales.xlsx", days_old=40, size=100)
+    old_reject = _file(root / "load-job" / "run1-load-rejects.csv", days_old=31)
+    new_report = _file(root / "report-job" / "run2-digest.pdf", days_old=2)
+    watch = tmp_path / "in"
+    old_done = _file(watch / "done" / "20260101-a.xlsx", days_old=60)
+    new_failed = _file(watch / "failed" / "b.xlsx", days_old=1)
+    waiting = _file(watch / "c.xlsx", days_old=90)              # not processed yet: never touched
+    export_copy = _file(tmp_path / "out" / "export.xlsx", days_old=90)
+    assert purge_work_area(root, [watch / "done", watch / "failed"], 0) == (0, 0, None)
+    n, size, cutoff = purge_work_area(root, [watch / "done", watch / "failed", tmp_path / "missing"], 30)
+    assert n == 3 and size == 100 + 10 + 10 and cutoff is not None
+    assert not old_upload.exists() and not old_reject.exists() and not old_done.exists()
+    assert new_report.exists() and new_failed.exists() and waiting.exists() and export_copy.exists()
+
+
+def test_files_days_and_watched_archives(tmp_path):
+    from liberty.jobs import load_jobs
+    from liberty.jobs.retention import files_days_of, watched_archives
+    assert files_days_of(RetentionPolicy(days=30)) == 30
+    assert files_days_of(RetentionPolicy(days=30, files_days=7)) == 7
+    assert files_days_of(RetentionPolicy(days=30, files_days=0)) == 0
+    jobs = tmp_path / "jobs.toml"
+    jobs.write_text(f"""
+[[jobs]]
+id = "watch"
+[[jobs.steps]]
+type = "file_load"
+name = "load"
+watch_dir = "{tmp_path / 'in'}"
+target = {{ connector = "c", table = "t" }}
+[[jobs.steps]]
+type = "file_load"
+name = "templated"
+watch_dir = "/in/${{params.x}}"
+target = {{ connector = "c", table = "t" }}
+""")
+    assert watched_archives(load_jobs(jobs)) == [tmp_path / "in" / "done", tmp_path / "in" / "failed"]
+
+
+async def test_the_scheduler_sweep_purges_files(jobs_db, tmp_path):
+    """The retention sweep (recurring or ``POST /admin/jobs/retention/sweep``) also purges the work
+    area when the app settings are reachable, and reports it."""
+    from types import SimpleNamespace
+
+    from liberty.jobs import JobRunner, JobScheduler, load_jobs
+    jobs = tmp_path / "jobs.toml"
+    jobs.write_text('[[jobs]]\nid = "j"\n[[jobs.steps]]\ntype = "sql_query"\nname = "s"\nconnector = "c"\nquery = "q"\n')
+    reg = load_jobs(jobs)
+    settings = SimpleNamespace(jobs=SimpleNamespace(files_dir=str(tmp_path / "files")))
+    old = _file(tmp_path / "files" / "j" / "uploads" / "old.csv", days_old=45, size=7)
+    sched = JobScheduler(reg, JobRunner(jobs_db, {}), state=lambda: SimpleNamespace(settings=settings))
+    rep = await sched.run_retention_now(RetentionPolicy(days=30))
+    assert rep.files_deleted == 1 and rep.files_bytes == 7 and not old.exists()
+    assert rep.to_dict()["files_deleted"] == 1
