@@ -18,25 +18,24 @@ import { useWorkspace } from '../workspace/WorkspaceContext'
 // segment carries the screen's APP and ``target`` its id, so two screens sharing a read query get
 // distinct tabs (a plain 'sql' tab keys on connector+query and would collide).
 // 'page' wraps a framework page (a menus.toml ``type = "page"`` target — nomaflow Jobs / Schedule /
-// Package / Changes / Integrity, the Reports list) as a tab, so clicking a page menu item opens a
+// Runs, the Reports list — or a Liberty Next page, ``/liberty/<page>``) as a tab, so clicking a page menu item opens a
 // tab instead of replacing the active tab's content. The tab's ``target`` IS the route path; the
 // path → component map lives in TabHost (see src/tabs/pageTabs.ts for the shared path set).
-export type TabKind = 'sql' | 'screen' | 'http' | 'dashboard' | 'nomaflow_run' | 'settings' | 'monitoring' | 'page' | 'job'
+export type TabKind = 'sql' | 'screen' | 'http' | 'dashboard' | 'nomaflow_run' | 'monitoring' | 'page' | 'job'
 export interface Tab {
   id: string // `${kind}:${connector}:${target}` — stable, so opening the same screen reactivates it
   kind: TabKind
-  /** Empty for dashboard / nomaflow_run / settings tabs (the target alone identifies them). */
+  /** Empty for dashboard / nomaflow_run / monitoring / page tabs (the target alone identifies them). */
   connector: string
   /** The query name (sql), endpoint name (http), dashboard id (dashboard), run_id (nomaflow_run);
-   *  empty for the single settings tab. */
+   *  empty for the single monitoring tab. */
   target: string
 }
 export function tabId(kind: TabKind, connector: string, target: string): string {
   return `${kind}:${connector}:${target}`
 }
 export function tabPath(t: Pick<Tab, 'kind' | 'connector' | 'target'>): string {
-  // Settings / Monitoring are singleton framework tabs with no connector/target segment.
-  if (t.kind === 'settings') return '/settings'
+  // Monitoring is a singleton framework tab with no connector/target segment.
   if (t.kind === 'monitoring') return '/monitoring'
   // A page tab's target IS its route path (e.g. /nomaflow/changes).
   if (t.kind === 'page') return t.target
@@ -50,10 +49,10 @@ export function tabPath(t: Pick<Tab, 'kind' | 'connector' | 'target'>): string {
 
 /** The application a tab belongs to: the connector of a screen / query / endpoint tab, the scope
  *  of a dashboard id (``nomajde.overview``), the app of an Explorer model page; null for the
- *  framework tabs (settings, monitoring, a plain page) — those belong to no application. A job tab
+ *  framework tabs (monitoring, a plain page — a Liberty Next page among them) — those belong to no application. A job tab
  *  names no app: it is treated as the other application's and closes on a switch. */
 export function tabApp(t: Pick<Tab, 'kind' | 'connector' | 'target'>): string | null {
-  if (t.kind === 'settings' || t.kind === 'monitoring' || t.kind === 'nomaflow_run') return null
+  if (t.kind === 'monitoring' || t.kind === 'nomaflow_run') return null
   if (t.kind === 'dashboard') return t.target.includes('.') ? t.target.split('.')[0] : t.target
   if (t.kind === 'job') return ''
   if (t.kind === 'page') {
@@ -74,11 +73,17 @@ interface TabsState {
 const TabsContext = createContext<TabsState | null>(null)
 
 const KEY = 'liberty.tabs'
+// Tabs a session may still hold from before the Liberty Next pages: the single Settings tab and
+// nomaflow's deployment pages (now /liberty/<page>) — dropped on load, their routes redirect.
+const RETIRED = new Set(['settings::', 'page::/nomaflow/package', 'page::/nomaflow/changes', 'page::/nomaflow/integrity'])
+
 function load(): { tabs: Tab[]; activeId: string | null } {
   try {
     const v = JSON.parse(sessionStorage.getItem(KEY) ?? 'null')
     if (v && Array.isArray(v.tabs) && v.tabs.every((t: unknown) => t && typeof (t as Tab).id === 'string')) {
-      return { tabs: v.tabs as Tab[], activeId: typeof v.activeId === 'string' ? v.activeId : null }
+      const tabs = (v.tabs as Tab[]).filter((t) => !RETIRED.has(t.id))
+      const activeId = typeof v.activeId === 'string' && tabs.some((t) => t.id === v.activeId) ? v.activeId : (tabs[tabs.length - 1]?.id ?? null)
+      return { tabs, activeId }
     }
   } catch { /* ignore */ }
   return { tabs: [], activeId: null }
@@ -111,7 +116,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     if (switchesSeen.current === appSwitches) return
     switchesSeen.current = appSwitches
     if (!ui.tabs_close_on_app_switch || !currentApp) return
-    // every tab of another application closes; the framework tabs (settings, monitoring) and the
+    // every tab of another application closes; the framework tabs (monitoring, the Liberty Next pages) and the
     // tabs of the picked app (its home, opened by the switch itself) stay
     setS((s) => {
       const kept = s.tabs.filter((x) => tabApp(x) === null || tabApp(x) === currentApp)

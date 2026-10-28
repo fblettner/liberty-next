@@ -507,7 +507,7 @@ async def _migrate_one(ctx: _Context, app: str, *, target: str, revision: str, d
 
 
 def _record_schema_upgrade(ctx: _Context, app: str, out: dict) -> None:
-    """Journal the applied revisions in the upgrade history (Settings → History → Upgrades),
+    """Journal the applied revisions in the upgrade history (Liberty Next → Deploy → History → Upgrades),
     next to the framework / apps version bumps. Best-effort: the migration already ran."""
     try:
         from liberty.versioning import ConfigVersionStore
@@ -590,7 +590,7 @@ def _parse_step(raw: str) -> dict:
 
 
 def render_upgrade_report(data: dict) -> str:
-    """The Markdown Settings → History → Upgrades shows for a report."""
+    """The Markdown Liberty Next → Deploy → History → Upgrades shows for a report."""
     kind = data.get("kind", "upgrade")
     fw, apps, tag = data.get("framework", {}), data.get("apps", {}), data.get("image_tag", {})
 

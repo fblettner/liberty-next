@@ -1,4 +1,4 @@
-// Settings → Access — RBAC management (users + roles), superuser-only. The framework enforces
+// Liberty Next → Administer → Access — RBAC management (users + roles), superuser-only. The framework enforces
 // permissions (Principal.has_permission, allow/deny, deny-wins); this is the management UI.
 //
 // Roles are edited in a full-height panel next to the roles list (pages/Settings/Access/

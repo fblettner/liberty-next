@@ -26,7 +26,7 @@ def resolve_app_config_path() -> Path:
     ``LIBERTY_APP_CONFIG`` (env) wins — useful for a gitignored ``config/app-dev.toml``
     in dev so encrypted license/api-key values don't get committed. Falls back to the
     historical default ``config/app.toml``. Used by both :func:`load_settings` and the
-    Settings → App editor so reads + writes always target the same file."""
+    Liberty Next → Administer → App editor so reads + writes always target the same file."""
     override = os.environ.get("LIBERTY_APP_CONFIG", "").strip()
     if override:
         return Path(override)
@@ -366,7 +366,7 @@ class ReportsBrandingSettings(BaseModel):
     branding here just fills the gaps — typically: company name as ``author``,
     customer brand color, a neutral eyebrow like "Rapport d'audit".
 
-    Edited via Settings → Reports (frontend ``ReportsBuilder``); persisted in
+    Edited via Liberty Next → Build → Report templates (frontend ``ReportsBuilder``); persisted in
     ``[reports.branding]`` inside ``app.toml`` (see
     :func:`liberty.web.admin.put_reports_branding`)."""
 
@@ -383,7 +383,7 @@ class ReportsSettings(BaseModel):
     report rendered through :func:`liberty.reports.render.render_content`.
 
     * ``branding`` (Phase 3b) — PDF cover / header / footer defaults edited
-      via Settings → Reports → Branding.
+      via Liberty Next → Administer → App → PDF branding.
     * ``templates_config_path`` (Phase 4a) — where ``reports.toml`` lives.
       Resolves through :func:`_default_config_path` so ``LIBERTY_APPS_DIR``
       (when set) redirects the default to ``${LIBERTY_APPS_DIR}/reports.toml``

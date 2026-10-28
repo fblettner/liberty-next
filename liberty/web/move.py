@@ -111,7 +111,7 @@ def _relocate_definition(doc: Any, *, kind: str, name: str, from_conn: str, to_c
     if not isinstance(conns, dict) or from_conn not in conns:
         raise MoveError(f"connector {from_conn!r} not found in connectors.toml")
     if to_conn not in conns:
-        raise MoveError(f"target connector {to_conn!r} does not exist — create it first (Settings → Connectors)")
+        raise MoveError(f"target connector {to_conn!r} does not exist — create it first (Liberty Next → Build → Connectors)")
     coll = _COLL_BY_KIND[kind]
     src = conns[from_conn].get(coll)
     if not isinstance(src, list):

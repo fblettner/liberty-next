@@ -76,7 +76,7 @@ export function filterRoutes(routes: ApiRoute[], q: string, group: string): ApiR
       || r.permissions.some((p) => p.toLowerCase().includes(n)) || r.file.toLowerCase().includes(n)))
 }
 
-/** The label a setting has in its editor (an i18n key; Settings → App field labels), so the
+/** The label a setting has in its editor (an i18n key; Liberty Next → Administer → App field labels), so the
  *  Configuration view reads like the screens. Keys edited elsewhere or file-only have their own. */
 export const CONFIG_LABELS: Record<string, string> = {
   'app.name': 'settings.app.name', 'app.host': 'settings.app.host', 'app.port': 'settings.app.port',

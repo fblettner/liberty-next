@@ -8,7 +8,7 @@ describe('tabApp', () => {
     expect(tabApp({ kind: 'dashboard', connector: '', target: 'nomajde.overview' })).toBe('nomajde')
     expect(tabApp({ kind: 'page', connector: '', target: '/explorer/nomajde/security' })).toBe('nomajde')
     expect(tabApp({ kind: 'page', connector: '', target: '/explorer' })).toBeNull()
-    expect(tabApp({ kind: 'settings', connector: '', target: '' })).toBeNull()
+    expect(tabApp({ kind: 'page', connector: '', target: '/liberty/screens' })).toBeNull()
     expect(tabApp({ kind: 'job', connector: '', target: 'nomajde-dictionary-refresh' })).toBe('')
   })
 })

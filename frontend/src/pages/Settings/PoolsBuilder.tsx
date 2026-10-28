@@ -2,7 +2,7 @@
 // pools, renders each as a SchemaForm driven by PoolConfig's JSON Schema (GET /admin/config/schema),
 // and on Save validates + surgically rewrites only the [pools.*] tables in connectors.toml
 // (PUT /admin/config/pools) then reloads. No rename yet — delete + re-add. Renders the body only;
-// Settings/index.tsx wraps the page.
+// pages/Liberty wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Database, Edit3, Undo2, GitBranch } from 'lucide-react'

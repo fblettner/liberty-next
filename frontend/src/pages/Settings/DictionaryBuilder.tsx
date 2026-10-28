@@ -5,7 +5,7 @@
 // top-level `[entries.*]` etc.) and per-connector overlays (`[connectors.<name>.entries.*]`) — v1's
 // per-app dictionaries map onto these so two migrated apps can't clash on a `dd_id`. Save validates
 // the whole `DictionaryFile` then rewrites the file (via tomlkit), then reloads. No rename yet —
-// delete + re-add. Renders the body only; Settings/index.tsx wraps the page.
+// delete + re-add. Renders the body only; pages/Liberty wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { Save, Plus, Trash2, Search, Edit3, BookText, Undo2, Copy, GitBranch, FileSpreadsheet } from 'lucide-react'

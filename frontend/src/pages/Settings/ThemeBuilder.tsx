@@ -1,4 +1,4 @@
-// Settings → Theme — per-deployment branding (superuser). Pick a built-in preset, set the primary
+// Liberty Next → Administer → Theme — per-deployment branding (superuser). Pick a built-in preset, set the primary
 // accent colour, name the app, choose a font + text size. The change applies to the whole install
 // (written to theme.toml on save and served by GET /api/theme to every client on load). Dark/light
 // stays a per-user toggle in the top bar — this only re-skins the accent family + names the app.

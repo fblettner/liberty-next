@@ -25,8 +25,8 @@ def test_every_settings_key_is_listed() -> None:
 
 def test_editors_and_file_only_reasons() -> None:
     ref = _ref()
-    assert ref["app.default_page_size"]["editor"] == "Settings → App"
-    assert ref["promotion.targets"]["editor"] == "Settings → Package → Promotion"
+    assert ref["app.default_page_size"]["editor"] == "Liberty Next → Administer → App"
+    assert ref["promotion.targets"]["editor"] == "Liberty Next → Deploy → Package → Promotion"
     assert ref["crypto.master_key"]["editor"] is None and ref["crypto.master_key"]["file_only"] == FILE_ONLY["crypto.master_key"]
     assert set(ui_editors()) <= set(ref)          # no editor registered for a key that doesn't exist
 

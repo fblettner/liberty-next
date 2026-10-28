@@ -37,7 +37,7 @@ the previous shipment, kept otherwise.
 
 Everything goes through ``tomllib`` + ``tomli_w`` (never ``tomlkit`` — see CLAUDE.md on the
 nested-table cliff); comments in the live files are dropped, as every builder save already
-does. Settings → Package & Deploy (:mod:`liberty.web.package_import`) shares the entity
+does. Liberty Next → Deploy → Package (:mod:`liberty.web.package_import`) shares the entity
 enumeration below.
 """
 

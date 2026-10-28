@@ -386,7 +386,7 @@ async def run_report(
 
     # Render in the requested format. Cover defaults come from three layers:
     #   1. framework — title, cover_brand=app_name, author=app_name
-    #   2. operator branding (Phase 3b) — Settings → Reports → Branding,
+    #   2. operator branding (Phase 3b) — Liberty Next → Administer → App → PDF branding,
     #      persisted in app.toml's [reports.branding]; overrides framework
     #      defaults but yields to per-report pdf_options
     #   3. plugin — ReportContent.pdf_options always wins

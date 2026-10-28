@@ -1,4 +1,4 @@
-// The role editor panel (Settings → Access → Roles): name + description, the baseline, the menu
+// The role editor panel (Liberty Next → Administer → Access → Roles): name + description, the baseline, the menu
 // tree, the rules beyond menus, and the resulting permission strings for the curious. It edits
 // `RoleModel` and writes `buildPermissions(model)` — the same strings the chip editor wrote.
 import { useMemo, useState } from 'react'

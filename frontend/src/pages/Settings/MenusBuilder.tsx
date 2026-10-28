@@ -415,7 +415,7 @@ export default function MenusBuilder() {
     setApps((p) => ({ ...(p ?? {}), [pick]: { items: [] } }))
     setSelApp(pick); setStatus(null)
   }
-  // Delete app is gone — the connector cascade (Settings → Connectors → Delete) is the single
+  // Delete app is gone — the connector cascade (Liberty Next → Build → Connectors → Delete) is the single
   // path that removes a connector and everything keyed under it (menu, screens, charts, …).
   // Revert pending tree edits to the last loaded state.
   const discard = () => {

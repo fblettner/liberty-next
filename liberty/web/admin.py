@@ -658,7 +658,7 @@ async def put_pools_config(body: PoolsBody, request: Request, _: Superuser) -> d
 async def config_integrity(request: Request, _: Superuser) -> dict[str, Any]:
     """Walk every cross-reference in the loaded config and report broken references (errors) +
     smells (unused connectors / orphan screens — warnings). Runs against the in-memory registries
-    (``app.state``), so it reflects the last ``/admin/reload``. Feeds Settings → Integrity."""
+    (``app.state``), so it reflects the last ``/admin/reload``. Feeds Liberty Next → Build → Integrity."""
     from liberty.web.integrity import check_integrity
     issues = check_integrity(request.app.state)
     return {
@@ -1247,7 +1247,7 @@ class FromPresetBody(BaseModel):
 
 @router.post("/explorer/from-preset", summary="Fill an explorer model from a preset")
 async def explorer_from_preset(body: FromPresetBody, request: Request, _: Superuser) -> dict[str, Any]:
-    """The Settings → Explorer "apply a preset": the preset's tables as entities (the base table
+    """The Liberty Next → Build → Explorer "apply a preset": the preset's tables as entities (the base table
     the hub), its joins as relations resolved on the discovered columns. Returns the model body
     to put in the editor + the warnings (a join column not found, a table that does not run)."""
     from liberty.explorer.config import ExplorerModel
@@ -2309,7 +2309,7 @@ async def preview_report_template(
 ) -> dict[str, Any]:
     """Render *body.template_inline* against the live connector data (or an
     empty dataset when no data binding is supplied) and return the rendered
-    markdown. Used by the Settings → Templates editor's "Test render" button.
+    markdown. Used by the Liberty Next → Build → Report templates editor's "Test render" button.
 
     Errors during data fetch / template parse / template render are returned as
     422 with the underlying message — the UI shows them inline next to the
@@ -2412,7 +2412,7 @@ async def introspect_report_query_columns(
 ) -> dict[str, Any]:
     """Return the column metadata for *body.query* on *body.connector*.
 
-    Used by the Settings → Templates editor for two things:
+    Used by the Liberty Next → Build → Report templates editor for two things:
 
     * Monaco autocomplete — typing ``row.`` suggests the actual column names
       the query returns.
@@ -2648,7 +2648,7 @@ async def export_job_endpoint(body: ExportJobBody, request: Request, _: Superuse
         "   ```\n\n"
         "## Notes\n\n"
         "- Queries / connectors / pools referenced by this job are NOT bundled — make sure\n"
-        "  the target install already has them. Use `Settings → Package` to ship the\n"
+        "  the target install already has them. Use `Liberty Next → Deploy → Package` to ship the\n"
         "  underlying config slice separately if needed.\n"
         "- ENC: secrets and ${VAR} references pass through verbatim. The target needs the\n"
         "  same `[crypto] master_key` and any referenced env vars set.\n"
@@ -3524,7 +3524,7 @@ class DeleteAppBody(BaseModel):
 
     Removes every per-app entry (connector / dictionary overlay / menu / screens) for
     *app*. The cross-file inverse of clone-app; same files touched, opposite direction.
-    Pool deletion is NOT included — pools are managed separately via Settings → Pools
+    Pool deletion is NOT included — pools are managed separately via Liberty Next → Administer → Pools
     and may be shared between apps.
     """
 

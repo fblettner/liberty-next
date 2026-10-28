@@ -205,7 +205,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.license = verify_license(settings.license.key, master_key=settings.crypto.master_key)
         if app.state.license.error and settings.license.key.strip():
             logging.getLogger("liberty.licensing").warning("license: %s", app.state.license.error)
-        # Every later rebuild (Settings → Reload, the file watcher, a license rotation)
+        # Every later rebuild (Liberty Next → reload the configuration, the file watcher, a license rotation)
         # goes through liberty.runtime.rebuild_runtime — one lock, one code path.
         import asyncio
         app.state.runtime_lock = asyncio.Lock()
@@ -551,7 +551,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "### Endpoint\n"
                 "- ``GET /api/theme`` — public (no auth). Returns the resolved CSS custom "
                 "  properties + the app name. The SPA applies them at boot.\n\n"
-                "Edit the theme in **Settings → Theme** (the structured editor). Changes are "
+                "Edit the theme in **Liberty Next → Administer → Theme** (the structured editor). Changes are "
                 "live for every new request — no reload needed."
             ),
         },
@@ -665,7 +665,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "TOML, the framework derives schemas at query time, serves a React admin UI on the "
             "same port, surfaces an Anthropic tool-use assistant for natural-language access, and "
             "wraps everything in a structured-config builder + dependency-aware deployment "
-            "packager (`Settings → Package`). See the README for install and the Liberty Apps "
+            "packager (`Liberty Next → Deploy → Package`). See the README for install and the Liberty Apps "
             "repo for the customer-facing nomasx1 / nomajde / nomaflow packages."
         ),
         contact={"name": "Liberty Next", "url": "https://github.com/fblettner/liberty-next"},

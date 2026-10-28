@@ -26,12 +26,12 @@ from liberty.config import Settings
 
 _ROOT = Path(__file__).resolve().parent
 
-# Screens other than Settings → App that write a key of app.toml.
+# Screens other than Liberty Next → Administer → App that write a key of app.toml.
 _OTHER_EDITORS: dict[str, str] = {
     "app.log_levels": "Monitoring → Server log (levels per module)",
-    "reports.branding": "Settings → Reports → Branding",
-    "changesets.post_apply": "nomaflow → Changes → Post-apply steps",
-    "promotion.targets": "Settings → Package → Promotion",
+    "reports.branding": "Liberty Next → Administer → App → PDF branding",
+    "changesets.post_apply": "Liberty Next → Deploy → Changes → Post-apply steps",
+    "promotion.targets": "Liberty Next → Deploy → Package → Promotion",
 }
 
 # Keys that stay in the file (or the environment) on purpose, with the reason shown on the page.
@@ -58,7 +58,7 @@ def _app_editor_keys() -> dict[str, str]:
                           ("auth", admin._AUTH_SAFE_KEYS), ("jobs", admin._JOBS_SAFE_KEYS),
                           ("changesets", admin._CHANGESETS_SAFE_KEYS)):
         for k in keys:
-            out[f"{section}.{k}"] = "Settings → App"
+            out[f"{section}.{k}"] = "Liberty Next → Administer → App"
     return out
 
 

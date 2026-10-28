@@ -1,6 +1,6 @@
 """Promote to another instance (C11): sign in on a target Liberty and have it preview or apply a
 payload this instance built — a config package (Package & Deploy) or an approved change package
-(nomaflow → Changes). The target does the work through its own routes (``/admin/import-package``,
+(Liberty Next → Deploy → Changes). The target does the work through its own routes (``/admin/import-package``,
 ``/admin/changesets/apply``), so a promotion is exactly what an operator importing the file there
 would get; the source only carries it and keeps a history of what it applied where.
 

@@ -6,6 +6,7 @@
 // render through <Outlet/> instead — but the tabs underneath stay mounted.
 import { lazy, Suspense, useEffect, useState, type LazyExoticComponent, type ComponentType } from 'react'
 import { explorerModelOf } from '../tabs/pageTabs'
+import { libertyPageOf } from '../services/libertyMenu'
 import i18n from 'i18next'
 import { Centered, ErrorBoundary } from '../common'
 import { useTabs } from '../tabs/TabsContext'
@@ -16,8 +17,8 @@ const HttpRunner = lazy(() => import('../pages/HttpRunner'))
 const DashboardView = lazy(() => import('../pages/DashboardView'))
 const NomaflowRunDetail = lazy(() => import('../pages/Nomaflow/RunDetail'))
 const JobRunner = lazy(() => import('../pages/JobRunner'))
-const Settings = lazy(() => import('../pages/Settings'))
 const Monitoring = lazy(() => import('../pages/Monitoring'))
+const LibertyPage = lazy(() => import('../pages/Liberty'))
 
 // `page` tabs (menus.toml type="page") → the framework page rendered inside the tab, keyed by its
 // route path (the tab's ``target``). Kept in sync with src/tabs/pageTabs.ts (the path set) + App's
@@ -26,14 +27,10 @@ const PAGE_COMPONENTS: Record<string, LazyExoticComponent<ComponentType>> = {
   '/nomaflow': lazy(() => import('../pages/Nomaflow')),
   '/nomaflow/schedule': lazy(() => import('../pages/Nomaflow/Schedule')),
   '/nomaflow/runs': lazy(() => import('../pages/Nomaflow/RunsList')),
-  '/nomaflow/package': lazy(() => import('../pages/Nomaflow/PackagePage')),
-  '/nomaflow/changes': lazy(() => import('../pages/Nomaflow/ChangesPage')),
-  '/nomaflow/integrity': lazy(() => import('../pages/Nomaflow/IntegrityPage')),
   '/reports': lazy(() => import('../pages/Reports')),
   '/notifications': lazy(() => import('../pages/Notifications')),
   '/explorer': lazy(() => import('../pages/Explorer')),
   '/developer': lazy(() => import('../pages/Developer')),
-  '/liberty/reports': lazy(() => import('../pages/DocReports')),
 }
 const ExplorerPage = lazy(() => import('../pages/Explorer'))
 
@@ -80,14 +77,14 @@ export default function TabHost({ hidden }: { hidden: boolean }) {
                 <NomaflowRunDetail runId={tab.target} />
               ) : tab.kind === 'job' ? (
                 <JobRunner jobId={tab.target} />
-              ) : tab.kind === 'settings' ? (
-                <Settings />
               ) : tab.kind === 'monitoring' ? (
                 <Monitoring />
               ) : tab.kind === 'page' ? (
                 (() => {
                   const initial = explorerModelOf(tab.target)
                   if (initial) return <ExplorerPage initial={initial} />
+                  const liberty = libertyPageOf(tab.target)
+                  if (liberty) return <LibertyPage page={liberty} />
                   const P = PAGE_COMPONENTS[tab.target]; return P ? <P /> : <Centered />
                 })()
               ) : tab.kind === 'screen' ? (

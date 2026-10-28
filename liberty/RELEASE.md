@@ -34,9 +34,14 @@
   the file / environment and what is not in the UI, and a status filter replaces the checkbox.
 - The Liberty Next workspace (superuser): the framework's pages are no longer listed under every application's menu —
   they form a workspace of their own, picked in the application switcher like an application or with the new button
-  of the top bar (which returns to the last application). Its menu groups them by purpose: Build (screen assistant,
-  configuration), Operate (monitoring, jobs, integrity), Deploy (package, changes), Document (developer reference,
-  documentation reports). The configuration editors open on the last application used.
+  of the top bar (which returns to the last application). The Settings page is split: each editor is its own page
+  (`/liberty/<page>`, every one with the "reload the configuration" button), grouped by purpose — Build, in the order an
+  application is made (screen assistant, connectors, dictionary, screens, menus, actions, charts, dashboards, Explorer
+  models, report templates, notification rules, AI, integrity), Administer (app, pools, access, theme), Operate (monitoring, jobs), Deploy (package,
+  changes, history), Document (developer reference, documentation reports, release notes). Package, Changes and
+  Integrity leave the nomaflow application (liberty-apps 0.1.3). The former `/settings?tab=…` and `/nomaflow/package |
+  changes | integrity` links redirect to the new pages; the editors open on the last application used; messages that
+  pointed to "Settings → …" name the new place.
 - Liberty Next → Document → Documentation reports (superuser): the implementation report and the technical report,
   picked from two cards; the sections to include, the language, the cover's date label, PDF or Markdown (`/admin/dev/reports`). The
   technical report documents the release from the running code (architecture, data model, configuration reference

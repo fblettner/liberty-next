@@ -1,7 +1,7 @@
 // Shared "Find usages" modal — every Settings editor surfaces a button that opens this with
 // {kind, name, scope?}. Hits POST /admin/find-usages, groups results by type, renders each
 // usage as a clickable row that deep-links to the editor that owns the referencing config
-// (the URL pattern is the same one Connectors → Open in Screens already uses — ?tab=...&app=...).
+// (the editor's Liberty Next page, `/liberty/<editor>?app=...&screen=...`, read by the editor on mount).
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
@@ -10,6 +10,7 @@ import { ArrowUpRight, Search, AlertCircle } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, SpinnerRing, Mono } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { libertyPath, type LibertyPage } from '../../services/libertyMenu'
 
 export interface Usage {
   type: string
@@ -115,48 +116,44 @@ function groupUsages(usages: Usage[]): Array<{ type: string; title: string; rows
     .map(([type, rows]) => ({ type, title: TYPE_TITLES[type] ?? type, rows }))
 }
 
-// Translate a deep_link payload into a Settings URL the navigate hook can push. Mirrors the
+// Translate a deep_link payload into the editor's Liberty Next page URL the navigate hook can push. Mirrors the
 // cross-link patterns the editors already understand (ScreensBuilder consumes ?app= + ?screen=,
 // ConnectorsBuilder consumes ?connector= + ?query=, …). Returns null when we don't know how
 // to route (the row falls back to a no-op click).
+const editorUrl = (page: LibertyPage, qp: URLSearchParams): string => libertyPath(page) + (qp.toString() ? `?${qp.toString()}` : '')
+
 export function deepLinkToUrl(link: Record<string, unknown>): string | null {
   const editor = String(link.editor || '')
   const qp = new URLSearchParams()
   if (editor === 'screens') {
-    qp.set('tab', 'screens')
     if (link.app) qp.set('app', String(link.app))
     if (link.screen) qp.set('screen', String(link.screen))
-    return `/settings?${qp.toString()}`
+    return editorUrl('screens', qp)
   }
   if (editor === 'connectors') {
-    qp.set('tab', 'connectors')
     if (link.connector) qp.set('connector', String(link.connector))
     if (link.query) qp.set('query', String(link.query))
-    return `/settings?${qp.toString()}`
+    return editorUrl('connectors', qp)
   }
   if (editor === 'dictionary') {
-    qp.set('tab', 'dictionary')
     if (link.kind) qp.set('kind', String(link.kind))
     if (link.scope) qp.set('scope', String(link.scope))
     if (link.name) qp.set('name', String(link.name))
-    return `/settings?${qp.toString()}`
+    return editorUrl('dictionary', qp)
   }
   if (editor === 'menus') {
-    qp.set('tab', 'menus')
     if (link.app) qp.set('app', String(link.app))
     if (link.item) qp.set('item', String(link.item))
-    return `/settings?${qp.toString()}`
+    return editorUrl('menus', qp)
   }
   if (editor === 'charts') {
-    qp.set('tab', 'charts')
     if (link.scope) qp.set('scope', String(link.scope))
     if (link.chart) qp.set('chart', String(link.chart))
-    return `/settings?${qp.toString()}`
+    return editorUrl('charts', qp)
   }
   if (editor === 'dashboards') {
-    qp.set('tab', 'dashboards')
     if (link.dashboard) qp.set('dashboard', String(link.dashboard))
-    return `/settings?${qp.toString()}`
+    return editorUrl('dashboards', qp)
   }
   return null
 }

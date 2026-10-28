@@ -1,4 +1,4 @@
-// Settings → Templates — operator-authored custom reports. Lists every
+// Liberty Next → Build → Report templates — operator-authored custom reports. Lists every
 // [reports.<id>] block from config/reports.toml; lets the operator add /
 // edit / delete templates and bind each to a connector query.
 //

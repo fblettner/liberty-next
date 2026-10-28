@@ -14,8 +14,8 @@ without systemd). The Docker twin is ``release/liberty``; both have the same ver
     liberty-ops rollback [--yes] [--apps WHEEL]        previous framework version + the pre-upgrade backup
 
 Design rules, same as the Docker script: the backup is the only hard gate of an upgrade; doctor is
-advisory there (an upgrade is often the fix); every run leaves a report in Settings → History →
-Upgrades (``liberty-admin record-upgrade``); what a rollback needs is recorded in
+advisory there (an upgrade is often the fix); every run leaves a report in Liberty Next → Deploy →
+History → Upgrades (``liberty-admin record-upgrade``); what a rollback needs is recorded in
 ``<config>/.versions/ops-state.json``.
 
 The post-upgrade steps run the **new** code through subprocesses (``liberty-admin …`` from the
@@ -362,7 +362,7 @@ def _doctor(env: Env) -> tuple[int, list[str]]:
             load_connectors(conn, master_key=env.settings.crypto.master_key)
             p_ok(f"connectors.toml parses: {conn}")
         except Exception as exc:  # noqa: BLE001
-            p_fail(f"connectors.toml does not load: {type(exc).__name__}: {str(exc)[:160]}", "fix the file (Settings → Connectors cannot open while it is broken)")
+            p_fail(f"connectors.toml does not load: {type(exc).__name__}: {str(exc)[:160]}", "fix the file (Liberty Next → Build → Connectors cannot open while it is broken)")
     else:
         p_fail(f"connectors.toml missing: {conn}", "liberty-admin init-db seeds [pools.default]; liberty-apps install writes the apps' connectors")
     if env.apps_dir is not None:
@@ -671,7 +671,7 @@ def record_report(env: Env, *, kind: str, started: str, steps: Steps, before: di
         name = json.loads(r.stdout)["report"]
     except (json.JSONDecodeError, KeyError):
         return None
-    ok(f"report recorded (Settings → History → Upgrades): {name}")
+    ok(f"report recorded (Liberty Next → Deploy → History → Upgrades): {name}")
     return name
 
 

@@ -419,7 +419,7 @@ export default function JobsList() {
   const filtersOn = !!(q || status || appFilter || tagFilter)
 
   // Export — a minimal ZIP with this job's [[jobs]] entry + a MANIFEST.md (referenced queries /
-  // connectors are not bundled; Settings → Package ships the config slice).
+  // connectors are not bundled; Liberty Next → Deploy → Package ships the config slice).
   const exportJob = async (job: JobSummary) => {
     try {
       await apiDownload('/admin/export-job', `nomaflow-job-${job.id}.zip`, { json: { id: job.id } })

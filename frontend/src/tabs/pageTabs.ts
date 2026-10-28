@@ -4,25 +4,24 @@
 // decision) and TabHost (the path → component registry) in agreement. The job editor
 // (/nomaflow/jobs/:id) and run detail (/nomaflow/runs/:id — the list /nomaflow/runs is) are intentionally NOT here: the editor is
 // a transient full-page reached from a button, and run detail is its own ``nomaflow_run`` tab kind.
+import { libertyPageOf } from '../services/libertyMenu'
+
+// The Liberty Next workspace's pages (`/liberty/<page>`, services/libertyMenu.ts) are page tabs too.
 export const PAGE_TAB_PATHS = [
   '/nomaflow',
   '/nomaflow/schedule',
   '/nomaflow/runs',
-  '/nomaflow/package',
-  '/nomaflow/changes',
-  '/nomaflow/integrity',
   '/reports',
   '/notifications',
   '/explorer',
   '/developer',
-  '/liberty/reports',
 ] as const
 
 /** The Explorer opened on one model: ``/explorer/<app>/<model>`` (a menu link per model). */
 export const EXPLORER_MODEL_PATH = /^\/explorer\/([^/]+)\/([^/]+)$/
 
 export function isPageTabPath(pathname: string): boolean {
-  return (PAGE_TAB_PATHS as readonly string[]).includes(pathname) || EXPLORER_MODEL_PATH.test(pathname)
+  return (PAGE_TAB_PATHS as readonly string[]).includes(pathname) || EXPLORER_MODEL_PATH.test(pathname) || libertyPageOf(pathname) !== null
 }
 
 /** The ``{app, model}`` of an Explorer model path, else null. */

@@ -59,7 +59,7 @@ type Row = Record<string, unknown>
 // screen — "what happens when a row is clicked" — then reveals only the relevant fields.
 const GENERAL_FORM_KEYS = [
   'label', 'description', 'audit_table',
-  // Change-package capture (Settings → Packages): toggle on to record every write on this
+  // Change-package capture (Liberty Next → Deploy → Changes): toggle on to record every write on this
   // screen into the app's active change package, with ``change_entity`` as its grouping label
   // and ``post_apply`` selecting the run-once steps this screen's changes need on promotion.
   'change_tracked', 'change_entity', 'post_apply',

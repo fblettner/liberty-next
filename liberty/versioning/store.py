@@ -346,7 +346,7 @@ class ConfigVersionStore:
 
     def write_upgrade_report(self, name: str, data: dict[str, Any], markdown: str) -> tuple[Path, Path]:
         """Store one upgrade / rollback report as ``<name>.json`` (the structured record) and
-        ``<name>.md`` (what Settings → History → Upgrades renders). *name* must be a plain file stem."""
+        ``<name>.md`` (what Liberty Next → Deploy → History → Upgrades renders). *name* must be a plain file stem."""
         if not name or any(ch in name for ch in "/\\") or name.startswith("."):
             raise ValueError(f"bad report name {name!r}")
         self.reports_dir.mkdir(parents=True, exist_ok=True)

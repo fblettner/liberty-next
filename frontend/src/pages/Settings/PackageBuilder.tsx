@@ -1,4 +1,4 @@
-// Settings → Package — full deploy workflow: BUILD a ZIP from selected seeds, IMPORT a ZIP
+// Liberty Next → Deploy → Package — full deploy workflow: BUILD a ZIP from selected seeds, IMPORT a ZIP
 // from another install. The build side: multi-select seeds (screens / menu items /
 // dashboards) on the left, the dependency closure preview on the right WITH PER-DEP
 // CHECKBOXES (connectors / pools / api_endpoints default-unchecked — operator opts in).

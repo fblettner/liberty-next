@@ -1,5 +1,5 @@
 """``ai.toml`` — the assistant material an application ships (bundled with the apps, merged
-like the other per-app files, edited under Settings → AI)::
+like the other per-app files, edited under Liberty Next → Build → AI)::
 
     [ai.nomajde]
     starters = ["Which users have no role?", "Roles with the most members"]

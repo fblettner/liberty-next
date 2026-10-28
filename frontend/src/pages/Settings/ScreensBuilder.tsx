@@ -331,7 +331,7 @@ export default function ScreensBuilder() {
     setDoc((p) => ({ ...(p ?? {}), [name]: { ...((p ?? {})[name] ?? {}) } }))
     setSelApp(name); setStatus(null)
   }
-  // App-level rename / delete are handled by the connector cascade (Settings → Connectors →
+  // App-level rename / delete are handled by the connector cascade (Liberty Next → Build → Connectors →
   // Clone / Rename / Delete operate across connectors.toml + dictionary.toml + menus.toml +
   // screens.toml + charts.toml + dashboards.toml). Per-screen Clone / Rename / Delete + Add
   // screen live here; everything else stays in the Connectors editor.

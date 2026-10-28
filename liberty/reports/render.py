@@ -782,7 +782,7 @@ def render_content(
     defaults when ``content.pdf_options`` doesn't override them.
 
     ``branding`` (Phase 3b) is the operator-curated install-wide PDF defaults
-    from ``Settings → Reports → Branding`` (persisted in ``[reports.branding]``
+    from ``Liberty Next → Administer → App → PDF branding`` (persisted in ``[reports.branding]``
     of ``app.toml``). It fills the gaps between framework defaults and the
     plugin's per-report ``pdf_options`` — typically the company's brand colour,
     author name, eyebrow text. Per-call ``content.pdf_options`` still wins,

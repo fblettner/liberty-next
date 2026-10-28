@@ -1,6 +1,6 @@
 """Cross-file top-level-key renames — the operation behind ``POST /admin/config/rename``.
 
-The structured config builders (Settings → Pools / Connectors / Dictionary / Menus / Screens /
+The structured config builders (Liberty Next → Pools / Connectors / Dictionary / Menus / Screens /
 Dashboards) edit each file's body in place, but a top-level key (a *connector name*, a
 *sequence id*, a *lookup id*, an *app name*) is referenced from several other files. Renaming
 ``[connectors.nomasx1]`` by hand means hunting every ``connector = "nomasx1"`` in
@@ -204,7 +204,7 @@ def rename_connector(
     if n == 0:
         raise RenameError(
             f"connector {old!r} not found in {conn_path} — nothing to rename. "
-            "Are you sure the connector exists? (Check Settings → Connectors.)"
+            "Are you sure the connector exists? (Check Liberty Next → Build → Connectors.)"
         )
 
     # 2) screens.toml — every Screen.connector / NestedFormTab.connector / NestedTableTab.connector

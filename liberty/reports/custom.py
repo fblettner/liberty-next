@@ -106,7 +106,7 @@ class CustomReportTemplate(BaseModel):
     pdf_options: dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "Per-report PDF overrides. Sits ABOVE Settings → Reports → Branding "
+            "Per-report PDF overrides. Sits ABOVE Liberty Next → Administer → App → PDF branding "
             "in precedence — anything set here overrides install-wide defaults "
             "for THIS report only. See BuildOptions for field names."
         ),

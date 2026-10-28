@@ -2,7 +2,7 @@
 // Every place we ask the operator to *pick* a query (Screen Editor's read/update/insert/delete,
 // the action `run_query` / `navigate` target, Menu item targets, Dictionary's Lookup / Sequence
 // query field) used to leave the operator stuck if they
-// realised the query needed tweaking — they had to leave the page, go to Settings → Connectors,
+// realised the query needed tweaking — they had to leave the page, go to Liberty Next → Build → Connectors,
 // find the connector + query, edit it, come back. This modal lets them edit the query in place.
 //
 // The modal:

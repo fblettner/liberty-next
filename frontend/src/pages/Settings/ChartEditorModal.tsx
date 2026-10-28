@@ -180,7 +180,7 @@ export function ChartEditorModal({
                 <Field label={t('settings.charts.query')}>
                   {/* Edit / Clone / Add trio sits next to the picker so the operator can
                       fix the SQL inline, fork it for the customer (Clone), or scaffold a
-                      brand-new query (Add) — without bouncing to Settings → Connectors.
+                      brand-new query (Add) — without bouncing to Liberty Next → Build → Connectors.
                       Shared icons + EditQueryModal: same UX as the dictionary lookup /
                       sequence + screen-editor surfaces. */}
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>

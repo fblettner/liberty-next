@@ -39,10 +39,16 @@
   dans l'interface, et un filtre d'état remplace la case à cocher.
 - L'espace Liberty Next (superutilisateur) : les pages du framework ne sont plus listées sous le menu de chaque
   application — elles forment un espace à part, choisi dans le sélecteur d'applications comme une application ou par le
-  nouveau bouton de la barre du haut (qui ramène à la dernière application). Son menu les regroupe par usage :
-  Construire (assistant d'écrans, configuration), Exploiter (supervision, tâches, intégrité), Déployer (paquet,
-  modifications), Documenter (référence développeur, rapports de documentation). Les éditeurs de configuration
-  s'ouvrent sur la dernière application utilisée.
+  nouveau bouton de la barre du haut (qui ramène à la dernière application). La page Paramètres est éclatée : chaque
+  éditeur est sa propre page (`/liberty/<page>`, chacune avec le bouton « recharger la configuration »), regroupées par
+  usage — Construire, dans l'ordre où se monte une application (assistant d'écrans, connecteurs, dictionnaire, écrans,
+  menus, actions, graphiques, tableaux de bord, modèles de l'Explorateur, modèles de rapport, règles de notification,
+  IA, intégrité), Administrer (app, pools, accès,
+  thème), Exploiter (supervision, tâches), Déployer (paquet, modifications, historique), Documenter (référence
+  développeur, rapports de documentation, notes de version). Paquet, Modifications et Intégrité quittent l'application
+  nomaflow (liberty-apps 0.1.3). Les anciens liens `/settings?tab=…` et `/nomaflow/package | changes | integrity`
+  redirigent vers les nouvelles pages ; les éditeurs s'ouvrent sur la dernière application utilisée ; les messages qui
+  renvoyaient à « Paramètres → … » nomment le nouvel emplacement.
 - Liberty Next → Documenter → Rapports de documentation (superutilisateur) : le rapport d'implémentation et le rapport
   technique, choisis par deux cartes ; les sections à inclure, la langue, le libellé de date de la page de garde, PDF ou Markdown
   (`/admin/dev/reports`). Le rapport technique documente la version à partir du code en cours d'exécution

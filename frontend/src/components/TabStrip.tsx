@@ -6,27 +6,25 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Table as TableIcon, Globe, Workflow, Play, X, ChevronLeft, ChevronRight, SlidersHorizontal, Activity, CalendarClock, Package, GitCompare, ShieldCheck, FileText, Bell, Compass, Code2, BookOpen } from 'lucide-react'
+import { Table as TableIcon, Globe, Workflow, Play, X, ChevronLeft, ChevronRight, Activity, CalendarClock, FileText, Bell, Compass, Code2 } from 'lucide-react'
 
-// Icon per `page` tab (keyed by route path), so Jobs / Schedule / Package / … stay recognisable.
+// Icon per `page` tab (keyed by route path), so Jobs / Schedule / … stay recognisable; a Liberty Next
+// page takes its menu leaf's icon.
 const PAGE_ICONS: Record<string, typeof TableIcon> = {
   '/nomaflow': Workflow,
   '/nomaflow/schedule': CalendarClock,
-  '/nomaflow/package': Package,
-  '/nomaflow/changes': GitCompare,
-  '/nomaflow/integrity': ShieldCheck,
   '/reports': FileText,
   '/notifications': Bell,
   '/explorer': Compass,
   '/developer': Code2,
-  '/liberty/reports': BookOpen,
 }
 import { colors, fontSize, fonts, radius } from '../theme'
 import { useTabs, tabPath, type Tab } from '../tabs/TabsContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
 import { useBranding } from '../branding/BrandingContext'
 import { findMenuLabelWithApp } from '../services/menuLabels'
-import { libertyLabel } from '../services/libertyMenu'
+import { libertyIcon, libertyLabel } from '../services/libertyMenu'
+import { iconFor } from './SidebarMenu'
 
 const Bar = styled.div`
   display: flex; align-items: stretch; gap: 4px; padding: 8px 16px 0; flex-shrink: 0;
@@ -181,20 +179,17 @@ export default function TabStrip() {
             tab.kind === 'http' ? Globe :
             tab.kind === 'nomaflow_run' ? Workflow :
             tab.kind === 'job' ? Play :
-            tab.kind === 'settings' ? SlidersHorizontal :
             tab.kind === 'monitoring' ? Activity :
-            tab.kind === 'page' ? (PAGE_ICONS[tab.target] ?? (tab.target.startsWith('/explorer/') ? Compass : FileText)) :
+            tab.kind === 'page' ? (PAGE_ICONS[tab.target] ?? iconFor(libertyIcon(libertyMenu, tab.target)) ?? (tab.target.startsWith('/explorer/') ? Compass : FileText)) :
             TableIcon
           // Resolve label + owning app via the menu tree so duplicates like "Users" under
           // nomasx1 vs ldap stay distinguishable (app name shown as a small line above).
-          // Nomaflow run + Settings tabs aren't menu-tree entries — label them directly with
+          // Nomaflow run + Monitoring tabs aren't menu-tree entries — label them directly with
           // no app top-line.
           let label: string
           let appLabel: string | undefined
           if (tab.kind === 'nomaflow_run') {
             label = t('tabs.nomaflowRun', { id: tab.target.slice(0, 8) })
-          } else if (tab.kind === 'settings') {
-            label = t('nav.settings')
           } else if (tab.kind === 'monitoring') {
             label = t('nav.monitoring')
           } else if (tab.kind === 'page') {

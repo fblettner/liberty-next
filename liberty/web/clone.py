@@ -167,7 +167,7 @@ def clone_app(
         raise CloneError(
             f"target pool [{new_pool}] not found in {conn_path}. Create the pool first "
             f"(CREATE DATABASE on Postgres + add [pools.{new_pool}] with the URL + "
-            "password via Settings → Pools), then re-run clone-app."
+            "password via Liberty Next → Administer → Pools), then re-run clone-app."
         )
 
     # ── pre-flight 2: source must exist somewhere ──
@@ -366,7 +366,7 @@ def delete_app(
 
     Refuses if the app doesn't exist in any of the 4 files (typo guard — the operator
     expected SOMETHING to disappear; surfacing "nothing found" is the right answer).
-    Pool deletion is NOT included — pools are managed separately (Settings → Pools);
+    Pool deletion is NOT included — pools are managed separately (Liberty Next → Administer → Pools);
     deleting an app shouldn't auto-drop a pool that other apps might still use.
     """
     _validate_identifier(app, what="app")

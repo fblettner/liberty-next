@@ -135,7 +135,7 @@ class ExplorerModel(BaseModel):
     app: str = ""  # injected from the outer table key
     label: str | None = None
     description: str | None = None
-    preset: str | None = Field(default=None, description="The Screen Assistant preset this model was filled from (Settings → Explorer applies it: tables → entities, base table → hub, joins → relations).")
+    preset: str | None = Field(default=None, description="The Screen Assistant preset this model was filled from (Liberty Next → Build → Explorer applies it: tables → entities, base table → hub, joins → relations).")
     group: str | None = Field(default=None, description="Where the model is listed in the Explorer's model picker (a header); blank = its preset's group, else the application.")
     hub: str = Field(default="", description="The entity every analysis starts from (the preset's base table when omitted).")
     entities: dict[str, ExplorerEntity] = Field(default_factory=dict)

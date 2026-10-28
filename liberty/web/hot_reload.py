@@ -227,7 +227,7 @@ async def _reload_connectors(app: FastAPI, path: Path) -> None:
         _log.warning(
             "hot_reload connectors.toml [pools.*] changed (added=%s removed=%s changed=%s) "
             "— pool changes are NOT auto-applied to avoid disrupting in-flight queries. "
-            "Use Settings → Pools → Reload from disk when ready.",
+            "Use Liberty Next → Administer → Pools → Reload from disk when ready.",
             added, removed, changed,
         )
 

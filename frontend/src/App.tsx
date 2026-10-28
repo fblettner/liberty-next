@@ -8,14 +8,15 @@ import Login from "./pages/Login";
 import OidcCallback from "./pages/OidcCallback";
 import { useTabs, type TabKind } from "./tabs/TabsContext";
 import { useWorkspace } from "./workspace/WorkspaceContext";
+import { settingsRedirect } from "./services/libertyMenu";
 
 // Framework pages are code-split; the SQL/HTTP screens aren't routed directly — they live as
 // tabs (see components/TabHost), and these route components just open/activate the matching tab.
-// Settings is also a tab now (its <Settings> lazy-loads inside TabHost); /settings is a TabRoute
-// marker like the screen routes. AI assistant is no longer a routed page — it lives in a
+// The configuration editors are pages of the Liberty Next workspace (`/liberty/<page>`), page tabs
+// like the others; /settings only redirects there. AI assistant is no longer a routed page — it lives in a
 // right-side drawer toggled from the utility bar (see components/AiDrawer). The /chat URL is gone.
 const NomaflowEditor = lazy(() => import("./pages/Nomaflow/JobEditor"));
-// nomaflow Jobs / Schedule / Package / Changes / Integrity and the Reports list are hosted as
+// nomaflow Jobs / Schedule / Runs, the Liberty Next pages and the Reports list are hosted as
 // `page` workspace TABS (TabHost's path → component registry, src/tabs/pageTabs.ts), so clicking a
 // page menu item opens a tab instead of replacing the active tab's content. Their routes below are
 // TabRoute markers. The job editor stays a direct Outlet page (transient, reached from a button);
@@ -43,7 +44,7 @@ function TabRoute({ kind }: { kind: TabKind }) {
     if (kind === "page") {
       // The route path IS the page tab's target (one tab per page path).
       openOrActivate({ kind, connector: "", target: pathname });
-    } else if (kind === "settings" || kind === "monitoring") {
+    } else if (kind === "monitoring") {
       openOrActivate({ kind, connector: "", target: "" });
     } else if (kind === "nomaflow_run" && runId) {
       openOrActivate({ kind, connector: "", target: runId });
@@ -54,6 +55,13 @@ function TabRoute({ kind }: { kind: TabKind }) {
     }
   }, [kind, connector, target, runId, pathname, openOrActivate]);
   return null;
+}
+
+// The former Settings page (`/settings?tab=…`) and nomaflow's deployment pages moved to the Liberty
+// Next workspace (`/liberty/<page>`): old links and bookmarks land on the new page.
+function SettingsRedirect() {
+  const { search } = useLocation();
+  return <Navigate to={settingsRedirect(search)} replace />;
 }
 
 // Index landing ("/") — the app's resting state when no tab is open. Closing all tabs / the last
@@ -91,21 +99,21 @@ export default function App() {
         <Route path="dashboard/:target" element={<TabRoute kind="dashboard" />} />
         {/* A nomaflow job for the user to run (a `job` menu item) — its own tab kind. */}
         <Route path="job/:target" element={<TabRoute kind="job" />} />
-        <Route path="settings" element={<TabRoute kind="settings" />} />
+        <Route path="settings" element={<SettingsRedirect />} />
         <Route path="monitoring" element={<TabRoute kind="monitoring" />} />
         <Route path="developer" element={<TabRoute kind="page" />} />
-        {/* the Liberty Next workspace's own pages (superuser) */}
-        <Route path="liberty/reports" element={<TabRoute kind="page" />} />
-        {/* nomaflow feature area — Jobs / Schedule / Package / Changes / Integrity open as `page`
-            tabs (TabHost renders them); only the Job editor is a direct Outlet page. */}
+        {/* the Liberty Next workspace's pages (superuser): the configuration editors, deployment, documentation */}
+        <Route path="liberty/:page" element={<TabRoute kind="page" />} />
+        {/* nomaflow feature area — Jobs / Schedule / Runs open as `page` tabs (TabHost renders them);
+            only the Job editor is a direct Outlet page. Package / Changes / Integrity moved to Liberty Next. */}
         <Route path="nomaflow" element={<TabRoute kind="page" />} />
         <Route path="nomaflow/jobs/new" element={<NomaflowEditor />} />
         <Route path="nomaflow/jobs/:id" element={<NomaflowEditor />} />
         <Route path="nomaflow/schedule" element={<TabRoute kind="page" />} />
         <Route path="nomaflow/runs" element={<TabRoute kind="page" />} />
-        <Route path="nomaflow/package" element={<TabRoute kind="page" />} />
-        <Route path="nomaflow/changes" element={<TabRoute kind="page" />} />
-        <Route path="nomaflow/integrity" element={<TabRoute kind="page" />} />
+        <Route path="nomaflow/package" element={<Navigate to="/liberty/package" replace />} />
+        <Route path="nomaflow/changes" element={<Navigate to="/liberty/changes" replace />} />
+        <Route path="nomaflow/integrity" element={<Navigate to="/liberty/integrity" replace />} />
         <Route path="notifications" element={<TabRoute kind="page" />} />
         <Route path="explorer" element={<TabRoute kind="page" />} />
         <Route path="explorer/:app/:model" element={<TabRoute kind="page" />} />

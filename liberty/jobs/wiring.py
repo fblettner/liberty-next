@@ -256,7 +256,7 @@ async def build_nomaflow(
         # The pool exists but the database doesn't answer (down, wrong host, firewall).
         # Same policy as the changesets / user-view bootstraps: log, skip nomaflow for
         # this run, let the rest of the app come up so /ready can report the outage and
-        # an operator can fix the pool through Settings → Pools + Reload.
+        # an operator can fix the pool through Liberty Next → Administer → Pools + Reload.
         _log.warning(
             "nomaflow.wiring pool %r unreachable at startup (%s: %s) — nomaflow disabled this run",
             pool_name, type(exc).__name__, exc,

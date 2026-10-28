@@ -500,7 +500,7 @@ class NavigateAction(_PromptableMixin, _ActionBase):
         description=(
             "Open the target INSIDE the current tab, as a panel over this grid with a breadcrumb and a Back "
             "button (the Explorer's drill), instead of a new tab; the grid behind keeps its rows and filters. "
-            "Blank = the application's ``[app] drill_inline`` default (Settings → App)."
+            "Blank = the application's ``[app] drill_inline`` default (Liberty Next → Administer → App)."
         ),
     )
 
@@ -1151,7 +1151,7 @@ class Screen(BaseModel):
         default=False,
         description=(
             "Capture every successful write on this screen into the application's current change "
-            "package (Settings → Packages) so it can be reviewed and promoted to another "
+            "package (Liberty Next → Deploy → Changes) so it can be reviewed and promoted to another "
             "environment. The natural key comes from this screen's ``key_columns``; the pre-image "
             "from the write's ``:_ORIGINAL`` binds drives drift detection on promotion. Off = not "
             "packaged. Requires ``[changesets] enabled``."

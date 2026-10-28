@@ -1,4 +1,4 @@
-// Settings → Integrity. Read-only diagnostics: fetches GET /admin/config/integrity (the inverse
+// Liberty Next → Build → Integrity. Read-only diagnostics: fetches GET /admin/config/integrity (the inverse
 // of find-usages — every cross-reference validated) and lists broken references (errors) + smells
 // (unused connectors / orphan screens — warnings), grouped by category. Each row deep-links into
 // the editor that owns the offender (reusing FindUsagesModal's deepLinkToUrl), so the operator

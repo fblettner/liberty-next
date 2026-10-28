@@ -8,7 +8,7 @@
 // the discriminated schema + rewrites only the [connectors.*] tables of connectors.toml (a
 // changed connector's subtree is re-rendered, so its inline `columns = [{…}]` may become
 // `[[…]]` — review in git), then reloads. No rename yet — delete + re-add. Renders the body
-// only; Settings/index.tsx wraps the page.
+// only; pages/Liberty wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers, Undo2, GitBranch, Shuffle, ArrowRightLeft } from 'lucide-react'
@@ -184,7 +184,7 @@ export default function ConnectorsBuilder() {
       api.get<ConnectorsDoc>('/admin/config/connectors/parsed'),
       api.get<DictionaryDoc>('/admin/config/dictionary/parsed'),
       // Pool names feed the Clone-app modal's "new pool" picker (drop a pool the
-      // operator already created via Settings → Pools). A separate fetch keeps
+      // operator already created via Liberty Next → Administer → Pools). A separate fetch keeps
       // this builder decoupled from the pools builder's full payload.
       api.get<{ pools: Record<string, unknown> }>('/admin/config/pools'),
     ])
@@ -251,9 +251,9 @@ export default function ConnectorsBuilder() {
     }
     if (sel && menus && menus[sel]) walk(menus[sel].items)
     base.MENU_HOME_ITEMS = { label: 'Menu items', values: homeOptions }
-    // ROLE_NAMES — the roles (Settings → Access), the keys of ``home_by_role``.
+    // ROLE_NAMES — the roles (Liberty Next → Administer → Access), the keys of ``home_by_role``.
     base.ROLE_NAMES = { label: 'Role', values: roleNames.map((r) => ({ value: r, label: r, mono: r })) }
-    // POOL_NAMES — every configured pool (Settings → Pools). Drives the connector's ``pool``
+    // POOL_NAMES — every configured pool (Liberty Next → Administer → Pools). Drives the connector's ``pool``
     // (default) + ``pools`` (extra) fields so they're picked from a dropdown, not typed.
     base.POOL_NAMES = { label: 'Pools', values: pools.map((p) => ({ value: p, label: p, mono: p })) }
     return base
@@ -366,7 +366,7 @@ export default function ConnectorsBuilder() {
   }
   // Connector delete = cross-file cascade. Removes the connector AND everything scoped under it:
   // its dictionary overlay, menu, screens, charts, and dashboards. The pool is left alone (managed
-  // in Settings → Pools, and may be shared). One confirmation — deleting a connector is a big deal.
+  // in Liberty Next → Administer → Pools, and may be shared). One confirmation — deleting a connector is a big deal.
   const deleteApp = async (appName: string) => {
     const ok = await modals.confirm({
       title: t('settings.connectors.delete'),

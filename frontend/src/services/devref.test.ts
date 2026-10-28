@@ -9,7 +9,7 @@ const k = (key: string, over: Partial<ConfigKey> = {}): ConfigKey => ({
 
 describe('keyStatus', () => {
   it('editor, file-only, gap', () => {
-    expect(keyStatus(k('app.name', { editor: 'Settings → App' }))).toBe('editor')
+    expect(keyStatus(k('app.name', { editor: 'Liberty Next → Administer → App' }))).toBe('editor')
     expect(keyStatus(k('crypto.master_key', { file_only: 'env' }))).toBe('file')
     expect(keyStatus(k('app.base_path'))).toBe('gap')
   })

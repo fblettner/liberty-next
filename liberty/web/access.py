@@ -4,7 +4,7 @@ The framework already *enforces* role-based access (``Principal.has_permission``
 colon-segmented permission strings — ``sql:<connector>:<query>``, ``api:<connector>:<endpoint>``,
 ``ai:chat``, ``*`` wildcards — plus the superuser bypass). Until now those users + roles were
 managed only via the ``liberty-admin`` CLI / hand-edited ``auth.toml``. These endpoints expose the
-same operations to the Settings → Access UI: list / create / edit users, set their roles + active
+same operations to the Liberty Next → Administer → Access UI: list / create / edit users, set their roles + active
 + superuser + password, and define roles' permission sets.
 
 Works against whichever auth backend is configured (``[auth] backend`` = ``toml`` | ``db``) — both

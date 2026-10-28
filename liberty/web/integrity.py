@@ -5,7 +5,7 @@ entity points at actually exist?" — it walks every cross-reference in the load
 (menus / screens / dictionary / dashboards / charts / connectors) and reports broken
 references (errors) plus dead-weight smells (unused connectors, orphan screens — warnings).
 
-Powers ``GET /admin/config/integrity`` → the Settings → Integrity tab. Each issue carries a
+Powers ``GET /admin/config/integrity`` → the Liberty Next → Build → Integrity tab. Each issue carries a
 ``deep_link`` (same shape as a :class:`Usage`) so the UI can route straight to the offender.
 """
 

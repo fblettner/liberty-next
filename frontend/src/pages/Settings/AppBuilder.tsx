@@ -1,4 +1,4 @@
-// Settings → App — the master settings file (``config/app.toml``). Edits a curated subset of
+// Liberty Next → Administer → App — the master settings file (``config/app.toml``). Edits a curated subset of
 // AppSettings + AISettings + LicenseSettings + OIDCSettings. Sensitive fields (license.key,
 // ai.api_key, oidc.client_secret) round-trip masked: GET returns them empty with a
 // ``<field>_set: bool`` indicator; PUT encrypts new plaintext with the install master key

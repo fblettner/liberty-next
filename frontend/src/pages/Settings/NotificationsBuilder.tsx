@@ -1,4 +1,4 @@
-// Settings → Notifications: the rules of notifications.toml. A list on the left, the rule editor on
+// Liberty Next → Build → Notifications: the rules of notifications.toml. A list on the left, the rule editor on
 // the right: a trigger (a screen event with its app / screen / events / row condition, a job event
 // with its jobs and threshold, or "fired by a screen action"), the channels, the recipients, the
 // subject / body / link templates, and the action channel's target. "Send a test" dispatches the

@@ -39,7 +39,7 @@ async def get_theme(request: Request) -> dict[str, Any]:
     custom properties (keys without the ``--`` prefix) the frontend sets on the document root.
 
     **Public** — no auth header required. The sign-in page calls this on first render so the
-    page is branded BEFORE the user has a token. Edited through **Settings → Theme**; the SPA
+    page is branded BEFORE the user has a token. Edited through **Liberty Next → Administer → Theme**; the SPA
     re-fetches this endpoint right after a save so changes appear without a reload."""
     cfg = load_theme(_theme_path(request)).theme
     resolved = resolve_theme(cfg)

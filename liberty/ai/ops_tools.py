@@ -1,7 +1,7 @@
 """Operations tools — the running server's state for an administrator's assistant:
 ``jobs_status`` (the nomaflow jobs with their schedule, last run, next fire, and a job's
 recent runs), ``server_log`` (the in-memory log tail the technical dashboard shows) and
-``integrity_checks`` (the configuration cross-reference checks of Settings → Integrity).
+``integrity_checks`` (the configuration cross-reference checks of Liberty Next → Build → Integrity).
 
 Opt-in (``[ai] ops_tools = true``): the log can carry what the server logged (an SQL
 statement under ``debug_sql``, a stack trace), so an operator enables these for an
@@ -95,7 +95,7 @@ def build_ops_tools(state: Callable[[], Any]) -> list[Tool]:
         return {"lines": picked[-cap:], "total_matching": len(picked)}
 
     def integrity_checks(severity: str | None = None) -> dict[str, Any]:
-        """Run the configuration integrity checks (Settings → Integrity): broken references
+        """Run the configuration integrity checks (Liberty Next → Build → Integrity): broken references
         between menus, screens, queries, dictionary items, dashboards and charts ("error"),
         and unused or orphaned entities ("warning"). Call it when something is "missing" or
         "not found" in the UI, or before a deployment.

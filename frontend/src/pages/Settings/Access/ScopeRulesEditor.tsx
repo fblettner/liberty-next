@@ -1,4 +1,4 @@
-// The role's data-scope rules (Settings → Access → Roles → Data scope): the list of rules, each
+// The role's data-scope rules (Liberty Next → Administer → Access → Roles → Data scope): the list of rules, each
 // "item in / not in values" or "item = a user attribute", with the mode for queries without the
 // item and an optional connector; plus the form that adds or edits one. Rules AND together
 // within the role; roles OR together on the user (liberty/auth/scope.py).
