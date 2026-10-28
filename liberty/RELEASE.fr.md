@@ -1,5 +1,37 @@
 # Liberty Next — Notes de version
 
+## 7.0.60 — non publiée
+
+**Explorateur de données : modèles fournis par les préréglages, entrées de dictionnaire en un clic**
+- Un préréglage de l'assistant écran portant `app` + `explorer = true` fournit un modèle
+  d'explorateur par défaut (`explorer.<app>.<id du préréglage>`) : listé avec les autres,
+  construit depuis le préréglage à la première utilisation, jamais écrit dans `explorer.toml`.
+  Déclarez un modèle sur le même préréglage pour le personnaliser. Une table du préréglage
+  accepte un `label` (le libellé de l'entité) et une `cardinality` (`one` pour une table de
+  référence jointe à un pivot transactionnel : une simple jointure LEFT).
+- Le catalogue JDE reçoit huit nouveaux fichiers de préréglages — Comptabilité générale,
+  Fournisseurs, Clients, Stocks, Ventes, Production, Données techniques, Coûts de revient —
+  issus des modèles de données Oracle E1 ; les quinze préréglages « complets » (Carnet d'adresses
+  compris) fournissent leur modèle.
+- Appliquer un préréglage dans Paramètres → Explorateur crée les entrées de dictionnaire qui
+  manquent à ses tables (l'étape Dictionnaire de l'assistant, rangées sous l'application : une
+  source JDE reçoit les descriptions de son dictionnaire de données). Sur la page Explorateur,
+  un superutilisateur voit combien de colonnes affichent leur nom brut et crée les entrées en un
+  clic (`POST /admin/explorer/{app}/{model}/dictionary`).
+
+**Montants JDE : les décimales du dictionnaire de données**
+- Nouveau format de dictionnaire `jdenumber` avec un champ `decimals` sur l'entrée : un montant
+  JD Edwards stocké sans point décimal (F9210.FRCDEC) se lit en valeur réelle, se réécrit en
+  entier stocké, et les filtres / bornes de l'explorateur sont liés en unités réelles ; les
+  sommes et colonnes de détail de l'explorateur sont mises à l'échelle en SQL, les colonnes de
+  résultat portent `decimals` et la table de l'explorateur affiche exactement ce nombre de
+  décimales. Sur les autres formats numériques, `decimals` est le nombre de décimales affichées.
+- L'analyse du dictionnaire (assistant, page dédiée, chemin des préréglages de l'explorateur) lit
+  `DD_DECIMALS` dans la requête JDE par table ; les tables de revue reçoivent une colonne
+  Décimales. La requête `dictionary_data_items_for_table_get` des applications émet désormais les
+  types `jdenumber` / `jdedate` / `integer`, les décimales, la taille et la règle de justification
+  à côté de la règle de recherche UDC.
+
 ## 7.0.59 — non publiée
 
 **Corrections issues de la revue de documentation (27/10/2026)**

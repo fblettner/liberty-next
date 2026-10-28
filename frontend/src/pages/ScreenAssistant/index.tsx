@@ -535,7 +535,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
         exists: !!it.exists, keep: !it.exists, type: (it.type as string | null) ?? null,
         source: (it.source as 'jde' | 'inferred' | undefined),
         label: String(it.label ?? ''), format: String(it.format ?? 'text'),
-        justify: String(it.justify ?? ''), size: (it.size as number | null) ?? null,
+        justify: String(it.justify ?? ''), size: (it.size as number | null) ?? null, decimals: (it.decimals as number | null) ?? null,
         rules: String(it.rules ?? ''), rules_values: String(it.rules_values ?? ''), default: String(it.default ?? ''),
         // The scan returns lookup_params as { SY: "01", RT: "ST" } for UDC columns — flatten to the
         // "SY=01,RT=ST" the input edits.
@@ -620,7 +620,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
       dictionary_scope: appKey,
       dictionary: sourceQuery ? [] : kept.map((d) => ({
         id: d.dd_id, label: d.label || undefined, format: d.format || undefined,
-        ...(d.justify ? { justify: d.justify } : {}), ...(d.size != null ? { size: d.size } : {}),
+        ...(d.justify ? { justify: d.justify } : {}), ...(d.size != null ? { size: d.size } : {}), ...(d.decimals ? { decimals: d.decimals } : {}),
         ...(d.rules ? { rules: d.rules } : {}), ...(d.rules_values ? { rules_values: d.rules_values } : {}),
         ...(d.lookup_params.trim() ? { lookup_params: parseParams(d.lookup_params) } : {}),
       })),
@@ -699,10 +699,10 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
           {STEPS[step] === 'target' && (
             <Grid2>
               <Field label={t('assistant.connector')}>
-                <SearchSelect value={connector} onChange={(v) => { setConnector(v); if (!app) setApp(v) }} options={connectors} placeholder={t('common.pick')} />
+                <SearchSelect sort value={connector} onChange={(v) => { setConnector(v); if (!app) setApp(v) }} options={connectors} placeholder={t('common.pick')} />
               </Field>
               <Field label={t('assistant.app')}>
-                <SearchSelect value={app} onChange={setApp} options={appOptions} allowCustom placeholder={t('assistant.appPick')} />
+                <SearchSelect sort value={app} onChange={setApp} options={appOptions} allowCustom placeholder={t('assistant.appPick')} />
               </Field>
             </Grid2>
           )}
@@ -731,7 +731,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
                 !base ? (
                   <Field label={t('assistant.existingQuery')}>
                     {existingQueries.length
-                      ? <SearchSelect value="" onChange={(v) => void pickQuery(v)} options={existingQueries} placeholder={t('common.pick')} />
+                      ? <SearchSelect sort value="" onChange={(v) => void pickQuery(v)} options={existingQueries} placeholder={t('common.pick')} />
                       : <div style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('assistant.noQueries')}</div>}
                   </Field>
                 ) : (

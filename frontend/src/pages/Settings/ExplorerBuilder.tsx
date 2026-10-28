@@ -156,9 +156,10 @@ export default function ExplorerBuilder() {
     if (entityIds.length > 0 && !(await modals.confirm({ title: t('settings.explorer.preset'), message: t('settings.explorer.applyPresetConfirm', { preset: presetId }) }))) return
     setBusy(true); setError(null); setStatus(null)
     try {
-      const r = await api.post<{ model: ExplorerModelBody; warnings: string[] }>('/admin/explorer/from-preset', { app: scope, preset: presetId, model })
+      const r = await api.post<{ model: ExplorerModelBody; warnings: string[]; dictionary?: { created: string[]; skipped: string[] } }>('/admin/explorer/from-preset', { app: scope, preset: presetId, model })
       update({ ...r.model, preset: presetId })
-      setStatus(r.warnings.length ? r.warnings.join(' · ') : t('settings.explorer.presetApplied', { n: Object.keys(r.model.entities ?? {}).length }))
+      const dict = r.dictionary && r.dictionary.created.length ? t('settings.explorer.presetDictionary', { n: r.dictionary.created.length }) : ''
+      setStatus((r.warnings.length ? r.warnings.join(' · ') : t('settings.explorer.presetApplied', { n: Object.keys(r.model.entities ?? {}).length })) + dict)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
     } finally { setBusy(false) }
@@ -180,7 +181,7 @@ export default function ExplorerBuilder() {
         <Boxes size={14} style={{ color: colors.text.muted }} />
         <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.explorer.model')}</span>
         <div style={{ width: 240 }}>
-          <SearchSelect value={modelId} onChange={setModelId} options={modelIds.map((id) => ({ value: id, label: doc?.[scope]?.[id]?.label || id, mono: id }))} placeholder={t('settings.explorer.noModel')} disabled={!scope} />
+          <SearchSelect sort value={modelId} onChange={setModelId} options={modelIds.map((id) => ({ value: id, label: doc?.[scope]?.[id]?.label || id, mono: id }))} placeholder={t('settings.explorer.noModel')} disabled={!scope} />
         </div>
         <Button $variant="ghost" $size="sm" onClick={() => void addModel()} disabled={busy || !scope}><Plus size={13} /> {t('settings.explorer.addModel')}</Button>
         {modelId && <Button $variant="ghost" $size="sm" onClick={() => void removeModel()} disabled={busy} style={{ color: colors.red.main }}><Trash2 size={13} /> {t('settings.explorer.deleteModelBtn')}</Button>}
@@ -198,7 +199,7 @@ export default function ExplorerBuilder() {
             <Field label={t('settings.explorer.hub')}><SearchSelect value={model.hub ?? ''} onChange={(v) => update({ hub: v })} options={entityOpts} placeholder={t('settings.access.pickItem')} /></Field>
             <Field label={t('settings.explorer.description')}><Input value={model.description ?? ''} onChange={(e) => update({ description: e.target.value || undefined })} /></Field>
             <Field label={t('settings.explorer.preset')}>
-              <SearchSelect value={model.preset ?? ''} anyLabel={t('settings.explorer.noPreset')} options={presets.map((p) => ({ value: p.id, label: p.label || p.id, mono: `${p.connector ? `${p.connector} · ` : ''}${(p.tables ?? []).map((x) => x.name).join(', ')}` }))}
+              <SearchSelect sort value={model.preset ?? ''} anyLabel={t('settings.explorer.noPreset')} options={presets.map((p) => ({ value: p.id, label: p.label || p.id, mono: `${p.connector ? `${p.connector} · ` : ''}${(p.tables ?? []).map((x) => x.name).join(', ')}` }))}
                 onChange={(v) => void applyPreset(v)} disabled={busy} />
             </Field>
           </Head>

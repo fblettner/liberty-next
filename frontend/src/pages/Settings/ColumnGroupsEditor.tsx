@@ -212,7 +212,7 @@ function GroupCard({
 
           <div>
             <SubLabel>{t('settings.screens.editor.columnGroupConnector')}</SubLabel>
-            <SearchSelect
+            <SearchSelect sort
               value={typeof group.connector === 'string' ? group.connector : ''}
               onChange={(v) => onPatch({ connector: v })}
               options={connectorOptions}
@@ -225,7 +225,7 @@ function GroupCard({
             <SubLabel>{t('settings.screens.editor.columnGroupUpdate')}</SubLabel>
             <QueryRow>
               <div className="grow">
-                <SearchSelect
+                <SearchSelect sort
                   value={typeof group.update_query === 'string' ? group.update_query : ''}
                   onChange={(v) => onPatch({ update_query: v })}
                   options={writableQueryOptions} allowCustom
@@ -241,7 +241,7 @@ function GroupCard({
             <SubLabel>{t('settings.screens.editor.columnGroupInsert')}</SubLabel>
             <QueryRow>
               <div className="grow">
-                <SearchSelect
+                <SearchSelect sort
                   value={typeof group.insert_query === 'string' ? group.insert_query : ''}
                   onChange={(v) => onPatch({ insert_query: v })}
                   options={writableQueryOptions} allowCustom
@@ -259,7 +259,7 @@ function GroupCard({
             <Hint>{t('settings.screens.editor.columnGroupDeleteHint')}</Hint>
             <QueryRow>
               <div className="grow">
-                <SearchSelect
+                <SearchSelect sort
                   value={typeof group.delete_query === 'string' ? group.delete_query : ''}
                   onChange={(v) => onPatch({ delete_query: v })}
                   options={writableQueryOptions} allowCustom

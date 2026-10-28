@@ -84,7 +84,7 @@ export function MoveQueryModal({
             </Banner>
           ) : (
             <Field label={t('settings.connectors.moveTo')}>
-              <SearchSelect value={value} onChange={setValue} options={opts} placeholder={t('common.pick')} />
+              <SearchSelect sort value={value} onChange={setValue} options={opts} placeholder={t('common.pick')} />
             </Field>
           )}
           {error && <Banner $tone="error" style={{ marginTop: 10 }}>{error}</Banner>}

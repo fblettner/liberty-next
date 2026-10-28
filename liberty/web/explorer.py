@@ -84,7 +84,7 @@ async def list_models(principal: CurrentPrincipal, explorer: Explorer) -> dict[s
     out = []
     for app, mid, m in explorer.items():
         if principal.has_permission(permission_for(app, mid)):
-            out.append({"app": app, "model": mid, "label": m.label or mid, "description": m.description, "hub": m.hub, "entities": len(m.entities)})
+            out.append({"app": app, "model": mid, "label": m.label or mid, "description": m.description, "hub": m.hub, "entities": len(m.entities), "preset": m.preset, "derived": m.derived})
     return {"models": out}
 
 

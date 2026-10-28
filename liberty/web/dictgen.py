@@ -55,7 +55,7 @@ class ScanBody(BaseModel):
             "Optional per-table JDE DD query that enriches the scan with format / rule / default / "
             "justify. Bound with ``:TBL_DB_NAME`` + ``:TBL_SCHEMA`` (the scanned table + its owner) and "
             "read for the columns ``DD_ID, DD_LABEL, DD_TYPE, DD_RULES, DD_RULES_VALUES, DD_DEFAULT, "
-            "DD_JUSTIFY`` (the last from F9210.FRDRUL — *RAB/*RABN/*RAZ). Use a ``#SCHEMA.<KEY>#`` token "
+            "DD_JUSTIFY, DD_DECIMALS`` (justify from F9210.FRDRUL — *RAB/*RABN/*RAZ; decimals from F9210.FRCDEC, the implied places of a ``jdenumber`` amount). Use a ``#SCHEMA.<KEY>#`` token "
             "(not a bind) for the F92xx schema. Missing / erroring → ignored."
         ),
     )
@@ -162,6 +162,7 @@ async def _fetch_jde_dd_table(
             "rules_values": _s("DD_RULES_VALUES"), "default": _s("DD_DEFAULT"),
             "justify": _map_jde_justify(_s("DD_JUSTIFY")),  # F9210.FRDRUL → right_blank / right_zero
             "size": _i("DD_SIZE"),                          # F9210.FRDTAS — data item width (MCU = 12)
+            "decimals": _i("DD_DECIMALS"),                  # F9210.FRCDEC — the implied places of an amount
         }
     return out
 
@@ -196,6 +197,13 @@ async def _fetch_jde_dd_filters(
 
 @router.post("/dictionary/scan", summary="Scan dictionary")
 async def scan_dictionary(body: ScanBody, request: Request, _: Superuser) -> dict[str, Any]:
+    return await propose_entries(body, request)
+
+
+async def propose_entries(body: ScanBody, request: Request) -> dict[str, Any]:
+    """The scan itself — ``{scope, dialect, jde, items: [{column, dd_id, exists, label, format,
+    rules, …}]}`` — shared by the route, the explorer's "apply a preset" and the model page's
+    "create the dictionary entries" (:func:`create_entries`)."""
     registry = request.app.state.connectors
     if bool(body.table) == bool(body.query):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Provide exactly one of `table` or `query`.")
@@ -302,7 +310,102 @@ async def scan_dictionary(body: ScanBody, request: Request, _: Superuser) -> dic
             "default": rich.get("default"),
             "justify": rich.get("justify"),
             "size": rich.get("size"),
+            "decimals": rich.get("decimals"),
             "lookup_params": lookup_params,
         })
 
     return {"scope": scope, "dialect": dialect, "jde": is_jde, "items": items}
+
+
+def entry_from_proposal(item: dict[str, Any]) -> dict[str, Any]:
+    """A dictionary entry (the ``DictionaryEntry`` dict) from a scan proposal — the shape the
+    Screen Assistant builds client-side: label, format, justify, size, rule and its argument,
+    the UDC lookup params. Blank proposals stay out (an entry carries only what is known)."""
+    e: dict[str, Any] = {}
+    for k in ("label", "format", "rules", "rules_values", "justify"):
+        if item.get(k):
+            e[k] = item[k]
+    if item.get("size") is not None:
+        e["size"] = item["size"]
+    if item.get("decimals"):
+        e["decimals"] = int(item["decimals"])
+    if item.get("lookup_params"):
+        e["lookup_params"] = dict(item["lookup_params"])
+    return e
+
+
+async def create_entries(
+    request: Request, principal: Principal, *, scope: str, sources: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Scan every source (``{connector, table, schema}`` or ``{connector, query}``) and write the
+    entries the dictionary lacks under *scope* (an app, as the assistant files them; ``shared``
+    for the top level), then rebuild the connectors so the new labels reach every query. The
+    Screen Assistant's Dictionary step, without the review: a JDE source gets its data
+    dictionary descriptions, another source the format inferred from the column type (the
+    label left for the operator). Returns ``{created: [ids], scanned: n, skipped: [reasons]}``."""
+    proposals: dict[str, dict[str, Any]] = {}
+    scanned = 0
+    skipped: list[str] = []
+    for src in sources:
+        try:
+            body = ScanBody(
+                connector=str(src["connector"]), table=src.get("table"), query=src.get("query"),
+                db_schema=src.get("schema"), scope=scope,
+            )
+            r = await propose_entries(body, request)
+        except HTTPException as exc:
+            skipped.append(f"{src.get('table') or src.get('query')}: {exc.detail}")
+            continue
+        scanned += 1
+        for it in r["items"]:
+            if it["exists"] or it["dd_id"] in proposals:
+                continue
+            proposals[it["dd_id"]] = entry_from_proposal(it)
+    if proposals:
+        from liberty.runtime import rebuild_runtime
+        from liberty.web.admin import DictionaryBody, put_dictionary_parsed
+        ddict = load_dictionary(_dictionary_path(request.app.state.settings)).model_dump(exclude_defaults=True)
+        section = ddict if scope == "shared" else ddict.setdefault("connectors", {}).setdefault(scope, {})
+        entries = section.setdefault("entries", {})
+        for k, v in proposals.items():
+            entries[k] = v
+        await put_dictionary_parsed(DictionaryBody(dictionary=ddict), request, principal)
+        await rebuild_runtime(request.app, sections={"connectors"})
+    return {"created": sorted(proposals), "scanned": scanned, "skipped": skipped}
+
+
+def model_sources(model: Any, presets_dir: Path | str | None) -> list[dict[str, Any]]:
+    """The tables / queries an explorer model reads: its entities, or — for a model that only
+    names its preset (one a preset ships by default) — the preset's tables."""
+    out: list[dict[str, Any]] = []
+    if model.preset and not model.entities:
+        from liberty.presets import find_preset
+        preset = find_preset(presets_dir, model.preset) if presets_dir is not None else None
+        for t in (preset or {}).get("tables") or []:
+            if not isinstance(t, dict) or not t.get("name"):
+                continue
+            if t.get("query"):
+                out.append({"connector": t.get("query_connector") or preset.get("connector") or model.app, "query": t["query"]})
+            else:
+                out.append({"connector": preset.get("connector") or model.app, "table": t["name"], "schema": t.get("schema")})
+        return out
+    for e in model.entities.values():
+        connector = e.connector or model.app
+        if e.table:
+            out.append({"connector": connector, "table": e.table, "schema": e.schema_})
+        elif e.query:
+            out.append({"connector": connector, "query": e.query})
+    return out
+
+
+@router.post("/explorer/{app}/{model}/dictionary", summary="Create the dictionary entries an explorer model lacks")
+async def explorer_model_dictionary(app: str, model: str, request: Request, principal: Superuser) -> dict[str, Any]:
+    """The Explorer page's "create the dictionary entries": every table / query of the model
+    scanned, the missing entries written under the app's scope (:func:`create_entries`). The
+    model cache is emptied by the rebuild, so the next model fetch shows the labels."""
+    m = request.app.state.explorer.get(app, model)
+    if m is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no explorer model {app}/{model}")
+    cache = getattr(request.app.state, "explorer_cache", None)
+    sources = model_sources(m, getattr(cache, "presets_dir", None))
+    return await create_entries(request, principal, scope=app, sources=sources)

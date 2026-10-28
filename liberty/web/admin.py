@@ -1237,6 +1237,9 @@ class FromPresetBody(BaseModel):
     preset: str
     # the model being edited — its declared entities are kept and completed
     model: dict[str, Any] = {}
+    # create the dictionary entries the preset's tables lack (the assistant's Dictionary step,
+    # filed under the app) — the fields then show their description, not their column name
+    dictionary: bool = True
 
 
 @router.post("/explorer/from-preset", summary="Fill an explorer model from a preset")
@@ -1258,7 +1261,11 @@ async def explorer_from_preset(body: FromPresetBody, request: Request, _: Superu
         request.app.state.connectors, getattr(request.app.state, "screens", None), body.app, model, preset,
         language=request.headers.get("x-liberty-lang"),
     )
-    return {"model": _explorer_model_dump(filled), "warnings": warnings}
+    out: dict[str, Any] = {"model": _explorer_model_dump(filled), "warnings": warnings}
+    if body.dictionary:
+        from liberty.web.dictgen import create_entries, model_sources
+        out["dictionary"] = await create_entries(request, _, scope=body.app, sources=model_sources(filled, None))
+    return out
 
 
 class DescribeEntityBody(BaseModel):

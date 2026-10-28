@@ -258,3 +258,23 @@ async def test_detail_paging_sort_and_drill(env) -> None:
     assert bucket_range("2024-02", "month") == (d(2024, 2, 1), d(2024, 2, 29)) and bucket_range("2026", "year") == (d(2026, 1, 1), d(2026, 12, 31))
     with pytest.raises(ExplorerError, match="not a month label"):
         bucket_range("x", "month")
+
+
+@pytest.mark.asyncio
+async def test_jdenumber_measure_reads_the_real_amount(env) -> None:
+    """A ``jdenumber`` field (a JDE amount stored without its decimal point) is read scaled by its
+    decimals everywhere the engine references it: the sum, the filter bound in real units, the
+    result column carrying ``decimals``."""
+    registry, screens, view = env
+    fld = view.field("sales.REVENUE")
+    assert fld is not None
+    fld.format, fld.decimals = "jdenumber", 2
+    res = await run(env, rows=[{"field": "company.NAME"}], measures=[{"field": "sales.REVENUE", "agg": "sum"}])
+    total = sum(r["sum(sales.REVENUE)"] for r in res["rows"])
+    plain = sum(r[4] for r in ROWS)
+    assert abs(total - plain / 100) < 1e-9
+    assert res["columns"][1]["decimals"] == 2 and "/ 100.0)" in res["sql"]
+    # a bound in real units compares with the scaled column
+    res = await run(env, rows=[{"field": "company.NAME"}], measures=[{"field": "sales.REVENUE", "agg": "sum"}], filters={"sales.REVENUE__from": "1"})
+    assert all(r["sum(sales.REVENUE)"] >= 1 for r in res["rows"])
+    fld.format, fld.decimals = None, None

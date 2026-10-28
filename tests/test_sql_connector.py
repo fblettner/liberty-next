@@ -2493,3 +2493,41 @@ async def test_build_params_matches_binds_without_case(pools: PoolRegistry) -> N
     assert conn._build_params(q.default_sql, q, {"status": "closed"})["STATUS"] == "closed"
     assert conn._build_params(q.default_sql, q, {"STATUS": "x", "status": "y"})["STATUS"] == "x"   # exact wins
     assert conn._build_params(q.default_sql, q, {"other": 5})["Other"] == 5
+
+
+def test_jdenumber_coercion() -> None:
+    """``jdenumber`` + decimals: the real value the form sends → the stored integer (half up), and
+    back on read; no decimals → a plain number; empty / None → None."""
+    from liberty.connectors.sql import _coerce_value, _from_jde_number
+    assert _coerce_value("123.45", "jdenumber", 2) == 12345
+    assert _coerce_value(123.455, "jdenumber", 2) == 12346
+    assert _coerce_value(-7, "jdenumber", 3) == -7000
+    assert _coerce_value("12345", "jdenumber", None) == 12345
+    assert _coerce_value("", "jdenumber", 2) is None and _coerce_value(None, "jdenumber", 2) is None
+    assert _from_jde_number(12345, 2) == 123.45 and _from_jde_number(12300, 2) == 123 and _from_jde_number(None, 2) is None
+    assert _from_jde_number(12345, None) == 12345 and _from_jde_number("x", 2) == "x"
+
+
+@pytest.mark.asyncio
+async def test_jdenumber_columns_scaled_on_read_and_in_filters(pools: PoolRegistry) -> None:
+    """A column whose dictionary entry is ``jdenumber`` with 2 decimals reads as the real amount
+    (``12345`` → ``123.45``), the wire column carries ``decimals``, and a filter typed in real units
+    is bound as the stored integer."""
+    async with pools.engine("test").begin() as c:
+        await c.execute(text("CREATE TABLE amt (id INTEGER, rpag INTEGER)"))
+        await c.execute(text("INSERT INTO amt (id, rpag) VALUES (1, 12345), (2, 100), (3, NULL)"))
+    from liberty.connectors.dictionary import DictionarySection
+    d = DictionaryFile(connectors={"db": DictionarySection(entries={
+        "rpag": DictionaryEntry(label="Gross Amount", format="jdenumber", decimals=2),
+    })})
+    q = QueryDef(name="all", sql="SELECT id, rpag FROM amt ORDER BY id")
+    conn = SQLConnector("db", SqlConnectorConfig(type="sql", pool="test", queries=[q]), pools, dictionary=d)
+    res = await conn.execute("all", column_hints=[ColumnHint(name="rpag", filter=True)])
+    assert [r["rpag"] for r in res.rows] == [123.45, 1, None]
+    col = next(c for c in res.columns if c.name == "rpag")
+    assert col.to_dict()["decimals"] == 2 and col.format == "jdenumber" and col.label == "Gross Amount"
+    # a filter in real units: 123.45 equals the stored 12345
+    res = await conn.execute("all", {"rpag": "123.45", "rpag_op": "equals"}, column_hints=[ColumnHint(name="rpag", filter=True)])
+    assert [r["id"] for r in res.rows] == [1]
+    res = await conn.execute("all", {"rpag_from": "1", "rpag_to": "2"}, column_hints=[ColumnHint(name="rpag", filter=True)])
+    assert [r["id"] for r in res.rows] == [2]

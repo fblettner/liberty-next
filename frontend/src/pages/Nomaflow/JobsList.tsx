@@ -858,7 +858,7 @@ function RunWithParamsModal({
       <ParamRow key={key}>
         <ParamKey>{key}</ParamKey>
         {isConnectorKey ? (
-          <SearchSelect
+          <SearchSelect sort
             value={v == null ? '' : String(v)}
             options={connectorOptions}
             onChange={setter}

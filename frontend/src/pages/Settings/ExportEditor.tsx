@@ -387,7 +387,7 @@ export default function ExportEditor({
                 <Row gap={10} style={{ alignItems: 'flex-end' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <Field label={t('settings.screens.export.sheetConnector')}>
-                      <SearchSelect
+                      <SearchSelect sort
                         value={sheetConnector}
                         options={sqlConnectorOptions}
                         onChange={(v) => patchSheet(idx, { connector: v || null })}
@@ -400,7 +400,7 @@ export default function ExportEditor({
                     <Field label={t('settings.screens.export.sheetQuery')}>
                       <Row gap={6} style={{ alignItems: 'center' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <SearchSelect
+                          <SearchSelect sort
                             value={sheetQuery}
                             options={queryOpts}
                             onChange={(v) => patchSheet(idx, { query: v || '' })}

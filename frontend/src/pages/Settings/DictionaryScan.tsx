@@ -17,7 +17,7 @@ import { ScanProposalsTable, summarizeProposals, type ScanProposal } from './Dic
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, radius } from '../../theme'
 
-interface ScanItem { column: string; dd_id: string; exists: boolean; type: string | null; data_item: string | null; source: 'jde' | 'inferred'; label: string | null; format: string | null; rules?: string | null; rules_values?: string | null; default?: string | null; justify?: string | null; size?: number | null; lookup_params?: Record<string, string> | null }
+interface ScanItem { column: string; dd_id: string; exists: boolean; type: string | null; data_item: string | null; source: 'jde' | 'inferred'; label: string | null; format: string | null; rules?: string | null; rules_values?: string | null; default?: string | null; justify?: string | null; size?: number | null; decimals?: number | null; lookup_params?: Record<string, string> | null }
 interface ScanResult { scope: string; dialect: string | null; jde: boolean; items: ScanItem[] }
 
 // "SY=01,RT=ST" ⇄ { SY: "01", RT: "ST" }
@@ -32,7 +32,7 @@ const toProposal = (it: ScanItem): ScanProposal => ({
   column: it.column, dd_id: it.dd_id, exists: it.exists, type: it.type, source: it.source,
   keep: !it.exists, label: it.label ?? '', format: it.format ?? '',
   rules: it.rules ?? '', rules_values: it.rules_values ?? '', lookup_params: paramsToStr(it.lookup_params),
-  default: it.default ?? '', justify: it.justify ?? '', size: it.size ?? null,
+  default: it.default ?? '', justify: it.justify ?? '', size: it.size ?? null, decimals: it.decimals ?? null,
 })
 
 const Box = styled(Modal)`width: min(1120px, 96vw); height: min(720px, 92vh);`
@@ -44,7 +44,7 @@ const Muted = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm};
 // Fallback format options if the framework-enum fetch fails; otherwise the live DICTIONARY_TYPE.
 const FORMAT_FALLBACK: SearchSelectOption[] = [
   { value: '', label: '(text)' }, { value: 'number', label: 'number' }, { value: 'date', label: 'date' },
-  { value: 'jdedate', label: 'jdedate' }, { value: 'jdetime', label: 'jdetime' }, { value: 'boolean', label: 'boolean' },
+  { value: 'jdedate', label: 'jdedate' }, { value: 'jdetime', label: 'jdetime' }, { value: 'jdenumber', label: 'jdenumber' }, { value: 'boolean', label: 'boolean' },
 ]
 
 export function DictionaryScan({
@@ -142,6 +142,7 @@ export function DictionaryScan({
         if (s.default.trim()) entry.default = s.default.trim()
         if (s.justify.trim()) entry.justify = s.justify.trim()   // JDE F9210.FRDRUL → right_blank / right_zero
         if (s.size != null) entry.size = s.size                  // JDE F9210.FRDTAS — data item width
+        if (s.decimals) entry.decimals = s.decimals               // JDE F9210.FRCDEC — a jdenumber's implied places
         if (s.lookup_params.trim()) entry.lookup_params = parseParams(s.lookup_params)   // UDC SY/RT binds
         sc.entries[s.dd_id] = entry
       }
@@ -170,11 +171,11 @@ export function DictionaryScan({
             <>
               <PickRow>
                 <Field label={t('settings.charts.connector')}>
-                  <SearchSelect value={connector} onChange={(v) => { setConnector(v); setPickedTable(''); setPickedSchema(null); setScope(v); setResult(null); setJde(/jde/i.test(v)) }}
+                  <SearchSelect sort value={connector} onChange={(v) => { setConnector(v); setPickedTable(''); setPickedSchema(null); setScope(v); setResult(null); setJde(/jde/i.test(v)) }}
                     options={sqlConns.map((c) => ({ value: c, label: c, mono: c }))} placeholder={t('chart.spec.pick')} />
                 </Field>
                 <Field label={t('settings.dictscan.scope')}>
-                  <SearchSelect value={scope} onChange={(v) => { setScope(v); setResult(null) }}
+                  <SearchSelect sort value={scope} onChange={(v) => { setScope(v); setResult(null) }}
                     options={sqlConns.map((c) => ({ value: c, label: c, mono: c }))} allowCustom
                     placeholder={t('chart.spec.pick')} />
                 </Field>

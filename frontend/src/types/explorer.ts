@@ -17,6 +17,7 @@ export interface ExplorerField {
   kind: 'dimension' | 'measure'
   aggregate?: Aggregate
   format?: string
+  decimals?: number
   rule?: DisplayRule
   dd?: string
   hidden?: boolean
@@ -45,9 +46,15 @@ export interface ExplorerModel {
   entities: ExplorerEntity[]
   relations: { from: string; to: string; on: string[][] }[]
   warnings: string[]
+  /** The preset the model was filled from, when any. */
+  preset?: string | null
+  /** Not in explorer.toml: the model a preset flagged `explorer = true` ships by default. */
+  derived?: boolean
+  /** Visible columns no dictionary entry documents (shown by their column name). */
+  undocumented?: number
 }
 
-export interface ExplorerModelSummary { app: string; model: string; label: string; description?: string | null; hub: string; entities: number }
+export interface ExplorerModelSummary { app: string; model: string; label: string; description?: string | null; hub: string; entities: number; preset?: string | null; derived?: boolean }
 
 // ── the analysis definition ──────────────────────────────────────────────────
 
@@ -87,6 +94,7 @@ export interface ResultColumn {
   bucket?: Bucket
   aggregate?: Aggregate
   format?: string
+  decimals?: number
   rule?: DisplayRule
 }
 

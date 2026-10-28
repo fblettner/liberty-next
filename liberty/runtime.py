@@ -246,7 +246,9 @@ async def rebuild_runtime(
         if "explorer" in wanted:
             from liberty.explorer import load_explorer
 
-            app.state.explorer = load_explorer(settings.explorer.config_path)
+            from liberty.presets import presets_dir
+
+            app.state.explorer = load_explorer(settings.explorer.config_path, presets_dir=presets_dir(settings.connectors.config_path))
         # The explorer's discovered fields depend on the connectors, the screens, the dictionary
         # and the model: any reload empties the cache.
         cache = getattr(app.state, "explorer_cache", None)

@@ -1012,7 +1012,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
               <Row gap={10}>
                 <div style={{ flex: 1 }}>
                   <Field label={`${t('settings.screens.visual.tabSettings.reuseScreen')} *`}>
-                    <SearchSelect
+                    <SearchSelect sort
                       value={(selTab.form_screen as string | undefined) ?? ''}
                       options={sameAppScreenOptions}
                       onChange={(v) => patchTab({ form_screen: v || '' })}
@@ -1022,7 +1022,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                 </div>
                 <div style={{ flex: 1 }}>
                   <Field label={t('settings.screens.visual.tabSettings.connector')}>
-                    <SearchSelect
+                    <SearchSelect sort
                       value={(selTab.connector as string | undefined) ?? ''}
                       options={sqlConnectorOptions}
                       onChange={(v) => patchTab({ connector: v && v !== connector ? v : null })}
@@ -1047,7 +1047,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
               <Row gap={10}>
                 <div style={{ flex: 1 }}>
                   <Field label={`${t('settings.screens.visual.tabSettings.targetScreen')} *`}>
-                    <SearchSelect
+                    <SearchSelect sort
                       value={(selTab.screen as string | undefined) ?? ''}
                       options={sameAppScreenOptions}
                       onChange={(v) => patchTab({ screen: v || '' })}
@@ -1057,7 +1057,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                 </div>
                 <div style={{ flex: 1 }}>
                   <Field label={t('settings.screens.visual.tabSettings.connector')}>
-                    <SearchSelect
+                    <SearchSelect sort
                       value={(selTab.connector as string | undefined) ?? ''}
                       options={sqlConnectorOptions}
                       onChange={(v) => patchTab({ connector: v && v !== connector ? v : null })}

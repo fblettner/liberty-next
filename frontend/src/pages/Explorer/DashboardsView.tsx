@@ -60,7 +60,7 @@ export function DashboardsView({ app, model, definition, analyses, editing, lang
         {editing && (
           <>
             <div style={{ width: 260 }}>
-              <SearchSelect value={adding} options={analyses.map((a) => ({ value: a.id, label: a.name, mono: a.id }))} placeholder={t('explorer.addTile')}
+              <SearchSelect sort value={adding} options={analyses.map((a) => ({ value: a.id, label: a.name, mono: a.id }))} placeholder={t('explorer.addTile')}
                 onChange={(v) => { if (!v) return; onChange({ ...definition, tiles: [...definition.tiles, { analysis: v, w: 2, h: 'm' }] }); setAdding('') }} />
             </div>
           </>

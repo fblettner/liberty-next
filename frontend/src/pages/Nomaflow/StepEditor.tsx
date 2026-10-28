@@ -641,7 +641,7 @@ function PythonForm({ step, patch }: FormProps) {
     <Grid>
       <Field $span={3}>
         <FieldLabel>{t('nomaflow.steps.callable')}</FieldLabel>
-        <SearchSelect
+        <SearchSelect sort
           value={String(f.callable ?? '')}
           onChange={(v) => patch({ callable: v } as Partial<StepConfig>)}
           options={options}
@@ -842,7 +842,7 @@ function FileLoadForm({ step, patch, sqlConnectors }: FormProps) {
       <Grid>
         <Field>
           <FieldLabel>{t('nomaflow.steps.connector')}</FieldLabel>
-          <SearchSelect value={String(tgt.connector ?? '')} onChange={(v) => setTarget({ connector: v })} options={connOpts} placeholder="—" />
+          <SearchSelect sort value={String(tgt.connector ?? '')} onChange={(v) => setTarget({ connector: v })} options={connOpts} placeholder="—" />
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.schema')}</FieldLabel>
@@ -890,7 +890,7 @@ function FileLoadForm({ step, patch, sqlConnectors }: FormProps) {
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.refuseConnector')}</FieldLabel>
-          <SearchSelect value={String(f.refuse_connector ?? '')} onChange={(v) => patch({ refuse_connector: v || undefined } as Partial<StepConfig>)} options={connOpts} anyLabel={t('nomaflow.steps.refuseConnectorTarget')} />
+          <SearchSelect sort value={String(f.refuse_connector ?? '')} onChange={(v) => patch({ refuse_connector: v || undefined } as Partial<StepConfig>)} options={connOpts} anyLabel={t('nomaflow.steps.refuseConnectorTarget')} />
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.controlColumn')}</FieldLabel>
@@ -931,7 +931,7 @@ function CallJobForm({ step, patch }: FormProps) {
     <Grid>
       <Field $span={3}>
         <FieldLabel>{t('nomaflow.steps.targetJobId')}</FieldLabel>
-        <SearchSelect
+        <SearchSelect sort
           value={String(f.target_job_id ?? '')}
           onChange={(v) => patch({ target_job_id: v } as Partial<StepConfig>)}
           options={options}
@@ -1036,18 +1036,18 @@ function ReportForm({ step, patch }: FormProps) {
           <>
             <Field>
               <FieldLabel>{t('nomaflow.steps.reportModel')}</FieldLabel>
-              <SearchSelect value={app && model ? `${app}/${model}` : ''} options={modelOpts} placeholder={t('common.pick')}
+              <SearchSelect sort value={app && model ? `${app}/${model}` : ''} options={modelOpts} placeholder={t('common.pick')}
                 onChange={(v) => { const [a, m] = v.split('/'); patch({ app: a, model: m } as Partial<StepConfig>) }} />
             </Field>
             <Field>
               <FieldLabel>{kind === 'dashboard' ? t('explorer.dashboards') : t('explorer.analyses')}</FieldLabel>
-              <SearchSelect value={rest} onChange={(v) => setRef(kind, v)} options={saved.map((s) => ({ value: s.id, label: s.name, mono: s.id }))} allowCustom placeholder={t('nomaflow.steps.reportSharedOnly')} />
+              <SearchSelect sort value={rest} onChange={(v) => setRef(kind, v)} options={saved.map((s) => ({ value: s.id, label: s.name, mono: s.id }))} allowCustom placeholder={t('nomaflow.steps.reportSharedOnly')} />
             </Field>
           </>
         ) : (
           <Field $span={2}>
             <FieldLabel>{t('nomaflow.steps.reportPlugin')}</FieldLabel>
-            <SearchSelect value={rest} onChange={(v) => setRef('report', v)} options={reports.map((r) => ({ value: `${r.scope}:${r.id}`, label: r.title, mono: `${r.scope}:${r.id}` }))} allowCustom />
+            <SearchSelect sort value={rest} onChange={(v) => setRef('report', v)} options={reports.map((r) => ({ value: `${r.scope}:${r.id}`, label: r.title, mono: `${r.scope}:${r.id}` }))} allowCustom />
           </Field>
         )}
         <Field>
@@ -1068,7 +1068,7 @@ function ReportForm({ step, patch }: FormProps) {
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.reportAsRole')}</FieldLabel>
-          <SearchSelect value={String(f.as_role ?? '')} onChange={(v) => patch({ as_role: v || undefined } as Partial<StepConfig>)} options={roles.map((r) => ({ value: r, label: r }))} anyLabel={t('nomaflow.steps.reportUnrestricted')} allowCustom />
+          <SearchSelect sort value={String(f.as_role ?? '')} onChange={(v) => patch({ as_role: v || undefined } as Partial<StepConfig>)} options={roles.map((r) => ({ value: r, label: r }))} anyLabel={t('nomaflow.steps.reportUnrestricted')} allowCustom />
         </Field>
       </Grid>
     </>

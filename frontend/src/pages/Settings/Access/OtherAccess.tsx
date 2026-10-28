@@ -87,7 +87,7 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
           <SearchSelect value={type} onChange={(v) => { setType(v as RuleType); setItem('') }} options={typeOpts} />
         </div>
         <div style={{ minWidth: 240, flex: 1 }}>
-          <SearchSelect value={item} onChange={setItem} options={itemOpts} allowCustom={type === 'pattern' || type === 'query' || type === 'api' || type === 'explorer'}
+          <SearchSelect sort value={item} onChange={setItem} options={itemOpts} allowCustom={type === 'pattern' || type === 'query' || type === 'api' || type === 'explorer'}
             placeholder={type === 'pattern' ? 'sql:nomasx1:security_*' : t('settings.access.pickItem')} />
         </div>
         <Button $size="sm" $variant="ghost" onClick={add} disabled={!item.trim()}><Plus size={13} /> {t('settings.access.addRule')}</Button>

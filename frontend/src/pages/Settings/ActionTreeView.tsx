@@ -673,7 +673,7 @@ export default function ActionTreeView({
     if (aType === 'call_action') {
       return (
         <Field label={t('settings.screens.action.sharedRef')}>
-          <SearchSelect
+          <SearchSelect sort
             value={(a.ref as string | undefined) ?? ''}
             options={sharedActionOptions}
             onChange={(v) => onPatch({ ref: v || '' })}
@@ -687,7 +687,7 @@ export default function ActionTreeView({
     if (aType === 'call_plugin') {
       return (
         <Field label={t('settings.screens.action.callable')}>
-          <SearchSelect
+          <SearchSelect sort
             value={(a.callable as string | undefined) ?? ''}
             options={pluginCallableOptions}
             onChange={(v) => onPatch({ callable: v || '' })}
@@ -720,7 +720,7 @@ export default function ActionTreeView({
     return (
       <>
         <Field label={t('settings.screens.action.connector')}>
-          <SearchSelect
+          <SearchSelect sort
             value={(a.connector as string | undefined) ?? ''}
             options={opts}
             onChange={(v) => onPatch({ connector: v && v !== effectiveConnector ? v : null })}
@@ -743,7 +743,7 @@ export default function ActionTreeView({
           <Field label={targetLabel + ' *'}>
             <Row gap={6} style={{ alignItems: 'center' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <SearchSelect
+                <SearchSelect sort
                   value={(a[targetKey] as string | undefined) ?? ''}
                   options={targetOpts}
                   onChange={(v) => onPatch({ [targetKey]: v || '' })}

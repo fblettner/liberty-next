@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Compass, Play, Table2, List, ArrowLeft, Code2, X, Grid3x3, BarChart3, LineChart, PieChart, Gauge, Save, Copy, Trash2, LayoutDashboard, FlaskConical, Pencil, FileDown } from 'lucide-react'
+import { BookOpen, Compass, Play, Table2, List, ArrowLeft, Code2, X, Grid3x3, BarChart3, LineChart, PieChart, Gauge, Save, Copy, Trash2, LayoutDashboard, FlaskConical, Pencil, FileDown } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { Banner, Button, Centered, Checkbox, Input, PageLayout, SearchSelect, SpinnerRing, useModals, type SearchSelectOption } from '../../common'
@@ -73,6 +73,8 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showSql, setShowSql] = useState(false)
+  const [dictBusy, setDictBusy] = useState(false)
+  const [dictNotice, setDictNotice] = useState<string | null>(null)
   const [calcEditing, setCalcEditing] = useState<CalcDef | null | undefined>(undefined)
   const [record, setRecord] = useState<{ entity: string; row: Record<string, unknown> } | null>(null)
   // saved analyses + dashboards
@@ -119,7 +121,7 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
   }, [])
   useEffect(() => {
     if (!app || !modelId) return
-    setModel(null); setDef(null); setResult(null); setDetail(null); setDrill(null); setError(null)
+    setModel(null); setDef(null); setResult(null); setDetail(null); setDrill(null); setError(null); setDictNotice(null)
     setCurrentAnalysis(null); setCurrentDashboard(null); setDashDef({ period: null, tiles: [] }); setDashEditing(false)
     setAnalyses([]); setDashboards([])
     const n = ++modelReq.current
@@ -128,6 +130,21 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
       .catch((e) => { if (n === modelReq.current) setError(e instanceof ApiError ? e.message : String(e)) })
     void loadSaved(app, modelId)
   }, [app, modelId, loadSaved])
+
+  /** A superuser's "create the dictionary entries": the model's tables scanned (the JDE data
+   *  dictionary for a JDE source), the missing entries written under the app, the model refetched
+   *  so the fields show their descriptions. */
+  const createDictionary = async () => {
+    setDictBusy(true); setDictNotice(null)
+    try {
+      const r = await api.post<{ created: string[]; skipped: string[] }>(`/admin/explorer/${encodeURIComponent(app)}/${encodeURIComponent(modelId)}/dictionary`, {})
+      const n = ++modelReq.current
+      const m = await api.get<ExplorerModel>(`/api/explorer/${encodeURIComponent(app)}/${encodeURIComponent(modelId)}/model?refresh=1`)
+      if (n !== modelReq.current) return
+      setModel(m)
+      setDictNotice([t('explorer.dictionaryCreated', { n: r.created.length }), ...r.skipped].join(' · '))
+    } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) } finally { setDictBusy(false) }
+  }
 
   const entities = useMemo(() => (model ? withCalculated(model, def?.calculated ?? [], calcTypes) : []), [model, def?.calculated, calcTypes])
   const fields = useMemo(() => fieldIndex(entities), [entities])
@@ -273,7 +290,7 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
       {mode === 'analyses' ? (
         <>
           <div style={{ width: 300 }}>
-            <SearchSelect value={currentAnalysis?.id ?? ''} options={savedOptions(analyses, t('explorer.mine'))} anyLabel={t('explorer.newAnalysis')} placeholder={t('explorer.pickAnalysis')}
+            <SearchSelect sort value={currentAnalysis?.id ?? ''} options={savedOptions(analyses, t('explorer.mine'))} anyLabel={t('explorer.newAnalysis')} placeholder={t('explorer.pickAnalysis')}
               onChange={(v) => loadAnalysis(analyses.find((a) => a.id === v) ?? null)} />
           </div>
           <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'analyses', asNew: false })} disabled={def.rows.length === 0 && def.measures.length === 0}><Save size={13} /> {t('common.save')}</Button>
@@ -285,7 +302,7 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
       ) : (
         <>
           <div style={{ width: 300 }}>
-            <SearchSelect value={currentDashboard?.id ?? ''} options={savedOptions(dashboards, t('explorer.mine'))} anyLabel={t('explorer.newDashboard')} placeholder={t('explorer.pickDashboard')}
+            <SearchSelect sort value={currentDashboard?.id ?? ''} options={savedOptions(dashboards, t('explorer.mine'))} anyLabel={t('explorer.newDashboard')} placeholder={t('explorer.pickDashboard')}
               onChange={(v) => loadDashboard(dashboards.find((d) => d.id === v) ?? null)} />
           </div>
           <Button $size="sm" $variant={dashEditing ? 'primary' : 'ghost'} onClick={() => setDashEditing((v) => !v)}><Pencil size={13} /> {t('explorer.editLayout')}</Button>
@@ -300,12 +317,19 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
   )
 
   return (
-    <PageLayout icon={<Compass size={18} />} title={t('explorer.title')} description={<span>{model.label}{model.description ? ` — ${model.description}` : ''}</span>}
+    <PageLayout icon={<Compass size={18} />} title={t('explorer.title')} description={<span>{model.label}{model.description ? ` — ${model.description}` : ''}{model.derived && model.preset ? ` · ${t('explorer.fromPreset', { preset: model.preset })}` : ''}</span>}
       headerRight={models && models.length > 0 ? (
-        <div style={{ width: 280 }}><SearchSelect value={`${app}/${modelId}`} options={models.map((m) => ({ value: `${m.app}/${m.model}`, label: m.label, mono: `${m.app} · ${m.model}` }))}
+        <div style={{ width: 380 }}><SearchSelect sort value={`${app}/${modelId}`} options={models.map((m) => ({ value: `${m.app}/${m.model}`, label: m.label, mono: m.app }))}
           onChange={(v) => { const [a, m] = v.split('/'); if (a && m) { setApp(a); setModelId(m) } }} /></div>
       ) : undefined}>
       {model.warnings.length > 0 && user?.is_superuser && <Banner $tone="warning" style={{ marginBottom: 8 }}>{model.warnings.join(' · ')}</Banner>}
+      {user?.is_superuser && (model.undocumented ?? 0) > 0 && (
+        <Banner $tone="info" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ flex: 1 }}>{t('explorer.undocumented', { n: model.undocumented })}</span>
+          <Button $size="sm" $variant="ghost" disabled={dictBusy} onClick={() => void createDictionary()}>{dictBusy ? <SpinnerRing size={12} thickness={2} /> : <BookOpen size={13} />} {t('explorer.createDictionary')}</Button>
+        </Banner>
+      )}
+      {dictNotice && <Banner $tone="ok" style={{ marginBottom: 8 }}>{dictNotice}</Banner>}
       {modeBar}
       {mode === 'dashboards' ? (
         <>

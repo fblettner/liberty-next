@@ -25,6 +25,7 @@ export interface ScanProposal {
   default: string
   justify: string
   size: number | null
+  decimals: number | null             // JDE F9210.FRCDEC — the implied places of a jdenumber amount
 }
 
 const Wrap = styled.div`overflow: auto; border: 1px solid ${colors.border}; border-radius: ${radius.md};`
@@ -55,6 +56,7 @@ export function ScanProposalsTable({
           <Th>{t('settings.dictscan.column')}</Th>
           <Th>{t('settings.dictscan.label')}</Th>
           <Th style={{ width: 120 }}>{t('settings.dictscan.format')}</Th>
+          <Th style={{ width: 64 }}>{t('settings.dictscan.decimals')}</Th>
           <Th style={{ width: 130 }}>{t('settings.dictscan.rule')}</Th>
           <Th style={{ width: 96 }}>{t('settings.dictscan.ruleValue')}</Th>
           <Th style={{ width: 140 }}>{t('settings.dictscan.lookupParams')}</Th>
@@ -74,6 +76,7 @@ export function ScanProposalsTable({
                 </Td>
                 <Td><Input value={d.label} disabled={dis} onChange={(e) => onPatch(d.column, { label: e.target.value })} placeholder={d.dd_id} /></Td>
                 <Td><SearchSelect value={d.format} disabled={dis} onChange={(v) => onPatch(d.column, { format: v })} options={fmtOpts} allowCustom placeholder="text" /></Td>
+                <Td><Input type="number" min={0} max={9} value={d.decimals ?? ''} disabled={dis} onChange={(e) => onPatch(d.column, { decimals: e.target.value === '' ? null : Number(e.target.value) })} placeholder="—" /></Td>
                 <Td><SearchSelect value={d.rules} disabled={dis} onChange={(v) => onPatch(d.column, { rules: v })} options={ruleOpts} anyLabel={t('common.none')} placeholder="—" /></Td>
                 <Td><Input value={d.rules_values} disabled={dis || !d.rules} onChange={(e) => onPatch(d.column, { rules_values: e.target.value })} placeholder="—" /></Td>
                 <Td><Input value={d.lookup_params} disabled={dis || d.rules !== 'LOOKUP'} onChange={(e) => onPatch(d.column, { lookup_params: e.target.value })} placeholder={d.rules === 'LOOKUP' ? 'SY=01,RT=ST' : ''} /></Td>

@@ -185,7 +185,7 @@ export function ChartEditorModal({
                       sequence + screen-editor surfaces. */}
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <SearchSelect value={query} onChange={(v) => { setQuery(v); setError(null) }}
+                      <SearchSelect sort value={query} onChange={(v) => { setQuery(v); setError(null) }}
                         options={queryOpts} placeholder={t('chart.spec.pick')} allowCustom />
                     </div>
                     <EditQueryButton connector={connector} queryName={query} />

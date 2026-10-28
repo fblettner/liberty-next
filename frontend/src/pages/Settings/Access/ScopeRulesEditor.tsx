@@ -158,11 +158,11 @@ export default function ScopeRulesEditor({ value, onChange, dictionary, attribut
             </Field>
           ) : (
             <Field label={t('settings.access.scopeItem')}>
-              <SearchSelect value={itemValue} onChange={pickItem} options={itemOpts} allowCustom placeholder={t('settings.access.pickItemScope')} />
+              <SearchSelect sort value={itemValue} onChange={pickItem} options={itemOpts} allowCustom placeholder={t('settings.access.pickItemScope')} />
             </Field>
           )}
           <Field label={t('settings.access.scopeConnector')}>
-            <SearchSelect value={draft.connector ?? ''} onChange={(v) => setDraft((d) => ({ ...d, connector: v || null }))} options={connOpts} anyLabel={t('settings.access.anyConnector')} />
+            <SearchSelect sort value={draft.connector ?? ''} onChange={(v) => setDraft((d) => ({ ...d, connector: v || null }))} options={connOpts} anyLabel={t('settings.access.anyConnector')} />
           </Field>
         </div>
         <div className="inline">
@@ -174,7 +174,7 @@ export default function ScopeRulesEditor({ value, onChange, dictionary, attribut
         </div>
         {byAttribute ? (
           <Field label={t('settings.access.attribute')}>
-            <SearchSelect value={attributeOf(draft.source) ?? ''} onChange={(v) => setDraft((d) => ({ ...d, source: v ? sourceFor(v.trim()) : null }))} options={attrOpts} allowCustom placeholder="company" />
+            <SearchSelect sort value={attributeOf(draft.source) ?? ''} onChange={(v) => setDraft((d) => ({ ...d, source: v ? sourceFor(v.trim()) : null }))} options={attrOpts} allowCustom placeholder="company" />
           </Field>
         ) : (
           <Field label={t('settings.access.values')}>

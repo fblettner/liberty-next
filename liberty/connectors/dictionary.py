@@ -59,6 +59,14 @@ class DictionaryEntry(BaseModel):
         description="How to render the cell — pick a built-in (date / number / boolean / …) or type a custom format.",
         json_schema_extra={"x_enum_ref": "DICTIONARY_TYPE"},
     )
+    decimals: int | None = Field(
+        default=None, ge=0, le=9,
+        description=(
+            "Decimal places. For `jdenumber` (a JD Edwards amount, stored without a decimal point) the "
+            "implied places: the value is divided by 10^decimals on read and multiplied back on write and "
+            "in filters (F9210.FRCDEC). For the other numeric formats, the places shown."
+        ),
+    )
     rules: str | None = Field(
         default=None,
         description="Display rule. BOOLEAN renders ✓/✗, ENUM shows a label per code, LOOKUP resolves a code to a label via a query, SEQUENCE / NN auto-fill on insert, PASSWORD masks input.",

@@ -52,7 +52,7 @@ export function NavigateTargetField({
       </Field>
       {navType === 'screen' ? (
         <Field label={t('settings.screens.action.navTargetScreen') + ' *'}>
-          <SearchSelect
+          <SearchSelect sort
             value={(action.screen as string | undefined) ?? ''}
             options={screenOptions}
             onChange={(v) => onPatch({ screen: v || null })}
@@ -64,7 +64,7 @@ export function NavigateTargetField({
         <Field label={t('settings.screens.action.navTargetQuery') + ' *'}>
           <Row gap={6} style={{ alignItems: 'center' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <SearchSelect
+              <SearchSelect sort
                 value={(action.to as string | undefined) ?? ''}
                 options={queryOptions}
                 onChange={(v) => onPatch({ to: v || null })}

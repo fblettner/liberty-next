@@ -343,7 +343,7 @@ export function CrudWizardModal({
                   a fresh tables fetch. */}
               {schemaOpts.length > 1 && (
                 <Field label={t('settings.crudWizard.schema')}>
-                  <SearchSelect
+                  <SearchSelect sort
                     value={pickedSchema && pickedSchema !== '__nopicker__' ? pickedSchema : ''}
                     onChange={(v) => { setPickedSchema(v); setTableName('') }}
                     options={schemaOpts}
@@ -365,7 +365,7 @@ export function CrudWizardModal({
                 </Field>
               )}
               <Field label={t('settings.crudWizard.table')}>
-                <SearchSelect
+                <SearchSelect sort
                   value={tableName}
                   onChange={(v) => setTableName(v)}
                   options={tableOpts}

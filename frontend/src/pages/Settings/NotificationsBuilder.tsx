@@ -136,8 +136,8 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
           {tr.kind === 'screen' && (
             <>
               <Grid>
-                <Field label={t('settings.notify.app')}><SearchSelect value={tr.app} onChange={(v) => setTrigger({ ...tr, app: v, screen: '' })} options={appOpts} /></Field>
-                <Field label={t('settings.notify.screen')}><SearchSelect value={tr.screen} onChange={(v) => setTrigger({ ...tr, screen: v })} options={screenOpts} allowCustom /></Field>
+                <Field label={t('settings.notify.app')}><SearchSelect sort value={tr.app} onChange={(v) => setTrigger({ ...tr, app: v, screen: '' })} options={appOpts} /></Field>
+                <Field label={t('settings.notify.screen')}><SearchSelect sort value={tr.screen} onChange={(v) => setTrigger({ ...tr, screen: v })} options={screenOpts} allowCustom /></Field>
                 <Field label={t('settings.notify.events')}>
                   <div style={{ display: 'flex', gap: 12, paddingTop: 8 }}>
                     {SCREEN_EVENTS.map((ev) => <Checkbox key={ev} checked={(tr.events ?? SCREEN_EVENTS).includes(ev)} onChange={() => setTrigger({ ...tr, events: toggleIn(tr.events, ev, SCREEN_EVENTS) })} label={ev} />)}
@@ -163,7 +163,7 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
               <Field label={t('settings.notify.jobs')}>
                 <Chips>
                   {(tr.jobs ?? []).map((j) => <PermChip key={j}>{j}<button type="button" onClick={() => setTrigger({ ...tr, jobs: (tr.jobs ?? []).filter((x) => x !== j) })}><X size={11} /></button></PermChip>)}
-                  <div style={{ minWidth: 160 }}><SearchSelect value="" onChange={(v) => { if (v && !(tr.jobs ?? []).includes(v)) setTrigger({ ...tr, jobs: [...(tr.jobs ?? []), v] }) }} options={jobOpts.filter((o) => !(tr.jobs ?? []).includes(o.value))} allowCustom placeholder={t('settings.notify.addJob')} /></div>
+                  <div style={{ minWidth: 160 }}><SearchSelect sort value="" onChange={(v) => { if (v && !(tr.jobs ?? []).includes(v)) setTrigger({ ...tr, jobs: [...(tr.jobs ?? []), v] }) }} options={jobOpts.filter((o) => !(tr.jobs ?? []).includes(o.value))} allowCustom placeholder={t('settings.notify.addJob')} /></div>
                 </Chips>
               </Field>
               <Field label={t('settings.notify.events')}>
@@ -190,13 +190,13 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
                 {(['role', 'user', 'email'] as const).map((k) => <SegBtn key={k} $active={recipientKind === k} onClick={() => { setRecipientKind(k); setRecipientText('') }}>{t(`settings.notify.rk_${k}`, k)}</SegBtn>)}
               </Seg>
               <div style={{ minWidth: 220, flex: 1 }}>
-                <SearchSelect value={recipientText} onChange={addRecipient} options={recipientOpts} allowCustom placeholder={recipientKind === 'email' ? 'name@example.com' : t('settings.notify.pickRecipient')} />
+                <SearchSelect sort value={recipientText} onChange={addRecipient} options={recipientOpts} allowCustom placeholder={recipientKind === 'email' ? 'name@example.com' : t('settings.notify.pickRecipient')} />
               </div>
             </Chips>
           </Field>
           {channels.includes('action') && (
             <Grid style={{ marginTop: 10 }}>
-              <Field label={t('settings.notify.actionConnector')}><SearchSelect value={rule.action?.connector ?? ''} onChange={(v) => patch({ action: { ...(rule.action ?? { connector: '' }), connector: v } })} options={connOpts} /></Field>
+              <Field label={t('settings.notify.actionConnector')}><SearchSelect sort value={rule.action?.connector ?? ''} onChange={(v) => patch({ action: { ...(rule.action ?? { connector: '' }), connector: v } })} options={connOpts} /></Field>
               <Field label={t('settings.notify.actionQuery')}><Input value={rule.action?.query ?? ''} onChange={(e) => patch({ action: { ...(rule.action ?? { connector: '' }), query: e.target.value || null } })} disabled={!sqlConns.some((c) => c.name === rule.action?.connector)} /></Field>
               <Field label={t('settings.notify.actionEndpoint')}><Input value={rule.action?.endpoint ?? ''} onChange={(e) => patch({ action: { ...(rule.action ?? { connector: '' }), endpoint: e.target.value || null } })} /></Field>
             </Grid>

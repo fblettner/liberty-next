@@ -404,7 +404,12 @@ class _Builder:
         """The SQL expression of a field: ``alias.COL``, or the calculated expression."""
         if fld.entity == "calc":
             return render(self.calc[fld.name.upper()][1])
-        return f"{owner or _alias(fld.entity)}.{_ident(fld.name)}"
+        col = f"{owner or _alias(fld.entity)}.{_ident(fld.name)}"
+        # a JDE amount is stored without its decimal point: every use (a measure, a row, a filter,
+        # a detail column) reads the real value, so sums and bounds are in real units
+        if (fld.format or "").lower() == "jdenumber" and fld.decimals:
+            return f"({col} / {10 ** int(fld.decimals)}.0)"
+        return col
 
     # ── plan ────────────────────────────────────────────────────────────────────
     def lay_out(self, row_entities: list[str]) -> None:
@@ -692,12 +697,16 @@ class _Builder:
                     c["rule"] = d.fld.rule
                 if d.fld.format:
                     c["format"] = d.fld.format
+                if d.fld.decimals is not None:
+                    c["decimals"] = d.fld.decimals
             columns.append(c)
         for m in measures:
             c = {"key": m.spec.key, "kind": "measure", "aggregate": m.spec.agg, "type": "number",
                  "field": m.fld.key if m.fld else None, "entity": m.fld.entity if m.fld else self.primary, "label": m.fld.label if m.fld else ""}
             if m.fld and m.fld.format and m.spec.agg in ("sum", "avg", "min", "max"):
                 c["format"] = m.fld.format
+            if m.fld and m.fld.decimals is not None and m.spec.agg in ("sum", "avg", "min", "max"):
+                c["decimals"] = m.fld.decimals
             columns.append(c)
         result: dict[str, Any] = {
             "mode": "aggregate", "entity": self.primary, "columns": columns, "rows": out_rows,
@@ -752,6 +761,8 @@ class _Builder:
             c = {"key": f.key, "kind": "column", "field": f.key, "entity": f.entity, "label": f.label, "type": f.type}
             if f.rule:
                 c["rule"] = f.rule
+            if f.decimals is not None:
+                c["decimals"] = f.decimals
             if f.format:
                 c["format"] = f.format
             columns.append(c)

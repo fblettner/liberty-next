@@ -395,12 +395,12 @@ export function DashboardEditorModal({
                     <Input value={sstr(f.dictionary_key)} onChange={(e) => patchFilter(i, { dictionary_key: e.target.value })} placeholder="APPS_ID" />
                   </Field>
                   <Field label={t('settings.dash.filter.connector')}>
-                    <SearchSelect value={sstr(o.connector)}
+                    <SearchSelect sort value={sstr(o.connector)}
                       onChange={(v) => patchFilterOpt(i, { connector: v, query: '' })}
                       options={connectorOpts} placeholder={t('common.pick')} allowCustom />
                   </Field>
                   <Field label={t('settings.dash.filter.query')}>
-                    <SearchSelect value={sstr(o.query)}
+                    <SearchSelect sort value={sstr(o.query)}
                       onChange={(v) => patchFilterOpt(i, { query: v })}
                       options={queryOptsFor(sstr(o.connector))}
                       placeholder={sstr(o.connector) ? t('common.pick') : t('settings.charts.pickConnFirst')} allowCustom />

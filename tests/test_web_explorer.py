@@ -88,6 +88,25 @@ PRESETS_TOML = textwrap.dedent("""
     join = "LEFT"
     on = [{ left = "fact_sales.COMPANY", right = "dim_company.COMPANY" }]
     key = ["COMPANY", "NOPE"]
+
+    [[presets]]                          # a preset that ships its model (explorer.shop.shop_shipped)
+    id = "shop_shipped"
+    label = "Sales (shipped)"
+    description = "The model the preset ships."
+    connector = "shop"
+    app = "shop"
+    explorer = true
+    [[presets.tables]]
+    name = "fact_sales"
+    label = "Sales lines"
+    key = ["id"]
+    [[presets.tables]]
+    name = "dim_company"
+    label = "Company (dim)"
+    cardinality = "one"
+    join = "LEFT"
+    on = [{ left = "fact_sales.COMPANY", right = "dim_company.COMPANY" }]
+    key = ["COMPANY"]
     """)
 
 SCREENS_TOML = textwrap.dedent("""
@@ -157,8 +176,9 @@ def test_list_models_by_permission(env) -> None:
     with TestClient(app) as client:
         assert client.get("/api/explorer").status_code == 401
         admin = client.get("/api/explorer", headers=_h(client, "admin")).json()["models"]
-        assert [(m["app"], m["model"]) for m in admin] == [("shop", "sales"), ("shop", "frompreset"), ("other", "x")] and admin[0]["label"] == "Shop" and admin[0]["entities"] == 2
-        assert [m["model"] for m in client.get("/api/explorer", headers=_h(client, "analyst")).json()["models"]] == ["sales", "frompreset"]
+        assert [(m["app"], m["model"]) for m in admin] == [("shop", "sales"), ("shop", "frompreset"), ("shop", "shop_shipped"), ("other", "x")] and admin[0]["label"] == "Shop" and admin[0]["entities"] == 2
+        assert admin[2]["derived"] is True and admin[2]["preset"] == "shop_shipped" and admin[0]["derived"] is False
+        assert [m["model"] for m in client.get("/api/explorer", headers=_h(client, "analyst")).json()["models"]] == ["sales", "frompreset", "shop_shipped"]
         assert client.get("/api/explorer", headers=_h(client, "nobody")).json()["models"] == []
 
 
@@ -229,7 +249,7 @@ def test_admin_parsed_round_trip(env) -> None:
         assert client.put("/admin/config/explorer/parsed", json=bad, headers=h).status_code == 422
         assert client.get("/admin/config/explorer/parsed", headers=_h(client, "analyst")).status_code == 403
         assert "explorer" in client.get("/admin/config/schema", headers=h).json()
-        assert client.get("/info", headers=h).json()["explorer"] == {"apps": ["shop", "other"], "models": 3}
+        assert client.get("/info", headers=h).json()["explorer"] == {"apps": ["shop", "other"], "models": 4}   # + the preset-shipped one
 
 
 def test_query_route(env) -> None:
@@ -321,16 +341,26 @@ def test_model_from_a_preset(env) -> None:
     """Settings → Explorer applies a preset: the endpoint returns the model filled — the preset's
     tables as entities (lower-cased ids, SELECT * on each), the base table as hub, the join as a
     relation resolved on the discovered columns, the declared entity completed — and the model
-    saved that way runs. A model that names a preset but has no entity is only a warning."""
-    app, _ = env
+    saved that way runs. A model that names a preset but has no entity is built from the preset
+    at first use (the preset's warnings on the view). Applying the preset also creates the
+    dictionary entries the tables lack (a non-JDE source: the inferred format, no label)."""
+    app, tmp_path = env
     with TestClient(app) as client:
         h = _h(client, "admin")
         body = client.get("/api/explorer/shop/frompreset/model", headers=h).json()
-        assert body["entities"] == [] and "not applied" in body["warnings"][0]
+        assert body["hub"] == "fact_sales" and [e["id"] for e in body["entities"]] == ["fact_sales", "dim_company"] and "NOPE" in body["warnings"][0]
+        assert body["derived"] is False and body["undocumented"] == 8
         r = client.post("/admin/explorer/from-preset", json={"app": "shop", "preset": "shop_sales", "model": {"entities": {"fact_sales": {"table": "fact_sales", "measures": {"QTY": "sum", "REVENUE": "sum"}}}}}, headers=h)
         assert r.status_code == 200, r.text
         filled = r.json()
         assert filled["warnings"] == ["preset key of dim_company: column not found for NOPE"] and filled["model"]["hub"] == "fact_sales" and filled["model"]["preset"] == "shop_sales"
+        assert filled["dictionary"] == {"created": ["COMPANY", "ID", "NAME", "QTY", "REGION", "REVENUE", "SALE_DATE"], "scanned": 2, "skipped": []}
+        assert "[connectors.shop.entries.SALE_DATE]" in (tmp_path / "dictionary.toml").read_text()
+        # a second apply creates nothing (every entry exists now); the fields are documented
+        again = client.post("/admin/explorer/from-preset", json={"app": "shop", "preset": "shop_sales"}, headers=h).json()
+        assert again["dictionary"]["created"] == []
+        body = client.get("/api/explorer/shop/frompreset/model", headers=h).json()
+        assert body["undocumented"] == 0 and {f["name"]: f.get("format") for f in body["entities"][0]["fields"]}["SALE_DATE"] == "date"
         ents = filled["model"]["entities"]
         # the preset's keys resolved to the real columns (`id` → ID); a missing item is only a warning
         assert set(ents) == {"fact_sales", "dim_company"} and ents["dim_company"] == {"label": "dim_company", "connector": "shop", "table": "dim_company", "key": ["COMPANY"], "cardinality": "many"}
@@ -351,3 +381,33 @@ def test_model_from_a_preset(env) -> None:
         r = client.post("/api/explorer/shop/frompreset/query", json={"rows": [{"field": "dim_company.NAME"}], "measures": [{"field": "fact_sales.REVENUE"}]}, headers=h)
         assert r.status_code == 200, r.text
         assert r.json()["rows"] == [{"dim_company.NAME": "Corp one", "sum(fact_sales.REVENUE)": 30.5}]
+
+
+def test_preset_shipped_model_and_its_dictionary(env) -> None:
+    """A preset flagged ``explorer = true`` with an ``app`` is a model by default — listed, built
+    from the preset at first use (the table labels and cardinalities of the preset), queryable —
+    and stays out of explorer.toml. The page's "create the dictionary entries" scans its tables."""
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = client.get("/api/explorer/shop/shop_shipped/model", headers=h)
+        assert body.status_code == 200, body.text
+        body = body.json()
+        assert body["derived"] is True and body["preset"] == "shop_shipped" and body["label"] == "Sales (shipped)" and body["hub"] == "fact_sales"
+        sales, company = body["entities"]
+        assert sales["label"] == "Sales lines" and sales["key"] == ["ID"] and company["label"] == "Company (dim)" and company["cardinality"] == "one"
+        assert body["relations"] == [{"from": "dim_company", "to": "fact_sales", "on": [["COMPANY", "COMPANY"]]}] and body["warnings"] == []
+        assert body["undocumented"] == 8
+        r = client.post("/api/explorer/shop/shop_shipped/query", json={"rows": [{"field": "dim_company.NAME"}], "measures": [{"field": "fact_sales.REVENUE"}]}, headers=h)
+        assert r.status_code == 200, r.text
+        assert r.json()["rows"] == [{"dim_company.NAME": "Corp one", "sum(fact_sales.REVENUE)": 30.5}]
+        # not in the file (the builder lists what explorer.toml declares)
+        assert "shop_shipped" not in client.get("/admin/config/explorer/parsed", headers=h).json()["explorer"]["shop"]
+        # the dictionary entries — superuser only, unknown model 404
+        assert client.post("/admin/explorer/shop/shop_shipped/dictionary", headers=_h(client, "analyst")).status_code == 403
+        assert client.post("/admin/explorer/shop/ghost/dictionary", headers=h).status_code == 404
+        r = client.post("/admin/explorer/shop/shop_shipped/dictionary", headers=h)
+        assert r.status_code == 200, r.text
+        assert r.json() == {"created": ["COMPANY", "ID", "NAME", "QTY", "REGION", "REVENUE", "SALE_DATE"], "scanned": 2, "skipped": []}
+        body = client.get("/api/explorer/shop/shop_shipped/model", headers=h).json()
+        assert body["undocumented"] == 0 and body["derived"] is True

@@ -167,6 +167,9 @@ export interface Column {
   width?: number
   align?: 'left' | 'right' | 'center' | string
   format?: string
+  /** Decimal places from the dictionary entry: a `jdenumber`'s implied places (the server scales the
+   *  value on read and write), the places shown for the other numeric formats. */
+  decimals?: number
   /** Resolved BOOLEAN / ENUM / LOOKUP display rule from the field dictionary (the v2 form of v1's dd_rules). */
   rule?: DisplayRule
   /** Dictionary key the column was hinted with (v1's ``col_dd_id``). Surfaced so dashboard

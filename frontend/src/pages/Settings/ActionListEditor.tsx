@@ -336,7 +336,7 @@ export default function ActionListEditor({
     return (
       <>
         <Field label={t('settings.screens.action.connector')}>
-          <SearchSelect
+          <SearchSelect sort
             value={(a.connector as string | undefined) ?? ''}
             options={opts}
             onChange={(v) => onPatch({ connector: v && v !== effectiveConnector ? v : null })}
@@ -361,7 +361,7 @@ export default function ActionListEditor({
             <Field label={targetLabel + ' *'}>
               <Row gap={6} style={{ alignItems: 'center' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <SearchSelect
+                  <SearchSelect sort
                     value={(a[targetKey] as string | undefined) ?? ''}
                     options={targetOpts}
                     onChange={(v) => onPatch({ [targetKey]: v || '' })}

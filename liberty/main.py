@@ -169,8 +169,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.dashboards = load_dashboards(settings.dashboards.config_path)
         from liberty.explorer import load_explorer
         from liberty.explorer.model import ModelCache
-        app.state.explorer = load_explorer(settings.explorer.config_path)
-        app.state.explorer_cache = ModelCache()
+        from liberty.presets import presets_dir
+        catalogue = presets_dir(settings.connectors.config_path)
+        app.state.explorer = load_explorer(settings.explorer.config_path, presets_dir=catalogue)
+        app.state.explorer_cache = ModelCache(presets_dir=catalogue)
         from liberty.notify import load_notification_rules
         app.state.notification_rules = load_notification_rules(settings.notify.config_path, strict=False)
         # Config file versioning — filesystem snapshot history (.versions/ next to the TOMLs) so the

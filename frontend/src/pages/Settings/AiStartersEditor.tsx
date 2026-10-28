@@ -106,7 +106,7 @@ export function AiStartersEditor({ value, apps, onChange }: {
         </Scope>
       ))}
       <div style={{ maxWidth: 320 }}>
-        <SearchSelect value="" options={scopeOptions} allowCustom placeholder={t('settings.app.aiStartersAddScope')}
+        <SearchSelect sort value="" options={scopeOptions} allowCustom placeholder={t('settings.app.aiStartersAddScope')}
           onChange={(v) => { const k = v.trim(); if (k && !scopes.includes(k)) setScope(k, []) }} />
       </div>
     </div>

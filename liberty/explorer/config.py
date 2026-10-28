@@ -142,6 +142,7 @@ class ExplorerModel(BaseModel):
     analyses: dict[str, BundledObject] = Field(default_factory=dict, description="The bundled analyses, by id.")
     dashboards: dict[str, BundledObject] = Field(default_factory=dict, description="The bundled dashboards of analyses, by id.")
     override: bool = False
+    derived: bool = Field(default=False, description="Not in explorer.toml: the model a preset flagged ``explorer = true`` ships by default (built from the preset at first use; declare a model with the same id to replace it).")
 
     @model_validator(mode="after")
     def _inject_and_check(self) -> ExplorerModel:
@@ -240,10 +241,35 @@ def parse_explorer(data: dict[str, Any]) -> ExplorerFile:
     return ExplorerFile.model_validate(data)
 
 
-def load_explorer(path: Path | str) -> ExplorerFile:
-    """Load and validate ``explorer.toml``; a missing file is an empty model set."""
+def add_preset_models(explorer: ExplorerFile, presets: list[dict[str, Any]]) -> ExplorerFile:
+    """The models the presets ship by default: a preset carrying ``explorer = true`` and an
+    ``app`` becomes ``explorer.<app>.<preset id>`` unless the file declares a model of that app
+    on the same preset, under any id (the declared one wins — that is how an operator
+    customises a shipped model: apply the preset in the builder, then edit). The model only
+    names its preset; its entities, hub and relations are built from the preset at first use
+    (:func:`liberty.explorer.model.build_model_view`)."""
+    for p in presets:
+        pid, app = str(p.get("id") or ""), str(p.get("app") or "")
+        if not (p.get("explorer") and pid and app) or not set(pid) <= _ID_CHARS:
+            continue
+        models = explorer.explorer.setdefault(app, {})
+        if pid in models or any(m.preset == pid for m in models.values()):
+            continue
+        m = ExplorerModel(label=p.get("label") or pid, description=p.get("description"), preset=pid, derived=True)
+        m.id, m.app = pid, app
+        models[pid] = m
+    return explorer
+
+
+def load_explorer(path: Path | str, presets_dir: Path | str | None = None) -> ExplorerFile:
+    """Load and validate ``explorer.toml``; a missing file is an empty model set. With
+    *presets_dir*, the models the presets ship by default are added (:func:`add_preset_models`)."""
     path = Path(path)
-    if not path.exists():
-        return ExplorerFile()
-    with path.open("rb") as fh:
-        return parse_explorer(tomllib.load(fh))
+    out = ExplorerFile()
+    if path.exists():
+        with path.open("rb") as fh:
+            out = parse_explorer(tomllib.load(fh))
+    if presets_dir is not None:
+        from liberty.presets import load_presets
+        add_preset_models(out, load_presets(presets_dir))
+    return out

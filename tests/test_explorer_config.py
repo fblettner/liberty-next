@@ -172,3 +172,34 @@ def test_resolve_dictionary_tries_the_app_scope_then_the_connectors() -> None:
     # a lower-cased result key (the Oracle dialect) never becomes the label: the field shows its upper-cased name once
     fields, _ = fields_from_columns(ExplorerEntity(id="f0101", query="q"), cols)
     assert [(f.name, f.label) for f in fields] == [("ABAN8", "Address Number"), ("ABMCU", "Business Unit"), ("ABALPH", "ABALPH")]
+
+
+def test_add_preset_models_ships_flagged_presets() -> None:
+    from liberty.explorer.config import add_preset_models
+    f = parse_explorer({"explorer": {"jde": {"ab": {"preset": "address_book", "label": "Mine"}}}})
+    presets = [
+        {"id": "address_book", "app": "jde", "explorer": True, "label": "Theirs", "tables": [{"name": "F0101"}]},   # declared wins
+        {"id": "ap_ledger", "app": "jde", "explorer": True, "label": "A/P", "description": "Vouchers", "tables": [{"name": "F0411"}]},
+        {"id": "no_app", "explorer": True, "tables": [{"name": "F0411"}]},                                           # needs an app
+        {"id": "not_flagged", "app": "jde", "tables": [{"name": "F0411"}]},
+        {"id": "bad id", "app": "jde", "explorer": True, "tables": [{"name": "F0411"}]},
+    ]
+    add_preset_models(f, presets)
+    assert sorted(f.explorer["jde"]) == ["ab", "ap_ledger"] and f.explorer["jde"]["ab"].label == "Mine" and not f.explorer["jde"]["ab"].derived
+    m = f.explorer["jde"]["ap_ledger"]
+    assert m.derived and m.preset == "ap_ledger" and m.app == "jde" and m.id == "ap_ledger" and m.label == "A/P" and m.description == "Vouchers" and m.entities == {}
+    assert "derived" not in m.model_dump(exclude_defaults=True) or m.model_dump(exclude_defaults=True)["derived"] is True
+
+
+def test_apply_preset_takes_the_table_label_and_cardinality() -> None:
+    from liberty.explorer.model import apply_preset
+    m = parse_explorer({"explorer": {"jde": {"ap": {"preset": "ap"}}}}).explorer["jde"]["ap"]
+    preset = {"id": "ap", "connector": "jdedwards", "tables": [
+        {"name": "F0411", "label": "Vouchers", "cardinality": "many"},                       # the base is the hub: always one
+        {"name": "F0401", "label": "Supplier", "cardinality": "one", "join": "LEFT", "on": [{"left": "F0411.AN8", "right": "F0401.AN8"}]},
+        {"name": "F0414", "join": "LEFT", "on": [{"left": "F0411.DOC", "right": "F0414.DOC"}]},
+    ]}
+    eff, _, _ = apply_preset(m, preset)
+    assert eff.entities["f0411"].label == "Vouchers" and eff.entities["f0411"].cardinality == "one"
+    assert eff.entities["f0401"].label == "Supplier" and eff.entities["f0401"].cardinality == "one"
+    assert eff.entities["f0414"].label == "F0414" and eff.entities["f0414"].cardinality == "many"

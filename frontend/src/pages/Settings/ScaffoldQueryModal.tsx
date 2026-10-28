@@ -218,7 +218,7 @@ export function ScaffoldQueryModal({
           {schema && schema.tables.length > 0 && (
             <>
               <Field label={t('settings.scaffold.table')}>
-                <SearchSelect
+                <SearchSelect sort
                   value={tableName}
                   onChange={(v) => { setTableName(v); setKeyCol(''); setValueCol(''); setLabelCol(''); setSqlOverride(null); setQueryName(''); setDictId(''); setDescription('') }}
                   options={tableOpts}

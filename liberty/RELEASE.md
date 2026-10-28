@@ -1,5 +1,32 @@
 # Liberty Next — Release notes
 
+## 7.0.60 — unreleased
+
+**Data Explorer: models shipped by the presets, dictionary entries in one click**
+- A Screen Assistant preset carrying `app` + `explorer = true` ships a Data Explorer model by
+  default (`explorer.<app>.<preset id>`): listed with the others, built from the preset at first
+  use, never written to `explorer.toml`. Declare a model on the same preset to customise it. A
+  preset table takes a `label` (the entity label) and a `cardinality` (`one` for a lookup joined to
+  a transaction hub: a plain LEFT JOIN).
+- The JDE catalogue ships eight new preset files — General Accounting, Accounts Payable, Accounts
+  Receivable, Inventory, Sales, Manufacturing, Product Data Management, Product Costing — from the
+  Oracle E1 data models; the fifteen "full" presets (Address Book included) ship their model.
+- Applying a preset in Settings → Explorer creates the dictionary entries its tables lack (the
+  assistant's Dictionary step, filed under the app: a JDE source gets its data dictionary
+  descriptions). On the Explorer page a superuser sees how many columns show their raw name and
+  creates the entries in one click (`POST /admin/explorer/{app}/{model}/dictionary`).
+
+**JDE amounts: the data dictionary's decimals**
+- New dictionary format `jdenumber` with a `decimals` entry field: a JD Edwards amount stored
+  without its decimal point (F9210.FRCDEC) reads as the real value, writes back as the stored
+  integer, and filters / explorer bounds are bound in real units; explorer sums and detail
+  columns are scaled in SQL, the result columns carry `decimals` and the Explorer table shows
+  exactly that many places. `decimals` on the other numeric formats is the places shown.
+- The dictionary scan (the assistant, the standalone page, the explorer preset path) reads
+  `DD_DECIMALS` from the per-table JDE query; the review tables get a Decimals column. The apps'
+  `dictionary_data_items_for_table_get` now emits `jdenumber` / `jdedate` / `integer` types,
+  the decimals, the size and the justify rule next to the UDC lookup rule.
+
 ## 7.0.59 — unreleased
 
 **Fixes from the documentation review (2026-10-27)**

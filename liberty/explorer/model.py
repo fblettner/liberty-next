@@ -92,6 +92,7 @@ class ExplorerField:
     kind: str                       # dimension | measure
     aggregate: Aggregate | None = None
     format: str | None = None
+    decimals: int | None = None     # the entry's places (a jdenumber's implied ones: scaled in SQL)
     rule: dict[str, Any] | None = None   # enum / lookup / boolean, the wire shape the grid uses
     dd: str | None = None
     hidden: bool = False
@@ -102,6 +103,8 @@ class ExplorerField:
             d["aggregate"] = self.aggregate
         if self.format:
             d["format"] = self.format
+        if self.decimals is not None:
+            d["decimals"] = self.decimals
         if self.rule:
             d["rule"] = self.rule
         if self.dd:
@@ -153,9 +156,13 @@ class ModelView:
         m = self.model
         return {
             "app": self.app, "model": m.id, "label": m.label or m.id, "description": m.description, "hub": m.hub, "preset": m.preset,
+            "derived": m.derived,
             "entities": [ev.to_dict() for ev in self.entities],
             "relations": [{"from": r.from_, "to": r.to, "on": [list(p) for p in r.on]} for r in m.relations],
             "warnings": list(self.warnings),
+            # visible columns no dictionary entry documents (label = the column name): the page
+            # offers a superuser to create them from the source's data dictionary
+            "undocumented": sum(1 for ev in self.entities for f in ev.fields if not f.hidden and not f.dd),
         }
 
 
@@ -188,7 +195,7 @@ def fields_from_columns(
         # case-insensitive Oracle column; the field's name is upper-cased too, so the pane shows one).
         out.append(ExplorerField(
             key=f"{entity.id}.{up}", entity=entity.id, name=up, label=col.label or up, type=tc,
-            kind=kind, aggregate=agg, format=col.format, rule=col.rule, dd=col.dd, hidden=(up in hidden or col.hidden),
+            kind=kind, aggregate=agg, format=col.format, decimals=col.decimals, rule=col.rule, dd=col.dd, hidden=(up in hidden or col.hidden),
         ))
     if entity.default_date and entity.default_date.upper() not in names:
         warnings.append(f"{entity.id}: default_date {entity.default_date!r} is not a column of {entity.query!r}")
@@ -230,6 +237,8 @@ def resolve_dictionary(
             col.label = entry.label_for(language) or col.label
         if col.format is None:
             col.format = entry.format
+        if col.decimals is None:
+            col.decimals = entry.decimals
         if col.rule is None:
             try:
                 col.rule = dictionary.resolve_rule(entry, connector=connector, language=language)
@@ -294,10 +303,12 @@ def apply_preset(model: ExplorerModel, preset: dict[str, Any]) -> tuple[Explorer
         name = str(t["name"])
         eid = by_table.get(name.upper()) or name.lower()
         ids[name.upper()] = eid
+        # a preset table may carry its own ``label`` and ``cardinality`` (a lookup joined to a
+        # transaction hub is "one": a plain LEFT JOIN, not a correlated sub-query)
         derived = ExplorerEntity(
-            id=eid, label=name, table=None if t.get("query") else name, schema=None if t.get("query") else t.get("schema"),
+            id=eid, label=t.get("label") or name, table=None if t.get("query") else name, schema=None if t.get("query") else t.get("schema"),
             query=t.get("query"), connector=t.get("query_connector") or preset.get("connector"),
-            cardinality="one" if i == 0 else "many",
+            cardinality="one" if i == 0 else (t.get("cardinality") or "many"),
         )
         declared = model.entities.get(eid)
         if t.get("key") and not (declared and declared.key):
@@ -378,7 +389,16 @@ async def materialize_preset(
 ) -> tuple[ExplorerModel, list[str]]:
     """The model filled from *preset* — the builder's "apply a preset": the derived entities, the
     hub, and the joins resolved on the discovered columns (JDE prefixes handled). The result is
-    what gets saved; the runtime never derives anything."""
+    what gets saved. A model that only names its preset (one a preset ships by default) is
+    filled the same way at first use — see :func:`build_model_view`."""
+    model, _views, warnings = await _materialize(connectors, screens, app, model, preset, language=language)
+    return model, warnings
+
+
+async def _materialize(
+    connectors: ConnectorRegistry, screens: ScreensFile | None, app: str, model: ExplorerModel, preset: dict[str, Any], *,
+    language: str | None,
+) -> tuple[ExplorerModel, list[EntityView], list[str]]:
     model, pending, keys = apply_preset(model, preset)
     order = ([model.hub] if model.hub in model.entities else []) + [eid for eid in model.entities if eid != model.hub]
     views = await asyncio.gather(*(describe_entity(connectors, screens, app, model.entities[eid], language=language) for eid in order))
@@ -408,19 +428,34 @@ async def materialize_preset(
         model.check_complete()
     except ValueError as exc:
         warnings.append(str(exc))
-    return model, warnings
+    # the views describe the entities as derived; the key / relations resolved above are on the
+    # model, the entity objects inside the views are re-pointed so a view's entity is the final one
+    for ev in views:
+        ev.entity = model.entities.get(ev.entity.id, ev.entity)
+    return model, list(views), warnings
 
 
 async def build_model_view(
     connectors: ConnectorRegistry, screens: ScreensFile | None, app: str, model: ExplorerModel, *, language: str | None,
     presets_dir: Path | str | None = None,
 ) -> ModelView:
-    """Every entity described concurrently (they are independent queries). *presets_dir* is
-    unused since a preset is materialised into the model at edit time; kept for the callers."""
-    del presets_dir
+    """Every entity described concurrently (they are independent queries). A model that names a
+    preset but has no entity (one a preset ships by default, or one saved before the builder
+    filled it) is materialised here from the catalogue under *presets_dir* — the result is
+    cached like any view, the configured model stays untouched."""
+    source = model
     warnings: list[str] = []
     if model.preset and not model.entities:
-        warnings.append(f"the preset {model.preset!r} is named but not applied: the model has no entity")
+        from liberty.presets import find_preset
+        preset = find_preset(presets_dir, model.preset) if presets_dir is not None else None
+        if preset is None:
+            warnings.append(f"the preset {model.preset!r} is named but not applied: the model has no entity")
+        else:
+            model, views, w = await _materialize(connectors, screens, app, model, preset, language=language)
+            warnings.extend(w)
+            for ev in views:
+                warnings.extend(ev.warnings)
+            return ModelView(model=model, app=app, entities=views, warnings=warnings, built_at=time.monotonic(), source=source)
     order = ([model.hub] if model.hub in model.entities else []) + [eid for eid in model.entities if eid != model.hub]
     views = await asyncio.gather(*(describe_entity(connectors, screens, app, model.entities[eid], language=language) for eid in order))
     for ev in views:
@@ -430,16 +465,17 @@ async def build_model_view(
             model.check_complete()
         except ValueError as exc:
             warnings.append(str(exc))
-    return ModelView(model=model, app=app, entities=list(views), warnings=warnings, built_at=time.monotonic(), source=model)
+    return ModelView(model=model, app=app, entities=list(views), warnings=warnings, built_at=time.monotonic(), source=source)
 
 
 class ModelCache:
     """Per-app, per-language cache of :class:`ModelView` with a TTL; cleared on reload."""
 
-    def __init__(self, ttl: float = CACHE_SECONDS) -> None:
+    def __init__(self, ttl: float = CACHE_SECONDS, presets_dir: Path | str | None = None) -> None:
         self._ttl = ttl
         self._views: dict[tuple[str, str, str], ModelView] = {}
         self._lock = asyncio.Lock()
+        self.presets_dir = presets_dir   # the catalogue a preset-shipped model is built from
 
     def clear(self) -> None:
         self._views.clear()
@@ -457,6 +493,6 @@ class ModelCache:
             cached = self._views.get(key)
             if cached is not None and not refresh and cached.source is model and now - cached.built_at < self._ttl:
                 return cached
-            view = await build_model_view(connectors, screens, app, model, language=language, presets_dir=presets_dir)
+            view = await build_model_view(connectors, screens, app, model, language=language, presets_dir=presets_dir or self.presets_dir)
             self._views[key] = view
             return view

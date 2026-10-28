@@ -1,6 +1,6 @@
 """The Screen Assistant's table presets — ``<config dir>/presets/**.toml``, each file a
-``[[presets]]`` list of ``{id, label, description?, group?, connector?, tables: [{schema?, name,
-alias?, join?, on?: [{left, right}], key?: [item…], query?, query_connector?}]}``. The first table is
+``[[presets]]`` list of ``{id, label, description?, group?, connector?, app?, explorer?, tables: [{schema?, name,
+label?, cardinality?, alias?, join?, on?: [{left, right}], key?: [item…], query?, query_connector?}]}``. The first table is
 the base, the others carry a join + ON on **data items** (``F0101.AN8``) that the consumer resolves
 to the physical columns (JDE prefixes them: ``ABAN8`` on F0101); ``key`` names the table's primary
 key the same way (``["AN8", "IDLN"]``) — the explorer's entity key, declared once here.
@@ -8,6 +8,11 @@ key the same way (``["AN8", "IDLN"]``) — the explorer's entity key, declared o
 Shared by the assistant's catalogue endpoint and the Data Explorer, whose model can derive its
 entities and relations from a preset (``[explorer.<app>.<model>] preset = "<id>"``) — one
 declaration of the join graph, shipped in the licensed app bundle.
+
+A preset carrying ``app`` + ``explorer = true`` ships a Data Explorer model by default
+(``explorer.<app>.<preset id>``, see :func:`liberty.explorer.config.add_preset_models`): a table's
+``label`` is then its entity label and ``cardinality = "one"`` marks a lookup joined to the base
+(the default for a joined table is ``many``).
 """
 
 from __future__ import annotations

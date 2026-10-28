@@ -564,7 +564,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     <>
       <Sub>{t('settings.screens.editor.generalHint')}</Sub>
       <Field label={t('settings.screens.editor.connectorLabel')}>
-        <SearchSelect
+        <SearchSelect sort
           value={(value.connector as string | undefined) ?? ''}
           options={connectorOptions}
           onChange={(v) => setProp('connector', v && v !== app ? v : null)}
@@ -664,7 +664,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
               />
             </Field>
             <Field label={t('settings.screens.editor.rowClickConnectorLabel')}>
-              <SearchSelect
+              <SearchSelect sort
                 value={(value.row_click_connector as string | undefined) ?? ''}
                 options={sqlConnectorOptions}
                 onChange={(v) => setProp('row_click_connector', v || null)}
@@ -785,7 +785,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       >
         <Row gap={6} style={{ alignItems: 'center' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <SearchSelect
+            <SearchSelect sort
               value={queryName}
               options={queryOptions}
               onChange={(v) => setProp(key, v || (required ? value[key] ?? '' : null))}
@@ -811,7 +811,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       <Sub>{t('settings.screens.editor.queriesHint')}</Sub>
       {tableOptions.length > 0 && (
         <Field label={t('settings.screens.editor.queries.fromTable')}>
-          <SearchSelect
+          <SearchSelect sort
             value=""
             options={tableOptions}
             onChange={(v) => v && applyTable(v)}

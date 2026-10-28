@@ -12,6 +12,9 @@
 //  · `allowCustom` → in the search box, pressing Enter (with no matching option) commits the typed
 //    text as the value. Free-text combobox semantics — for fields where v1 emitted aliases we don't
 //    want to reject (`format`, `dialect`, …).
+//  · `sort` → the options in alphabetical order of their label (locale-aware, numeric) for the
+//    catalogue pickers — connectors, queries, screens, models, presets, roles — where the config
+//    order is arbitrary and the operator looks for a name.
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
@@ -19,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ChevronDown, Check } from 'lucide-react'
 import { SpinnerRing } from './Spinner'
+import { sortOptions } from '../services/options'
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
 
 export interface SearchSelectOption {
@@ -125,7 +129,7 @@ const CreateRow = styled.button`
 `
 
 export function SearchSelect({
-  value, onChange, options, placeholder, anyLabel, loading, disabled, allowCustom, cellColumns,
+  value, onChange, options: given, placeholder, anyLabel, loading, disabled, allowCustom, cellColumns, sort,
 }: {
   value: string
   onChange: (v: string) => void
@@ -142,8 +146,13 @@ export function SearchSelect({
    *  in-dropdown facet-chip filter (a LOOKUP's display_fields / filter_fields). When a column is
    *  filterable, a row of toggle chips of its distinct values shows above the list and narrows it. */
   cellColumns?: { label: string; filterable?: boolean }[]
+  /** Show the options in alphabetical order of their label (a catalogue: connectors, queries,
+   *  screens, models…) instead of the order given — see ``sortOptions``. Lists whose order means
+   *  something (statuses, steps, join types) leave it off. */
+  sort?: boolean
 }) {
   const { t } = useTranslation()
+  const options = useMemo(() => (sort ? sortOptions(given) : given), [given, sort])
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   // facet filters: cell-column index → the ONE selected value (single-select per column — pick a

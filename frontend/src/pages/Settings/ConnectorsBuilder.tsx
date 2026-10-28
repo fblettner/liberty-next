@@ -1261,7 +1261,7 @@ export default function ConnectorsBuilder() {
               <Row style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12 }}>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: fontSize.sm }}>
                   <span style={{ color: colors.text.muted }}>{t('settings.connectors.cloneSource')}</span>
-                  <SearchSelect
+                  <SearchSelect sort
                     value={cloneSource}
                     options={Object.keys(conns ?? {}).map((n) => ({ value: n, label: n, mono: n }))}
                     onChange={(v) => setCloneSource(v)}
@@ -1278,7 +1278,7 @@ export default function ConnectorsBuilder() {
                 </label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: fontSize.sm }}>
                   <span style={{ color: colors.text.muted }}>{t('settings.connectors.cloneNewPool')}</span>
-                  <SearchSelect
+                  <SearchSelect sort
                     value={cloneNewPool}
                     options={pools.map((n) => ({ value: n, label: n, mono: n }))}
                     onChange={(v) => setCloneNewPool(v)}

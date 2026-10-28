@@ -30,6 +30,7 @@ FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
             {"value": "timestamp", "label": "Timestamp"},
             {"value": "jdedate", "label": "JD Edwards Date"},
             {"value": "jdetime", "label": "JD Edwards Time"},
+            {"value": "jdenumber", "label": "JD Edwards Number"},
             {"value": "number", "label": "Number"},
             {"value": "integer", "label": "Integer"},
             {"value": "decimal", "label": "Decimal"},

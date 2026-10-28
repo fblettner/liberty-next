@@ -120,7 +120,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
   versioning/             config snapshot history (.versions/) + upgrade journal
   userviews/              DB-backed saved grid / chart views (shared + per user)
   presets.py              the Screen Assistant's table presets (config/presets/**.toml): the catalogue loader
-                          shared by the assistant endpoint and the explorer (a model may derive from a preset)
+                          shared by the assistant endpoint and the explorer (a model may derive from a preset; a
+                          preset with `app` + `explorer = true` ships its model by default, built at first use)
   explorer/               the Data Explorer (C3): config.py (explorer.toml: hub, entities (a query or a table)
                           with cardinality / key / measures / default_date, relations on column pairs, an
                           optional `preset`), model.py (fields discovered from each entity query's columns +

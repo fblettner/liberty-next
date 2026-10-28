@@ -134,3 +134,12 @@ def test_scan_unknown_table_404(app) -> None:
 def test_scan_unknown_connector_404(app) -> None:
     with TestClient(app) as client:
         assert client.post("/admin/dictionary/scan", json={"connector": "nope", "table": "customers"}, headers=_h(client, "admin")).status_code == 404
+
+
+def test_entry_from_proposal_keeps_what_is_known() -> None:
+    from liberty.web.dictgen import entry_from_proposal
+    full = {"column": "ABAN8", "dd_id": "AN8", "exists": False, "label": "Address Number", "format": "number", "rules": "LOOKUP",
+            "rules_values": "ab", "default": None, "justify": "right_blank", "size": 8, "decimals": 2, "lookup_params": {"SY": "01"}}
+    assert entry_from_proposal(full) == {"label": "Address Number", "format": "number", "rules": "LOOKUP", "rules_values": "ab", "justify": "right_blank", "size": 8, "decimals": 2, "lookup_params": {"SY": "01"}}
+    assert "decimals" not in entry_from_proposal({"dd_id": "X", "decimals": 0, "format": "jdenumber"})
+    assert entry_from_proposal({"dd_id": "X", "label": None, "format": "date", "rules": None, "size": None, "lookup_params": {}}) == {"format": "date"}

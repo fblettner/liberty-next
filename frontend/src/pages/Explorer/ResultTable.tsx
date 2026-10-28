@@ -36,6 +36,8 @@ export function ResultTable({ columns, rows, lang, onRowClick, paging }: {
   const { t } = useTranslation()
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null)
   const nf = useMemo(() => new Intl.NumberFormat(lang, { maximumFractionDigits: 2 }), [lang])
+  // a column with dictionary decimals (a JDE amount) shows exactly that many places
+  const nfs = useMemo(() => new Map(columns.filter((c) => c.decimals != null).map((c) => [c.key, new Intl.NumberFormat(lang, { minimumFractionDigits: c.decimals, maximumFractionDigits: c.decimals })])), [columns, lang])
   const specs = useMemo<LookupSpec[]>(() => columns.flatMap((c) => (c.rule?.kind === 'lookup'
     ? [{ connector: c.rule.connector, query: c.rule.query, value: c.rule.value, label: c.rule.label, params: c.rule.params, sources: c.rule.sources }] : [])), [columns])
   const lookups = useLookupBatch(specs)
@@ -59,7 +61,7 @@ export function ResultTable({ columns, rows, lang, onRowClick, paging }: {
   const isNum = (c: ResultColumn) => c.kind === 'measure' || c.type === 'number'
   const cell = (c: ResultColumn, v: unknown) => {
     if (v === null || v === undefined) return <td key={c.key} className="null">—</td>
-    if (isNum(c) && typeof v === 'number') return <td key={c.key} className="num">{nf.format(v)}</td>
+    if (isNum(c) && typeof v === 'number') return <td key={c.key} className="num">{(nfs.get(c.key) ?? nf).format(v)}</td>
     if (c.rule && !c.bucket) {
       const col: Column = { name: c.key, type: null, rule: c.rule }
       const r = ruleCell(v, col, undefined, lookupFor(c))

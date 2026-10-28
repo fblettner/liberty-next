@@ -102,7 +102,7 @@ function UserModal({ initial, roleNames, attributeNames, onSaved, onClose }: { i
             <Chips>
               {roles.map((r) => <PermChip key={r}>{r}<button type="button" onClick={() => setRoles(roles.filter((x) => x !== r))}><X size={11} /></button></PermChip>)}
               <div style={{ minWidth: 200 }}>
-                <SearchSelect value="" onChange={addRole} options={roleOpts.filter((o) => !roles.includes(o.value))} placeholder={t('settings.access.addRole')} />
+                <SearchSelect sort value="" onChange={addRole} options={roleOpts.filter((o) => !roles.includes(o.value))} placeholder={t('settings.access.addRole')} />
               </div>
             </Chips>
           </Field>
@@ -117,7 +117,7 @@ function UserModal({ initial, roleNames, attributeNames, onSaved, onClose }: { i
               ))}
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <div style={{ minWidth: 220 }}>
-                  <SearchSelect value="" onChange={(k) => { if (k.trim()) setAttrs([...attrs, { key: k.trim(), text: '' }]) }} options={attrOpts} allowCustom placeholder={t('settings.access.addAttribute')} />
+                  <SearchSelect sort value="" onChange={(k) => { if (k.trim()) setAttrs([...attrs, { key: k.trim(), text: '' }]) }} options={attrOpts} allowCustom placeholder={t('settings.access.addAttribute')} />
                 </div>
               </div>
             </div>

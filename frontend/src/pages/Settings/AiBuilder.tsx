@@ -131,7 +131,7 @@ export default function AiBuilder() {
           <Section>
             <SectionHead><LayoutList size={14} /> {t('settings.ai.screenStarters')} <span className="spacer" />
               <div style={{ minWidth: 260 }}>
-                <SearchSelect value="" options={screenOpts} allowCustom placeholder={t('settings.ai.addScreen')}
+                <SearchSelect sort value="" options={screenOpts} allowCustom placeholder={t('settings.ai.addScreen')}
                   onChange={(v) => { const id = v.trim(); if (id && !screenIds.includes(id)) setScreen(id, []) }} />
               </div>
             </SectionHead>

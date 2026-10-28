@@ -264,16 +264,16 @@ export function WidgetEditorModal({
           )}
           {kind === 'chart' && chartMode === 'saved' ? (
             <Field label={t('settings.dash.savedChart')}>
-              <SearchSelect value={savedChartId} onChange={setSavedChartId} options={savedChartOpts}
+              <SearchSelect sort value={savedChartId} onChange={setSavedChartId} options={savedChartOpts}
                 placeholder={savedChartOpts.length ? t('chart.spec.pick') : t('settings.dash.noCharts')} />
             </Field>
           ) : (
             <Grid2>
               <Field label={t('settings.charts.connector')}>
-                <SearchSelect value={connector} onChange={(v) => { setConnector(v); setQuery('') }} options={connectorOpts} placeholder={t('chart.spec.pick')} allowCustom />
+                <SearchSelect sort value={connector} onChange={(v) => { setConnector(v); setQuery('') }} options={connectorOpts} placeholder={t('chart.spec.pick')} allowCustom />
               </Field>
               <Field label={t('settings.charts.query')}>
-                <SearchSelect value={query} onChange={setQuery} options={queryOpts}
+                <SearchSelect sort value={query} onChange={setQuery} options={queryOpts}
                   placeholder={connector ? t('chart.spec.pick') : t('settings.charts.pickConnFirst')} allowCustom />
               </Field>
             </Grid2>

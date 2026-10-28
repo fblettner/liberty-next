@@ -26,7 +26,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, AsyncIterator
 
 _log = logging.getLogger(__name__)
@@ -127,6 +127,36 @@ _JDEDATE_FORMATS = {"jdedate"}
 # Symmetric with jdedate: a Python time/datetime / "HH:MM:SS" string / already-HHMMSS int all
 # collapse to the integer form on write, and decode back to "HH:MM:SS" on read.
 _JDETIME_FORMATS = {"jdetime"}
+# JDE amounts — stored as integers without a decimal point, the data dictionary (F9210.FRCDEC)
+# carrying the implied decimal places: ``12345`` with 2 decimals is 123.45. ``format = "jdenumber"``
+# + the entry's ``decimals`` divide on read (:func:`_from_jde_number`) and multiply back on write
+# and in filter binds (:func:`_coerce_value`). No decimals → a plain number.
+_JDENUMBER_FORMATS = {"jdenumber"}
+
+
+def _from_jde_number(v: Any, decimals: int | None) -> Any:
+    """A stored JDE integer → the real value (``12345``, 2 → ``123.45``). ``None`` and non-numeric
+    values pass through; no decimals → unchanged."""
+    if v is None or not decimals:
+        return v
+    try:
+        d = Decimal(str(v))
+    except (ValueError, ArithmeticError):
+        return v
+    return _jsonable_number(d.scaleb(-int(decimals)))
+
+
+def _to_jde_number(v: Any, decimals: int | None) -> Any:
+    """The inverse: a real value → the stored integer (``123.45``, 2 → ``12345``), rounded half up."""
+    if v is None:
+        return None
+    try:
+        d = Decimal(str(v).strip())
+    except (ValueError, ArithmeticError):
+        return v
+    if not decimals:
+        return _jsonable_number(d)
+    return int(d.scaleb(int(decimals)).to_integral_value(rounding=ROUND_HALF_UP))
 
 
 def _to_jde_time(t: Any) -> int | None:
@@ -217,7 +247,7 @@ def _to_jde_julian(d: Any) -> int | None:
     return (d.year - 1900) * 1000 + d.timetuple().tm_yday
 
 
-def _coerce_value(value: Any, fmt: str | None) -> Any:
+def _coerce_value(value: Any, fmt: str | None, decimals: int | None = None) -> Any:
     """Coerce *value* to the Python type implied by *fmt*. Pass-through when *fmt* is unknown
     or the value is already the right type. Empty string → ``None`` so a blank field in the
     form lands as SQL NULL, not as ``''`` (Oracle treats them the same on VARCHAR2 but not
@@ -246,6 +276,9 @@ def _coerce_value(value: Any, fmt: str | None) -> Any:
             # Same contract as jdedate: JDE stores HHMMSS integers. A SYSDATE-stamped ``now``
             # (datetime) lands here for a ``format = "jdetime"`` audit column and becomes HHMMSS.
             return _to_jde_time(value)
+        if f in _JDENUMBER_FORMATS:
+            # The real value the form / filter sends → the stored integer (implied decimals).
+            return _to_jde_number(value, decimals)
         if f in _INTEGER_FORMATS:
             if isinstance(value, bool):
                 return int(value)  # True/False → 1/0
@@ -383,7 +416,7 @@ _JOBN_VALUE = "LIBERTY"
 # Formats whose "not applicable" (write_when=false) neutral value is ``0``; everything else is a
 # single space (JDE CHAR NOT-NULL safe — padded to width on Oracle, matching the coalesce step's
 # ``" "`` sentinel for empties). See ``_neutral_for_format`` / ``SQLConnector._apply_write_when``.
-_NEUTRAL_NUMERIC_FORMATS = {"integer", "number", "decimal", "currency", "jdedate", "jdetime"}
+_NEUTRAL_NUMERIC_FORMATS = {"integer", "number", "decimal", "currency", "jdedate", "jdetime", "jdenumber"}
 
 
 def _neutral_for_format(fmt: str | None) -> Any:
@@ -598,7 +631,7 @@ def _filter_sql_type(fmt: str | None, dialect: str) -> str:
     can use a btree index on the column. Falls back to a wide VARCHAR when the format is
     unknown (matches the historic v1 behaviour but only for one bind, not every column)."""
     f = (fmt or "").strip().lower()
-    if f in ("integer", "number", "jdedate", "jdetime"):
+    if f in ("integer", "number", "jdedate", "jdetime", "jdenumber"):
         return "NUMBER" if dialect == "oracle" else "INTEGER"
     if f in ("decimal", "currency"):
         return "NUMBER" if dialect == "oracle" else "NUMERIC"
@@ -1083,6 +1116,9 @@ class Column:
     width: int | None = None
     align: str | None = None
     format: str | None = None
+    # Decimal places from the dictionary entry — the implied places of a ``jdenumber`` (scaled on
+    # read / write by the connector), the places shown for the other numeric formats.
+    decimals: int | None = None
     rule: dict[str, Any] | None = None
     dd: str | None = None
     # The related-table write-back group this column belongs to (``ColumnHint.group``). Surfaced so
@@ -1127,6 +1163,8 @@ class Column:
             d["dd"] = self.dd
         if self.format is not None:
             d["format"] = self.format
+        if self.decimals is not None:
+            d["decimals"] = self.decimals
         if self.rule is not None:
             d["rule"] = self.rule
         if self.group is not None:
@@ -1669,12 +1707,12 @@ class SQLConnector:
                 rv = (params or {}).get(f"{col.name}{suffix}")
                 if rv is None or rv == "":
                     continue
-                rfmt = col.format
-                if rfmt is None and col.dd != "":
+                rfmt, rdec = col.format, None
+                if col.dd != "":
                     entry = self._dict.find_entry(col.dd or col.name, connector=dict_scope or self.name)
-                    if entry is not None and entry.format:
-                        rfmt = entry.format
-                coerced = rv if (rfmt or "").lower() in _TEXT_FORMATS or not rfmt else _coerce_value(rv, rfmt)
+                    if entry is not None:
+                        rfmt, rdec = rfmt or entry.format, entry.decimals
+                coerced = rv if (rfmt or "").lower() in _TEXT_FORMATS or not rfmt else _coerce_value(rv, rfmt, rdec)
                 ranges.append((col.name, f"{col.name}{suffix}", rfmt, op, coerced))
             if not col.filter:
                 continue
@@ -1686,18 +1724,18 @@ class SQLConnector:
                 op = "contains"
             # Effective format — hint's own wins, else the dictionary entry's. ``dd = ""``
             # opts out of dictionary lookup (parallels the SELECT-side hint resolver).
-            fmt = col.format
-            if fmt is None and col.dd != "":
+            fmt, dec = col.format, None
+            if col.dd != "":
                 key = (col.dd or col.name)
                 entry = self._dict.find_entry(key, connector=dict_scope or self.name)
-                if entry is not None and entry.format:
-                    fmt = entry.format
+                if entry is not None:
+                    fmt, dec = fmt or entry.format, entry.decimals
             # Python-coerce the value for non-text columns. Text-y formats are left as
             # strings (the wrap's LOWER/LIKE want a string; ``_coerce_value(..., "text")``
             # is a no-op anyway). For number / date / boolean / jdedate the value flows
             # to asyncpg as a real Python int / date / bool — the SQL has no CAST so
             # asyncpg gets to send the column's native type code and the index applies.
-            coerced = v if (fmt or "").lower() in _TEXT_FORMATS or not fmt else _coerce_value(v, fmt)
+            coerced = v if (fmt or "").lower() in _TEXT_FORMATS or not fmt else _coerce_value(v, fmt, dec)
             active.append((col.name, fmt, op, coerced))
             active_names.add(col.name.upper())
         # Declared query params (``QueryDef.params``) used as OPTIONAL equality filters — the v1
@@ -1718,7 +1756,7 @@ class SQLConnector:
                     continue
                 entry = self._dict.find_entry(name, connector=dict_scope or self.name)
                 fmt = entry.format if (entry is not None and entry.format) else None
-                coerced = v if (fmt or "").lower() in _TEXT_FORMATS or not fmt else _coerce_value(v, fmt)
+                coerced = v if (fmt or "").lower() in _TEXT_FORMATS or not fmt else _coerce_value(v, fmt, entry.decimals if entry is not None else None)
                 active.append((name, fmt, "equals", coerced))
                 active_names.add(up)
         if not active and not ranges:
@@ -1777,7 +1815,7 @@ class SQLConnector:
             """Pull (fmt, rule, rules_values, default, false_value) off a DictionaryEntry,
             inferring the BOOLEAN false counterpart when the operator didn't set one."""
             if entry is None:
-                return {"fmt": fmt_override, "rule": None, "rules_values": None, "default": None, "false_value": None}
+                return {"fmt": fmt_override, "rule": None, "rules_values": None, "default": None, "false_value": None, "decimals": None}
             rule_up = entry.rules.upper() if entry.rules else None
             false_v: str | None = None
             if rule_up == "BOOLEAN":
@@ -1788,6 +1826,7 @@ class SQLConnector:
                 "rules_values": entry.rules_values,
                 "default": entry.default,
                 "false_value": false_v,
+                "decimals": entry.decimals,
             }
 
         scope = dict_scope or self.name
@@ -2067,7 +2106,7 @@ class SQLConnector:
             # ``expected str, got bool`` on a string column). The pure ``format = "boolean"``
             # case without a rule still coerces (a real PG bool column needs a Python bool).
             if rule != "BOOLEAN":
-                out[k] = _coerce_value(out[k], fmt)
+                out[k] = _coerce_value(out[k], fmt, m.get("decimals"))
         return out
 
     def _apply_write_when(
@@ -2491,6 +2530,14 @@ class SQLConnector:
                     for cn in _jdetime_cols:
                         if cn in row:
                             row[cn] = _from_jde_time(row[cn])
+            # JDE amounts → the real value (the entry's implied decimals) — symmetric with the
+            # write-side ``_coerce_value(value, "jdenumber", decimals)``.
+            _jdenumber_cols = [(c.name, c.decimals) for c in columns if (c.format or "").lower() == "jdenumber" and c.decimals]
+            if _jdenumber_cols:
+                for row in rows:
+                    for cn, dec in _jdenumber_cols:
+                        if cn in row:
+                            row[cn] = _from_jde_number(row[cn], dec)
             duration_ms = (time.perf_counter() - started) * 1000.0
             return QueryResult(
                 connector=self.name,
@@ -2764,6 +2811,7 @@ class SQLConnector:
             # JDE Julian date columns — same case-insensitive convention as execute().
             _jdedate_cols = {c.name for c in columns if (c.format or "").lower() == "jdedate"}
             _jdetime_cols = {c.name for c in columns if (c.format or "").lower() == "jdetime"}
+            _jdenumber_cols = [(c.name, c.decimals) for c in columns if (c.format or "").lower() == "jdenumber" and c.decimals]
             yield StreamMeta(columns=columns, cap=cap, chunk_size=chunk)
 
             sent = 0
@@ -2793,6 +2841,9 @@ class SQLConnector:
                         for cn in _jdetime_cols:
                             if cn in row:
                                 row[cn] = _from_jde_time(row[cn])
+                    for cn, dec in _jdenumber_cols:
+                        if cn in row:
+                            row[cn] = _from_jde_number(row[cn], dec)
                     out.append(row)
                 if out:
                     sent += len(out)
@@ -3207,6 +3258,7 @@ def _resolve_hint(
             for w in h.rules_when
         ],
         width=h.width, align=h.align, format=fmt, rule=rule,
+        decimals=(entry.decimals if entry is not None else None),
         # Only surface `dd` when it's *explicitly* set on the hint (a non-empty override). For
         # `dd = None` (default — dictionary lookup happens by column name) or `dd = ""` (operator
         # opted out of the dictionary), don't pollute the wire. Phase-8 dashboard filters key on

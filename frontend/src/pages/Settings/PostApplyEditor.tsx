@@ -120,7 +120,7 @@ export function PostApplyEditor({ onSaved }: { onSaved?: () => void }) {
               <div>
                 <Lbl>{TARGET_LABEL[st.type]}</Lbl>
                 {st.type === 'call_plugin' ? (
-                  <SearchSelect value={st.target} onChange={(v) => update(i, { target: v })}
+                  <SearchSelect sort value={st.target} onChange={(v) => update(i, { target: v })}
                     options={pluginOpts} allowCustom placeholder={TARGET_LABEL.call_plugin} />
                 ) : (
                   <Input value={st.target} onChange={(e) => update(i, { target: e.target.value })} placeholder={TARGET_LABEL[st.type]} />
