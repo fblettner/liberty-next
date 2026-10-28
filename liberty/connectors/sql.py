@@ -1116,6 +1116,8 @@ class Column:
     width: int | None = None
     align: str | None = None
     format: str | None = None
+    # The row-menu action a click on the value fires (``ColumnHint.drill``): the cell is a link.
+    drill: str | None = None
     # Decimal places from the dictionary entry — the implied places of a ``jdenumber`` (scaled on
     # read / write by the connector), the places shown for the other numeric formats.
     decimals: int | None = None
@@ -1165,6 +1167,8 @@ class Column:
             d["format"] = self.format
         if self.decimals is not None:
             d["decimals"] = self.decimals
+        if self.drill:
+            d["drill"] = self.drill
         if self.rule is not None:
             d["rule"] = self.rule
         if self.group is not None:
@@ -3259,6 +3263,7 @@ def _resolve_hint(
         ],
         width=h.width, align=h.align, format=fmt, rule=rule,
         decimals=(entry.decimals if entry is not None else None),
+        drill=h.drill or None,
         # Only surface `dd` when it's *explicitly* set on the hint (a non-empty override). For
         # `dd = None` (default — dictionary lookup happens by column name) or `dd = ""` (operator
         # opted out of the dictionary), don't pollute the wire. Phase-8 dashboard filters key on

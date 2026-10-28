@@ -375,6 +375,12 @@ function columnVisibleNow(c: Column, activeFilters: Record<string, string>): boo
   })
 }
 
+// A link-style cell (``ColumnHint.drill``): the value, blue, underlined under the pointer.
+const DrillLink = styled.button`
+  border: none; background: none; padding: 0; margin: 0; font: inherit; color: ${colors.blue.main}; cursor: pointer; text-align: inherit;
+  &:hover { text-decoration: underline; }
+`
+
 export function ResultTable({
   result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters, screen, addSeed, nestedDialog, renderDetail, embedded, getSubRows, onRowExpand, subRowCount, tableId: tableIdOverride, onCurrentRow, onDrill,
 }: {
@@ -1687,6 +1693,27 @@ export function ResultTable({
         },
       })
     }
+    // Link-style cells (``ColumnHint.drill``): the value fires the named row-menu action for its row
+    // — the key column IS the drill. Not in batch-edit mode (the cell is an input there).
+    if (!editMode) {
+      for (const def of out) {
+        const c = shownColumns.find((x) => x.name === def.id)
+        const action = c?.drill ? rowMenu.find((a) => a.id === c.drill) : undefined
+        if (!c || !action) continue
+        const inner = def.cell
+        def.cell = (info) => {
+          const content = typeof inner === 'function' ? inner(info) : null
+          if (isGroupRow(info) || content === null || content === undefined || content === '') return content
+          const row = info.row.original as DataRow
+          return (
+            <DrillLink type="button" title={action.label || action.id}
+              onClick={(e) => { e.stopPropagation(); onCurrentRow?.(row); void runRowAction(action, row) }}>
+              {content}
+            </DrillLink>
+          )
+        }
+      }
+    }
     return out
     // ``editTick`` is deliberately NOT in the dep list — including it would rebuild the column
     // defs on every keystroke, which makes TanStack re-instantiate row cells and the uncontrolled
@@ -1695,7 +1722,7 @@ export function ResultTable({
     // ``setEditTick`` on every edit) is enough — flexRender is called fresh and the new
     // ``defaultText`` flows to the SearchSelect / Checkbox / EditInput. Uncontrolled inputs
     // ignore ``defaultValue`` changes after mount, so the DOM keeps the user's typed text.
-  }, [shownColumns, enumMaps, lookupMaps, t, editMode, editChange, cur, grouped, isGroupRow, span, rulesWhenFilterOpts])
+  }, [shownColumns, enumMaps, lookupMaps, t, editMode, editChange, cur, grouped, isGroupRow, span, rulesWhenFilterOpts, rowMenu, runRowAction, onCurrentRow])
 
   // the leftmost select + status columns — rebuild freely on edit-state changes; they hold no
   // <input>, only checkboxes/markers/buttons, so remounting them is harmless.

@@ -167,6 +167,8 @@ export interface Column {
   width?: number
   align?: 'left' | 'right' | 'center' | string
   format?: string
+  /** The row-menu action a click on the value fires (`ColumnHint.drill`): the cell renders as a link. */
+  drill?: string
   /** Decimal places from the dictionary entry: a `jdenumber`'s implied places (the server scales the
    *  value on read and write), the places shown for the other numeric formats. */
   decimals?: number

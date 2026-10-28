@@ -703,3 +703,14 @@ def test_navigate_inline_flag() -> None:
     from liberty.screens.config import NavigateAction
     a = NavigateAction(id="roles", to="roles_get", inline=True)
     assert a.inline is True and NavigateAction(id="x", screen="s").inline is None   # blank = the app's drill_inline
+
+
+def test_column_drill_names_a_row_menu_action() -> None:
+    """``columns[].drill`` is a link-style cell firing a row-menu action: the id must exist."""
+    from liberty.connectors.config import ColumnHint
+    from liberty.screens.config import NavigateAction, Screen
+    nav = NavigateAction(id="roles", label="Roles", to="roles_get", param_binds=[])
+    s = Screen(id="users", label="Users", read_query="users_get", row_menu=[nav], columns=[ColumnHint(name="USR_ID", drill="roles")])
+    assert s.columns[0].drill == "roles"
+    with pytest.raises(ValueError, match="unknown row-menu action 'ghost'"):
+        Screen(id="users", label="Users", read_query="users_get", row_menu=[nav], columns=[ColumnHint(name="USR_ID", drill="ghost")])

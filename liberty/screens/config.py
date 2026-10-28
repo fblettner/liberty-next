@@ -1430,6 +1430,15 @@ class Screen(BaseModel):
                         f"screen {self.id!r}: row_click_route references unknown column(s) "
                         f"{sorted(missing)!r} — known: {sorted(known)!r}"
                     )
+        # A column's ``drill`` names one of this screen's row-menu actions (a link-style cell).
+        drilled = [c for c in self.columns if getattr(c, "drill", None)]
+        if drilled:
+            ids = {a.id for a in self.row_menu}
+            for c in drilled:
+                if c.drill not in ids:
+                    raise ValueError(
+                        f"screen {self.id!r}: column {c.name!r} drills to unknown row-menu action {c.drill!r} — known: {sorted(ids)!r}"
+                    )
         # Shared view names must be unique, and at most one may be the default.
         if self.views:
             seen_v: set[str] = set()

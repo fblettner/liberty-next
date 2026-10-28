@@ -100,6 +100,10 @@
   la même façon. `[app] drill_inline` (Paramètres → App) fixe le comportement de toute
   navigation dont l'action ne dit rien ; l'option `inline` de l'action l'emporte dans les deux
   sens. Désactivé par défaut : rien ne change tant que l'opérateur ne l'active pas.
+- Cellules-liens : l'indication de colonne `drill = "<id d'action du menu de ligne>"` affiche la
+  valeur comme un lien qui déclenche cette action `navigate` pour la ligne — la colonne clé est la
+  navigation, sans poignée ni menu. Paramètres → Écrans propose les actions du menu de ligne dans
+  le champ ; un identifiant inconnu est refusé au chargement.
 - Tableaux de bord : l'étiquette d'une ligne de liste se place sur la ligne du titre, la ligne
   reste sur deux hauteurs.
 

@@ -399,6 +399,15 @@ class ColumnHint(BaseModel):
         json_schema_extra={"x_group": "Display", "x_enum_ref": "COLUMN_ALIGN"},
     )
     width: int | None = Field(default=None, json_schema_extra={"x_group": "Display"}, description="Fixed column width in pixels (blank = auto-size).")
+    drill: str | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "Display", "x_enum_ref": "ROW_MENU_ACTIONS"},
+        description=(
+            "Render the value as a link that fires this row-menu action (its id — a `navigate`) for the row: "
+            "the key column becomes the drill, no menu needed. Opens like the action says (a tab, or the "
+            "in-place panel)."
+        ),
+    )
     colspan: int | None = Field(
         default=None,
         json_schema_extra={"x_group": "Display"},

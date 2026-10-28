@@ -313,6 +313,9 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       mono: id,
     }))
     base.CHART_IDS = { label: 'Saved charts', values: chartValues }
+    // ROW_MENU_ACTIONS — this screen's row-menu actions, for a column's ``drill`` (a link-style cell).
+    const rowMenu = Array.isArray(value.row_menu) ? (value.row_menu as Record<string, unknown>[]) : []
+    base.ROW_MENU_ACTIONS = { label: 'Row menu actions', values: rowMenu.filter((a) => typeof a.id === 'string' && a.id).map((a) => ({ value: String(a.id), label: typeof a.label === 'string' && a.label ? a.label : String(a.id), mono: String(a.id) })) }
     // ENUM_IDS / LOOKUP_IDS / SEQUENCE_IDS — the dictionary ids in this screen's connector scope
     // (shared + the connector overlay). Drive the Columns editor's ``rules_values`` dropdown via
     // its ``x_enum_ref_when`` (rules=ENUM → ENUM_IDS, LOOKUP → LOOKUP_IDS, SEQUENCE/NN →
@@ -391,7 +394,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       values: postApplySteps.map((s) => ({ value: s.id, label: s.label ? `${s.label} (${s.id})` : s.id, mono: s.id })),
     }
     return base
-  }, [parentEnums, effectiveScreenColumns, readQueryName, chartsCatalog, dict, app, selectedConnectorMeta, value.column_groups, postApplySteps, wsConnectors, effectiveConnector])
+  }, [parentEnums, effectiveScreenColumns, readQueryName, chartsCatalog, dict, app, selectedConnectorMeta, value.column_groups, postApplySteps, wsConnectors, effectiveConnector, value.row_menu])
 
   // Pre-pick the per-tab sub-schemas. General/Queries leave connector + the four query fields
   // out (rendered manually as SearchSelects); everything else still goes through SchemaForm so

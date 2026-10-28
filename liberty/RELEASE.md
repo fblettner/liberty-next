@@ -86,6 +86,10 @@
   panel nests the same way. `[app] drill_inline` (Settings → App) sets the default for every
   drill whose action does not say; an action's own `inline` overrides it either way. Off by
   default, so nothing changes until the operator turns it on.
+- Link-style cells: a column hint `drill = "<row-menu action id>"` renders the value as a link
+  that fires that `navigate` action for the row — the key column is the drill, no handle or menu
+  needed. Settings → Screens offers the screen's row-menu actions in the field; a wrong id is
+  refused at load.
 - Dashboards: a list row's tag sits on the title line, so a row stays two lines high.
 
 ## 7.0.59 — unreleased
