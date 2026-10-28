@@ -43,6 +43,16 @@
   pendant l'exécution ; elle se rafraîchit seule tant qu'une exécution tourne. S'appuie sur
   `GET /admin/jobs/runs`. La page Détail d'exécution perd ses boutons retour.
 - Barre latérale : une icône de menu `shieldalert`.
+- Connecteurs : un champ peut porter une référence `${ENV}` même booléen ou numérique
+  (`verify_ssl = "${JDE_AIS_VERIFY_SSL:-true}"`) : l'enregistrement des connecteurs dans les
+  Paramètres, la suppression avec dépendances, la génération et le test d'API valident désormais
+  les valeurs telles que l'exécution les résout (le fichier était refusé avant). L'éditeur de
+  connecteur API affiche et conserve une telle référence pour la vérification TLS.
+- Fusion de configuration (mise à jour des applications, Package & Deploy) : une valeur livrée
+  qui est entièrement une référence `${VAR}` ou `${VAR:-défaut}` appartient à l'installation —
+  la valeur en place l'emporte, booléens, nombres et référence propre à l'installation compris
+  (plusieurs connexions AIS, chacune sur sa variable). Avant, une vérification TLS
+  désactivée dans les Paramètres était réactivée.
 
 ## 7.0.60 — non publiée
 

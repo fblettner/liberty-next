@@ -42,3 +42,4 @@ services:
       JDE_DB_URL: "${JDE_DB_URL:-}"
       JDE_AIS_URL: "${JDE_AIS_URL:-}"
       JDE_AIS_VERIFY_SSL: "${JDE_AIS_VERIFY_SSL:-true}"
+      JDE_AIS_USER: "${JDE_AIS_USER:-JDE}"

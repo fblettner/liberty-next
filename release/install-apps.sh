@@ -153,7 +153,7 @@ upsert_env "APPS_HOST_PATH" "$APPS_ABS"
 # The JDE connection values the wheel ships as ${ENV} references — documented, left for the
 # operator (empty = fill them in Settings → Pools / Connectors instead).
 if ! grep -qE '^#? *JDE_DB_URL=' .env; then
-  printf '\n# JD Edwards connection (the apps wheel ships these as ${ENV} references; empty = set them in Settings)\n# JDE_DB_URL=oracle+oracledb://user@host:1521/?service_name=JDEPROD\n# JDE_AIS_URL=https://jde.example.com:7077/jderest/v2\n# JDE_AIS_VERIFY_SSL=true\n' >> .env
+  printf '\n# JD Edwards connection (the apps wheel ships these as ${ENV} references; empty = set them in Settings)\n# JDE_DB_URL=oracle+oracledb://user@host:1521/?service_name=JDEPROD\n# JDE_AIS_URL=https://jde.example.com:7077/jderest/v2\n# JDE_AIS_VERIFY_SSL=true\n# JDE_AIS_USER=JDE\n' >> .env
   info "Added the commented JDE_* keys to .env"
 fi
 

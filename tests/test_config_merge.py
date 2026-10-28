@@ -201,18 +201,19 @@ def test_connectors_without_snapshot_take_vendor_structure_but_keep_secrets() ->
 
 
 def test_env_placeholders_are_filled_from_the_live_file() -> None:
-    """The wheel ships install-specific hosts / users as `${VAR}`; a concrete live value wins,
-    a live placeholder is left alone, and a wheel-side `${VAR:-default}` is a real value."""
+    """The wheel ships install-specific hosts / users / the TLS switch as `${VAR}` or
+    `${VAR:-default}`; a concrete live value wins (a boolean too), a live placeholder is left alone,
+    and a literal vendor value still lands."""
     wheel = _toml('[connectors.ais]\ntype = "api"\nbase_url = "${JDE_AIS_URL}"\nverify_ssl = true\nauth_password = ""\n[connectors.x]\ntype = "api"\nbase_url = "${X_URL:-http://x}"\n')
     live = _toml('[connectors.ais]\ntype = "api"\nbase_url = "https://jde.customer/jderest"\nverify_ssl = false\nauth_password = "ENC:api"\n[connectors.x]\ntype = "api"\nbase_url = "http://real"\n')
     merged, rep = merge_file("connectors.toml", wheel, live, None)
     ais = merged["connectors"]["ais"]
     assert ais["base_url"] == "https://jde.customer/jderest" and ais["auth_password"] == "ENC:api"
     assert ais["verify_ssl"] is True                       # a real vendor change still lands
-    assert merged["connectors"]["x"]["base_url"] == "${X_URL:-http://x}"   # has a default → vendor value
-    assert rep.secrets_restored == 2
-    merged, _ = merge_file("connectors.toml", wheel, _toml('[connectors.ais]\ntype = "api"\nbase_url = "${OTHER}"\n'), None)
-    assert merged["connectors"]["ais"]["base_url"] == "${JDE_AIS_URL}"   # placeholder vs placeholder → wheel's
+    assert merged["connectors"]["x"]["base_url"] == "http://real"          # a reference with a default is the install's too
+    assert rep.secrets_restored == 2                   # x: restored, then equal to the live one (unchanged)
+    merged, _ = merge_file("connectors.toml", wheel, _toml('[connectors.ais]\ntype = "api"\nbase_url = "${AIS_PROD_URL}"\n'), None)
+    assert merged["connectors"]["ais"]["base_url"] == "${AIS_PROD_URL}"   # the install's own reference (several AIS) wins
 
 
 def test_connectors_blanked_secret_restored_on_refresh() -> None:
@@ -457,3 +458,16 @@ def test_jobs_file_merge_writes_and_snapshots(tmp_path: Path) -> None:
     dry = tmp_path / "dry" / "jobs.toml"
     merge_jobs_file(wheel, None, dry, tmp_path / "dry-snap.toml", dry_run=True)
     assert not dry.exists()
+
+
+def test_env_reference_with_default_keeps_a_live_boolean() -> None:
+    """The wheel ships the AIS TLS check as `${JDE_AIS_VERIFY_SSL:-true}`; an install that switched
+    it off in Settings (a TOML boolean) keeps it off across an upgrade, with or without a previous
+    shipment on record, and the connector's new endpoint still lands."""
+    wheel = _toml('[connectors.ais]\ntype = "api"\nbase_url = "${JDE_AIS_URL}"\nverify_ssl = "${JDE_AIS_VERIFY_SSL:-true}"\n[[connectors.ais.endpoints]]\nname = "new"\npath = "/new"\n')
+    live = _toml('[connectors.ais]\ntype = "api"\nbase_url = "https://jde.customer/jderest"\nverify_ssl = false\n')
+    for prev in (None, _toml('[connectors.ais]\ntype = "api"\nbase_url = "${JDE_AIS_URL}"\nverify_ssl = "${JDE_AIS_VERIFY_SSL:-true}"\n')):
+        merged, rep = merge_file("connectors.toml", wheel, live, prev)
+        ais = merged["connectors"]["ais"]
+        assert ais["verify_ssl"] is False and ais["base_url"] == "https://jde.customer/jderest"
+        assert [e["name"] for e in ais.get("endpoints", [])] == ["new"], rep

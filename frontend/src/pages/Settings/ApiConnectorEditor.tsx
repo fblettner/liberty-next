@@ -57,7 +57,8 @@ export type ApiConnector = {
   home?: string | null
   base_url?: string
   timeout?: number                                          // seconds (Pydantic side)
-  verify_ssl?: boolean
+  /** A boolean, or an environment reference (``${JDE_AIS_VERIFY_SSL:-true}``) resolved by the server. */
+  verify_ssl?: boolean | string
   default_headers?: Record<string, string>
   auth_type?: 'none' | 'basic' | 'bearer' | 'api_key' | 'oauth2'
   auth_username?: string | null
@@ -314,13 +315,17 @@ function ConnectionTab({
       </FieldRow>
       <FieldRow>
         <label>{t('settings.api.connection.sslVerify')}</label>
+        {/* On / off, or an environment reference typed in (``${VAR:-true}``) — a per-install
+            choice the shipped config leaves to the deployment; the reference is kept as written. */}
         <SearchSelect
-          value={value.verify_ssl === false ? 'false' : 'true'}
+          allowCustom
+          value={typeof value.verify_ssl === 'string' ? value.verify_ssl : value.verify_ssl === false ? 'false' : 'true'}
           options={[
             { value: 'true', label: t('settings.api.connection.sslOn') },
             { value: 'false', label: t('settings.api.connection.sslOff') },
+            ...(typeof value.verify_ssl === 'string' ? [{ value: value.verify_ssl, label: value.verify_ssl, mono: value.verify_ssl }] : []),
           ]}
-          onChange={(v) => patch({ verify_ssl: v === 'false' ? false : undefined })}
+          onChange={(v) => patch({ verify_ssl: v === 'false' ? false : v === 'true' || v === '' ? undefined : v })}
         />
       </FieldRow>
       <SectionHead>{t('settings.api.connection.defaultHeaders')}</SectionHead>

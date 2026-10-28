@@ -195,18 +195,22 @@ def is_overridden(entity: Any) -> bool:
 
 
 # ── secrets ──────────────────────────────────────────────────────────────────────────────────
-_ENV_PLACEHOLDER = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*\}$")  # `${VAR}` with no default: "the install fills this"
+# A whole value that is one `${VAR}` or `${VAR:-default}` reference: "the install owns this" (a
+# host, a user, the AIS TLS check `${JDE_AIS_VERIFY_SSL:-true}` — the default only covers an unset
+# variable); a concrete live value at that place is the install's choice and wins.
+_ENV_PLACEHOLDER = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*(?::-[^}]*)?\}$")
 
 
 def is_placeholder(value: Any) -> bool:
-    """``""`` or a bare ``${VAR}`` — what the wheel ships where the install owns the value
-    (a blanked ``ENC:`` secret, a host, a user)."""
+    """``""`` or a whole ``${VAR}`` / ``${VAR:-default}`` reference — what the wheel ships where
+    the install owns the value (a blanked ``ENC:`` secret, a host, a user, a TLS switch)."""
     return isinstance(value, str) and (value == "" or bool(_ENV_PLACEHOLDER.match(value)))
 
 
 def restore_blanked(node: Any, live: Any) -> int:
-    """Where *node* holds a placeholder (``""`` or a bare ``${VAR}``) and *live* has a concrete
-    non-placeholder string at the same path, copy the live value in: the wheel ships ``ENC:``
+    """Where *node* holds a placeholder (``""`` or a whole ``${VAR}`` reference) and *live* has
+    its own value at the same path (a string — a different reference included —, a boolean, a
+    number), copy the live value in: the wheel ships ``ENC:``
     secrets blanked and install-specific hosts / users as ``${VAR}`` references, the install
     owns the real value. Recurses into nested tables, leaves arrays alone (secrets never live
     in TOML arrays). Returns how many were restored."""
@@ -215,7 +219,10 @@ def restore_blanked(node: Any, live: Any) -> int:
     n = 0
     for k, v in node.items():
         lv = live.get(k)
-        if is_placeholder(v) and isinstance(lv, str) and lv and not is_placeholder(lv):
+        # the install's value: a concrete one (text, boolean, number), or a reference of its own
+        # (another AIS on ``${AIS_PROD_URL}``) — only a blank or the very same reference is not
+        concrete = (isinstance(lv, str) and lv != "" and lv != v) or (isinstance(lv, (bool, int, float)) and not isinstance(v, (bool, int, float)))
+        if is_placeholder(v) and concrete:
             node[k] = lv
             n += 1
         elif isinstance(v, dict) and isinstance(lv, dict):

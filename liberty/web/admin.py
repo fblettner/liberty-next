@@ -34,6 +34,7 @@ from pydantic import BaseModel, ValidationError
 
 from liberty.auth.dependencies import require_superuser
 from liberty.auth.principal import Principal
+from liberty.config import substitute_env
 from liberty.crypto import CryptoError, encrypt, is_encrypted
 from liberty.connectors.config import (
     ApiConnectorConfig,
@@ -711,7 +712,9 @@ async def put_connectors_parsed(body: ConnectorsParsedBody, request: Request, _:
         if name in ALWAYS_LICENSED_CONNECTORS:
             raw["licensed"] = True
         try:
-            ConnectorsFile.model_validate({"connectors": {name: raw}})
+            # validated as the runtime reads it: ${ENV} references resolved (a boolean such as
+            # verify_ssl may be one), the raw value is what gets written
+            ConnectorsFile.model_validate(substitute_env({"connectors": {name: raw}}))
         except ValidationError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"connector {name!r}: {exc}") from exc
         if raw.get("type") == "api":
@@ -1126,7 +1129,7 @@ async def assistant_scaffold(body: ScaffoldBody, request: Request, principal: Su
 
     # ── validate EVERYTHING before writing anything (no partial scaffolds) ───────────────────
     try:
-        ConnectorsFile.model_validate({"connectors": conns})
+        ConnectorsFile.model_validate(substitute_env({"connectors": conns}))
         DictionaryFile.model_validate(ddict)
         parse_screens({"screens": screens})
         MenusFile.model_validate({"menus": menus})
@@ -3152,7 +3155,7 @@ async def _delete_connector_queries(request: Request, connector: str, query_name
     try:
         # Re-load the file with the dropped queries and validate the connector.
         normalised = tomllib.loads(tomlkit.dumps(doc))
-        cfg = ConnectorsFile.model_validate(normalised)
+        cfg = ConnectorsFile.model_validate(substitute_env(normalised))
         if connector not in cfg.connectors:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
                                 detail=f"connector {connector!r} disappeared from validation")
@@ -3200,7 +3203,7 @@ async def test_api_connector(body: ApiTestBody, request: Request, _: Superuser) 
     from liberty.connectors.config import ApiConnectorConfig
 
     try:
-        cfg = ApiConnectorConfig.model_validate(body.config)
+        cfg = ApiConnectorConfig.model_validate(substitute_env(body.config))
     except ValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid api connector config: {exc}") from exc
 

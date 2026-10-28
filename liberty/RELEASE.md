@@ -35,6 +35,14 @@
   run and a progress bar while one runs; it refreshes itself while a run is going. Backed by
   `GET /admin/jobs/runs`. The Run detail page loses its back buttons.
 - Sidebar: a `shieldalert` menu icon.
+- Connectors: a field may hold an `${ENV}` reference even when it is a boolean or a number
+  (`verify_ssl = "${JDE_AIS_VERIFY_SSL:-true}"`): saving connectors in Settings, the delete with
+  dependencies, the scaffold and the API test now validate the values as the runtime resolves
+  them (they refused the file before). The API connector editor shows and keeps such a reference
+  for the TLS check.
+- Config merge (apps upgrade, Package & Deploy): a shipped value that is a whole `${VAR}` or
+  `${VAR:-default}` reference belongs to the install — the live value wins, booleans, numbers and
+  the install's own reference included (several AIS connections, each on its own variable). Before, a TLS check switched off in Settings was switched back on.
 
 ## 7.0.60 — unreleased
 

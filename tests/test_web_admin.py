@@ -1799,3 +1799,26 @@ def test_notifications_parsed_round_trip_and_reload(env, tmp_path) -> None:
         assert "closed" in app.state.notification_rules.notifications      # reloaded at once
         assert client.put("/admin/config/notifications/parsed", json={"notifications": {"bad": {"trigger": {"kind": "comet"}, "subject": "x"}}}, headers=h).status_code == 422
         assert client.put("/admin/config/notifications/parsed", json={"notifications": {}}, headers=_h(client, "reader")).status_code == 403
+
+
+def test_api_connector_settings_from_the_environment(env, monkeypatch) -> None:
+    """The shipped JDE web service connection reads its address, user and SSL check from the
+    environment: a save keeps the references as written (validated as the runtime resolves them,
+    a boolean included), and the runtime config carries the resolved values."""
+    from liberty.connectors.config import parse_connectors
+    app, conn_toml, db_url = env
+    monkeypatch.setenv("JDE_AIS_URL", "https://ais.example.com/jderest/v2")
+    monkeypatch.setenv("JDE_AIS_VERIFY_SSL", "false")
+    remote = {"type": "api", "base_url": "${JDE_AIS_URL}", "auth_type": "basic",
+              "auth_username": "${JDE_AIS_USER:-JDE}", "verify_ssl": "${JDE_AIS_VERIFY_SSL:-true}"}
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        body = {"connectors": {"db": {"type": "sql", "pool": "default", "queries": [{"name": "answer", "sql": "SELECT 42 AS answer"}]}, "ais": remote}}
+        r = client.put("/admin/config/connectors/parsed", json=body, headers=h)
+        assert r.status_code == 200 and r.json().get("saved") is True, r.text
+        txt = conn_toml.read_text()
+        assert 'verify_ssl = "${JDE_AIS_VERIFY_SSL:-true}"' in txt and 'base_url = "${JDE_AIS_URL}"' in txt
+        r = client.post("/admin/config/api/test", json={"config": remote}, headers=h)
+        assert r.status_code != 422, r.text
+    cfg = parse_connectors({"connectors": {"ais": remote}}).connectors["ais"]
+    assert cfg.verify_ssl is False and cfg.base_url == "https://ais.example.com/jderest/v2" and cfg.auth_username == "JDE"
