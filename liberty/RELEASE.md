@@ -27,6 +27,13 @@
   endpoints stay the target's unless picked) or takes an approved change package, signs in on the
   target and returns its preview — or applies it there. An applied promotion is kept in a history
   (`<config>/.promotion/`, `/admin/promotion/history`) and marks the change package exported.
+- "Promote to…" on Settings → Package (Build) and on an approved change package (nomaflow →
+  Changes): pick a target instance — it previews at once (the package's plan with its diffs, or the
+  change package's report where a conflict or an unverifiable change can be forced) — then "Apply on
+  <target>". Package → Promotion edits the target instances (Test signs in there) and lists the
+  promotions applied from here; a row opens on the target's report.
+- Changes → Apply: a change whose drift can't be verified (no read query) can be forced — it never
+  applied before, the force box only showed on conflicts.
 
 ## 7.0.63 — unreleased
 

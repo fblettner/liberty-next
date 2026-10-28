@@ -6,13 +6,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { type LucideIcon, Search, Download, Upload, Package, FileText, Menu as MenuIcon, LayoutDashboard, AlertCircle, CheckCircle2, Compass, Workflow, Bell, Zap, Sparkles } from 'lucide-react'
+import { type LucideIcon, Search, Download, Upload, Package, FileText, Menu as MenuIcon, LayoutDashboard, AlertCircle, CheckCircle2, Rocket, Compass, Workflow, Bell, Zap, Sparkles } from 'lucide-react'
 import { api, apiDownload, apiUpload, ApiError } from '../../api/client'
 import type { ScreensDoc, MenusDoc, DashboardsDoc, ExplorerDoc, AiDoc } from '../../types/config'
 import { Banner, Button, Card, Centered, Checkbox, SpinnerRing, Mono, ViewCards } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { DEFAULT_EXCLUDED_KINDS, KIND_ORDER, KIND_TITLES, depKey } from './FindDependenciesModal'
 import { PackagePlanView } from './PackagePlanView'
+import { PromoteModal } from './PromoteModal'
+import { PromotionPanel } from './PromotionPanel'
+import type { PromotionPayload } from '../../types/promotion'
 import { pendingChanges } from '../../services/packagePlan'
 import type { PackagePlan } from '../../types/packagePlan'
 
@@ -115,15 +118,16 @@ const FileDrop = styled.label<{ $hasFile?: boolean }>`
 
 export default function PackageBuilder() {
   const { t } = useTranslation()
-  const [mode, setMode] = useState<'build' | 'import'>('build')
+  const [mode, setMode] = useState<'build' | 'import' | 'promotion'>('build')
 
   return (
     <Shell>
       <ViewCards compact value={mode} onChange={setMode} items={[
         { id: 'build', label: t('settings.package.buildTab'), desc: t('settings.package.buildDesc'), icon: <Download size={15} />, color: colors.blue.main },
         { id: 'import', label: t('settings.package.importTab'), desc: t('settings.package.importDesc'), icon: <Upload size={15} />, color: colors.purple.main },
+        { id: 'promotion', label: t('settings.promotion.tab'), desc: t('settings.promotion.tabDesc'), icon: <Rocket size={15} />, color: colors.orange.main },
       ]} />
-      {mode === 'build' ? <BuildPanel /> : <ImportPanel />}
+      {mode === 'build' ? <BuildPanel /> : mode === 'import' ? <ImportPanel /> : <PromotionPanel />}
     </Shell>
   )
 }
@@ -147,6 +151,8 @@ function BuildPanel() {
   const [depBusy, setDepBusy] = useState(false)
   const [depError, setDepError] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
+  // The payload is fixed when the dialog opens (the selection then), so it previews once.
+  const [promote, setPromote] = useState<PromotionPayload | null>(null)
 
   useEffect(() => {
     Promise.all([
@@ -306,7 +312,15 @@ function BuildPanel() {
           {downloading ? <SpinnerRing size={13} thickness={2} /> : <Download size={13} />}
           {t('settings.package.download', { n: totalIncluded })}
         </Button>
+        <Button $size="sm" onClick={() => manifest && setPromote({
+          kind: 'config',
+          seeds: [...selected.values()].map((s) => ({ kind: s.kind, name: s.name, scope: s.scope ?? null })),
+          include: manifest.deps.filter((d) => included.has(depKey(d))).map((d) => ({ kind: d.kind, scope: d.scope, name: d.name })),
+        })} disabled={!manifest || selected.size === 0 || totalIncluded === 0}>
+          <Rocket size={13} /> {t('settings.promotion.promoteTo')}
+        </Button>
       </Toolbar>
+      {promote && <PromoteModal payload={promote} onClose={() => setPromote(null)} />}
       {depError && <Banner $tone="error"><AlertCircle size={14} style={{ marginRight: 6, verticalAlign: -2 }} />{depError}</Banner>}
       <Grid>
         <Panel>

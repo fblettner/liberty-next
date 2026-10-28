@@ -32,6 +32,15 @@
   choisis) ou prend un paquet de changements approuvé, se connecte à la cible et renvoie son aperçu
   — ou l'y applique. Une promotion appliquée est gardée dans un historique (`<config>/.promotion/`,
   `/admin/promotion/history`) et marque le paquet de changements comme exporté.
+- « Promouvoir vers… » dans Paramètres → Paquet (Construire) et sur un paquet de changements
+  approuvé (nomaflow → Changements) : choisir une instance cible — elle prévisualise aussitôt (le plan
+  du paquet avec ses différences, ou le rapport du paquet de changements où un conflit ou un
+  changement invérifiable peut être forcé) — puis « Appliquer sur <cible> ». Paquet → Promotion
+  édite les instances cibles (Tester s'y connecte) et liste les promotions appliquées depuis ici ;
+  une ligne s'ouvre sur le rapport de la cible.
+- Changements → Appliquer : un changement dont la dérive ne peut pas être vérifiée (pas de requête
+  de lecture) peut être forcé — il ne s'appliquait jamais, la case Forcer n'apparaissait que sur
+  les conflits.
 
 ## 7.0.63 — non publiée
 

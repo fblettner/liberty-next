@@ -5,12 +5,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Layers, ArrowRight, Send, Check, X, EyeOff, Eye, Download, Upload, ChevronRight, ChevronDown, RefreshCw, Trash2, Search, Inbox, Plus, FolderInput } from 'lucide-react'
+import { Layers, ArrowRight, Send, Check, X, EyeOff, Eye, Download, Upload, Rocket, ChevronRight, ChevronDown, RefreshCw, Trash2, Search, Inbox, Plus, FolderInput } from 'lucide-react'
 import { Banner, Button, useModals } from '../../common'
 import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { ApplyBundlePanel } from './ApplyBundleModal'
 import { PostApplyEditor } from './PostApplyEditor'
+import { PromoteModal } from './PromoteModal'
+import type { PromotionPayload } from '../../types/promotion'
 import { Overlay, Modal, ModalHeader, ModalBody, ModalFooter } from '../../common/Modal'
 import { createPortal } from 'react-dom'
 
@@ -213,6 +215,7 @@ export default function ChangePackagesBuilder() {
   const [detail, setDetail] = useState<PkgDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [promote, setPromote] = useState<PromotionPayload | null>(null)
   // Two tabs, like the Package page: review/manage change packages, or apply an imported bundle.
   const [mode, setMode] = useState<'changes' | 'apply'>('changes')
   const [filter, setFilter] = useState('')
@@ -413,7 +416,7 @@ export default function ChangePackagesBuilder() {
     for (const e of detail?.entries ?? []) {
       const entity = e.entity || e.query
       const keyLabel = e.entity_key ? Object.values(e.entity_key).map(fmt).join('·') : ''
-      const k = `${entity} ${keyLabel} ${e.source_action ?? ''}`
+      const k = `${entity}\u0000${keyLabel}\u0000${e.source_action ?? ''}`
       ;(m.get(k) ?? m.set(k, []).get(k)!).push(e)
     }
     return [...m.entries()]
@@ -424,6 +427,8 @@ export default function ChangePackagesBuilder() {
 
   return (
     <>
+      {promote && <PromoteModal payload={promote} onClose={() => setPromote(null)}
+        onApplied={() => { if (selId) void Promise.all([loadList(), loadDetail(selId)]) }} />}
       <Tabs>
         <TabBtn $active={mode === 'changes'} onClick={() => setMode('changes')}>
           <Layers size={13} /> {t('settings.changes.changesTab')}
@@ -557,6 +562,9 @@ export default function ChangePackagesBuilder() {
                       )}
                       <Button $size="sm" $variant="primary" disabled={busy} onClick={() => void exportPkg()}>
                         <Download size={13} /> {t('settings.changes.export')}
+                      </Button>
+                      <Button $size="sm" disabled={busy} onClick={() => setPromote({ kind: 'changes', packageId: detail.id, name: detail.name })}>
+                        <Rocket size={13} /> {t('settings.promotion.promoteTo')}
                       </Button>
                     </>
                   )}

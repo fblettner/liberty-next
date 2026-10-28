@@ -6,14 +6,12 @@ import { useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Upload } from 'lucide-react'
-import { Button, Banner } from '../../common'
+import { Button, Banner, Checkbox } from '../../common'
 import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
-type OpSummary = { connector: string; query: string; operation: string; entity: string | null; entity_key: Record<string, unknown> | null; post_apply?: boolean; label?: string | null }
-type Result = { index: number; op: OpSummary; status: string; detail?: string; rowcount?: number }
-type AlreadyApplied = { name: string; applied_at: string | null; applied_by: string | null }
-type Report = { dry_run: boolean; op_count: number; summary: Record<string, number>; results: Result[]; already_applied?: AlreadyApplied | null }
+import type { BundleReport as Report } from '../../types/changesets'
+export type { Report }
 type Bundle = { format?: string; package?: { name?: string; application?: string }; op_count?: number }
 
 const STATUS_TONE: Record<string, string> = {
@@ -73,7 +71,6 @@ export function ApplyBundlePanel({ onApplied }: { onApplied?: () => void }) {
   }
 
   const toggleForce = (i: number) => setForce((s) => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n })
-  const summaryText = useMemo(() => report ? Object.entries(report.summary).map(([k, v]) => `${v} ${k}`).join(' · ') : '', [report])
   const hasConflicts = (report?.summary.conflict ?? 0) > 0
 
   return (
@@ -95,7 +92,20 @@ export function ApplyBundlePanel({ onApplied }: { onApplied?: () => void }) {
         </Button>
       </Actions>
       {error && <Banner $tone="error" style={{ marginTop: 8 }}>{error}</Banner>}
-      {report?.already_applied && (
+      {report && <BundleReportView report={report} force={force} onToggleForce={toggleForce} />}
+    </div>
+  )
+}
+
+/** A change bundle's drift report (a dry run or an apply, here or on a promotion target): the
+ *  summary, then each op with its status; on a dry run a conflict — or an op whose drift can't be
+ *  verified (no read query / key), which only applies when forced — can be ticked to force. */
+export function BundleReportView({ report, force, onToggleForce }: { report: Report; force: Set<number>; onToggleForce: (i: number) => void }) {
+  const { t } = useTranslation()
+  const summaryText = useMemo(() => Object.entries(report.summary).map(([k, v]) => `${v} ${k}`).join(' · '), [report])
+  return (
+    <>
+      {report.already_applied && (
         <Banner $tone="warning" style={{ marginTop: 8 }}>
           {t('settings.changes.alreadyApplied',
             {
@@ -104,28 +114,26 @@ export function ApplyBundlePanel({ onApplied }: { onApplied?: () => void }) {
             })}
         </Banner>
       )}
-      {report && (
-        <>
-          <Banner $tone={report.summary.conflict || report.summary.error ? 'warning' : 'ok'} style={{ margin: '8px 0' }}>
-            {report.dry_run ? t('settings.changes.dryRunReport') : t('settings.changes.applied')}{summaryText}
-          </Banner>
-          {report.results.map((r) => (
-            <Op key={r.index}>
-              <div className="top">
-                <Badge $tone={STATUS_TONE[r.status] ?? colors.text.muted}>{r.status.replace('_', ' ')}</Badge>
-                {r.op.post_apply && <Badge $tone={colors.blue.main}>{t('settings.changes.postApply')}</Badge>}
-                <span className="key">{r.op.post_apply ? (r.op.label || r.op.operation) : `${r.op.operation} ${r.op.entity_key ? Object.entries(r.op.entity_key).map(([k, v]) => `${k}=${v}`).join(' · ') : ''}`}</span>
-                <span className="q">{r.op.connector}.{r.op.query}</span>
-                {r.status === 'conflict' && report.dry_run && (
-                  <label><input type="checkbox" checked={force.has(r.index)} onChange={() => toggleForce(r.index)} /> {t('settings.changes.force')}</label>
-                )}
-              </div>
-              {r.detail && <div className="detail">{r.detail}</div>}
-            </Op>
-          ))}
-        </>
-      )}
-    </div>
+      <Banner $tone={report.summary.conflict || report.summary.error ? 'warning' : 'ok'} style={{ margin: '8px 0' }}>
+        {report.dry_run ? t('settings.changes.dryRunReport') : t('settings.changes.applied')}{summaryText}
+      </Banner>
+      {report.results.map((r) => (
+        <Op key={r.index}>
+          <div className="top">
+            <Badge $tone={STATUS_TONE[r.status] ?? colors.text.muted}>{r.status.replace('_', ' ')}</Badge>
+            {r.op.post_apply && <Badge $tone={colors.blue.main}>{t('settings.changes.postApply')}</Badge>}
+            <span className="key">{r.op.post_apply ? (r.op.label || r.op.operation) : `${r.op.operation} ${r.op.entity_key ? Object.entries(r.op.entity_key).map(([k, v]) => `${k}=${v}`).join(' · ') : ''}`}</span>
+            <span className="q">{r.op.connector}.{r.op.query}</span>
+            {(r.status === 'conflict' || r.status === 'unverified') && report.dry_run && (
+              <span style={{ marginLeft: 'auto' }}>
+                <Checkbox checked={force.has(r.index)} onChange={() => onToggleForce(r.index)} label={t('settings.changes.force')} />
+              </span>
+            )}
+          </div>
+          {r.detail && <div className="detail">{r.detail}</div>}
+        </Op>
+      ))}
+    </>
   )
 }
 
