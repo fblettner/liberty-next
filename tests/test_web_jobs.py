@@ -1405,4 +1405,10 @@ def test_web_manifest_is_public_and_named_after_the_instance(env) -> None:
         r = client.get("/manifest.webmanifest")
         assert r.status_code == 200 and r.headers["content-type"].startswith("application/manifest+json")
         m = r.json()
-        assert m["name"] == "Liberty Next" and m["start_url"] == "./" and m["icons"][0]["src"] == "favicon.svg"
+        assert m["name"] == "Liberty Next" and m["start_url"] == "./" and m["display"] == "standalone"
+        icons = {(i["src"], i["sizes"], i["purpose"]) for i in m["icons"]}
+        assert {("icon-192.png", "192x192", "any"), ("icon-512.png", "512x512", "any"),
+                ("icon-maskable-512.png", "512x512", "maskable")} <= icons
+        public = Path(__file__).resolve().parent.parent / "frontend" / "public"
+        assert all((public / src).is_file() for src, _, _ in icons) and (public / "sw.js").is_file()
+

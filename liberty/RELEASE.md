@@ -52,6 +52,10 @@
 - PDF reports: a table with long identifiers (query names, paths) no longer runs past the right margin —
   the cells wrap them after `_`, `.` or `/`. Developer reference → Configuration and the technical report
   show a default path as `${LIBERTY_APPS_DIR}/…` instead of the absolute path of the server.
+- Installable as an app (PWA): Chrome / Edge offer "Install" and Safari "Add to Dock" — Liberty Next opens in its
+  own window, named after the instance (the theme's app name). The service worker caches nothing: every request goes
+  to the server as in the browser, so a release is used on the next load and no data stays on the device. Needs
+  HTTPS (or localhost); works under `[app] base_path`. Icons 192 / 512 px, maskable and Apple touch.
 
 ## 7.0.64 — unreleased
 

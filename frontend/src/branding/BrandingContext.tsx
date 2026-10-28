@@ -96,8 +96,10 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
     setAppName(t.app_name ?? null)
     if (t.presets) setPresets(t.presets)
     if (t.ui) setUi({ ...UI_DEFAULTS, ...t.ui })
-    // Browser tab title — operator name if set, else whatever index.html shipped.
+    // Browser tab title — operator name if set, else whatever index.html shipped; Safari names the
+    // installed app from the page, so its title follows.
     document.title = t.app_name || baseTitle.current
+    document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute('content', document.title)
   }, [])
 
   const refresh = useCallback(async () => {

@@ -25,6 +25,15 @@ window.addEventListener("vite:preloadError", (event) => {
   window.location.reload();
 });
 
+// Installable as an app (Chrome / Edge "Install", Safari "Add to Dock"): browsers offer it once a
+// service worker is registered, on HTTPS or localhost only. It caches nothing (public/sw.js). The
+// path is relative, so it resolves against the <base href> — under a [app] base_path too.
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => { /* not installable here */ });
+  });
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter basename={routerBasename(basePath())}>

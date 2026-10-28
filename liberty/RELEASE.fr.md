@@ -60,6 +60,11 @@
 - Rapports PDF : un tableau aux identifiants longs (noms de requêtes, chemins) ne dépasse plus la marge
   droite — les cellules les coupent après `_`, `.` ou `/`. Référence développeur → Configuration et le rapport
   technique affichent un chemin par défaut sous la forme `${LIBERTY_APPS_DIR}/…` au lieu du chemin absolu du serveur.
+- Installable comme une application (PWA) : Chrome / Edge proposent « Installer » et Safari « Ajouter au Dock » —
+  Liberty Next s'ouvre dans sa propre fenêtre, au nom de l'instance (le nom d'application du thème). Le service
+  worker ne met rien en cache : chaque requête part au serveur comme dans le navigateur, une nouvelle version est donc
+  prise au chargement suivant et aucune donnée ne reste sur le poste. Nécessite HTTPS (ou localhost) ; fonctionne
+  sous `[app] base_path`. Icônes 192 / 512 px, maskable et Apple.
 
 ## 7.0.64 — non publiée
 

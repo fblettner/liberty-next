@@ -73,7 +73,15 @@ async def web_manifest(request: Request):
     accent = resolved.get("vars", {}).get("blue-main") or "#007AFF"
     return JSONResponse({
         # Relative to the manifest's own URL, so they hold under a sub-path ([app] base_path) too.
-        "name": name, "short_name": name[:12], "start_url": "./", "scope": "./", "display": "standalone",
-        "background_color": "#07060e", "theme_color": accent if str(accent).startswith("#") else "#007AFF",
-        "icons": [{"src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}],
+        "id": "./", "name": name, "short_name": name[:12], "description": "Liberty Next",
+        "start_url": "./", "scope": "./", "display": "standalone",
+        "background_color": "#0B0D12", "theme_color": accent if str(accent).startswith("#") else "#007AFF",
+        # PNGs (the browsers' install check wants 192 and 512 px), the maskable one for Android's
+        # shaped launchers, the SVG for the rest — all in frontend/public
+        "icons": [
+            {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+            {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+            {"src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+            {"src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
+        ],
     }, media_type="application/manifest+json")
