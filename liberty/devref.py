@@ -37,14 +37,25 @@ _OTHER_EDITORS: dict[str, str] = {
 FILE_ONLY: dict[str, str] = {
     "crypto.master_key": "the key every ENC: value is encrypted with — set in the environment (LIBERTY_MASTER_KEY); changing it from the UI would make every stored secret unreadable",
     "auth.jwt_secret": "signs every session — set in the environment (LIBERTY_JWT_SECRET); changing it signs everyone out",
+    "auth.jwt_algorithm": "HS256 is the only algorithm the token service supports",
 }
+# The deployment layout: where the configuration files are. Set by the installation (LIBERTY_APPS_DIR,
+# the Docker volumes); pointing one at another place from a screen would show an empty configuration.
+_LAYOUT = "deployment layout — follows LIBERTY_APPS_DIR / the install; changed in app.toml, then a restart"
+for _key in ("connectors.config_path", "connectors.dictionary_path", "menus.config_path", "screens.config_path",
+             "charts.config_path", "actions.config_path", "dashboards.config_path", "explorer.config_path",
+             "theme.config_path", "ai.config_path", "jobs.config_path", "reports.templates_config_path",
+             "notify.config_path", "auth.toml_path", "app.static_dir"):
+    FILE_ONLY[_key] = _LAYOUT
 
 
 def _app_editor_keys() -> dict[str, str]:
     from liberty.web import admin
     out: dict[str, str] = {}
     for section, keys in (("app", admin._APP_SAFE_KEYS), ("ai", admin._AI_SAFE_KEYS), ("license", admin._LICENSE_SAFE_KEYS),
-                          ("oidc", admin._OIDC_SAFE_KEYS), ("notify", admin._NOTIFY_SAFE_KEYS)):
+                          ("oidc", admin._OIDC_SAFE_KEYS), ("notify", admin._NOTIFY_SAFE_KEYS),
+                          ("auth", admin._AUTH_SAFE_KEYS), ("jobs", admin._JOBS_SAFE_KEYS),
+                          ("changesets", admin._CHANGESETS_SAFE_KEYS)):
         for k in keys:
             out[f"{section}.{k}"] = "Settings → App"
     return out

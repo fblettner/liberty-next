@@ -45,4 +45,11 @@ def test_the_route_is_superuser_only(env) -> None:  # noqa: F811
         assert client.get("/admin/dev/config").status_code == 401
         assert client.get("/admin/dev/config", headers=_h(client, "reader")).status_code == 403
         body = client.get("/admin/dev/config", headers=_h(client, "admin")).json()
-        assert body["total"] == len(body["keys"]) and body["editable"] > 0 and "app.base_path" in body["gaps"]
+        assert body["total"] == len(body["keys"]) and body["editable"] > 0 and body["gaps"] == []
+
+
+def test_every_setting_is_editable_or_explained() -> None:
+    """Keeps priority 1 true: a new app.toml key must get a field in a screen (``admin._*_SAFE_KEYS``,
+    ``devref._OTHER_EDITORS``) or a reason in ``devref.FILE_ONLY``."""
+    from liberty.devref import config_gaps
+    assert config_gaps() == [], "settings not editable in the UI and not explained as file-only"

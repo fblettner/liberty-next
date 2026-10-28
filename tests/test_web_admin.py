@@ -1785,6 +1785,38 @@ def test_app_parsed_notify_section_round_trip_encrypts_the_password(env, tmp_pat
         assert client.get("/admin/config/app/parsed", headers=h).json()["notify"]["smtp_host"] == "smtp.test"
 
 
+def test_app_parsed_every_setting_section(env, tmp_path, monkeypatch) -> None:
+    """C10: sign-in, nomaflow, change packages, the server log, the sub-path, the OIDC claims and
+    session secret are edited from Settings → App; the paths come back read-only with their reason."""
+    import tomllib
+    app, _conn_toml, _db_url = env
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        got = client.get("/admin/config/app/parsed", headers=h).json()
+        assert got["auth"]["access_token_ttl"] == 3600 and got["jobs"]["max_upload_mb"] == 200 and got["changesets"]["retention_days"] == 0
+        assert "jwt_secret" not in got["auth"] and "config_path" not in got["jobs"]
+        ro = {r["key"]: r for r in got["readonly"]}
+        assert "deployment layout" in ro["screens.config_path"]["reason"] and ro["crypto.master_key"]["value"] in ("set", "not set")
+        assert "default" in got["choices"]["pools"]
+        body = {k: got[k] for k in ("app", "ai", "license", "oidc", "notify")}
+        body["app"] = {**got["app"], "log_format": "json", "log_file": None, "base_path": "/liberty"}
+        body["oidc"] = {**got["oidc"], "attribute_claims": {"company": "org"}, "session_secret": "cookie-s3cret"}
+        body["auth"] = {**got["auth"], "access_token_ttl": 1800, "login_max_failures": 5}
+        body["jobs"] = {**got["jobs"], "enabled": False, "files_dir": ""}
+        body["changesets"] = {**got["changesets"], "retention_days": 30}
+        r = client.put("/admin/config/app/parsed", json=body, headers=h)
+        assert r.status_code == 200, r.text
+        assert r.json()["requires_restart"] is True
+        doc = tomllib.loads((tmp_path / "app.toml").read_text())
+        assert doc["app"]["log_format"] == "json" and "log_file" not in doc["app"] and doc["app"]["base_path"] == "/liberty"
+        assert doc["auth"]["access_token_ttl"] == 1800 and doc["jobs"]["enabled"] is False and "files_dir" not in doc["jobs"]
+        assert doc["changesets"]["retention_days"] == 30 and doc["oidc"]["attribute_claims"] == {"company": "org"}
+        assert doc["oidc"]["session_secret"].startswith("ENC:") and "cookie-s3cret" not in (tmp_path / "app.toml").read_text()
+        bad = {**body, "auth": {**got["auth"], "backend": "ldap"}}
+        assert client.put("/admin/config/app/parsed", json=bad, headers=h).status_code == 422
+
+
 def test_notifications_parsed_round_trip_and_reload(env, tmp_path) -> None:
     app, _conn_toml, _db_url = env
     with TestClient(app) as client:

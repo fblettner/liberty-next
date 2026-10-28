@@ -8,6 +8,18 @@
   droite (type, l'écran qui le modifie ou pourquoi il reste dans le fichier / l'environnement, les
   modules qui le lisent, défaut ; filtres, export), et une ligne ouvre le détail avec chaque ligne de
   code qui le lit (`/admin/dev/config`).
+- Paramètres → App : chaque paramètre de app.toml se règle maintenant depuis l'écran — nouvelles
+  sections Journal du serveur (format console, le fichier sur disque ou désactivé, sa taille et sa
+  rotation), Connexion (stockage des comptes et son pool, émetteur et durées des jetons, limitation
+  des connexions), nomaflow (actif ou non, pool, lignes de journal par exécution, espace de travail,
+  téléversement maximal) et Paquets de changements (actif ou non, pool, rétention) ; le sous-chemin
+  (`base_path`), les attributs OIDC lus depuis les claims et le secret de session (stocké chiffré),
+  les outils Explorateur de l'assistant, le pool de la boîte de réception. Ce qui reste dans le
+  fichier — les chemins des fichiers de configuration, l'algorithme de signature, la clé maîtresse
+  et le secret JWT — est listé en lecture seule avec la raison. Un test échoue désormais quand un
+  nouveau paramètre n'est ni modifiable ni expliqué.
+- Paramètres → App : modifier seulement les paramètres de notification active maintenant
+  Enregistrer (ils n'entraient pas dans la détection des modifications).
 
 ## 7.0.64 — non publiée
 

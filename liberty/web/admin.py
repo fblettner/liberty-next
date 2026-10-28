@@ -1714,7 +1714,7 @@ async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dic
 # nudge the UI.
 from liberty.ai.appconfig import AiFile, parse_ai_config
 from liberty.ai.catalog import KNOWN_MODELS
-from liberty.config import AISettings, AppSettings, LicenseSettings, OIDCSettings, ReportsBrandingSettings, load_settings, resolve_app_config_path, NotifySettings
+from liberty.config import AISettings, AppSettings, AuthSettings, ChangeSetsSettings, JobsSettings, LicenseSettings, OIDCSettings, ReportsBrandingSettings, load_settings, resolve_app_config_path, NotifySettings
 
 
 # Keys safe to expose: secrets, path fields, and backend toggles that require a coordinated
@@ -1723,10 +1723,11 @@ _APP_SAFE_KEYS = {
     "name", "host", "port", "log_level", "hot_reload", "default_language", "oracle_thick",
     "default_period", "default_page_size", "dashboard_cache_seconds",
     "tabs_multi", "tabs_close_on_app_switch", "tabs_max", "drill_inline",
+    "log_format", "log_file", "log_file_max_mb", "log_file_backups", "base_path",
 }
 _AI_SAFE_KEYS = {
     "enabled", "model", "max_tokens", "max_iterations", "system_prompt", "thinking",
-    "effort", "request_timeout", "connector_tools", "api_tool", "scaffold_tools", "ops_tools",
+    "effort", "request_timeout", "connector_tools", "api_tool", "scaffold_tools", "ops_tools", "explorer_tools",
     "allowed_connectors", "web_fetch_domains", "web_fetch_max_uses", "allowed_models", "starters",
     "api_key",   # sensitive — encrypted on save, masked on GET
 }
@@ -1734,20 +1735,29 @@ _LICENSE_SAFE_KEYS = {"key"}   # sensitive — encrypted on save, masked on GET
 _OIDC_SAFE_KEYS = {
     "enabled", "discovery_url", "client_id", "scopes",
     "username_claim", "email_claim", "name_claim",
-    "redirect_url", "frontend_redirect",
-    "client_secret",   # sensitive — encrypted on save, masked on GET
+    "redirect_url", "frontend_redirect", "attribute_claims",
+    "client_secret", "session_secret",   # sensitive — encrypted on save
 }
 
 # Fields that get encrypt-on-save + mask-on-get. Identified by (section, field) tuple
 # so encryption is targeted (other strings in the same section stay as-is).
 _NOTIFY_SAFE_KEYS = {
-    "enabled", "smtp_host", "smtp_port", "smtp_user", "smtp_from", "smtp_tls", "smtp_ssl", "smtp_timeout", "retention_days",
+    "enabled", "pool", "smtp_host", "smtp_port", "smtp_user", "smtp_from", "smtp_tls", "smtp_ssl", "smtp_timeout", "retention_days",
     "smtp_password",   # sensitive — encrypted on save
 }
+# Sign-in, nomaflow and change packages (C10 — every setting editable in the UI). The secret, the
+# algorithm and the file paths stay in the file (liberty.devref.FILE_ONLY says why).
+_AUTH_SAFE_KEYS = {
+    "backend", "pool", "jwt_issuer", "access_token_ttl", "refresh_token_ttl", "refresh_reuse_grace",
+    "login_max_failures", "login_window_seconds",
+}
+_JOBS_SAFE_KEYS = {"enabled", "pool", "run_log_max_lines", "files_dir", "max_upload_mb"}
+_CHANGESETS_SAFE_KEYS = {"enabled", "pool", "retention_days"}
 _APP_TOML_SENSITIVE_FIELDS: set[tuple[str, str]] = {
     ("ai", "api_key"),
     ("license", "key"),
     ("oidc", "client_secret"),
+    ("oidc", "session_secret"),
     ("notify", "smtp_password"),
 }
 
@@ -1787,6 +1797,9 @@ async def get_app_parsed(request: Request, _: Superuser) -> dict[str, Any]:
         license_model = LicenseSettings.model_validate(raw.get("license") or {})
         oidc_model = OIDCSettings.model_validate(raw.get("oidc") or {})
         notify_model = NotifySettings.model_validate(raw.get("notify") or {})
+        auth_model = AuthSettings.model_validate(raw.get("auth") or {})
+        jobs_model = JobsSettings.model_validate(raw.get("jobs") or {})
+        changesets_model = ChangeSetsSettings.model_validate(raw.get("changesets") or {})
     except ValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"existing app.toml is invalid: {exc}") from exc
 
@@ -1798,13 +1811,33 @@ async def get_app_parsed(request: Request, _: Superuser) -> dict[str, Any]:
         "license": _pick(license_model.model_dump(), _LICENSE_SAFE_KEYS),
         "oidc": _pick(oidc_model.model_dump(), _OIDC_SAFE_KEYS),
         "notify": _pick(notify_model.model_dump(), _NOTIFY_SAFE_KEYS),
+        "auth": _pick(auth_model.model_dump(mode="json"), _AUTH_SAFE_KEYS),
+        "jobs": _pick(jobs_model.model_dump(mode="json"), _JOBS_SAFE_KEYS),
+        "changesets": _pick(changesets_model.model_dump(mode="json"), _CHANGESETS_SAFE_KEYS),
+        # What stays in the file (paths, the signing algorithm, the env-only secrets): shown, not
+        # edited — the value in force and why (liberty.devref.FILE_ONLY).
+        "readonly": _readonly_settings(request),
         "choices": {
             "log_levels": ["debug", "info", "warning", "error", "critical"],
             "effort_levels": ["", "low", "medium", "high", "xhigh", "max"],
             "connectors": connectors,
             "models": _AI_MODELS,
+            "pools": sorted(request.app.state.connectors.pools.names()) if hasattr(request.app.state, "connectors") else [],
         },
     }
+
+
+def _readonly_settings(request: Request) -> list[dict[str, Any]]:
+    from liberty.devref import FILE_ONLY
+    live = request.app.state.settings
+    out = []
+    for key, reason in FILE_ONLY.items():
+        section, _, name = key.partition(".")
+        value = getattr(getattr(live, section, None), name, None)
+        if key in ("crypto.master_key", "auth.jwt_secret"):
+            value = "set" if value else "not set"   # a secret: whether it is there, never the value
+        out.append({"key": key, "value": "" if value is None else str(value), "reason": reason})
+    return out
 
 
 class AppConfigBody(BaseModel):
@@ -1813,6 +1846,9 @@ class AppConfigBody(BaseModel):
     license: dict[str, Any] = {}
     oidc: dict[str, Any] = {}
     notify: dict[str, Any] | None = None   # None: the section is left as it is on disk
+    auth: dict[str, Any] | None = None
+    jobs: dict[str, Any] | None = None
+    changesets: dict[str, Any] | None = None
 
 
 def _encrypt_sensitives(section: str, fields: dict[str, Any], master_key: str) -> dict[str, Any]:
@@ -1861,7 +1897,18 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
     license_in = _pick(body.license or {}, _LICENSE_SAFE_KEYS)
     oidc_in = _pick(body.oidc or {}, _OIDC_SAFE_KEYS)
     notify_in = _pick(body.notify, _NOTIFY_SAFE_KEYS) if body.notify is not None else None
+    extra_in: dict[str, tuple[dict[str, Any], Any]] = {}
+    for section, given, keys, model in (("auth", body.auth, _AUTH_SAFE_KEYS, AuthSettings),
+                                        ("jobs", body.jobs, _JOBS_SAFE_KEYS, JobsSettings),
+                                        ("changesets", body.changesets, _CHANGESETS_SAFE_KEYS, ChangeSetsSettings)):
+        if given is not None:
+            picked = _pick(given, keys)
+            if section == "jobs" and not picked.get("files_dir"):
+                picked.pop("files_dir", None)   # blank = the default work area (next to the config)
+            extra_in[section] = (picked, model)
     try:
+        for _sec, (picked, model) in extra_in.items():
+            model.model_validate(picked)
         AppSettings.model_validate(app_in)
         AISettings.model_validate(ai_in)
         LicenseSettings.model_validate(license_in)
@@ -1889,7 +1936,11 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
         if section not in doc:
             doc[section] = tomlkit.table()
         for k, v in values.items():
-            doc[section][k] = v
+            if v is None:   # no value (app.log_file left blank…): TOML has no null — drop the key
+                if k in doc[section]:
+                    del doc[section][k]
+            else:
+                doc[section][k] = v
 
     _upsert("app", app_in)
     _upsert("ai", ai_in)
@@ -1897,6 +1948,10 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
     _upsert("oidc", oidc_in)
     if notify_in is not None:
         _upsert("notify", notify_in)
+    for sec, (picked, _model) in extra_in.items():
+        _upsert(sec, picked)
+        if sec == "jobs" and "files_dir" not in picked and "jobs" in doc and "files_dir" in doc["jobs"]:
+            del doc["jobs"]["files_dir"]
 
     new_text = tomlkit.dumps(doc)
     try:
@@ -1906,6 +1961,9 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
         LicenseSettings.model_validate(reparsed.get("license") or {})
         OIDCSettings.model_validate(reparsed.get("oidc") or {})
         NotifySettings.model_validate(reparsed.get("notify") or {})
+        AuthSettings.model_validate(reparsed.get("auth") or {})
+        JobsSettings.model_validate(reparsed.get("jobs") or {})
+        ChangeSetsSettings.model_validate(reparsed.get("changesets") or {})
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting app.toml is invalid: {exc}") from exc
 
@@ -1930,6 +1988,12 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
         or new_settings.app.log_level != old_settings.app.log_level
         # thick mode is process-global, set once at the first Oracle connection
         or getattr(new_settings.app, "oracle_thick", None) != getattr(old_settings.app, "oracle_thick", None)
+        # read once at startup: the log file, the sub-path, sign-in, nomaflow, change packages
+        or any(getattr(new_settings.app, k) != getattr(old_settings.app, k)
+               for k in ("log_format", "log_file", "log_file_max_mb", "log_file_backups", "base_path"))
+        or new_settings.auth != old_settings.auth or new_settings.jobs != old_settings.jobs
+        or new_settings.changesets.model_dump(exclude={"post_apply"}) != old_settings.changesets.model_dump(exclude={"post_apply"})
+        or new_settings.oidc.session_secret != old_settings.oidc.session_secret
     )
     license_changed = new_settings.license.key != old_settings.license.key
     request.app.state.settings = new_settings

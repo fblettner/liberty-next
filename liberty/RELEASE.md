@@ -7,6 +7,16 @@
   the UI yet, the grid on the right (type, the screen that edits it or why it stays in the file /
   the environment, the modules that read it, default; filters, export), and a row opens the detail
   with each line of code that reads it (`/admin/dev/config`).
+- Settings → App: every setting of app.toml is now set from the screen — new sections Server log
+  (console format, the file on disk or off, its size and rotation), Sign-in (accounts store and
+  pool, token issuer and lifetimes, sign-in throttle), nomaflow (on / off, pool, run log lines,
+  work area, largest upload) and Change packages (on / off, pool, retention); the sub-path
+  (`base_path`), the OIDC attributes read from claims and the session secret (stored encrypted), the
+  Explorer tools of the assistant, the inbox pool. What stays in the file — the paths of the
+  configuration files, the signing algorithm, the master key and the JWT secret — is listed
+  read-only with the reason. A test now fails when a new setting is neither editable nor explained.
+- Settings → App: editing only the notification settings now enables Save (they were left out of
+  the unsaved-changes check).
 
 ## 7.0.64 — unreleased
 
