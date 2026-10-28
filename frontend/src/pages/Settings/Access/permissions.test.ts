@@ -89,6 +89,16 @@ describe('parsePermissions / buildPermissions', () => {
     expect(eff['menu:nomasx1:users'].visible).toBe(true)     // runnable → the sidebar shows it
     expect(eff['menu:nomajde:ais'].visible).toBe(false)
     expect(leafVisible(['!dashboard:nomasx1.employees'], forest.nomasx1[1])).toBe(false)
-    expect(leafVisible([], forest.nomasx1[2])).toBe(true)     // a page is always shown
+    expect(leafVisible([], forest.nomasx1[2])).toBe(true)     // an open page is always shown
+  })
+  it('a nomaflow page needs nomaflow:view (edit includes it), like the backend', () => {
+    const f = buildMenuForest({ nomaflow: { items: [{ id: 'jobs', label: 'Jobs', type: 'page', target: '/nomaflow/schedule' }] } }, {})
+    const jobs = f.nomaflow[0]
+    expect(jobs.targetPerm).toBe('nomaflow:view')
+    expect(leafVisible([], jobs)).toBe(false)
+    expect(leafVisible(['nomaflow:view'], jobs)).toBe(true)
+    expect(leafVisible(['nomaflow:edit'], jobs)).toBe(true)
+    expect(leafVisible(['menu:nomaflow:jobs'], jobs)).toBe(true)
+    expect(leafVisible(['*', '!menu:nomaflow:jobs'], jobs)).toBe(false)
   })
 })

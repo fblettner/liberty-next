@@ -65,6 +65,16 @@
   worker ne met rien en cache : chaque requête part au serveur comme dans le navigateur, une nouvelle version est donc
   prise au chargement suivant et aucune donnée ne reste sur le poste. Nécessite HTTPS (ou localhost) ; fonctionne
   sous `[app] base_path`. Icônes 192 / 512 px, maskable et Apple.
+- nomaflow sans superutilisateur : `nomaflow:view` suit les tâches (liste, planning, exécutions avec leur journal et
+  leurs fichiers), `job:<id>` (`job:*` pour toutes) lance une tâche, dépose son fichier et annule ses exécutions — la
+  permission qu'une entrée de menu de tâche demande déjà — et `nomaflow:edit` crée, modifie, supprime, suspend et
+  reprend les tâches et applique le changement (`POST /admin/jobs/reload`, la partie tâches du rechargement) ; edit
+  inclut view. Les politiques de rétention / d'exécutions manquées, leurs lancements manuels et l'export d'une tâche
+  restent au superutilisateur. Accordé dans Accès → Autres accès → nomaflow ; les pages nomaflow du menu n'apparaissent
+  qu'à qui détient view (ou une autorisation de menu), et l'application nomaflow apparaît dans le sélecteur avec son
+  connecteur (`sql:nomaflow:*`). Modifier les tâches est un droit fort : leurs étapes exécutent du SQL et du Python
+  autorisé sans restriction de lignes. La fenêtre « Lancer avec paramètres » ne lit que la tâche lancée
+  (`GET /admin/jobs/{id}/definition`).
 
 ## 7.0.64 — non publiée
 

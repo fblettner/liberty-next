@@ -13,6 +13,8 @@ import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock, Che
 import { api, apiDownload, ApiError } from '../../api/client'
 import { PageLayout, Button, Banner, Centered, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, FileInput, Input, Select, SearchSelect, type SearchSelectOption, useModals } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
+import { useAuth } from '../../auth/AuthContext'
+import { nomaflowAccess } from '../../services/permissions'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { JobSummary, JobsListResponse, JobsParsedResponse, StepConfig } from './types'
 import { STATE_TONE, relative, uploadJobFile } from './util'
@@ -153,6 +155,9 @@ const LinkLikeButton = styled.button`
 export default function JobsList() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  // what this user may do here (the server checks again): follow, edit, run a job, the policies
+  const { user } = useAuth()
+  const access = useMemo(() => nomaflowAccess(user), [user])
   const [jobs, setJobs] = useState<JobSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)   // job id with an action in flight
@@ -232,8 +237,8 @@ export default function JobsList() {
     // still fire immediately — the modal would offer nothing actionable.
     setError(null); setBusyId(job.id)
     try {
-      const parsed = await api.get<JobsParsedResponse>('/admin/config/jobs/parsed')
-      const def = parsed.jobs.find((j) => j.id === job.id)
+      // the job alone (``job:<id>``) — reading the whole jobs file is for its editors
+      const def = await api.get<JobsParsedResponse['jobs'][number]>(`/admin/jobs/${encodeURIComponent(job.id)}/definition`)
       const jobParams = (def?.params ?? {}) as Record<string, unknown>
       const allSteps = (def?.steps ?? [])
       const hasParams = Object.keys(jobParams).length > 0
@@ -332,7 +337,7 @@ export default function JobsList() {
       // a preset's own cron fires even on a disabled job: the clone's presets must not run twice
       if (Array.isArray(cloned.presets)) cloned.presets = cloned.presets.map((p: { schedule?: string | null; enabled?: boolean }) => ({ ...p, schedule: undefined, enabled: false }))
       await api.put('/admin/config/jobs/parsed', { jobs: [...parsed.jobs, cloned] })
-      await api.post('/admin/reload')
+      await api.post('/admin/jobs/reload')
       navigate(`/nomaflow/jobs/${encodeURIComponent(newId)}`)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
@@ -356,7 +361,7 @@ export default function JobsList() {
       const parsed = await api.get<JobsParsedResponse>('/admin/config/jobs/parsed')
       const next = parsed.jobs.filter((j) => j.id !== job.id)
       await api.put('/admin/config/jobs/parsed', { jobs: next })
-      await api.post('/admin/reload')
+      await api.post('/admin/jobs/reload')
       load()
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
@@ -433,9 +438,11 @@ export default function JobsList() {
       description={t('nomaflow.jobs.subtitle')}
     >
       <Toolbar>
-        <Button $variant="primary" $size="sm" onClick={newJob}>
-          <Plus size={14} /> {t('nomaflow.jobs.new')}
-        </Button>
+        {access.edit && (
+          <Button $variant="primary" $size="sm" onClick={newJob}>
+            <Plus size={14} /> {t('nomaflow.jobs.new')}
+          </Button>
+        )}
         <Button $variant="ghost" $size="sm" onClick={() => navigate('/nomaflow/schedule')}>
           <CalendarClock size={14} /> {t('nomaflow.jobs.scheduleView')}
         </Button>
@@ -471,8 +478,8 @@ export default function JobsList() {
           the last sweep's result + a Clean-now button. `onChanged` re-fetches
           the job list because a sweep may have deleted the latest run row that
           a card was displaying as last_run. */}
-      <RetentionPanel onChanged={load} />
-      <MissedPanel onChanged={load} />
+      {access.policies && <RetentionPanel onChanged={load} />}
+      {access.policies && <MissedPanel onChanged={load} />}
       {error && <Banner $tone="error" style={{ marginBottom: 12 }}>{error}</Banner>}
       {sorted == null && !error ? <Centered /> : null}
       {sorted && sorted.length === 0 && (
@@ -493,7 +500,7 @@ export default function JobsList() {
                   const busy = busyId === job.id
                   return (
                     <JobRow key={job.id}>
-                      <span className="id" title={job.id} onClick={() => navigate(`/nomaflow/jobs/${encodeURIComponent(job.id)}`)}>{job.id}</span>
+                      <span className="id" title={job.id} onClick={access.edit ? () => navigate(`/nomaflow/jobs/${encodeURIComponent(job.id)}`) : undefined}>{job.id}</span>
                       <span className="desc" title={job.description ?? ''}>{job.description}</span>
                       <span>
                         {job.last_run ? (
@@ -506,18 +513,21 @@ export default function JobsList() {
                         <span><Clock size={11} style={{ verticalAlign: '-1px' }} /> {job.schedule ? <Mono>{job.schedule}</Mono> : t('nomaflow.jobs.manualOnly')}</span>
                         {job.enabled && job.next_run && <span>{t('nomaflow.jobs.nextRun')} {relative(job.next_run)}</span>}
                       </span>
-                      <Toggle $on={job.enabled} disabled={busy} onClick={() => toggleEnabled(job)} title={t(job.enabled ? 'nomaflow.jobs.disable' : 'nomaflow.jobs.enable')}>
+                      <Toggle $on={job.enabled} disabled={busy || !access.edit} onClick={() => toggleEnabled(job)} title={t(job.enabled ? 'nomaflow.jobs.disable' : 'nomaflow.jobs.enable')}>
                         {busy ? <SpinnerRing size={12} thickness={2} /> : null}
                         {job.enabled ? t('nomaflow.jobs.enabled') : t('nomaflow.jobs.disabled')}
                       </Toggle>
                       <span className="acts">
-                        {job.in_flight
+                        {!access.run(job.id) ? null : job.in_flight
                           ? <IconBtn className="danger" type="button" disabled={busy} onClick={() => cancelRun(job)} title={t('nomaflow.jobs.cancel')}><Ban size={14} /></IconBtn>
                           : <IconBtn type="button" disabled={busy} onClick={() => runNow(job)} title={t('nomaflow.jobs.runNow')}>{busy ? <SpinnerRing size={12} thickness={2} /> : <Play size={14} />}</IconBtn>}
-                        <IconBtn type="button" disabled={busy} onClick={() => navigate(`/nomaflow/jobs/${encodeURIComponent(job.id)}`)} title={t('common.edit')}><Pencil size={14} /></IconBtn>
-                        <IconBtn type="button" disabled={busy} onClick={() => duplicateJob(job)} title={t('nomaflow.jobs.duplicate')}><Copy size={14} /></IconBtn>
-                        <IconBtn type="button" disabled={busy} onClick={() => void exportJob(job)} title={t('nomaflow.jobs.export')}><Download size={14} /></IconBtn>
-                        <IconBtn className="danger" type="button" disabled={busy} onClick={() => deleteJob(job)} title={t('nomaflow.jobs.delete')}><Trash2 size={14} /></IconBtn>
+                        {access.edit && <>
+                          <IconBtn type="button" disabled={busy} onClick={() => navigate(`/nomaflow/jobs/${encodeURIComponent(job.id)}`)} title={t('common.edit')}><Pencil size={14} /></IconBtn>
+                          <IconBtn type="button" disabled={busy} onClick={() => duplicateJob(job)} title={t('nomaflow.jobs.duplicate')}><Copy size={14} /></IconBtn>
+                        </>}
+                        {/* the export is a deployment package — Liberty Next → Deploy, superuser */}
+                        {access.policies && <IconBtn type="button" disabled={busy} onClick={() => void exportJob(job)} title={t('nomaflow.jobs.export')}><Download size={14} /></IconBtn>}
+                        {access.edit && <IconBtn className="danger" type="button" disabled={busy} onClick={() => deleteJob(job)} title={t('nomaflow.jobs.delete')}><Trash2 size={14} /></IconBtn>}
                       </span>
                     </JobRow>
                   )
@@ -544,7 +554,7 @@ export default function JobsList() {
             setParamModalJob(null)
             await _postRun(paramModalJob.job.id, body)
           }}
-          onSavePreset={async (preset) => {
+          onSavePreset={!access.edit ? undefined : async (preset) => {
             // Read jobs.toml fresh, splice the new preset into THIS job's
             // ``presets`` array (replacing any same-name entry — operators
             // typing the same name expect to update, not duplicate), write
@@ -563,7 +573,7 @@ export default function JobsList() {
               return { ...j, presets: [...presets, kept] }
             })
             await api.put('/admin/config/jobs/parsed', { jobs: updated })
-            await api.post('/admin/reload')
+            await api.post('/admin/jobs/reload')
             // Refresh the modal's preset list so the new entry appears in
             // the dropdown without re-opening the modal.
             const refreshed = updated.find((j) => j.id === paramModalJob.job.id)
@@ -619,7 +629,8 @@ function RunWithParamsModal({
    *  The current modal state is captured as a JobPreset (log_level + params +
    *  op_kwargs + step_enabled diff-vs-defaults). Promise resolves when the save
    *  + reload land; rejects with a string the modal renders as an error. */
-  onSavePreset: (preset: import('./types').JobPreset) => Promise<void>
+  /** Absent for who may run the job but not edit it — no "save as preset" then. */
+  onSavePreset?: (preset: import('./types').JobPreset) => Promise<void>
 }) {
   const { t } = useTranslation()
   const modals = useModals()
@@ -729,7 +740,7 @@ function RunWithParamsModal({
         ),
         step_enabled: { ...stepEnabled },
       }
-      await onSavePreset(preset)
+      await onSavePreset?.(preset)
       setSelectedPreset(name)
     } catch (e) {
       setSavePresetError(e instanceof Error ? e.message : String(e))
@@ -877,7 +888,7 @@ function RunWithParamsModal({
                       <option key={p.name} value={p.name}>{p.name}</option>
                     ))}
                   </Select>
-                  <Button
+                  {onSavePreset && <Button
                     $variant="ghost" $size="sm"
                     onClick={handleSavePreset}
                     disabled={savePresetBusy}
@@ -886,7 +897,7 @@ function RunWithParamsModal({
                   >
                     {savePresetBusy ? <SpinnerRing size={12} thickness={2} /> : null}
                     {t('nomaflow.runParams.savePresetBtn')}
-                  </Button>
+                  </Button>}
                 </div>
               </ParamRow>
               {savePresetError && (

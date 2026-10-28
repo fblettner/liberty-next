@@ -396,3 +396,26 @@ def test_home_by_role_picks_the_users_first_listed_role(tmp_path) -> None:
         r = client.post("/auth/login", json={"username": "aud", "password": "audpw"})
         h = {"Authorization": f"Bearer {r.json()['access_token']}"}
         assert client.get("/api/menus/app1", headers=h).json()["home_path"] == "/sql/app1/users_get"
+
+
+def test_nomaflow_page_items_need_nomaflow_view() -> None:
+    """A ``page`` leaf is shown to everyone, except a feature area with its own permission: the
+    nomaflow pages need ``nomaflow:view`` (``nomaflow:edit`` includes it)."""
+    from liberty.auth.principal import Principal
+    from liberty.dashboards import DashboardsFile
+    from liberty.menus import MenuItem
+    from liberty.web.menus import _keeper, page_permission
+
+    assert page_permission("/nomaflow") == "nomaflow:view"
+    assert page_permission("/nomaflow/runs") == "nomaflow:view"
+    assert page_permission("/nomaflowx") is None and page_permission("/explorer") is None
+    jobs = MenuItem(id="jobs", label="Jobs", type="page", target="/nomaflow/schedule")
+    explorer = MenuItem(id="explorer", label="Explorer", type="page", target="/explorer")
+    dash = DashboardsFile()
+    keep = lambda perms: _keeper(Principal(id="1", username="u", permissions=perms), dash, "nomaflow")  # noqa: E731
+    assert keep(())(explorer, "nomaflow") is True
+    assert keep(())(jobs, "nomaflow") is False
+    assert keep(("nomaflow:view",))(jobs, "nomaflow") is True
+    assert keep(("nomaflow:edit",))(jobs, "nomaflow") is True
+    assert keep(("menu:nomaflow:jobs",))(jobs, "nomaflow") is True
+    assert keep(("*", "!menu:nomaflow:jobs"))(jobs, "nomaflow") is False

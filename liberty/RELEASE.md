@@ -56,6 +56,14 @@
   own window, named after the instance (the theme's app name). The service worker caches nothing: every request goes
   to the server as in the browser, so a release is used on the next load and no data stays on the device. Needs
   HTTPS (or localhost); works under `[app] base_path`. Icons 192 / 512 px, maskable and Apple touch.
+- nomaflow without superuser: `nomaflow:view` follows the jobs (list, schedule, runs with their log and files),
+  `job:<id>` (`job:*` for all) runs a job, uploads its file and cancels its runs — the permission a job menu item already
+  asks — and `nomaflow:edit` creates, edits, deletes, pauses and resumes jobs and applies the change
+  (`POST /admin/jobs/reload`, the jobs part of the reload); edit includes view. The retention / missed-schedule
+  policies, their manual runs and the job export stay with a superuser. Granted in Access → Other access → nomaflow; the
+  nomaflow menu pages show only to who holds view (or a menu allow), and the nomaflow application appears in the picker
+  with its connector (`sql:nomaflow:*`). Editing jobs is a strong grant: their steps run SQL and allow-listed Python
+  without row scope. The Run-with-parameters dialog reads only the job run (`GET /admin/jobs/{id}/definition`).
 
 ## 7.0.64 — unreleased
 

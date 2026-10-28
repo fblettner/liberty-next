@@ -5,6 +5,10 @@
 // `menu:<app>:<id>` for the node, `menu:` + the target permission for every leaf under an
 // allowed / denied node — so existing roles and the backend's `_keeper` are untouched.
 
+import { hasPermission, isDenied } from '../../../services/permissions'
+// the backend's matcher lives in services/ (shared with the screens that gate an action)
+export { hasPermission, isDenied, segmentMatch } from '../../../services/permissions'
+
 export interface MenuItemRaw { id: string; parent?: string | null; label?: string; type?: string | null; connector?: string | null; target?: string | null }
 export type MenusCatalog = Record<string, { items: MenuItemRaw[] }>
 export interface ScreenRef { id: string; connector: string; read_query: string }
@@ -18,7 +22,7 @@ export interface MenuNode {
   label: string
   type: string | null
   target: string | null
-  /** What the leaf runs: `sql:<c>:<q>` / `api:<c>:<e>` / `dashboard:<id>`; null for folders and pages. */
+  /** What the leaf runs: `sql:<c>:<q>` / `api:<c>:<e>` / `dashboard:<id>`; `nomaflow:view` for a nomaflow page; null for folders and the other pages. */
   targetPerm: string | null
   children: MenuNode[]
 }
@@ -27,13 +31,19 @@ export type MenuForest = Record<string, MenuNode[]>
 export const nodeKey = (app: string, id: string): string => `menu:${app}:${id}`
 export const isLeaf = (n: MenuNode): boolean => !!n.type && !!n.target
 
+/** The permission a `page` leaf's route needs — the nomaflow pages ask `nomaflow:view` (which
+ *  `nomaflow:edit` includes); other pages are open (liberty/web/menus.py `page_permission`). */
+export const pagePermission = (target: string): string | null =>
+  target === '/nomaflow' || target.startsWith('/nomaflow/') ? 'nomaflow:view' : null
+const INCLUDED_IN: Record<string, string[]> = { 'nomaflow:view': ['nomaflow:edit'] }
+
 /** The permission a menu leaf's target needs — the same resolution as the backend's `_keeper`:
  *  a `screen` leaf runs its screen's read query on the screen's connector. */
 export function targetPermission(app: string, item: MenuItemRaw, screens: Record<string, ScreenRef[]>): string | null {
   if (!item.type || !item.target) return null
   if (item.type === 'dashboard') return `dashboard:${item.target}`
   if (item.type === 'job') return `job:${item.target}`
-  if (item.type === 'page') return null
+  if (item.type === 'page') return pagePermission(item.target)
   if (item.type === 'screen') {
     const scr = (screens[app] ?? []).find((s) => s.id === item.target)
     return scr ? `sql:${scr.connector}:${scr.read_query}` : null
@@ -72,32 +82,15 @@ export function flattenForest(forest: MenuForest): MenuNode[] {
   return out
 }
 
-// ── the backend's matcher (Principal.has_permission / is_denied) ───────────────────────────
-/** Colon-segment glob: `*` matches one segment; a trailing `*` matches the rest. */
-export function segmentMatch(pattern: string, value: string): boolean {
-  const ps = pattern.split(':')
-  const vs = value.split(':')
-  for (let i = 0; i < ps.length; i++) {
-    if (i >= vs.length) return false
-    if (ps[i] === '*') {
-      if (i === ps.length - 1) return true
-      continue
-    }
-    if (ps[i] !== vs[i]) return false
-  }
-  return ps.length === vs.length
-}
-export const isDenied = (perms: string[], perm: string): boolean => perms.some((p) => p.startsWith('!') && segmentMatch(p.slice(1), perm))
-export const hasPermission = (perms: string[], perm: string): boolean =>
-  !isDenied(perms, perm) && perms.some((p) => !p.startsWith('!') && segmentMatch(p, perm))
 
 /** Whether the sidebar shows a leaf for a user holding *perms* — the `_keeper` rule: an explicit
  *  menu deny hides it; a dashboard needs no grant (existence is the gate) unless denied; a page
- *  is always shown; otherwise the target must be runnable or the menu explicitly allowed. */
+ *  is shown unless its feature area has a permission (the nomaflow pages); otherwise the target must be runnable or the menu explicitly allowed. */
 export function leafVisible(perms: string[], node: MenuNode): boolean {
   if (isDenied(perms, node.key)) return false
   if (node.type === 'dashboard') return !isDenied(perms, node.targetPerm ?? '')
-  if (node.type === 'page') return true
+  if (node.type === 'page') return node.targetPerm == null || hasPermission(perms, node.key)
+    || [node.targetPerm, ...(INCLUDED_IN[node.targetPerm] ?? [])].some((p) => hasPermission(perms, p))
   if (node.targetPerm == null) return hasPermission(perms, node.key)
   return hasPermission(perms, node.targetPerm) || hasPermission(perms, node.key)
 }

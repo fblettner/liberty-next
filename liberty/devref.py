@@ -212,6 +212,8 @@ def config_gaps() -> list[str]:
 # ── API: every route of the running app ─────────────────────────────────────────────────────────
 
 _IMPERATIVE = re.compile(r"""(?:require_permission\(\s*\w+\s*,\s*|has_permission\(\s*)f?["']([^"']+)["']""")
+# nomaflow's run check (liberty/web/jobs.py ``_require_run``): ``job:<id>``
+_RUN_CHECK = re.compile(r"\b_require_run\(")
 
 
 def _access(route: Any) -> tuple[str, list[str]]:
@@ -228,6 +230,11 @@ def _access(route: Any) -> tuple[str, list[str]]:
             level = "superuser"
         elif call is deps.get_current_principal and level == "public":
             level = "signed-in"
+        elif isinstance(getattr(call, "permission", None), str):
+            # a feature's own guard carrying its permission (nomaflow:view / nomaflow:edit)
+            perms.append(call.permission)
+            if level in ("public", "signed-in"):
+                level = "permission"
         elif getattr(call, "__qualname__", "").startswith(("require_permission.", "require_role.")):
             cells = {c.cell_contents for c in (call.__closure__ or ()) if isinstance(c.cell_contents, str)}
             kind = "permission" if call.__qualname__.startswith("require_permission.") else "role"
@@ -241,6 +248,8 @@ def _access(route: Any) -> tuple[str, list[str]]:
         for m in _IMPERATIVE.finditer(src):
             if m.group(1) not in perms:
                 perms.append(m.group(1))
+        if _RUN_CHECK.search(src) and "job:{job_id}" not in perms:
+            perms.append("job:{job_id}")
     except (OSError, TypeError):
         pass
     if perms and level == "signed-in":

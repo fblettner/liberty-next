@@ -10,8 +10,9 @@ A leaf is kept iff:
 * ``endpoint`` — the caller holds ``api:{connector}:{target}``
 * ``dashboard`` — the dashboard with id ``target`` exists in the catalog (per-widget
   permission gating happens at render time; an "empty" dashboard still surfaces)
-* ``page`` — always kept (the target frontend route enforces its own auth); only the
-  item's ``roles`` filter applies
+* ``page`` — kept (the target frontend route enforces its own auth), except a page of a
+  feature area with its own permission: the nomaflow pages (``/nomaflow``…) need ``nomaflow:view``
+  (or a menu allow); the item's ``roles`` filter applies to all
 
 …plus any ``roles`` filter on the item. The frontend uses these to render the sidebar;
 with no ``menus.toml`` (or nothing accessible) it falls back to the flat connector list.
@@ -37,6 +38,18 @@ from liberty.web.deps import get_connectors, get_menus, get_screens, request_lan
 router = APIRouter(prefix="/api", tags=["menus"])
 
 Menus = Annotated[MenusFile, Depends(get_menus)]
+
+# Page routes whose feature area has its own permission: a menu leaf to them is shown only to who
+# may open them (the frontend's Access editor mirrors this — pages/Settings/Access/permissions.ts).
+_PAGE_PERMISSIONS: tuple[tuple[str, str], ...] = (("/nomaflow", "nomaflow:view"),)
+# A permission that includes another (an editor of jobs also sees them — liberty/web/jobs.py).
+_INCLUDED_IN: dict[str, tuple[str, ...]] = {"nomaflow:view": ("nomaflow:edit",)}
+
+
+def page_permission(target: str | None) -> str | None:
+    """The permission a ``page`` leaf's route needs, or None when the route is open."""
+    t = target or ""
+    return next((perm for prefix, perm in _PAGE_PERMISSIONS if t == prefix or t.startswith(prefix + "/")), None)
 
 
 def _get_dashboards(request: Request) -> DashboardsFile:
@@ -101,9 +114,11 @@ def _keeper(principal: Principal, dashboards: DashboardsFile, app: str, screens:
             # ``target`` is the qualified ``<scope>.<id>`` id.
             return dashboards.find(did) is not None
         if item.type == "page":
-            # A page leaf points at a frontend route; the route enforces its own auth. Only the
-            # roles filter + the menu deny (both above) gate it here.
-            return True
+            # A page leaf points at a frontend route; the route enforces its own auth. The roles
+            # filter + the menu deny (both above) gate it, and a feature area's own permission.
+            perm = page_permission(item.target)
+            return (perm is None or principal.has_permission(menu_perm)
+                    or any(principal.has_permission(p) for p in (perm, *_INCLUDED_IN.get(perm, ()))))
         if item.type == "job":
             # A job leaf opens the job for the user to run: ``job:<id>`` (or a menu allow) shows
             # it, ``!job:<id>`` hides it. The user routes check the same permission.

@@ -1600,8 +1600,12 @@ async def put_theme_parsed(body: ThemeBody, request: Request, _: Superuser) -> d
 # see NOMAFLOW-UI.md §4.
 
 
+# The jobs editor is open to ``nomaflow:edit`` (see liberty/web/jobs.py), not only a superuser.
+from liberty.web.jobs import Editor as JobsEditor
+
+
 @router.get("/config/jobs/parsed", summary="Get jobs config")
-async def get_jobs_parsed(request: Request, _: Superuser) -> dict[str, Any]:
+async def get_jobs_parsed(request: Request, _: JobsEditor) -> dict[str, Any]:
     """The current ``jobs.toml`` parsed and normalised — ``{path, meta, jobs: [<Job dict>...]}``.
 
     A missing file → an empty job list (+ default meta). ``step_defaults`` is merged into
@@ -1650,7 +1654,7 @@ def _drop_none(value: Any) -> Any:
     return value
 
 @router.put("/config/jobs/parsed", summary="Update jobs config")
-async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dict[str, object]:
+async def put_jobs_parsed(body: JobsBody, request: Request, principal: JobsEditor) -> dict[str, object]:
     """Validate the submitted jobs (+ optional meta) against :class:`liberty.jobs.JobsFile`,
     then rewrite ``jobs.toml`` via ``tomlkit`` — preserving comments + formatting on
     untouched sections. Re-parses the result before writing. Does not reload — call
@@ -1662,8 +1666,14 @@ async def put_jobs_parsed(body: JobsBody, request: Request, _: Superuser) -> dic
 
     ``meta`` is optional: when present it REPLACES the file's existing ``[meta]`` block
     (so retention edits land); when absent the existing block is preserved. The JobEditor
-    flow omits meta + the RetentionPanel sends it — neither steps on the other."""
+    flow omits meta + the RetentionPanel sends it — neither steps on the other.
+
+    ``nomaflow:edit`` saves the jobs; the ``[meta]`` policies (retention, missed schedule) stay
+    with a superuser."""
     from liberty.jobs import JobsFile
+
+    if body.meta is not None and not principal.is_superuser:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Superuser required for the jobs policies ([meta])")
 
     try:
         validate_payload: dict[str, Any] = {"jobs": body.jobs}

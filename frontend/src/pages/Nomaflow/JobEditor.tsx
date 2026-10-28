@@ -4,7 +4,7 @@
 //
 // The whole jobs.toml is rewritten on save (PUT /admin/config/jobs/parsed replaces the
 // [[jobs]] array), so the editor loads the full job list, edits one entry, and writes
-// the merged list back — then POST /admin/reload to apply.
+// the merged list back — then POST /admin/jobs/reload to apply.
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -376,7 +376,7 @@ export default function JobEditor() {
         ? [...allJobs, cleanedJob]
         : allJobs.map((j) => (j.id === id ? cleanedJob : j))
       await api.put('/admin/config/jobs/parsed', { jobs: merged })
-      await api.post('/admin/reload')
+      await api.post('/admin/jobs/reload')   // the jobs part of the reload — open to nomaflow:edit
       navigate('/nomaflow')
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))

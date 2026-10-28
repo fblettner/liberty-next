@@ -1,9 +1,21 @@
-"""``/admin/jobs`` routes — nomaflow control plane (superuser only).
+"""``/admin/jobs`` routes — nomaflow control plane.
 
-Three endpoints (spec §6 + §4):
+Access (a superuser holds them all):
+
+* ``nomaflow:view`` — the job list, the schedule, the runs with their log and files, the cron
+  preview, the retention / missed-schedule status;
+* ``job:<id>`` (``job:*`` for every job) — run the job (and upload its file), cancel its runs —
+  the same permission a ``job`` menu item asks;
+* ``nomaflow:edit`` — create / edit / delete jobs (``/admin/config/jobs/parsed``), pause or
+  resume them, apply the change (``POST /admin/jobs/reload``); it includes ``nomaflow:view``. A job
+  runs SQL and the allow-listed Python of its steps without row scope, so editing jobs is a
+  powerful grant;
+* superuser — the retention and missed-schedule policies and their manual runs.
+
+Endpoints (spec §6 + §4):
 
 * ``GET  /admin/jobs`` — list the loaded job catalogue + their schedule status.
-  Powers the Settings → Jobs UI's job picker.
+  Powers the nomaflow Jobs page.
 * ``POST /admin/jobs/<id>/run`` — fire a manual trigger. Returns when the run
   reaches a terminal state (caller blocks; long-running jobs should be invoked
   through the scheduler, not this endpoint).
@@ -51,6 +63,28 @@ router = APIRouter(prefix="/admin/jobs", tags=["admin", "jobs"])
 user_router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
 Superuser = Annotated[Principal, Depends(require_superuser)]
+
+VIEW, EDIT = "nomaflow:view", "nomaflow:edit"
+
+
+def _nomaflow_guard(permission: str):
+    """Dependency: 403 unless the caller holds *permission* (``nomaflow:edit`` includes view)."""
+    def _guard(principal: CurrentPrincipal) -> Principal:
+        if not (principal.has_permission(permission) or (permission == VIEW and principal.has_permission(EDIT))):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail=f"Missing permission: {permission}")
+        return principal
+    _guard.permission = permission  # type: ignore[attr-defined]  — read by the developer reference (devref)
+    return _guard
+
+
+Viewer = Annotated[Principal, Depends(_nomaflow_guard(VIEW))]
+Editor = Annotated[Principal, Depends(_nomaflow_guard(EDIT))]
+
+
+def _require_run(principal: Principal, job_id: str) -> None:
+    """Running a job (or cancelling its run) needs ``job:<id>`` — the menu item's permission."""
+    if not principal.has_permission(f"job:{job_id}"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=f"Missing permission: job:{job_id}")
 
 
 # --------------------------------------------------------------------------- #
@@ -176,7 +210,7 @@ async def _latest_runs_by_job(db) -> dict[str, dict[str, Any]]:
 
 
 @router.get("", summary="List jobs")
-async def list_jobs(request: Request, _: Superuser) -> dict[str, Any]:
+async def list_jobs(request: Request, _: Viewer) -> dict[str, Any]:
     """Return every job in the registry + operational state: scheduler-registered /
     in-flight flags, the last run's status (badge), and the next scheduled fire.
     Powers the Jobs list (NOMAFLOW-UI.md §3.1)."""
@@ -202,11 +236,23 @@ async def list_jobs(request: Request, _: Superuser) -> dict[str, Any]:
     }
 
 
+@router.get("/{job_id}/definition", summary="One job's definition")
+async def job_definition(job_id: str, request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
+    """The job as loaded — its parameters, steps and presets — for the "Run with parameters"
+    dialog of someone who may run it (``job:<id>``) without editing the jobs file."""
+    _require_run(principal, job_id)
+    try:
+        job = _components(request).registry.get(job_id)
+    except UnknownJobError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"unknown job {job_id!r}") from None
+    return job.model_dump(by_alias=True, exclude_defaults=True, exclude_none=True)
+
+
 @router.post("/{job_id}/run", summary="Run job now")
 async def run_job_now(
     job_id: str,
     request: Request,
-    principal: Superuser,
+    principal: CurrentPrincipal,
     body: dict[str, Any] | None = Body(default=None),
 ) -> dict[str, Any]:
     """Fire *job_id* manually as a :class:`ManualTrigger`. **Fire-and-return** —
@@ -226,8 +272,9 @@ async def run_job_now(
     optional body ``{"op_kwargs": {step_name: {key: value}}}`` ephemerally
     overrides the matching step's saved ``op_kwargs`` for this fire only.
     Useful for the nomasx1-init-db job (change ``target_connector`` per fire
-    without editing jobs.toml). The saved config is untouched.
+    without editing jobs.toml). The saved config is untouched. Needs ``job:<id>``.
     """
+    _require_run(principal, job_id)
     comps = _components(request)
     registry: JobRegistry = comps.registry
     scheduler: JobScheduler = comps.scheduler
@@ -347,11 +394,12 @@ async def run_job_now(
     summary="Upload a file for a run",
     responses={400: {"description": "No file part, or a type the loader does not read."}, 413: {"description": "Too large."}},
 )
-async def upload_job_file(job_id: str, request: Request, principal: Superuser) -> dict[str, Any]:
+async def upload_job_file(job_id: str, request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
     """Store a spreadsheet / CSV in the job's work area (``[jobs] files_dir``) for a
     ``file_load`` step to read on the next fire: the Run-with-parameters modal uploads first,
-    then fires with ``op_kwargs[<step>] = {"file": <path>}``. Superuser only; the name is
+    then fires with ``op_kwargs[<step>] = {"file": <path>}``. Needs ``job:<id>``; the name is
     sanitised and time-stamped, the size capped by ``[jobs] max_upload_mb``."""
+    _require_run(principal, job_id)
     comps = _components(request)
     try:
         comps.registry.get(job_id)
@@ -394,7 +442,7 @@ async def _store_upload(request: Request, job_id: str, principal: Principal) -> 
 
 
 @router.get("/runs/{run_id}/files/{name}", summary="Download a run's file")
-async def download_run_file(run_id: str, name: str, request: Request, _: Superuser):
+async def download_run_file(run_id: str, name: str, request: Request, _: Viewer):
     """A file a step left in the job's work area for this run — today the ``file_load``
     rejects report (``<run>-<step>-rejects.csv``). The name must be a plain file name of that
     run; anything else is a 404."""
@@ -421,14 +469,14 @@ async def _run_file_response(request: Request, run_id: str, name: str, *, job_id
 
 
 @router.get("/runs/{run_id}/inputs/{step}", summary="Download a run's uploaded file")
-async def download_run_input(run_id: str, step: str, request: Request, _: Superuser):
+async def download_run_input(run_id: str, step: str, request: Request, _: Viewer):
     """The spreadsheet / CSV uploaded for a ``file_load`` step of this run (kept in the job's
     ``uploads`` folder of the work area)."""
     return await _run_input_response(request, run_id, step)
 
 
 @router.post("/{job_id}/enabled", summary="Pause or resume a job")
-async def set_job_enabled(job_id: str, request: Request, principal: Superuser, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+async def set_job_enabled(job_id: str, request: Request, principal: Editor, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """``{enabled: bool}`` — pause (``false``) or resume a job's own schedule: the one job's
     ``enabled`` in ``jobs.toml`` (tomlkit, comments kept, snapshotted first), then the live
     registry and the job's triggers — no full reload. The job's scheduled presets are not
@@ -468,7 +516,7 @@ async def set_job_enabled(job_id: str, request: Request, principal: Superuser, b
 
 
 @router.post("/runs/{run_id}/cancel", summary="Cancel job run")
-async def cancel_run(run_id: str, request: Request, principal: Superuser) -> dict[str, Any]:
+async def cancel_run(run_id: str, request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
     """Request cancellation of an in-flight run.
 
     Returns 404 when *run_id* isn't in flight (already terminated, or never
@@ -476,8 +524,18 @@ async def cancel_run(run_id: str, request: Request, principal: Superuser) -> dic
     process are not cancellable; they'll be swept on next restart). On 202,
     the task got the signal — the actual transition to ``CANCELED`` happens
     inside the run loop's ``CancelledError`` handler shortly afterwards."""
+    from sqlalchemy import select
+
+    from liberty.jobs.models import JobRun
+
     comps = _components(request)
     runner: JobRunner = comps.runner
+    if not principal.is_superuser:
+        async with comps.db.session() as s:
+            job_id = (await s.execute(select(JobRun.job_id).where(JobRun.id == run_id))).scalar_one_or_none()
+        if job_id is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"run {run_id} is not in flight on this worker")
+        _require_run(principal, job_id)
 
     if not runner.cancel(run_id):
         raise HTTPException(
@@ -524,9 +582,22 @@ def _step_dict(step: Any, extras: dict[str, Any] | None = None) -> dict[str, Any
     }
 
 
+@router.post("/reload", summary="Apply the saved jobs")
+async def reload_jobs(request: Request, principal: Editor) -> dict[str, Any]:
+    """Re-read ``jobs.toml`` into the running scheduler after a job was saved — the jobs part of
+    ``POST /admin/reload`` (superuser), so an editor of jobs applies their change without reloading
+    the whole configuration."""
+    from liberty.runtime import rebuild_runtime
+
+    await rebuild_runtime(request.app, sections={"jobs"})
+    comps = _components(request)
+    _log.info("nomaflow jobs reloaded by %s", principal.username)
+    return {"jobs": len(comps.registry.jobs())}
+
+
 @router.get("/runs", summary="List runs")
 async def list_runs(
-    request: Request, _: Superuser,
+    request: Request, _: Viewer,
     job: str | None = None, state: str | None = None, q: str | None = None,
     hours: int | None = None, limit: int = 100, offset: int = 0,
 ) -> dict[str, Any]:
@@ -599,7 +670,7 @@ async def list_runs(
 
 
 @router.get("/runs/{run_id}", summary="Get run detail")
-async def get_run_detail(run_id: str, request: Request, _: Superuser) -> dict[str, Any]:
+async def get_run_detail(run_id: str, request: Request, _: Viewer) -> dict[str, Any]:
     """One run — its summary, its step rows, and its **log** (NOMAFLOW-UI.md
     live-logs increment). Powers the Run detail page.
 
@@ -721,7 +792,7 @@ async def _run_input_response(request: Request, run_id: str, step: str, *, job_i
 
 
 @router.get("/callables", summary="List python callables")
-async def list_callables(request: Request, _: Superuser) -> dict[str, Any]:
+async def list_callables(request: Request, _: Editor) -> dict[str, Any]:
     """Return the catalog of available python-step callables — every top-level
     ``async def j_*`` / ``def j_*`` discovered under ``plugins/``. Powers the
     Job Designer's callable dropdown so operators pick from a list instead of
@@ -753,7 +824,7 @@ async def list_callables(request: Request, _: Superuser) -> dict[str, Any]:
 @router.get("/cron-preview", summary="Preview cron schedule")
 async def cron_preview(
     schedule: str,
-    _: Superuser,
+    _: Viewer,
     timezone: str = "",
     count: int = 5,
 ) -> dict[str, Any]:
@@ -793,7 +864,7 @@ async def cron_preview(
 
 
 @router.get("/retention", summary="Get retention status")
-async def get_retention_status(request: Request, _: Superuser) -> dict[str, Any]:
+async def get_retention_status(request: Request, _: Viewer) -> dict[str, Any]:
     """Return the current retention policy (read from ``jobs.toml`` [meta.retention])
     + the last automatic sweep's report (None until the first sweep fires).
     Surfaced by the Nomaflow Retention panel so operators see "what's the policy
@@ -808,7 +879,7 @@ async def get_retention_status(request: Request, _: Superuser) -> dict[str, Any]
 
 
 @router.get("/missed", summary="Get missed-schedule status")
-async def get_missed_status(request: Request, _: Superuser) -> dict[str, Any]:
+async def get_missed_status(request: Request, _: Viewer) -> dict[str, Any]:
     """The ``[meta.missed]`` policy + the last check's report (None until the first check)."""
     comps = _components(request)
     last = comps.scheduler.last_missed

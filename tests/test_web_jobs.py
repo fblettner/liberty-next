@@ -242,6 +242,12 @@ def _seed_db(db_url: str) -> None:
             await svc.create_user("reader", password="readerpw")
             await svc.get_or_create_role("loader", permissions=["job:load-file", "job:manual-only", "job:pick-app", "job:per-app"])
             await svc.create_user("loader", password="loaderpw", roles=["loader"])
+            # nomaflow without superuser: an operator follows every job and runs ``ping``; an
+            # editor creates / edits jobs
+            await svc.get_or_create_role("operator", permissions=["nomaflow:view", "job:ping"])
+            await svc.create_user("operator", password="operatorpw", roles=["operator"])
+            await svc.get_or_create_role("jobeditor", permissions=["nomaflow:edit"])
+            await svc.create_user("jobeditor", password="jobeditorpw", roles=["jobeditor"])
         await pools.dispose()
     asyncio.run(go())
 
@@ -987,11 +993,12 @@ def test_cancel_for_unknown_run_returns_404(env) -> None:
         assert r.status_code == 404
 
 
-def test_cancel_requires_superuser(env) -> None:
+def test_cancel_requires_the_jobs_permission(env) -> None:
     app, _ = env
     with TestClient(app) as client:
         assert client.post("/admin/jobs/runs/x/cancel").status_code == 401
-        assert client.post("/admin/jobs/runs/x/cancel", headers=_h(client, "reader")).status_code == 403
+        # the run's job decides; an unknown run is a 404 for everyone
+        assert client.post("/admin/jobs/runs/x/cancel", headers=_h(client, "reader")).status_code == 404
 
 
 # --------------------------------------------------------------------------- #
@@ -1412,3 +1419,42 @@ def test_web_manifest_is_public_and_named_after_the_instance(env) -> None:
         public = Path(__file__).resolve().parent.parent / "frontend" / "public"
         assert all((public / src).is_file() for src, _, _ in icons) and (public / "sw.js").is_file()
 
+
+def test_nomaflow_without_superuser(env) -> None:
+    """``nomaflow:view`` follows the jobs, ``job:<id>`` runs one, ``nomaflow:edit`` edits them —
+    the policies ([meta], retention sweep, missed check) stay with a superuser."""
+    app, _ = env
+    with TestClient(app) as client:
+        op, ed, rd = _h(client, "operator"), _h(client, "jobeditor"), _h(client, "reader")
+        for h in (op, ed):
+            assert client.get("/admin/jobs", headers=h).status_code == 200
+            assert client.get("/admin/jobs/runs", headers=h).status_code == 200
+            assert client.get("/admin/jobs/cron-preview", params={"schedule": "0 * * * *"}, headers=h).status_code == 200
+            assert client.get("/admin/jobs/retention", headers=h).status_code == 200
+        assert client.get("/admin/jobs", headers=rd).status_code == 403
+        # run: job:<id>, not nomaflow:view
+        r = client.post("/admin/jobs/ping/run", headers=op)
+        assert r.status_code == 200, r.text
+        run_id = r.json()["run_id"]
+        assert client.get(f"/admin/jobs/runs/{run_id}", headers=op).status_code == 200
+        assert client.post("/admin/jobs/manual-only/run", headers=op).status_code == 403
+        assert client.get("/admin/jobs/ping/definition", headers=op).json()["id"] == "ping"
+        assert client.get("/admin/jobs/manual-only/definition", headers=op).status_code == 403
+        assert client.post("/admin/jobs/ping/run", headers=ed).status_code == 403
+        assert client.post("/admin/jobs/manual-only/upload", headers=op, files={"file": ("a.csv", b"x\n")}).status_code == 403
+        # edit: the jobs config, pause / resume, the callables, apply — not for the operator
+        assert client.get("/admin/config/jobs/parsed", headers=op).status_code == 403
+        assert client.post("/admin/jobs/reload", headers=op).status_code == 403
+        assert client.post("/admin/jobs/ping/enabled", json={"enabled": False}, headers=op).status_code == 403
+        parsed = client.get("/admin/config/jobs/parsed", headers=ed)
+        assert parsed.status_code == 200
+        assert client.get("/admin/jobs/callables", headers=ed).status_code == 200
+        jobs = parsed.json()["jobs"]
+        assert client.put("/admin/config/jobs/parsed", json={"jobs": jobs}, headers=ed).status_code == 200
+        assert client.post("/admin/jobs/reload", headers=ed).json()["jobs"] == len(jobs)
+        assert client.post("/admin/jobs/ping/enabled", json={"enabled": True}, headers=ed).status_code == 200
+        # the policies stay with a superuser
+        meta = parsed.json()["meta"]
+        assert client.put("/admin/config/jobs/parsed", json={"jobs": jobs, "meta": meta}, headers=ed).status_code == 403
+        assert client.post("/admin/jobs/retention/sweep", headers=ed).status_code == 403
+        assert client.post("/admin/jobs/missed/check", headers=ed).status_code == 403

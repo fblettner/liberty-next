@@ -28,7 +28,7 @@ const SegBtn = styled.button<{ $active?: boolean; $tone?: 'allow' | 'deny' }>`
 `
 const AddRow = styled.div`display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px;`
 
-type RuleType = 'connector' | 'query' | 'api' | 'dashboard' | 'explorer' | 'job' | 'ai' | 'pattern'
+type RuleType = 'connector' | 'query' | 'api' | 'dashboard' | 'explorer' | 'job' | 'nomaflow' | 'ai' | 'pattern'
 
 interface Props { value: string[]; onChange: (next: string[]) => void; dashboardIds: string[] }
 
@@ -51,7 +51,12 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
     if (type === 'api') return apiConns.flatMap((c) => c.endpoints.map((e) => ({ value: `api:${c.name}:${e.name}`, label: `${c.name} · ${e.label || e.name}`, mono: `api:${c.name}:${e.name}` })))
     if (type === 'dashboard') return dashboardIds.map((d) => ({ value: `dashboard:${d}`, label: d, mono: `dashboard:${d}` }))
     if (type === 'explorer') return sqlConns.map((c) => ({ value: `explorer:${c.name}:*`, label: `${c.name}  (${t('settings.access.allModels')})`, mono: `explorer:${c.name}:*` }))
-    if (type === 'job') return jobIds.map((j) => ({ value: `job:${j}`, label: j, mono: `job:${j}` }))
+    if (type === 'job') return [{ value: 'job:*', label: t('settings.access.allJobs'), mono: 'job:*' }, ...jobIds.map((j) => ({ value: `job:${j}`, label: j, mono: `job:${j}` }))]
+    // nomaflow without superuser (liberty/web/jobs.py): follow the jobs, edit them; running one is ``job:<id>``
+    if (type === 'nomaflow') return [
+      { value: 'nomaflow:view', label: t('settings.access.nomaflowView'), mono: 'nomaflow:view' },
+      { value: 'nomaflow:edit', label: t('settings.access.nomaflowEdit'), mono: 'nomaflow:edit' },
+    ]
     if (type === 'ai') return [{ value: 'ai:chat', label: t('settings.access.aiChat'), mono: 'ai:chat' }]
     return []
   }, [type, sqlConns, apiConns, dashboardIds, jobIds, t])
@@ -71,6 +76,7 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
     { value: 'dashboard', label: t('settings.access.tDashboard') },
     { value: 'explorer', label: t('settings.access.tExplorer') },
     { value: 'job', label: t('settings.access.tJob') },
+    { value: 'nomaflow', label: t('settings.access.tNomaflow') },
     { value: 'ai', label: t('settings.access.tAi') },
     { value: 'pattern', label: t('settings.access.tPattern') },
   ]
