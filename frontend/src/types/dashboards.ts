@@ -110,7 +110,32 @@ export interface BarsWidgetWire {
   max_rows: number
 }
 
-export type DashboardWidget = ChartWidgetWire | KpiWidgetWire | TableWidgetWire | StatWidgetWire | ListWidgetWire | BarsWidgetWire
+/** A block of Markdown — an overview's introduction. */
+export interface TextWidgetWire {
+  type: 'text'
+  label?: string | null
+  description?: string | null
+  col_span: number
+  row_span: number
+  markdown: string
+}
+
+export interface LinkWire { label?: string | null; description?: string | null; icon?: string | null; menu?: string | null; url?: string | null }
+
+/** A card of links: menu items of the dashboard's app (resolved in the user's menu tree) or URLs. */
+export interface LinksWidgetWire {
+  type: 'links'
+  label?: string | null
+  description?: string | null
+  col_span: number
+  row_span: number
+  /** The dashboard's app: where `menu` links are looked up. */
+  app: string
+  columns: number
+  links: LinkWire[]
+}
+
+export type DashboardWidget = ChartWidgetWire | KpiWidgetWire | TableWidgetWire | StatWidgetWire | ListWidgetWire | BarsWidgetWire | TextWidgetWire | LinksWidgetWire
 
 export interface DashboardFilterOptionsWire {
   connector: string

@@ -480,6 +480,10 @@ def sections_to_markdown(sections: list[Section], title: str, *, lang: str | Non
     for s in sections:
         if len(sections) > 1:
             lines += [f"## {s.title}", ""]
+        if s.kind == "text":
+            # a dashboard's text widget: its markdown as it is, under the section title
+            lines += [s.note or "", ""]
+            continue
         if s.note:
             lines += [f"*{s.note}*", ""]
         if figures and s.kind == "kpi" and s.headers:

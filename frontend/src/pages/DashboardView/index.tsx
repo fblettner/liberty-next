@@ -24,6 +24,8 @@ import { TableWidget } from './TableWidget'
 import { StatWidget } from './StatWidget'
 import { ListWidget } from './ListWidget'
 import { BarsWidget } from './BarsWidget'
+import { TextWidget } from './TextWidget'
+import { LinksWidget } from './LinksWidget'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 // CSS-grid layout: 12 cols on desktop, collapse to 6 on tablet, 1 on mobile so dashboards stay
@@ -202,6 +204,10 @@ function WidgetCell({
         ? <ListWidget widget={widget} {...common} />
         : widget.type === 'bars'
         ? <BarsWidget widget={widget} {...common} />
+        : widget.type === 'text'
+        ? <TextWidget widget={widget} />
+        : widget.type === 'links'
+        ? <LinksWidget widget={widget} />
         : <KpiWidget widget={widget} {...common} />}
     </WidgetFrame>
   )

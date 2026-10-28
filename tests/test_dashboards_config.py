@@ -272,3 +272,25 @@ def test_parse_synthesis_widgets() -> None:
         parse_dashboards({"dashboards": {"c": {"x": {"label": "X", "widgets": [{"type": "stat", "connector": "c", "query": "q"}]}}}})
     with pytest.raises(Exception):  # pydantic ValidationError
         parse_dashboards({"dashboards": {"c": {"x": {"label": "X", "widgets": [{"type": "bars", "connector": "c", "query": "q", "label_column": "A", "value_column": "V", "share": "half"}]}}}})
+
+
+def test_text_and_links_widgets() -> None:
+    """A text widget carries Markdown; a links widget its links — each a menu item id of the
+    dashboard's app or a labelled url, localisable one by one."""
+    import pytest as _pytest
+    f = parse_dashboards({"dashboards": {"nomajde": {"overview": {"label": "Overview", "widgets": [
+        {"type": "text", "markdown": "**Nomajde** is …", "col_span": 12},
+        {"type": "links", "label": "Security", "columns": 2, "links": [
+            {"menu": "user_management", "description": "Users", "l": {"fr": {"description": "Utilisateurs"}}},
+            {"url": "https://nomana-it.fr/nomajde/", "label": "About", "icon": "globe"},
+        ]},
+    ]}}}})
+    w = f.dashboards["nomajde"]["overview"].widgets
+    assert w[0].type == "text" and w[0].markdown.startswith("**Nomajde**") and w[0].col_span == 12
+    assert w[1].type == "links" and w[1].columns == 2 and [l.menu or l.url for l in w[1].links] == ["user_management", "https://nomana-it.fr/nomajde/"]
+    with _pytest.raises(ValueError, match="exactly one of"):
+        parse_dashboards({"dashboards": {"x": {"d": {"label": "d", "widgets": [{"type": "links", "links": [{"menu": "a", "url": "https://b"}]}]}}}})
+    with _pytest.raises(ValueError, match="needs a `label`"):
+        parse_dashboards({"dashboards": {"x": {"d": {"label": "d", "widgets": [{"type": "links", "links": [{"url": "https://b"}]}]}}}})
+    with _pytest.raises(ValueError):
+        parse_dashboards({"dashboards": {"x": {"d": {"label": "d", "widgets": [{"type": "links", "links": []}]}}}})

@@ -60,6 +60,23 @@
   rafraîchissement du dictionnaire de nomajde prend le modèle Explorateur à rafraîchir (vide =
   tous les modèles).
 
+**Tableaux de bord : widgets texte et liens — une vue d'ensemble pour une application de gestion**
+- `text` : un bloc Markdown (à quoi sert l'application, comment lire la page) ; `links` : une
+  carte de points d'entrée, chacun un élément de menu de l'application du tableau de bord
+  (affiché seulement si l'utilisateur peut l'ouvrir, sous le libellé de l'élément par défaut)
+  ou une URL. Les deux dans l'éditeur de widgets, traduisibles, exportés (le texte tel quel,
+  les liens en table).
+- nomajde reçoit sa Vue d'ensemble : ce que fait Nomajde, les chiffres de l'instance JDE
+  (utilisateurs, rôles, enregistrements de sécurité, codes UDC, objets) et les points d'entrée de
+  chaque domaine ; l'application s'ouvre dessus.
+
+**Assistant IA : l'Explorateur de données comme outils**
+- `explorer_models`, `explorer_fields` et `explorer_query` permettent à l'assistant de répondre à
+  un total, un classement, une tendance ou une comparaison via les modèles de l'Explorateur
+  (dimensions, mesures, filtres, période, tri, Top N) dans le périmètre de l'appelant, au lieu
+  d'annoncer qu'aucune requête agrégée n'existe. Actifs par défaut (`[ai] explorer_tools =
+  false` pour les retirer).
+
 ## 7.0.59 — non publiée
 
 **Corrections issues de la revue de documentation (27/10/2026)**

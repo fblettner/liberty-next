@@ -33,7 +33,7 @@ from liberty.auth.dependencies import CurrentPrincipal
 from liberty.auth.principal import Principal
 from liberty.charts import ChartConfig, ChartsFile
 from liberty.connectors.registry import ConnectorRegistry
-from liberty.dashboards import BarsWidget, ChartWidget, Dashboard, DashboardsFile, KpiWidget, ListWidget, StatWidget, TableWidget
+from liberty.dashboards import BarsWidget, ChartWidget, Dashboard, DashboardsFile, KpiWidget, ListWidget, StatWidget, TextWidget, LinksWidget, TableWidget
 from liberty.dashboards.report import PeriodPick, dashboard_sections, resolve_column
 from liberty.screens import ScreensFile
 from liberty.web.deps import get_connectors, get_screens, request_language
@@ -134,6 +134,16 @@ def _resolve_plain_widget(w: StatWidget | ListWidget | BarsWidget) -> dict[str, 
     return w.model_dump(mode="json", exclude_none=True, exclude={"l"})
 
 
+def _resolve_static_widget(w: Any, app: str, language: str | None) -> dict[str, Any]:
+    """A text or links widget: as configured (no query), the links localised one by one and the
+    dashboard's app attached so the page resolves ``menu`` links in that app's menu tree."""
+    d = w.model_dump(mode="json", exclude_none=True, exclude={"l"})
+    if getattr(w, "links", None) is not None:
+        d["app"] = app
+        d["links"] = [_localize({k: v for k, v in link.model_dump(mode="json", exclude_none=True).items() if k != "l"}, link.l, language) for link in w.links]
+    return d
+
+
 def _localize(d: dict[str, Any], overrides: dict[str, dict[str, Any]], language: str | None) -> dict[str, Any]:
     """*d* with the ``l`` block of *language* (``fr``, or ``fr-FR`` → ``fr``) merged over it — the
     string fields the operator translated; the block itself never travels."""
@@ -203,6 +213,8 @@ def _resolve_dashboard(dashboard: Dashboard, charts: ChartsFile, principal: Prin
             wd = _resolve_table_widget(w)
         elif isinstance(w, (StatWidget, ListWidget, BarsWidget)):
             wd = _resolve_plain_widget(w)
+        elif isinstance(w, (TextWidget, LinksWidget)):
+            wd = _resolve_static_widget(w, dashboard.connector, language)
         else:  # pragma: no cover - guarded by the discriminated union
             continue
         if wd is None:

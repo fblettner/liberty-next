@@ -294,6 +294,7 @@ class AISettings(BaseModel):
     # Off by default: the log tail can carry what the server logged; enable for an install
     # whose chat users are administrators.
     ops_tools: bool = False
+    explorer_tools: bool = True  # explorer_models / explorer_fields / explorer_query — aggregates on the Data Explorer models
     allowed_connectors: list[str] = Field(default_factory=list)  # empty → all
     # Server-side web_fetch (Anthropic-hosted); disabled unless domains are listed
     web_fetch_domains: list[str] = Field(default_factory=list)

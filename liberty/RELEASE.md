@@ -51,6 +51,21 @@
   parameter; the value reaches the step's parameters, anything else is refused. The nomajde
   dictionary refresh takes the Explorer model to refresh (blank = every model).
 
+**Dashboards: text and links widgets — an overview for a management application**
+- `text`: a block of Markdown (what the application is for, how to read the page); `links`: a
+  card of entry points, each a menu item of the dashboard's app (shown only when the user can
+  open it, under the item's label by default) or a URL. Both in the widget editor, both
+  localisable, both exported (the text as it is, the links as a table).
+- nomajde gets its Overview: what Nomajde does, the live figures of the JDE instance (users,
+  roles, security records, UDC codes, objects) and the entry points of each domain; the app
+  opens on it.
+
+**AI assistant: the Data Explorer as tools**
+- `explorer_models`, `explorer_fields` and `explorer_query` let the assistant answer a total,
+  a ranking, a trend or a comparison through the Explorer models (dimensions, measures,
+  filters, period, sort, Top N) under the caller's scope, instead of declaring that no
+  aggregate query exists. On by default (`[ai] explorer_tools = false` to remove them).
+
 ## 7.0.59 — unreleased
 
 **Fixes from the documentation review (2026-10-27)**

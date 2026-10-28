@@ -21,6 +21,7 @@ from typing import Any, AsyncIterator, Callable
 import json
 
 from liberty.ai.connector_tools import build_connector_tools
+from liberty.ai.explorer_tools import build_explorer_tools
 from liberty.ai.instance_tools import build_instance_tools
 from liberty.ai.ops_tools import build_ops_tools
 from liberty.ai.scaffold_tools import build_scaffold_tools
@@ -55,7 +56,13 @@ DEFAULT_SYSTEM_PROMPT = (
     "jobs, their last and next runs, a job's recent runs with the failing step), server_log (the "
     "recent log lines) and integrity_checks (broken references in the configuration). Prefer "
     "them to guessing when the user reports that something failed, is late or is missing.\n"
-    "8. End every reply with one last line of the form\n"
+    "8. For a total, a ranking, a trend, a share or a comparison by period, use the Data Explorer "
+    "tools: explorer_models (the analytical models), explorer_fields (the field keys of a model), "
+    "then explorer_query (rows = dimensions, measures = sum / avg / count…, filters, a period, a "
+    "sort, a Top N). The raw row queries of list_connectors give lines, not figures: never add "
+    "them up yourself when a model covers the subject, and never say no aggregate exists before "
+    "calling explorer_models.\n"
+    "9. End every reply with one last line of the form\n"
     "   >>> [\"a short follow-up question\", \"another one\"]\n"
     "   — two or three questions the user is likely to ask next, in their language, as a JSON "
     "list of strings; nothing after that line. Leave the line out when no follow-up makes "
@@ -442,6 +449,8 @@ def build_assistant(
         ))
     if state is not None:
         registry.add(*build_instance_tools(state, allowed=settings.allowed_connectors or None))
+        if settings.explorer_tools:
+            registry.add(*build_explorer_tools(state, allowed=settings.allowed_connectors or None))
         if settings.ops_tools:
             registry.add(*build_ops_tools(state))
     return AiAssistant(settings, client=client, tools=registry)

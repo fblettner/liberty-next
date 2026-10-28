@@ -120,3 +120,11 @@ def test_chart_section_pivots_a_series_column() -> None:
                     {"refresh": "2026-05", "process": "P2P", "lines": 2}, {"refresh": "2026-04", "process": "O2C", "lines": 7}]}
     s = chart_section("Trend", {"spec": {"type": "bar", "x": "REFRESH", "series": "PROCESS", "y": ["LINES"], "aggregation": "sum", "stacked": True, "sort_by_x": True}}, res)
     assert s.headers == ["Refresh", "P2P", "O2C"] and s.rows == [["2026-04", None, 7.0], ["2026-05", 12.0, 4.0]] and s.stacked
+
+
+def test_text_and_links_sections() -> None:
+    """The export: a text widget's markdown flows as it is; a links widget is a two-column table."""
+    from liberty.explorer.report import Section, sections_to_markdown
+    md = sections_to_markdown([Section("Intro", "text", [], note="**Nomajde** is the companion.\n\n- one\n- two"), Section("Security", "table", ["Link", "Description"], [["Users", "F0092"]])], "Overview", lang="en")
+    assert "**Nomajde** is the companion." in md and "- two" in md and r"*\*\*Nomajde" not in md
+    assert "| Link | Description |" in md and "| Users | F0092 |" in md

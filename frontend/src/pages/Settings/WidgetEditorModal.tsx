@@ -5,9 +5,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { X, BarChart3, Hash, Table as TableIcon, List as ListIcon, BarChartHorizontal } from 'lucide-react'
+import { X, BarChart3, Hash, Table as TableIcon, List as ListIcon, BarChartHorizontal, FileText, Link2, Plus, Trash2 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Checkbox, Field, Input, SearchSelect, SpinnerRing, Tag, useModals, type SearchSelectOption } from '../../common'
+import { Banner, Button, Checkbox, Field, Input, SearchSelect, SpinnerRing, Tag, Textarea, useModals, type SearchSelectOption } from '../../common'
 import { EditorModalShell } from '../../common/EditorModalShell'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { ChartSpecEditor } from '../TableView/ChartSpecEditor'
@@ -16,16 +16,19 @@ import { resolveColumnName } from '../../services/chartData'
 import { KpiWidget } from '../DashboardView/KpiWidget'
 import { TableWidget } from '../DashboardView/TableWidget'
 import { StatWidget } from '../DashboardView/StatWidget'
+import { TextWidget } from '../DashboardView/TextWidget'
+import { LinksWidget } from '../DashboardView/LinksWidget'
+import { MENU_ICON_NAMES, iconFor } from '../../components/SidebarMenu'
 import { ListWidget } from '../DashboardView/ListWidget'
 import { BarsWidget } from '../DashboardView/BarsWidget'
 import type { QueryResult } from '../../types/connectors'
 import type { ChartSpec, SavedChartSpec } from '../../types/charts'
 import { AGGREGATIONS, defaultChartSpec, fromSavedSpec, toSavedSpec } from '../../types/charts'
-import type { BarsWidgetWire, KpiWidgetWire, ListWidgetWire, StatWidgetWire, TableWidgetWire, ValueFormat } from '../../types/dashboards'
+import type { BarsWidgetWire, KpiWidgetWire, ListWidgetWire, StatWidgetWire, TableWidgetWire, ValueFormat, TextWidgetWire, LinksWidgetWire, LinkWire } from '../../types/dashboards'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 const PREVIEW_LIMIT = 1000
-export type WidgetKind = 'chart' | 'kpi' | 'table' | 'stat' | 'list' | 'bars'
+export type WidgetKind = 'chart' | 'kpi' | 'table' | 'stat' | 'list' | 'bars' | 'text' | 'links'
 
 const KindBar = styled.div`display: flex; gap: 6px; flex-wrap: wrap;`
 const KindBtn = styled.button<{ $active?: boolean }>`
@@ -55,16 +58,18 @@ const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite
 const str = (v: unknown) => (typeof v === 'string' ? v : '')
 
 export function WidgetEditorModal({
-  initial, chartsCatalog, onSave, onClose,
+  initial, scope, chartsCatalog, onSave, onClose,
 }: {
   initial: Record<string, unknown>
+  /** The dashboard's app: where a links widget's `menu` links are picked. */
+  scope: string
   chartsCatalog: Record<string, { label?: string; connector?: string; query?: string; spec?: SavedChartSpec }>
   onSave: (widget: Record<string, unknown>) => void
   onClose: () => void
 }) {
   const { t } = useTranslation()
   const modals = useModals()
-  const { connectors } = useWorkspace()
+  const { connectors, menus } = useWorkspace()
 
   const [kind, setKind] = useState<WidgetKind>((initial.type as WidgetKind) || 'chart')
   const [label, setLabel] = useState(str(initial.label))
@@ -93,6 +98,24 @@ export function WidgetEditorModal({
     label_column: str(initial.label_column), sub_label_column: str(initial.sub_label_column), share: str(initial.share) || 'total', note: str(initial.note),
   })
   const setP = (k: string, v: string) => setPlain((cur) => ({ ...cur, [k]: v }))
+  // text / links (no query behind them)
+  const [markdown, setMarkdown] = useState(str(initial.markdown))
+  const [links, setLinks] = useState<LinkWire[]>(Array.isArray(initial.links) ? (initial.links as LinkWire[]).map((l) => ({ ...l })) : [])
+  const [linkColumns, setLinkColumns] = useState(num(initial.columns, 1))
+  const setLink = (i: number, patch: Partial<LinkWire>) => setLinks((cur) => cur.map((l, j) => (j === i ? { ...l, ...patch } : l)))
+  // the app's menu leaves, for a `menu` link (the sidebar's own tree: what this user can see)
+  const menuOpts: SearchSelectOption[] = useMemo(() => {
+    const out: SearchSelectOption[] = []
+    const walk = (nodes: { id: string; label: string; type?: string; items?: unknown[] }[], prefix: string) => {
+      for (const n of nodes) {
+        if (n.items) walk(n.items as typeof nodes, `${prefix}${n.label} › `)
+        else if (n.type) out.push({ value: n.id, label: `${prefix}${n.label}`, mono: n.id })
+      }
+    }
+    walk((menus?.[scope]?.items ?? []) as { id: string; label: string; type?: string; items?: unknown[] }[], '')
+    return out
+  }, [menus, scope])
+  const iconOpts: SearchSelectOption[] = useMemo(() => MENU_ICON_NAMES.map((n) => { const I = iconFor(n); return { value: n, label: n, icon: I ? <I size={14} /> : undefined } }), [])
   const [error, setError] = useState<string | null>(null)
 
   // Sample of the chosen query — drives the column pickers + the chart inline builder/preview.
@@ -141,6 +164,16 @@ export function WidgetEditorModal({
       if (!column) return setError(t('settings.dash.errColumn'))
       base.connector = connector; base.query = query; base.column = column; base.aggregation = aggregation
       if (comparePrevious) base.compare_previous = true
+    } else if (kind === 'text') {
+      if (!markdown.trim()) return setError(t('settings.dash.errMarkdown'))
+      base.markdown = markdown
+    } else if (kind === 'links') {
+      const clean = links.map((l) => ({
+        ...(l.label?.trim() ? { label: l.label.trim() } : {}), ...(l.description?.trim() ? { description: l.description.trim() } : {}),
+        ...(l.icon ? { icon: l.icon } : {}), ...(l.menu ? { menu: l.menu } : {}), ...(l.url?.trim() ? { url: l.url.trim() } : {}),
+      }))
+      if (!clean.length || clean.some((l) => !!l.menu === !!l.url || (l.url && !l.label))) return setError(t('settings.dash.errLinks'))
+      base.links = clean; base.columns = linkColumns
     } else if (kind === 'stat') {
       if (!connector || !query) return setError(t('settings.dash.errConnQuery'))
       if (!plain.value_column) return setError(t('settings.dash.errValueColumn'))
@@ -171,7 +204,7 @@ export function WidgetEditorModal({
   }
 
   // Unsaved-changes guard (Save / Discard / Keep editing) — matches the chart + dashboard editors.
-  const draftKey = JSON.stringify({ kind, label, description, colSpan, rowSpan, chartMode, savedChartId, spec, connector, query, column, aggregation, comparePrevious, columns, maxRows, plain })
+  const draftKey = JSON.stringify({ kind, label, description, colSpan, rowSpan, chartMode, savedChartId, spec, connector, query, column, aggregation, comparePrevious, columns, maxRows, plain, markdown, links, linkColumns })
   const initialKey = useRef<string | null>(null)
   if (initialKey.current === null) initialKey.current = draftKey
   const dirty = draftKey !== initialKey.current
@@ -217,6 +250,12 @@ export function WidgetEditorModal({
       <SearchSelect value={canon(plain[key])} onChange={(v) => setP(key, v)} options={colOpts} placeholder={t('chart.spec.pick')} anyLabel={t('common.none')} allowCustom />
     </Field>
   )
+  const textPreview: TextWidgetWire | null = kind === 'text' && markdown.trim()
+    ? { type: 'text', label: label || null, description: description || null, col_span: colSpan, row_span: rowSpan, markdown }
+    : null
+  const linksPreview: LinksWidgetWire | null = kind === 'links' && links.length
+    ? { type: 'links', label: label || null, description: description || null, col_span: colSpan, row_span: rowSpan, app: scope, columns: linkColumns, links }
+    : null
   const tablePreview: TableWidgetWire | null = kind === 'table' && connector && query
     ? { type: 'table', label: label || null, col_span: colSpan, row_span: rowSpan, connector, query, columns, ...(maxRows ? { max_rows: parseInt(maxRows, 10) } : {}) }
     : null
@@ -238,6 +277,8 @@ export function WidgetEditorModal({
             <KindBtn $active={kind === 'stat'} onClick={() => setKind('stat')}><Hash size={14} /> {t('settings.dash.kindStat')}</KindBtn>
             <KindBtn $active={kind === 'list'} onClick={() => setKind('list')}><ListIcon size={14} /> {t('settings.dash.kindList')}</KindBtn>
             <KindBtn $active={kind === 'bars'} onClick={() => setKind('bars')}><BarChartHorizontal size={14} /> {t('settings.dash.kindBars')}</KindBtn>
+            <KindBtn $active={kind === 'text'} onClick={() => setKind('text')}><FileText size={14} /> {t('settings.dash.kindText')}</KindBtn>
+            <KindBtn $active={kind === 'links'} onClick={() => setKind('links')}><Link2 size={14} /> {t('settings.dash.kindLinks')}</KindBtn>
           </KindBar>
 
           <Grid3>
@@ -254,6 +295,53 @@ export function WidgetEditorModal({
           <Field label={t('settings.dash.wDescription')}>
             <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('settings.dash.wDescriptionHint')} />
           </Field>
+
+          {kind === 'text' && (
+            <>
+              <Field label={t('settings.dash.markdown')}>
+                <Textarea value={markdown} onChange={(e) => setMarkdown(e.target.value)} rows={8} placeholder={t('settings.dash.markdownHint')} />
+              </Field>
+              <PreviewWrap>
+                {textPreview ? <div style={{ flex: 1, minHeight: 0, display: 'flex' }}><TextWidget widget={textPreview} /></div>
+                  : <Msg>{t('settings.dash.errMarkdown')}</Msg>}
+              </PreviewWrap>
+            </>
+          )}
+
+          {kind === 'links' && (
+            <>
+              <Grid3>
+                <Field label={t('settings.dash.linkColumns')}>
+                  <Input type="number" min={1} max={4} value={linkColumns} onChange={(e) => setLinkColumns(Math.min(4, Math.max(1, Number(e.target.value) || 1)))} />
+                </Field>
+              </Grid3>
+              {links.map((l, i) => (
+                <Grid3 key={i} style={{ alignItems: 'end' }}>
+                  <Field label={t('settings.dash.linkMenu')}>
+                    <SearchSelect sort value={l.menu ?? ''} onChange={(v) => setLink(i, { menu: v || null, ...(v ? { url: null } : {}) })} options={menuOpts} anyLabel={t('common.none')} />
+                  </Field>
+                  <Field label={t('settings.dash.linkUrl')}>
+                    <Input value={l.url ?? ''} onChange={(e) => setLink(i, { url: e.target.value, ...(e.target.value ? { menu: null } : {}) })} placeholder="https://…" />
+                  </Field>
+                  <Field label={t('settings.dash.linkIcon')}>
+                    <SearchSelect value={l.icon ?? ''} onChange={(v) => setLink(i, { icon: v || null })} options={iconOpts} anyLabel={t('common.none')} />
+                  </Field>
+                  <Field label={t('settings.dash.linkLabel')}>
+                    <Input value={l.label ?? ''} onChange={(e) => setLink(i, { label: e.target.value })} placeholder={t('settings.dash.linkLabelHint')} />
+                  </Field>
+                  <Field label={t('settings.dash.linkDescription')}>
+                    <Input value={l.description ?? ''} onChange={(e) => setLink(i, { description: e.target.value })} />
+                  </Field>
+                  <div><Button $size="sm" $variant="ghost" onClick={() => setLinks((cur) => cur.filter((_, j) => j !== i))}><Trash2 size={13} /> {t('common.delete')}</Button></div>
+                </Grid3>
+              ))}
+              <div><Button $size="sm" $variant="ghost" onClick={() => setLinks((cur) => [...cur, {}])}><Plus size={13} /> {t('settings.dash.addLink')}</Button></div>
+              <PreviewWrap>
+                {linksPreview ? <div style={{ flex: 1, minHeight: 0, display: 'flex' }}><LinksWidget widget={linksPreview} /></div>
+                  : <Msg>{t('settings.dash.errLinks')}</Msg>}
+              </PreviewWrap>
+            </>
+          )}
 
           {/* chart: saved vs inline */}
           {kind === 'chart' && (

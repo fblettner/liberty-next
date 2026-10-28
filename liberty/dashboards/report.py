@@ -347,6 +347,16 @@ async def dashboard_sections(
             cards.clear()
 
     for w in dashboard.get("widgets") or []:
+        if w.get("type") == "text":
+            flush()
+            out.append(Section(w.get("label") or "", "text", [], note=str(w.get("markdown") or "")))
+            continue
+        if w.get("type") == "links":
+            flush()
+            fr = (lang or "").lower().startswith("fr")
+            out.append(Section(w.get("label") or ("Liens" if fr else "Links"), "table", ["Lien" if fr else "Link", "Description"],
+                               [[link.get("label") or link.get("menu") or link.get("url") or "", link.get("description") or ""] for link in w.get("links") or []]))
+            continue
         c, q = w.get("connector"), w.get("query")
         if not c or not q:
             continue

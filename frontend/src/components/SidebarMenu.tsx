@@ -11,6 +11,7 @@
 // a small lucide whitelist (so the bundle doesn't have to ship all 1500 icons).
 import { useMemo, useState, type ComponentType } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
+import { leafPath } from '../services/menuPath'
 import styled from '@emotion/styled'
 import {
   ChevronRight,
@@ -157,23 +158,6 @@ const LeafLabel = styled.span`
   text-overflow: ellipsis;
 `
 
-function leafPath(node: MenuNode, app: string): string | null {
-  if (!node.target) return null
-  const t = encodeURIComponent(node.target)
-  // Dashboards have no connector segment — the catalog is flat (keyed by id).
-  if (node.type === 'dashboard') return `/dashboard/${t}`
-  // A job leaf opens the job's own page (run it, follow the log).
-  if (node.type === 'job') return `/job/${t}`
-  // A `page` leaf's target IS the route — navigate straight to it (e.g. /nomaflow).
-  // No connector, no encoding (it's a path, not an identifier). See NOMAFLOW-UI.md §2.
-  if (node.type === 'page') return node.target
-  // A `screen` leaf's target is a screen id, scoped to this menu's app — the dedicated route
-  // resolves it (its own columns / dialog), distinct from any other screen on the same query.
-  if (node.type === 'screen') return `/screen/${encodeURIComponent(app)}/${t}`
-  if (!node.connector) return null
-  const c = encodeURIComponent(node.connector)
-  return node.type === 'endpoint' ? `/http/${c}/${t}` : `/sql/${c}/${t}`
-}
 
 /** Folder ids on the path to the leaf whose route is `activePath` — so the menu opens to "you are here". */
 function ancestorsOfActive(nodes: MenuNode[], activePath: string, app: string): Set<string> {

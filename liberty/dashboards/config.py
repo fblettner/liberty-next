@@ -208,7 +208,46 @@ class BarsWidget(WidgetBase):
     max_rows: int = Field(default=10, ge=1, le=100, description="Rows shown.")
 
 
-Widget = Annotated[Union[ChartWidget, KpiWidget, TableWidget, StatWidget, ListWidget, BarsWidget], Field(discriminator="type")]
+class TextWidget(WidgetBase):
+    """A block of text (Markdown): what the application is for, how to read the page, a note —
+    an overview page's introduction. No query behind it; readable by everyone."""
+    type: Literal["text"] = "text"
+    markdown: str = Field(description="The text, in Markdown (headings, lists, links, emphasis).")
+
+
+class LinkItem(BaseModel):
+    """One entry of a links card: a menu item of the dashboard's app (``menu`` = its id — the
+    link shows only when the user can see that item, and takes its label when none is given)
+    or an external ``url``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str | None = Field(default=None, description="The link's wording (default: the menu item's label).")
+    description: str | None = Field(default=None, description="A line under the link.")
+    icon: str | None = Field(default=None, description="A lucide icon name the sidebar knows (``users``, ``shield``…); default: the menu item's.")
+    menu: str | None = Field(default=None, description="The id of a menu item of the dashboard's app.")
+    url: str | None = Field(default=None, description="An external address (opens in a new tab).")
+    l: dict[str, dict[str, Any]] = Field(default_factory=dict, description="Per-language overrides of ``label`` / ``description``.")
+
+    @model_validator(mode="after")
+    def _one_target(self) -> LinkItem:
+        if bool(self.menu) == bool(self.url):
+            raise ValueError("a link needs exactly one of `menu` (a menu item id) or `url`")
+        if self.url and not self.label:
+            raise ValueError(f"link {self.url!r}: a url link needs a `label`")
+        return self
+
+
+class LinksWidget(WidgetBase):
+    """A card of links — the entry points of a domain (\"Security Maintenance: users, roles,
+    workbench…\"): an overview page's navigation. A ``menu`` link is permission-pruned like the
+    sidebar; a ``url`` link opens in a new tab."""
+    type: Literal["links"] = "links"
+    links: list[LinkItem] = Field(min_length=1, description="The links, in display order.")
+    columns: int = Field(default=1, ge=1, le=4, description="Links per row inside the card.")
+
+
+Widget = Annotated[Union[ChartWidget, KpiWidget, TableWidget, StatWidget, ListWidget, BarsWidget, TextWidget, LinksWidget], Field(discriminator="type")]
 
 
 class DashboardFilterOptions(BaseModel):
