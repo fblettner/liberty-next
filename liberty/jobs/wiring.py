@@ -27,6 +27,7 @@ from liberty.jobs.scheduler import JobScheduler
 from liberty.jobs.schema import StepType
 from liberty.jobs.steps import (
     CallJobExecutor,
+    FileExportExecutor,
     FileLoadExecutor,
     HttpStepExecutor,
     LdapSyncExecutor,
@@ -127,6 +128,7 @@ def build_executors(
         StepType.LDAP_SYNC: LdapSyncExecutor(connectors),
         StepType.HTTP: HttpStepExecutor(),
         StepType.FILE_LOAD: FileLoadExecutor(connectors, settings=settings),
+        StepType.FILE_EXPORT: FileExportExecutor(connectors, settings=settings),
     }
     if state is not None:
         from liberty.jobs.steps.notify_step import NotifyStepExecutor

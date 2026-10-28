@@ -67,9 +67,9 @@ const TextArea = styled.textarea`
 `
 
 const STEP_TONE: Record<StepType, 'blue' | 'green' | 'orange' | 'purple' | 'neutral' | 'yellow'> = {
-  sql_copy: 'blue', sql_query: 'green', python: 'purple', ldap_sync: 'orange', http: 'neutral', call_job: 'yellow', file_load: 'green', report: 'purple', notify: 'blue',
+  sql_copy: 'blue', sql_query: 'green', python: 'purple', ldap_sync: 'orange', http: 'neutral', call_job: 'yellow', file_load: 'green', report: 'purple', notify: 'blue', file_export: 'orange',
 }
-const STEP_TYPES: StepType[] = ['sql_copy', 'sql_query', 'python', 'ldap_sync', 'http', 'call_job', 'file_load', 'report', 'notify']
+const STEP_TYPES: StepType[] = ['sql_copy', 'sql_query', 'python', 'ldap_sync', 'http', 'call_job', 'file_load', 'file_export', 'report', 'notify']
 
 /** A fresh blank step of *type* — the "+ Add" buttons append one of these. */
 function blankStep(type: StepType): StepConfig {
@@ -92,6 +92,8 @@ function blankStep(type: StepType): StepConfig {
       return { type, name: '', report: 'analysis:', app: '', model: '', format: 'xlsx', period: 'lastMonth' }
     case 'notify':
       return { type, name: '', recipients: [], subject: '', attach: ['*'], channels: ['portal', 'email'] }
+    case 'file_export':
+      return { type, name: '', connector: '', query: '', format: 'xlsx' }
   }
 }
 
@@ -111,6 +113,7 @@ function stepSummary(s: StepConfig): string {
     case 'file_load': return `${String(f.path ?? '').split('/').pop() || '?'} → ${ep(f.target)}`
     case 'report': return `${String(f.report ?? '')} → ${String(f.format ?? 'xlsx')}${f.as_user ? ` as ${f.as_user}` : f.as_role ? ` as role ${f.as_role}` : ''}`
     case 'notify': return `${((f.recipients as string[] | undefined) ?? []).join(', ') || '?'} · ${String(f.subject ?? '')}`
+    case 'file_export': return `${f.connector ?? '?'}.${f.query ?? '?'} → ${String(f.filename || f.query || '?')}.${String(f.format ?? 'xlsx')}`
     default: return ''
   }
 }
@@ -790,6 +793,70 @@ function ListInput({ value, onChange, placeholder, disabled }: { value: string[]
 // file_load — a spreadsheet / CSV into a table (liberty/jobs/steps/file_load.py). Path and
 // constants take ${params.x} / ${run.id}; columns map target ← header (or #position); the rest
 // match by name; replace_partition deletes the partitions the load carries, in one transaction.
+/** ``file_export``: a read query → an xlsx / csv file in the run's work area (``notify`` attaches
+ *  it), optionally copied to a folder. */
+function FileExportForm({ step, patch, sqlConnectors }: FormProps) {
+  const { t } = useTranslation()
+  const f = step as Record<string, unknown>
+  const connName = String(f.connector ?? '')
+  const conn = sqlConnectors.find((c) => c.name === connName)
+  const queries = conn && conn.type === 'sql' ? conn.queries.filter((q) => !q.writable) : []
+  const connOpts: SearchSelectOption[] = sqlConnectors.map((c) => ({ value: c.name, label: c.name, mono: c.name }))
+  const queryOpts: SearchSelectOption[] = queries.map((q) => ({ value: q.name, label: q.name, mono: q.name }))
+  const fmtOpts: SearchSelectOption[] = [{ value: 'xlsx', label: 'Excel (xlsx)' }, { value: 'csv', label: 'CSV' }]
+  const set = (k: string, v: unknown) => patch({ [k]: v } as Partial<StepConfig>)
+  return (
+    <>
+      <Grid>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.connector')}</FieldLabel>
+          <SearchSelect sort value={connName} onChange={(v) => set('connector', v)} options={connOpts} placeholder="—" />
+        </Field>
+        <Field $span={2}>
+          <FieldLabel>{t('nomaflow.steps.query')}</FieldLabel>
+          <SearchSelect sort allowCustom value={String(f.query ?? '')} onChange={(v) => set('query', v)} options={queryOpts} placeholder={t('nomaflow.steps.queryFreeText')} />
+        </Field>
+        <Field $span={3}>
+          <FieldLabel>{t('nomaflow.steps.params')}</FieldLabel>
+          <KeyValueEditor value={(f.params ?? {}) as Record<string, unknown>} onChange={(v) => set('params', v)} />
+        </Field>
+      </Grid>
+      <SubHead>{t('nomaflow.steps.file')}</SubHead>
+      <Grid>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.exportFormat')}</FieldLabel>
+          <SearchSelect value={String(f.format ?? 'xlsx')} onChange={(v) => set('format', v || 'xlsx')} options={fmtOpts} />
+        </Field>
+        <Field $span={2}>
+          <FieldLabel>{t('nomaflow.steps.exportFilename')}</FieldLabel>
+          <Input value={String(f.filename ?? '')} onChange={(e) => set('filename', e.target.value || undefined)} placeholder="sales-${params.period}" />
+        </Field>
+        {String(f.format ?? 'xlsx') === 'xlsx' ? (
+          <Field>
+            <FieldLabel>{t('nomaflow.steps.sheet')}</FieldLabel>
+            <Input value={String(f.sheet ?? '')} onChange={(e) => set('sheet', e.target.value || undefined)} placeholder={String(f.query ?? '')} />
+          </Field>
+        ) : (
+          <>
+            <Field>
+              <FieldLabel>{t('nomaflow.steps.delimiter')}</FieldLabel>
+              <Input value={String(f.delimiter ?? '')} onChange={(e) => set('delimiter', e.target.value || undefined)} placeholder=";" />
+            </Field>
+            <Field>
+              <FieldLabel>{t('nomaflow.steps.encoding')}</FieldLabel>
+              <Input value={String(f.encoding ?? 'utf-8-sig')} onChange={(e) => set('encoding', e.target.value || 'utf-8-sig')} />
+            </Field>
+          </>
+        )}
+        <Field $span={3}>
+          <FieldLabel>{t('nomaflow.steps.exportDir')}</FieldLabel>
+          <Input value={String(f.export_dir ?? '')} onChange={(e) => set('export_dir', e.target.value || undefined)} placeholder="/data/out/${params.period}" />
+        </Field>
+      </Grid>
+    </>
+  )
+}
+
 function FileLoadForm({ step, patch, sqlConnectors }: FormProps) {
   const { t } = useTranslation()
   const f = step as Record<string, unknown>
@@ -988,6 +1055,7 @@ function StepCard({ step, index, count, sqlConnectors, onPatch, onMove, onDuplic
           {step.type === 'call_job' && <CallJobForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
           {step.type === 'file_load' && <FileLoadForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
           {step.type === 'report' && <ReportForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
+          {step.type === 'file_export' && <FileExportForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
           {step.type === 'notify' && <NotifyForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
         </Body>
       )}

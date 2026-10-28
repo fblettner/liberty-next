@@ -22,7 +22,8 @@ const POLL_MS = 2000
 const Body = styled.div`display: flex; flex-direction: column; gap: 14px; min-height: 0; flex: 1; overflow: auto; padding-bottom: 12px;`
 const Card = styled.section`border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.card}; padding: 14px;`
 const Title = styled.h3`margin: 0 0 10px; font-size: ${fontSize.sm}; text-transform: uppercase; letter-spacing: 0.04em; color: ${colors.text.muted};`
-const Row = styled.div`display: flex; align-items: center; gap: 10px; flex-wrap: wrap;`
+// the fields and the Run button share a baseline: the button lines up with the inputs, not with their labels
+const Row = styled.div`display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap;`
 const Field = styled.label`display: flex; flex-direction: column; gap: 4px; min-width: 260px; font-size: ${fontSize.sm}; color: ${colors.text.secondary};`
 const LogBox = styled.pre`
   margin: 0; padding: 12px; max-height: 420px; min-height: 120px; overflow: auto;

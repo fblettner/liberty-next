@@ -81,6 +81,7 @@ def test_build_executors_covers_implemented_step_types(connectors) -> None:
         StepType.LDAP_SYNC,
         StepType.HTTP,
         StepType.FILE_LOAD,
+        StepType.FILE_EXPORT,
     }
 
 

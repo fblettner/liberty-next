@@ -56,6 +56,12 @@
 - nomaflow: pausing or resuming a job (`POST /admin/jobs/{id}/enabled`) edits that job in
   jobs.toml and re-registers its schedule, without a full reload; the Jobs page uses it too. The
   job editor's Alerts block is laid out on a grid again.
+- Jobs: a `file_export` step — a named read query written to an xlsx or csv file in the run's
+  work area (the `notify` step attaches it, Run detail downloads it), optionally copied to
+  `export_dir`. Binds from the run parameters and templated `params`; the file name and folder
+  take `${params.x}` / `${run.id}`; the rows stream from the database, headers are the column
+  labels. A form in the step editor.
+- nomaflow: on a user's job page, the Run button lines up with the fields.
 
 ## 7.0.60 — unreleased
 

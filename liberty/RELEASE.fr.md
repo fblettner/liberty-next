@@ -69,6 +69,13 @@
 - nomaflow : mettre en pause ou reprendre une tâche (`POST /admin/jobs/{id}/enabled`) modifie
   cette tâche dans jobs.toml et réenregistre sa planification, sans rechargement complet ; la page
   Tâches l'utilise aussi. Le bloc Alertes de l'éditeur de tâche est de nouveau aligné.
+- Tâches : une étape `file_export` — une requête de lecture nommée écrite dans un fichier xlsx ou
+  csv de l'espace de travail de l'exécution (l'étape `notify` le joint, le détail d'exécution le
+  télécharge), copié en option dans `export_dir`. Paramètres liés depuis ceux de l'exécution et
+  des `params` avec modèles ; le nom du fichier et le dossier acceptent `${params.x}` /
+  `${run.id}` ; les lignes arrivent en flux depuis la base, les en-têtes sont les libellés des
+  colonnes. Un formulaire dans l'éditeur d'étapes.
+- nomaflow : sur la page de tâche d'un utilisateur, le bouton Exécuter est aligné sur les champs.
 
 ## 7.0.60 — non publiée
 

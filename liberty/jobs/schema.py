@@ -47,6 +47,9 @@ class StepType(str, Enum):
     # file in the run's work area, then mail it (``notify`` attaches the run's files).
     REPORT = "report"
     NOTIFY = "notify"
+    # A named read query → an xlsx / csv file in the run's work area (attached by ``notify``),
+    # optionally copied to a folder.
+    FILE_EXPORT = "file_export"
 
 
 class CopyMode(str, Enum):
@@ -253,13 +256,18 @@ class Step(BaseModel):
     report: str | None = None
     app: str | None = None
     model: str | None = None
-    format: Literal["xlsx", "pdf"] | None = None
+    format: Literal["xlsx", "pdf", "csv"] | None = None   # report: xlsx | pdf; file_export: xlsx | csv
     period: str | None = None
     window_from: str | None = None
     window_to: str | None = None
     as_user: str | None = None
     as_role: str | None = None
     filename: str | None = None
+    # file_export — ``connector`` + ``query`` (a read query; binds from ``params``, ``${params.x}``
+    # templates and the run parameters), written as ``format`` (xlsx | csv) to the run's work area
+    # as ``filename`` (default: the query name; ``${params.x}`` / ``${run.id}`` allowed), ``sheet``
+    # / ``delimiter`` / ``encoding`` as for file_load; ``export_dir`` also copies it to that folder.
+    export_dir: str | None = None
     # notify — the recipients (``user:`` / ``role:`` / ``email:``), the subject / body (with
     # ``{JOB}`` ``{RUN_ID}`` ``{FILES}`` placeholders), the run files to attach (``["*"]`` = every
     # file this run produced) and the channels.
@@ -308,8 +316,14 @@ class Step(BaseModel):
                 raise ValueError(f"step {self.name!r}: a plugin report is report:<scope>:<id>")
             if (self.window_from is None) != (self.window_to is None):
                 raise ValueError(f"step {self.name!r}: `window_from` and `window_to` go together")
+            if self.format == "csv":
+                raise ValueError(f"step {self.name!r}: a report renders xlsx or pdf")
         elif self.type is StepType.NOTIFY:
             self._require("recipients", "subject")
+        elif self.type is StepType.FILE_EXPORT:
+            self._require("connector", "query")
+            if self.format not in (None, "xlsx", "csv"):
+                raise ValueError(f"step {self.name!r}: a file_export writes xlsx or csv")
         elif self.type is StepType.FILE_LOAD:
             self._require("target")   # the file comes from `path`, `watch_dir`, or an upload at run time
             if (self.control_column is None) != (self.control_total is None):
