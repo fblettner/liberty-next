@@ -13,7 +13,7 @@ import { findMenuLabel } from '../../services/menuLabels'
 import { splitJobTarget } from '../../services/menuPath'
 import { toMulti } from '../../services/multiChoice'
 import { MultiChoice } from '../../common/MultiChoice'
-import { downloadRunFile, durationOf, filesInLog, getJob, getRun, isActive, runJob, uploadFile, type JobRunDetail, type JobRunRow, type UserJob } from '../../services/jobRunner'
+import { downloadRunFile, downloadRunInput, durationOf, filesInLog, getJob, getRun, isActive, runJob, uploadFile, type JobRunDetail, type JobRunRow, type UserJob } from '../../services/jobRunner'
 import { STATE_TONE, relative } from '../Nomaflow/util'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -144,6 +144,12 @@ export default function JobRunner({ jobId: target }: { jobId: string }) {
           <Title>{t('jobrun.log')}{detail ? <> · <Tag $tone={STATE_TONE[detail.run.state]}>{t(`jobrun.state.${detail.run.state}`)}</Tag> {detail.run.state === 'QUEUED' ? t('jobrun.queued') : ''}</> : null}</Title>
           {detail ? <LogBox ref={logRef}>{detail.logs || t('jobrun.noLog')}</LogBox> : <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('jobrun.noRuns')}</span>}
           {detail?.run.error_message && <div style={{ marginTop: 8, fontSize: fontSize.sm }}><Err>{detail.run.error_message}</Err></div>}
+          {(detail?.inputs ?? []).length > 0 && (
+            <Row style={{ marginTop: 10 }}>
+              <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('jobrun.uploaded')}</span>
+              {detail!.inputs!.map((x) => <Button key={x.step} $size="sm" $variant="ghost" onClick={() => void downloadRunInput(jobId, detail!.run.id, x.step, x.name).catch((e) => setError(String(e)))}><Download size={12} /> {x.name}</Button>)}
+            </Row>
+          )}
           {runFiles.length > 0 && (
             <Row style={{ marginTop: 10 }}>
               <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('jobrun.files')}</span>

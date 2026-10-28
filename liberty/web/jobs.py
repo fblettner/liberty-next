@@ -23,6 +23,8 @@ the brief JSON the reload endpoint returns (a couple of fields, no envelope).
 
 from __future__ import annotations
 
+import re
+
 import logging
 from pathlib import Path
 from datetime import datetime
@@ -418,6 +420,13 @@ async def _run_file_response(request: Request, run_id: str, name: str, *, job_id
     return FileResponse(path, filename=name, media_type="text/csv" if path.suffix == ".csv" else "application/octet-stream")
 
 
+@router.get("/runs/{run_id}/inputs/{step}", summary="Download a run's uploaded file")
+async def download_run_input(run_id: str, step: str, request: Request, _: Superuser):
+    """The spreadsheet / CSV uploaded for a ``file_load`` step of this run (kept in the job's
+    ``uploads`` folder of the work area)."""
+    return await _run_input_response(request, run_id, step)
+
+
 @router.post("/{job_id}/enabled", summary="Pause or resume a job")
 async def set_job_enabled(job_id: str, request: Request, principal: Superuser, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     """``{enabled: bool}`` — pause (``false``) or resume a job's own schedule: the one job's
@@ -656,7 +665,59 @@ async def _run_detail(request: Request, run_id: str, *, job_id: str | None = Non
             row = await session.get(RunLog, run_id)
         logs = row.logs if row is not None else ""
 
-    return {"run": run_payload, "steps": step_payload, "logs": logs, "overrides": overrides}
+    inputs = _run_inputs(request, run_payload["job_id"], overrides)
+    return {"run": run_payload, "steps": step_payload, "logs": logs, "overrides": overrides, "inputs": inputs}
+
+
+_STAMP = re.compile(r"^\d{8}-\d{6}-")
+
+
+def _input_path(request: Request, job_id: str, overrides: dict[str, Any], step: str) -> Path | None:
+    """The file uploaded for *step* of a run (its ``op_kwargs[step].file``), only when it lies in
+    the job's ``uploads`` folder and still exists — anything else is not served."""
+    from liberty.jobs.files import job_dir
+    raw = ((overrides.get("op_kwargs") or {}).get(step) or {}).get("file")
+    if not isinstance(raw, str) or not raw:
+        return None
+    uploads = (job_dir(request.app.state.settings, job_id) / "uploads").resolve()
+    p = Path(raw).resolve()
+    return p if uploads in p.parents and p.is_file() else None
+
+
+def _run_inputs(request: Request, job_id: str, overrides: dict[str, Any]) -> list[dict[str, Any]]:
+    """The files uploaded for a run, per ``file_load`` step: ``{step, name, size}`` (the name as
+    the user sent it, without the upload's time stamp)."""
+    out: list[dict[str, Any]] = []
+    for step in (overrides.get("op_kwargs") or {}):
+        p = _input_path(request, job_id, overrides, step)
+        if p is not None:
+            out.append({"step": step, "name": _STAMP.sub("", p.name), "size": p.stat().st_size})
+    return out
+
+
+async def _run_input_response(request: Request, run_id: str, step: str, *, job_id: str | None = None):
+    """The file uploaded for *step* of a run, as a download; with *job_id* the run must belong to
+    that job (the user route)."""
+    import json
+
+    from fastapi.responses import FileResponse
+
+    from liberty.jobs.models import JobRun, RunOverrides
+
+    comps = _components(request)
+    async with comps.db.session() as s:
+        run = await s.get(JobRun, run_id)
+        ov = await s.get(RunOverrides, run_id)
+    if run is None or (job_id is not None and run.job_id != job_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"unknown run {run_id!r}")
+    try:
+        overrides = json.loads(ov.overrides_json) if ov is not None and ov.overrides_json else {}
+    except json.JSONDecodeError:
+        overrides = {}
+    path = _input_path(request, run.job_id, overrides, step)
+    if path is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no uploaded file for step {step!r} of run {run_id!r}")
+    return FileResponse(path, filename=_STAMP.sub("", path.name), media_type="application/octet-stream")
 
 
 @router.get("/callables", summary="List python callables")
@@ -943,6 +1004,12 @@ async def user_run_detail(job_id: str, run_id: str, request: Request, principal:
     out = await _run_detail(request, run_id, job_id=job_id)
     out.pop("overrides", None)
     return out
+
+
+@user_router.get("/{job_id}/runs/{run_id}/inputs/{step}", summary="Download a run's uploaded file")
+async def user_run_input(job_id: str, run_id: str, step: str, request: Request, principal: CurrentPrincipal):
+    _user_job(request, job_id, principal)
+    return await _run_input_response(request, run_id, step, job_id=job_id)
 
 
 @user_router.get("/{job_id}/runs/{run_id}/files/{name}", summary="Download a run's file")

@@ -15,7 +15,7 @@ import { api, ApiError } from '../../api/client'
 import { PageLayout, Button, Banner, Centered, Card, Tag, Mono } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { RunDetailResponse, RunState } from './types'
-import { STATE_TONE, downloadRunFile } from './util'
+import { STATE_TONE, downloadRunFile, downloadRunInput } from './util'
 
 const POLL_MS = 2000
 const ACTIVE: RunState[] = ['RUNNING', 'QUEUED']
@@ -259,6 +259,7 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
                 const childRunId = s.extras?.child_run_id
                 const childJobId = s.extras?.child_job_id
                 const rejectsFile = s.extras?.rejects_file
+                const input = (data.inputs ?? []).find((x) => x.step === s.step_name)
                 const reportFile = s.step_type === 'report' ? s.extras?.file : undefined
                 const attached = s.step_type === 'notify' && Array.isArray(s.extras?.attached) ? (s.extras.attached as string[]) : []
                 const loadCounts = s.step_type === 'file_load' && s.extras && typeof s.extras.read === 'number'
@@ -281,6 +282,13 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
                         </>
                       )}
                       {loadCounts && <div style={{ fontSize: fontSize.micro, color: colors.text.muted }}>{loadCounts}</div>}
+                      {input && (
+                        <div>
+                          <ChildRunLink onClick={() => { if (runId) void downloadRunInput(runId, input.step, input.name).catch(() => undefined) }} title={t('nomaflow.run.uploadedFile')}>
+                            <Download size={11} /> {input.name}
+                          </ChildRunLink>
+                        </div>
+                      )}
                       {rejectsFile && (
                         <div>
                           <ChildRunLink onClick={() => { if (runId) void downloadRunFile(runId, rejectsFile).catch(() => undefined) }} title={rejectsFile}>

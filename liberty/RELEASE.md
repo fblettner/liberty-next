@@ -1,5 +1,12 @@
 # Liberty Next — Release notes
 
+## 7.0.62 — unreleased
+
+- nomaflow: the spreadsheet / CSV uploaded for a run can be downloaded again — under the
+  `file_load` step on Run detail, and on the user's job page ("File loaded"). Uploads are kept in
+  the job's work area; `GET /admin/jobs/runs/{run}/inputs/{step}` and
+  `GET /api/jobs/{job}/runs/{run}/inputs/{step}` serve them.
+
 ## 7.0.61 — unreleased
 
 - Jobs: a plugin report step (`report:<scope>:<id>`) takes the run's job params and user

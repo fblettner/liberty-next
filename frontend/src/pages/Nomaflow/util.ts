@@ -38,6 +38,16 @@ export async function uploadJobFile(jobId: string, file: File): Promise<{ name: 
 }
 
 /** Download a file a step left for a run (the file_load rejects report) through the authenticated API. */
+/** The file uploaded for a run's file_load *step*, saved as *name* (admin route). */
+export async function downloadRunInput(runId: string, step: string, name: string): Promise<void> {
+  const res = await fetch(`/admin/jobs/runs/${encodeURIComponent(runId)}/inputs/${encodeURIComponent(step)}`, { headers: { ...authHeaders() } })
+  if (!res.ok) throw new Error(`download failed: ${res.status}`)
+  const url = URL.createObjectURL(await res.blob())
+  const a = document.createElement('a')
+  a.href = url; a.download = name; a.click()
+  URL.revokeObjectURL(url)
+}
+
 export async function downloadRunFile(runId: string, name: string): Promise<void> {
   const res = await fetch(`/admin/jobs/runs/${encodeURIComponent(runId)}/files/${encodeURIComponent(name)}`, { headers: { ...authHeaders() } })
   if (!res.ok) throw new Error(`download failed: ${res.status}`)

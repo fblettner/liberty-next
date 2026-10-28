@@ -1,5 +1,13 @@
 # Liberty Next — Notes de version
 
+## 7.0.62 — non publiée
+
+- nomaflow : le classeur / CSV téléversé pour une exécution peut être retéléchargé — sous l'étape
+  `file_load` du détail d'exécution, et sur la page de tâche de l'utilisateur (« Fichier
+  chargé »). Les fichiers téléversés restent dans l'espace de travail de la tâche ;
+  `GET /admin/jobs/runs/{run}/inputs/{step}` et `GET /api/jobs/{job}/runs/{run}/inputs/{step}`
+  les servent.
+
 ## 7.0.61 — non publiée
 
 - Tâches : une étape de rapport de plugin (`report:<scope>:<id>`) reçoit les paramètres de la

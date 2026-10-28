@@ -203,5 +203,9 @@ export interface RunDetailResponse {
     step_enabled?: Record<string, boolean>
     parent_chain?: Array<[string, string]>
   }
+  /** The files uploaded for this run, per file_load step (the name as sent). */
+  inputs?: RunInput[]
 }
+
+export interface RunInput { step: string; name: string; size: number }
 

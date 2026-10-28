@@ -12,7 +12,8 @@ export interface JobRunRow {
   started_at: string | null; finished_at: string | null; rows_affected: number | null; error_message: string | null
 }
 export interface JobStepRow { step_index: number; step_name: string; step_type: string; attempt: number; state: RunState; rows_affected: number | null; error_message: string | null }
-export interface JobRunDetail { run: JobRunRow; steps: JobStepRow[]; logs: string }
+export interface JobRunInput { step: string; name: string; size: number }
+export interface JobRunDetail { run: JobRunRow; steps: JobStepRow[]; logs: string; inputs?: JobRunInput[] }
 
 export const ACTIVE_STATES: RunState[] = ['RUNNING', 'QUEUED']
 export const isActive = (s: RunState | undefined): boolean => !!s && ACTIVE_STATES.includes(s)
@@ -48,6 +49,15 @@ export function runJob(jobId: string, files: Record<string, string>, params: Rec
  *  names them, the page offers them as downloads. */
 export function runFileUrl(jobId: string, runId: string, name: string): string {
   return `/api/jobs/${enc(jobId)}/runs/${enc(runId)}/files/${enc(name)}`
+}
+
+/** The file a user uploaded for a run's file_load *step*, saved as *name*. */
+export async function downloadRunInput(jobId: string, runId: string, step: string, name: string): Promise<void> {
+  const res = await fetch(`/api/jobs/${enc(jobId)}/runs/${enc(runId)}/inputs/${enc(step)}`, { headers: { ...authHeaders() } })
+  if (!res.ok) throw new Error(`download failed: ${res.status}`)
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(await res.blob()); a.download = name; a.click()
+  URL.revokeObjectURL(a.href)
 }
 
 export async function downloadRunFile(jobId: string, runId: string, name: string): Promise<void> {

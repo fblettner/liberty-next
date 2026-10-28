@@ -1151,6 +1151,14 @@ def test_user_job_routes(env) -> None:
         assert [x["id"] for x in runs] == [run_id]
         assert client.get(f"/api/jobs/manual-only/runs/{run_id}", headers=h).status_code == 404
         assert client.get(f"/api/jobs/load-file/runs/{run_id}/files/{run_id}-nope.csv", headers=h).status_code == 404
+        # the uploaded file: listed on the run (the name as sent), downloadable by the user and the admin
+        assert d["inputs"] == [{"step": "load", "name": "items.csv", "size": len(b"code,name\nA,Alpha\n")}]
+        got = client.get(f"/api/jobs/load-file/runs/{run_id}/inputs/load", headers=h)
+        assert got.status_code == 200 and got.content == b"code,name\nA,Alpha\n" and "items.csv" in got.headers["content-disposition"]
+        assert client.get(f"/admin/jobs/runs/{run_id}/inputs/load", headers=_h(client, "admin")).content == b"code,name\nA,Alpha\n"
+        assert client.get(f"/api/jobs/load-file/runs/{run_id}/inputs/nope", headers=h).status_code == 404
+        assert client.get(f"/api/jobs/manual-only/runs/{run_id}/inputs/load", headers=h).status_code == 404
+        assert client.get(f"/admin/jobs/runs/{run_id}/inputs/load", headers=h).status_code == 403
         # a plain manual job runs without files
         r = client.post("/api/jobs/manual-only/run", json={}, headers=h)
         assert r.status_code == 200, r.text
