@@ -161,7 +161,21 @@ class ReportStepExecutor:
         if fmt not in d.formats:
             raise StepFailed(f"report: {ref} does not render {fmt} (supported: {list(d.formats)})")
         fn = registry.get_callable(scope, report_id)
-        kwargs: dict[str, Any] = dict(step.params)
+        # the step's ``params``, then what the run carries in ``op_kwargs`` (the job-level
+        # ``params``, a per-run override, a user parameter from the job's page) — later wins;
+        # typed by the report's declared parameters (a user parameter arrives as text)
+        kwargs: dict[str, Any] = {**dict(step.params), **dict(step.op_kwargs)}
+        for p in getattr(d, "params", ()) or ():
+            v = kwargs.get(p.name)
+            if isinstance(v, str) and getattr(p, "type", None) in ("int", "float"):
+                v = v.strip()
+                if v == "":
+                    kwargs.pop(p.name)
+                else:
+                    try:
+                        kwargs[p.name] = int(v) if p.type == "int" else float(v)
+                    except ValueError as exc:
+                        raise StepFailed(f"report: parameter {p.name!r} must be a number, got {v!r}") from exc
         try:
             sig = inspect.signature(fn, eval_str=True)
             names = sig.parameters

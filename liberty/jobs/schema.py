@@ -407,17 +407,19 @@ class JobPreset(BaseModel):
 
 class UserParam(BaseModel):
     """A parameter a USER sets when running the job from its menu item (the ``job`` page) —
-    the only per-run override that side has. The value lands in ``op_kwargs[step][name]``.
-    ``choices`` lists fixed values; ``choices_from = "explorer_models:<app>"`` offers the app's
-    Explorer models (value = the model id, label = its label). A blank value means "not set"
-    (the callable's default, e.g. every model)."""
+    the only per-run override that side has — and the dropdown the Run-with-parameters modal
+    shows for it. With a ``step`` the value lands in ``op_kwargs[step][name]``; without, it is a
+    job-level parameter (``params``, merged under every step). ``choices`` lists fixed values;
+    ``choices_from`` reads them: ``explorer_models:<app>`` (the app's Explorer models) or
+    ``query:<connector>/<query>:<value column>:<label column>`` (the rows of a read query, e.g.
+    the applications of nomasx1). A blank value means "not set" (the job's own default)."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(..., min_length=1, description="The op_kwargs key the value is written to.")
     label: str | None = Field(default=None, description="What the page shows (default: the name).")
     l: dict[str, str] = Field(default_factory=dict, description="Per-language label overrides.")
-    step: str = Field(..., min_length=1, description="The step receiving the value.")
+    step: str | None = Field(default=None, description="The step receiving the value; blank = a job-level parameter (every step).")
     default: str | None = Field(default=None, description="Pre-selected value.")
     required: bool = False
     choices: list[str] = Field(default_factory=list, description="Fixed choices (a dropdown).")

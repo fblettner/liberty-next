@@ -187,17 +187,15 @@ async def list_jobs(request: Request, _: Superuser) -> dict[str, Any]:
     in_flight = scheduler.in_flight_job_ids
     next_fires = scheduler.next_fire_times
     last_runs = await _latest_runs_by_job(comps.db)
+    cache: dict = {}
+    jobs_out = []
+    for j in registry.jobs():
+        summary = _job_summary(j, scheduled_ids=scheduled_ids, in_flight_ids=in_flight, last_run=last_runs.get(j.id), next_fires=next_fires)
+        if j.user_params:
+            summary["user_params"] = await _user_params(request, j, request.headers.get("x-liberty-lang"), cache=cache)
+        jobs_out.append(summary)
     return {
-        "jobs": [
-            _job_summary(
-                j,
-                scheduled_ids=scheduled_ids,
-                in_flight_ids=in_flight,
-                last_run=last_runs.get(j.id),
-                next_fires=next_fires,
-            )
-            for j in registry.jobs()
-        ],
+        "jobs": jobs_out,
         "active_run_ids": sorted(runner.active_run_ids),
     }
 
@@ -690,9 +688,13 @@ def _upload_steps(job) -> list[dict[str, Any]]:
     return out
 
 
-def _user_params(request: Request, job, language: str | None) -> list[dict[str, Any]]:
-    """The job's ``user_params`` with their choices resolved: fixed ``choices``, or
-    ``choices_from = "explorer_models:<app>"`` → the app's Explorer models (id → label)."""
+async def _user_params(request: Request, job, language: str | None, *, cache: dict | None = None) -> list[dict[str, Any]]:
+    """The job's ``user_params`` with their choices resolved: fixed ``choices``,
+    ``choices_from = "explorer_models:<app>"`` (the app's Explorer models) or
+    ``"query:<connector>/<query>:<value column>:<label column>"`` (a read query's rows; a query
+    that fails yields no choice — the field then takes free text). *cache* shares the query
+    results between the jobs of one listing."""
+    cache = {} if cache is None else cache
     out: list[dict[str, Any]] = []
     for p in job.user_params:
         choices: list[dict[str, str]] = [{"value": c, "label": c} for c in p.choices]
@@ -703,7 +705,38 @@ def _user_params(request: Request, job, language: str | None) -> list[dict[str, 
                 for app, mid, m in (explorer.items() if explorer is not None else []):
                     if app == arg:
                         choices.append({"value": mid, "label": m.label or mid})
+            elif kind == "query":
+                if arg not in cache:
+                    cache[arg] = await _query_choices(request, arg)
+                choices.extend(cache[arg])
         out.append({"name": p.name, "label": p.label_for(language), "step": p.step, "default": p.default, "required": p.required, "choices": choices})
+    return out
+
+
+async def _query_choices(request: Request, spec: str) -> list[dict[str, str]]:
+    """``<connector>/<query>:<value column>:<label column>`` → ``[{value, label}]`` (columns
+    matched without case); [] when the query is missing, writable or fails (logged)."""
+    target, _, cols = spec.partition(":")
+    connector, _, query = target.partition("/")
+    value_col, _, label_col = cols.partition(":")
+    if not (connector and query and value_col):
+        return []
+    try:
+        conn = request.app.state.connectors.sql(connector)
+        if conn.get_query(query).writable:
+            return []
+        res = await conn.execute(query, {})
+    except Exception as exc:  # noqa: BLE001 — a choice list never breaks the page
+        _log.warning("nomaflow job choices %s: %s", spec, exc)
+        return []
+    out: list[dict[str, str]] = []
+    for row in res.rows:
+        low = {str(k).lower(): v for k, v in row.items()}
+        v = low.get(value_col.lower())
+        if v is None:
+            continue
+        lab = low.get((label_col or value_col).lower())
+        out.append({"value": str(v).strip(), "label": f"{lab} ({str(v).strip()})" if lab not in (None, "") and str(lab) != str(v) else str(v).strip()})
     return out
 
 
@@ -725,7 +758,7 @@ async def user_get_job(job_id: str, request: Request, principal: CurrentPrincipa
     return {
         "job": {
             "id": job.id, "description": job.description, "tags": list(job.tags), "uploads": _upload_steps(job), "in_flight": in_flight,
-            "params": _user_params(request, job, request.headers.get("x-liberty-lang")),
+            "params": await _user_params(request, job, request.headers.get("x-liberty-lang")),
         },
         "runs": runs,
     }
@@ -752,7 +785,8 @@ async def user_run(job_id: str, request: Request, principal: CurrentPrincipal, b
     params = (body or {}).get("params") or {}
     if not isinstance(params, dict):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="`params` must be an object of `{name: value}`")
-    declared = {p["name"]: p for p in _user_params(request, job, None)}
+    declared = {p["name"]: p for p in await _user_params(request, job, None)}
+    job_level: dict[str, Any] = {}
     for name, value in params.items():
         p = declared.get(name)
         if p is None:
@@ -760,7 +794,13 @@ async def user_run(job_id: str, request: Request, principal: CurrentPrincipal, b
         v = "" if value is None else str(value).strip()
         if p["choices"] and v and v not in {c["value"] for c in p["choices"]}:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"{name!r}: {v!r} is not one of the choices")
-        overrides.setdefault(p["step"], {})[name] = v
+        if not v:
+            continue                                   # blank = not set: the job's own default
+        typed: Any = int(v) if v.lstrip("-").isdigit() and isinstance(job.params.get(name), int) else v
+        if p["step"]:
+            overrides.setdefault(p["step"], {})[name] = typed
+        else:
+            job_level[name] = typed
     for p in declared.values():
         if p["required"] and not (params.get(p["name"]) or p["default"]):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"{p['name']!r} is required")
@@ -776,7 +816,7 @@ async def user_run(job_id: str, request: Request, principal: CurrentPrincipal, b
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"{step!r}: upload the file first")
         overrides.setdefault(step, {})["file"] = str(p)
     _log.info("nomaflow.user fire job=%s triggered_by=%s overrides=%s", job_id, principal.username, {s: sorted(k) for s, k in overrides.items()} or None)
-    run_id = await comps.scheduler.fire_now_async(job, triggered_by=principal.username, op_kwargs_overrides=overrides or None)
+    run_id = await comps.scheduler.fire_now_async(job, triggered_by=principal.username, op_kwargs_overrides=overrides or None, params_override=job_level or None)
     return {"job_id": job_id, "run_id": run_id, "triggered_by": principal.username, "status": "queued"}
 
 

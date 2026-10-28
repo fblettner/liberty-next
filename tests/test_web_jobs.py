@@ -137,6 +137,19 @@ name = "note"
 step = "after"
 
 [[jobs]]
+id = "pick-app"
+description = "A job-level parameter picked from a read query (the applications of an app)."
+params = { apps_id = 1 }
+[[jobs.steps]]
+type = "python"
+name = "echo"
+callable = "tests.test_web_jobs:_record_kwargs"
+[[jobs.user_params]]
+name = "apps_id"
+label = "Application"
+choices_from = "query:db/answer:ANSWER:ANSWER"
+
+[[jobs]]
 id = "shared-params"
 description = "Job-level params merged under every step's op_kwargs (step wins on conflict)."
 params = { apps_id = 99, source_connector = "src_default" }
@@ -202,7 +215,7 @@ def _seed_db(db_url: str) -> None:
             await svc.get_or_create_role("admin", permissions=["*"])
             await svc.create_user("admin", password="adminpw", is_superuser=True, roles=["admin"])
             await svc.create_user("reader", password="readerpw")
-            await svc.get_or_create_role("loader", permissions=["job:load-file", "job:manual-only"])
+            await svc.get_or_create_role("loader", permissions=["job:load-file", "job:manual-only", "job:pick-app"])
             await svc.create_user("loader", password="loaderpw", roles=["loader"])
         await pools.dispose()
     asyncio.run(go())
@@ -254,7 +267,7 @@ def test_list_jobs_returns_catalogue_with_operational_flags(env) -> None:
         assert r.status_code == 200
         body = r.json()
         ids = {j["id"]: j for j in body["jobs"]}
-        assert set(ids) == {"ping", "manual-only", "disabled", "echo-kwargs", "load-file", "shared-params"}
+        assert set(ids) == {"ping", "manual-only", "disabled", "echo-kwargs", "load-file", "pick-app", "shared-params"}
         # Only the enabled+scheduled job is registered with the scheduler
         assert ids["ping"]["registered_with_scheduler"] is True
         assert ids["manual-only"]["registered_with_scheduler"] is False
@@ -394,7 +407,7 @@ def test_get_jobs_parsed_returns_catalogue(env) -> None:
         body = r.json()
         assert body["path"].endswith("jobs.toml")
         ids = {j["id"] for j in body["jobs"]}
-        assert ids == {"ping", "manual-only", "disabled", "echo-kwargs", "load-file", "shared-params"}
+        assert ids == {"ping", "manual-only", "disabled", "echo-kwargs", "load-file", "pick-app", "shared-params"}
 
 
 def test_get_jobs_parsed_requires_superuser(env) -> None:
@@ -970,7 +983,7 @@ def test_admin_reload_includes_nomaflow_state(env) -> None:
         assert "nomaflow" in body
         nf = body["nomaflow"]
         assert nf["enabled"] is True
-        assert set(nf["jobs"]) == {"ping", "manual-only", "disabled", "echo-kwargs", "load-file", "shared-params"}
+        assert set(nf["jobs"]) == {"ping", "manual-only", "disabled", "echo-kwargs", "load-file", "pick-app", "shared-params"}
         assert nf["scheduled_jobs"] == ["ping"]
 
 
@@ -1117,3 +1130,27 @@ def test_user_job_routes(env) -> None:
         # a plain manual job runs without files
         r = client.post("/api/jobs/manual-only/run", json={}, headers=h)
         assert r.status_code == 200, r.text
+
+
+def test_job_level_param_with_query_choices(env) -> None:
+    """A ``user_params`` entry without a step is a job-level parameter: its choices come from a
+    read query (``query:<connector>/<query>:<value>:<label>``), the admin listing carries them for
+    the Run-with-parameters modal, and a user's pick reaches every step typed like the default."""
+    import time
+    app, _ = env
+    with TestClient(app) as client:
+        admin = client.get("/admin/jobs", headers=_h(client, "admin")).json()["jobs"]
+        pick = next(j for j in admin if j["id"] == "pick-app")
+        assert pick["user_params"] == [{"name": "apps_id", "label": "Application", "step": None, "default": None, "required": False, "choices": [{"value": "42", "label": "42"}]}]
+        assert "user_params" not in next(j for j in admin if j["id"] == "ping")
+        h = _h(client, "loader")
+        assert client.post("/api/jobs/pick-app/run", json={"params": {"apps_id": "7"}}, headers=h).status_code == 422
+        RECORDED_KWARGS.clear()
+        r = client.post("/api/jobs/pick-app/run", json={"params": {"apps_id": "42"}}, headers=h)
+        assert r.status_code == 200, r.text
+        for _ in range(100):
+            d = client.get(f"/api/jobs/pick-app/runs/{r.json()['run_id']}", headers=h).json()
+            if d["run"]["state"] not in ("QUEUED", "RUNNING"):
+                break
+            time.sleep(0.05)
+        assert d["run"]["state"] == "SUCCEEDED" and RECORDED_KWARGS.get("apps_id") == 42

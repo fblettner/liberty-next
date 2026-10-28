@@ -9,9 +9,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock, ChevronDown, ChevronRight, Copy, Download, Trash2 } from 'lucide-react'
+import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock, ChevronDown, ChevronRight, Copy, Download, Trash2, Search } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { PageLayout, Button, Banner, Centered, Card, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, FileInput, Input, Select, SearchSelect, type SearchSelectOption, useModals } from '../../common'
+import { PageLayout, Button, Banner, Centered, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, FileInput, Input, Select, SearchSelect, type SearchSelectOption, useModals } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { JobSummary, JobsListResponse, JobsParsedResponse, StepConfig } from './types'
@@ -26,36 +26,37 @@ const ToolbarSpacer = styled.div`flex: 1;`
 // Tag filter chip row — sits between the action toolbar and the job list. Each chip
 // toggles a tag's membership in the active filter set; the union (any-match) of all
 // active tags is shown. Active chip = blue tone; inactive = muted ghost.
-const TagFilterRow = styled.div`
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;
-`
-const TagFilterLabel = styled.span`
-  font-size: ${fontSize.sm}; color: ${colors.text.muted}; margin-right: 4px;
-`
-const TagFilterChip = styled.button<{ $active?: boolean }>`
-  font-family: ${fonts.mono}; font-size: ${fontSize.sm};
-  height: 24px; padding: 0 10px; cursor: pointer; border-radius: ${radius.sm};
-  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : colors.border)};
-  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
-  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
-  &:hover { color: ${colors.text.primary}; }
-`
 const TagFilterClear = styled.button`
   font-size: ${fontSize.sm}; padding: 0 6px; height: 24px; cursor: pointer;
   background: transparent; border: none; color: ${colors.text.muted};
   &:hover { color: ${colors.text.primary}; }
 `
 const List = styled.div`display: flex; flex-direction: column; gap: 10px;`
-const JobCard = styled(Card)`display: flex; flex-direction: column; gap: 8px;`
-const CardTop = styled.div`display: flex; align-items: center; gap: 10px; flex-wrap: wrap;`
-const JobId = styled.span`font-family: ${fonts.mono}; font-weight: 600; color: ${colors.text.primary}; font-size: ${fontSize.md};`
-const Desc = styled.div`color: ${colors.text.secondary}; font-size: ${fontSize.sm};`
-const MetaRow = styled.div`
-  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-  color: ${colors.text.muted}; font-size: ${fontSize.sm};
+// The compact list: one group per application, one line per job.
+const Group = styled.div`border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.card}; overflow: hidden;`
+const GroupHead = styled.button`
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px; border: none; cursor: pointer;
+  background: ${colors.bg.input}; color: ${colors.text.primary}; font-family: ${fonts.sans}; font-size: ${fontSize.base}; font-weight: 600; text-align: left;
+  & .n { color: ${colors.text.muted}; font-weight: 400; font-size: ${fontSize.sm}; }
 `
-const Meta = styled.span`display: inline-flex; align-items: center; gap: 5px;`
-const Actions = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap;`
+const JobRow = styled.div`
+  display: grid; grid-template-columns: minmax(220px, 1.2fr) minmax(0, 2fr) 110px 150px 96px auto; align-items: center; gap: 12px;
+  padding: 7px 12px; border-top: 1px solid ${colors.border}; font-size: ${fontSize.sm}; color: ${colors.text.secondary};
+  &:hover { background: var(--hover-subtle); }
+  & .id { font-family: ${fonts.mono}; color: ${colors.text.primary}; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  & .id:hover { color: ${colors.blue.main}; }
+  & .desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .when { display: flex; flex-direction: column; line-height: 1.25; font-size: ${fontSize.micro}; color: ${colors.text.muted}; }
+  & .acts { display: flex; gap: 2px; justify-content: flex-end; }
+  @media (max-width: 1100px) { grid-template-columns: minmax(180px, 1fr) 110px 96px auto; & .desc, & .sched { display: none; } }
+`
+const IconBtn = styled.button`
+  display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; cursor: pointer;
+  border: 1px solid transparent; border-radius: ${radius.sm}; background: none; color: ${colors.text.secondary};
+  &:hover:not(:disabled) { border-color: ${colors.border}; background: ${colors.bg.input}; color: ${colors.blue.main}; }
+  &.danger:hover:not(:disabled) { color: ${colors.red.main}; }
+  &:disabled { opacity: 0.4; cursor: default; }
+`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 28px 4px; text-align: center;`
 // The last-run state badge, clickable → that run's detail page (its log).
 const RunLink = styled.span`display: inline-flex; cursor: pointer; &:hover { opacity: 0.8; }`
@@ -362,29 +363,68 @@ export default function JobsList() {
   // are those whose ``tags`` contain ANY of the selected tags (union, not intersection
   // — picking ``nomasx1`` + ``security`` shows everything tagged either, matching the
   // "narrow my view" mental model). Empty selection = show everything.
-  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set())
+  const FILTER_KEY = 'liberty.nomaflow.jobs.filters'
+  const saved = useMemo(() => { try { return JSON.parse(localStorage.getItem(FILTER_KEY) ?? '{}') as Record<string, string> } catch { return {} } }, [])
+  const [q, setQ] = useState(saved.q ?? '')
+  const [status, setStatus] = useState(saved.status ?? '')
+  const [appFilter, setAppFilter] = useState(saved.app ?? '')
+  const [tagFilter, setTagFilter] = useState(saved.tag ?? '')
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  useEffect(() => { try { localStorage.setItem(FILTER_KEY, JSON.stringify({ q, status, app: appFilter, tag: tagFilter })) } catch { /* ignore */ } }, [q, status, appFilter, tagFilter])
+  const { connectors: wsConnectors } = useWorkspace()
+  // The application a job belongs to: its first tag naming a connector (nomasx1, nomajde…), else
+  // the prefix of its id; framework jobs (no app) land in "Framework".
+  const appOf = useCallback((j: JobSummary): string => {
+    const names = new Set((wsConnectors ?? []).map((c) => c.name))
+    const tagged = j.tags.find((tg) => names.has(tg))
+    if (tagged) return tagged
+    const prefix = j.id.split('-')[0]
+    return names.has(prefix) ? prefix : 'framework'
+  }, [wsConnectors])
   const allTags = useMemo<string[]>(() => {
     if (!jobs) return []
     const acc = new Set<string>()
     for (const j of jobs) for (const tg of j.tags) acc.add(tg)
     return [...acc].sort()
   }, [jobs])
-  const toggleTagFilter = (tg: string) => {
-    setSelectedTags((prev) => {
-      const next = new Set(prev)
-      if (next.has(tg)) next.delete(tg)
-      else next.add(tg)
-      return next
-    })
-  }
-  const clearTagFilters = () => setSelectedTags(new Set())
 
   const sorted = useMemo(() => {
     if (!jobs) return null
-    const base = [...jobs].sort((a, b) => a.id.localeCompare(b.id))
-    if (selectedTags.size === 0) return base
-    return base.filter((j) => j.tags.some((tg) => selectedTags.has(tg)))
-  }, [jobs, selectedTags])
+    const needle = q.trim().toLowerCase()
+    return [...jobs].sort((a, b) => a.id.localeCompare(b.id)).filter((j) => {
+      if (tagFilter && !j.tags.includes(tagFilter)) return false
+      if (appFilter && appOf(j) !== appFilter) return false
+      if (status === 'enabled' && !j.enabled) return false
+      if (status === 'disabled' && j.enabled) return false
+      if (status === 'scheduled' && !(j.enabled && j.next_run)) return false
+      if (status === 'running' && !j.in_flight) return false
+      if (status === 'failed' && j.last_run?.state !== 'FAILED') return false
+      if (needle && !`${j.id} ${j.description ?? ''} ${j.tags.join(' ')}`.toLowerCase().includes(needle)) return false
+      return true
+    })
+  }, [jobs, q, status, appFilter, tagFilter, appOf])
+  const groups = useMemo(() => {
+    const m = new Map<string, JobSummary[]>()
+    for (const j of sorted ?? []) { const a = appOf(j); m.set(a, [...(m.get(a) ?? []), j]) }
+    return [...m.entries()].sort(([a], [b]) => (a === 'framework' ? 1 : b === 'framework' ? -1 : a.localeCompare(b)))
+  }, [sorted, appOf])
+  const appOptions = useMemo<SearchSelectOption[]>(() => [...new Set((jobs ?? []).map(appOf))].map((a) => ({ value: a, label: a === 'framework' ? t('nomaflow.jobs.framework') : a })), [jobs, appOf, t])
+  const filtersOn = !!(q || status || appFilter || tagFilter)
+
+  // Export — a minimal ZIP with this job's [[jobs]] entry + a MANIFEST.md (referenced queries /
+  // connectors are not bundled; Settings → Package ships the config slice).
+  const exportJob = async (job: JobSummary) => {
+    const res = await fetch('/api/admin/export-job', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: job.id }),
+    })
+    if (!res.ok) return
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `nomaflow-job-${job.id}.zip`
+    document.body.appendChild(a); a.click(); a.remove()
+    URL.revokeObjectURL(url)
+  }
 
   const header = (
     <PageLayout
@@ -404,29 +444,29 @@ export default function JobsList() {
         </Button>
         <ToolbarSpacer />
       </Toolbar>
-      {/* Tag filter row — chip per distinct tag across the job set. Click a chip to
-          narrow the list; click again to deselect; "Clear" appears once a filter is
-          active. Hidden when no tags are declared anywhere (no value to add). */}
-      {allTags.length > 0 && (
-        <TagFilterRow>
-          <TagFilterLabel>{t('nomaflow.jobs.filterByTags')}</TagFilterLabel>
-          {allTags.map((tg) => (
-            <TagFilterChip
-              key={tg}
-              type="button"
-              $active={selectedTags.has(tg)}
-              onClick={() => toggleTagFilter(tg)}
-            >
-              {tg}
-            </TagFilterChip>
-          ))}
-          {selectedTags.size > 0 && (
-            <TagFilterClear type="button" onClick={clearTagFilters}>
-              {t('nomaflow.jobs.clearFilters')}
-            </TagFilterClear>
-          )}
-        </TagFilterRow>
-      )}
+      <Toolbar>
+        <div style={{ position: 'relative', flex: '1 1 260px', maxWidth: 380 }}>
+          <Search size={14} style={{ position: 'absolute', left: 9, top: 9, color: colors.text.muted }} />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('nomaflow.jobs.search')} style={{ paddingLeft: 28 }} />
+        </div>
+        <div style={{ width: 170 }}>
+          <SearchSelect value={appFilter} onChange={setAppFilter} options={appOptions} anyLabel={t('nomaflow.jobs.allApps')} placeholder={t('nomaflow.jobs.allApps')} sort />
+        </div>
+        <div style={{ width: 170 }}>
+          <SearchSelect value={status} onChange={setStatus} anyLabel={t('nomaflow.jobs.anyStatus')} placeholder={t('nomaflow.jobs.anyStatus')}
+            options={['enabled', 'disabled', 'scheduled', 'running', 'failed'].map((v) => ({ value: v, label: t(`nomaflow.jobs.status.${v}`) }))} />
+        </div>
+        <div style={{ width: 170 }}>
+          <SearchSelect value={tagFilter} onChange={setTagFilter} options={allTags.map((tg) => ({ value: tg, label: tg }))} anyLabel={t('nomaflow.jobs.anyTag')} placeholder={t('nomaflow.jobs.anyTag')} sort />
+        </div>
+        {filtersOn && (
+          <TagFilterClear type="button" onClick={() => { setQ(''); setStatus(''); setAppFilter(''); setTagFilter('') }}>
+            {t('nomaflow.jobs.clearFilters')}
+          </TagFilterClear>
+        )}
+        <ToolbarSpacer />
+        {sorted && jobs && <span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('nomaflow.jobs.shown', { n: sorted.length, total: jobs.length })}</span>}
+      </Toolbar>
       {/* Retention panel — collapsible; surfaces the run-history cleanup policy +
           the last sweep's result + a Clean-now button. `onChanged` re-fetches
           the job list because a sweep may have deleted the latest run row that
@@ -440,129 +480,49 @@ export default function JobsList() {
       )}
       {sorted && sorted.length > 0 && (
         <List>
-          {sorted.map((job) => {
-            const busy = busyId === job.id
+          {groups.map(([app, list]) => {
+            const open = !collapsed.has(app)
             return (
-              <JobCard key={job.id}>
-                <CardTop>
-                  <JobId>{job.id}</JobId>
-                  {job.last_run && (
-                    <RunLink
-                      onClick={() => navigate(`/nomaflow/runs/${encodeURIComponent(job.last_run!.run_id)}`)}
-                      title={t('nomaflow.jobs.viewRun')}
-                    >
-                      <Tag $tone={STATE_TONE[job.last_run.state]}>{job.last_run.state}</Tag>
-                    </RunLink>
-                  )}
-                  {job.tags.map((tg) => <Tag key={tg}>{tg}</Tag>)}
-                  <ToolbarSpacer />
-                  <Toggle
-                    $on={job.enabled}
-                    disabled={busy}
-                    onClick={() => toggleEnabled(job)}
-                    title={t(job.enabled ? 'nomaflow.jobs.disable' : 'nomaflow.jobs.enable')}
-                  >
-                    {busy ? <SpinnerRing size={12} thickness={2} /> : null}
-                    {job.enabled ? t('nomaflow.jobs.enabled') : t('nomaflow.jobs.disabled')}
-                  </Toggle>
-                </CardTop>
-                {job.description && <Desc>{job.description}</Desc>}
-                <MetaRow>
-                  <Meta>
-                    <Clock size={13} />
-                    {job.schedule
-                      ? <Mono>{job.schedule}</Mono>
-                      : t('nomaflow.jobs.manualOnly')}
-                  </Meta>
-                  {job.preset_schedules && job.preset_schedules.length > 0 && (
-                    <Meta
-                      title={job.preset_schedules
-                        .map((ps) => `${ps.name}: ${ps.schedule}${ps.next_run ? ` — next ${new Date(ps.next_run).toLocaleString()}` : ''}`)
-                        .join('\n')}
-                    >
-                      <Copy size={13} />
-                      {t('nomaflow.jobs.presetSchedules', {
-                        count: job.preset_schedules.length,
-                      })}
-                    </Meta>
-                  )}
-                  {job.next_run && (
-                    <Meta title={new Date(job.next_run).toLocaleString()}>
-                      <CalendarClock size={13} /> {t('nomaflow.jobs.nextRun')} {relative(job.next_run)}
-                    </Meta>
-                  )}
-                  {job.last_run?.finished_at && (
-                    <Meta title={new Date(job.last_run.finished_at).toLocaleString()}>
-                      {t('nomaflow.jobs.lastRun')} {relative(job.last_run.finished_at)}
-                    </Meta>
-                  )}
-                  <Meta>{t('nomaflow.jobs.stepCount', { count: job.step_count })}</Meta>
-                </MetaRow>
-                <Actions>
-                  <Button
-                    $variant="ghost" $size="sm" disabled={busy || job.in_flight}
-                    onClick={() => runNow(job)}
-                  >
-                    {busy ? <SpinnerRing size={13} thickness={2} /> : <Play size={13} />}
-                    {t('nomaflow.jobs.runNow')}
-                  </Button>
-                  {job.in_flight && (
-                    <Button $variant="danger" $size="sm" disabled={busy} onClick={() => cancelRun(job)}>
-                      <Ban size={13} /> {t('nomaflow.jobs.cancel')}
-                    </Button>
-                  )}
-                  <Button
-                    $variant="ghost" $size="sm" disabled={busy}
-                    onClick={() => navigate(`/nomaflow/jobs/${encodeURIComponent(job.id)}`)}
-                  >
-                    <Pencil size={13} /> {t('common.edit')}
-                  </Button>
-                  {/* Duplicate — clones the job under ``<id>_copy``, disabled by
-                      default with no schedule (avoid double-running the source's
-                      cron). Lands the operator on the new entry's editor. */}
-                  <Button
-                    $variant="ghost" $size="sm" disabled={busy}
-                    onClick={() => duplicateJob(job)}
-                    title={t('nomaflow.jobs.duplicate')}
-                  >
-                    {busy ? <SpinnerRing size={13} thickness={2} /> : <Copy size={13} />}
-                    {t('nomaflow.jobs.duplicateBtn')}
-                  </Button>
-                  {/* Delete — confirm, then rewrite jobs.toml without this entry + reload.
-                      Run history is retention-managed and left intact. */}
-                  <Button
-                    $variant="ghost" $size="sm" disabled={busy}
-                    onClick={() => deleteJob(job)}
-                    title={t('nomaflow.jobs.delete')}
-                  >
-                    <Trash2 size={13} /> {t('common.delete')}
-                  </Button>
-                  {/* Export — minimal ZIP carrying just this job's [[jobs]] entry + a
-                      MANIFEST.md. Referenced queries / connectors are NOT bundled (the
-                      target install must already have them). Use Settings → Package to
-                      ship the underlying config slice separately. */}
-                  <Button
-                    $variant="ghost" $size="sm" disabled={busy}
-                    onClick={async () => {
-                      const res = await fetch('/api/admin/export-job', {
-                        method: 'POST', credentials: 'include',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ id: job.id }),
-                      })
-                      if (!res.ok) return
-                      const blob = await res.blob()
-                      const url = URL.createObjectURL(blob)
-                      const a = document.createElement('a')
-                      a.href = url; a.download = `nomaflow-job-${job.id}.zip`
-                      document.body.appendChild(a); a.click(); a.remove()
-                      URL.revokeObjectURL(url)
-                    }}
-                    title={t('nomaflow.jobs.export')}
-                  >
-                    <Download size={13} /> {t('nomaflow.jobs.exportBtn')}
-                  </Button>
-                </Actions>
-              </JobCard>
+              <Group key={app}>
+                <GroupHead type="button" onClick={() => setCollapsed((c) => { const n = new Set(c); if (n.has(app)) n.delete(app); else n.add(app); return n })}>
+                  {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  {app === 'framework' ? t('nomaflow.jobs.framework') : app}
+                  <span className="n">{list.length}</span>
+                </GroupHead>
+                {open && list.map((job) => {
+                  const busy = busyId === job.id
+                  return (
+                    <JobRow key={job.id}>
+                      <span className="id" title={job.id} onClick={() => navigate(`/nomaflow/jobs/${encodeURIComponent(job.id)}`)}>{job.id}</span>
+                      <span className="desc" title={job.description ?? ''}>{job.description}</span>
+                      <span>
+                        {job.last_run ? (
+                          <RunLink onClick={() => navigate(`/nomaflow/runs/${encodeURIComponent(job.last_run!.run_id)}`)} title={`${t('nomaflow.jobs.viewRun')} · ${job.last_run.finished_at ? new Date(job.last_run.finished_at).toLocaleString() : ''}`}>
+                            <Tag $tone={STATE_TONE[job.last_run.state]}>{job.last_run.state}</Tag>
+                          </RunLink>
+                        ) : <span style={{ color: colors.text.muted }}>—</span>}
+                      </span>
+                      <span className="when sched" title={job.next_run ? new Date(job.next_run).toLocaleString() : ''}>
+                        <span><Clock size={11} style={{ verticalAlign: '-1px' }} /> {job.schedule ? <Mono>{job.schedule}</Mono> : t('nomaflow.jobs.manualOnly')}</span>
+                        {job.enabled && job.next_run && <span>{t('nomaflow.jobs.nextRun')} {relative(job.next_run)}</span>}
+                      </span>
+                      <Toggle $on={job.enabled} disabled={busy} onClick={() => toggleEnabled(job)} title={t(job.enabled ? 'nomaflow.jobs.disable' : 'nomaflow.jobs.enable')}>
+                        {busy ? <SpinnerRing size={12} thickness={2} /> : null}
+                        {job.enabled ? t('nomaflow.jobs.enabled') : t('nomaflow.jobs.disabled')}
+                      </Toggle>
+                      <span className="acts">
+                        {job.in_flight
+                          ? <IconBtn className="danger" type="button" disabled={busy} onClick={() => cancelRun(job)} title={t('nomaflow.jobs.cancel')}><Ban size={14} /></IconBtn>
+                          : <IconBtn type="button" disabled={busy} onClick={() => runNow(job)} title={t('nomaflow.jobs.runNow')}>{busy ? <SpinnerRing size={12} thickness={2} /> : <Play size={14} />}</IconBtn>}
+                        <IconBtn type="button" disabled={busy} onClick={() => navigate(`/nomaflow/jobs/${encodeURIComponent(job.id)}`)} title={t('common.edit')}><Pencil size={14} /></IconBtn>
+                        <IconBtn type="button" disabled={busy} onClick={() => duplicateJob(job)} title={t('nomaflow.jobs.duplicate')}><Copy size={14} /></IconBtn>
+                        <IconBtn type="button" disabled={busy} onClick={() => void exportJob(job)} title={t('nomaflow.jobs.export')}><Download size={14} /></IconBtn>
+                        <IconBtn className="danger" type="button" disabled={busy} onClick={() => deleteJob(job)} title={t('nomaflow.jobs.delete')}><Trash2 size={14} /></IconBtn>
+                      </span>
+                    </JobRow>
+                  )
+                })}
+              </Group>
             )
           })}
         </List>
@@ -851,13 +811,22 @@ function RunWithParamsModal({
 
   // Render one row per kwarg, typed input based on value + key. Extracted so both the
   // job-level params section and each step's section share the rendering logic.
-  const renderKwargRow = (key: string, v: unknown, setter: (v: unknown) => void) => {
+  const renderKwargRow = (key: string, v: unknown, setter: (v: unknown) => void, step: string | null = null) => {
     // _connector / connector → connector picker (saves typos vs free text).
     const isConnectorKey = key === 'connector' || key.endsWith('_connector')
+    // A parameter the job declares a choice list for (user_params: the applications of an app,
+    // a language…) → a dropdown; a number keeps its type.
+    const declared = (job.user_params ?? []).find((p) => p.name === key && (p.step ?? null) === step && p.choices.length > 0)
     return (
       <ParamRow key={key}>
-        <ParamKey>{key}</ParamKey>
-        {isConnectorKey ? (
+        <ParamKey title={declared?.label}>{key}</ParamKey>
+        {declared ? (
+          <SearchSelect sort
+            value={v == null ? '' : String(v)}
+            options={declared.choices}
+            onChange={(nv) => setter(typeof v === 'number' && nv !== '' && Number.isFinite(Number(nv)) ? Number(nv) : nv)}
+          />
+        ) : isConnectorKey ? (
           <SearchSelect sort
             value={v == null ? '' : String(v)}
             options={connectorOptions}
@@ -1044,7 +1013,7 @@ function RunWithParamsModal({
                     {expandable && isExpanded && (
                       <StepKwargsPanel>
                         {Object.entries(kwargs).map(([k, v]) =>
-                          renderKwargRow(k, v, (nv) => setStepKey(s.name, k, nv)),
+                          renderKwargRow(k, v, (nv) => setStepKey(s.name, k, nv), s.name),
                         )}
                       </StepKwargsPanel>
                     )}

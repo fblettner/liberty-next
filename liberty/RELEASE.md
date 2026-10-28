@@ -1,5 +1,18 @@
 # Liberty Next — Release notes
 
+## 7.0.61 — unreleased
+
+- Jobs: a plugin report step (`report:<scope>:<id>`) takes the run's job params and user
+  parameters on top of its own `params`, typed by the report's declared parameters.
+- Dashboards: the page grows and scrolls to its end; a full-width links card shows all its links;
+  more sidebar icons for the app menus.
+- Jobs: a user parameter without `step` is a job-level parameter, passed to every step; its
+  choices can come from a read query (`choices_from = "query:<connector>/<query>:<value>:<label>"`).
+  The admin "Run with parameters" dialog offers the same dropdowns.
+- nomaflow: the jobs list is searchable (id, description, tag), filtered by application, status
+  and tag (kept per browser), grouped by application with collapsible groups, one line per job
+  with icon actions.
+
 ## 7.0.60 — unreleased
 
 **Data Explorer: models shipped by the presets, dictionary entries in one click**

@@ -159,3 +159,28 @@ def test_schema_and_wiring() -> None:
     assert StepType.REPORT not in build_executors(reg)
     ex = build_executors(reg, state=lambda: None)
     assert isinstance(ex[StepType.REPORT], ReportStepExecutor) and isinstance(ex[StepType.NOTIFY], NotifyStepExecutor)
+
+
+@pytest.mark.asyncio
+async def test_plugin_report_takes_the_run_params_typed(state, monkeypatch) -> None:
+    """A ``report:<scope>:<id>`` step passes the step's ``params``, then the run's ``op_kwargs``
+    (job params, a user parameter) — later wins — typed by the report's declared parameters."""
+    from liberty.reports.schema import ReportContent, ReportDef, ReportParam
+    seen: dict = {}
+
+    def gen(**kw):
+        seen.update(kw)
+        return ReportContent(markdown="# Audit", title="Audit")
+
+    d = ReportDef(id="audit", scope="nomasx1", title="Audit", formats=("pdf", "markdown"), callable="x:y",
+                  params=(ReportParam(name="apps_id", label="App", type="int", required=True), ReportParam(name="lang", label="Lang", type="string")))
+    state.reports = SimpleNamespace(get=lambda scope, rid: d, get_callable=lambda scope, rid: gen)
+    monkeypatch.setattr("liberty.reports.render.render_content", lambda *a, **k: (b"%PDF", "application/pdf", "audit.pdf"))
+    step = Step(type=StepType.REPORT, name="r", report="report:nomasx1:audit", format="pdf", params={"apps_id": 1, "lang": "en"})
+    step = step.model_copy(update={"op_kwargs": {"apps_id": " 2 ", "lang": "fr"}})
+    res = await ReportStepExecutor(lambda: state).execute(step, _ctx())
+    assert seen["apps_id"] == 2 and seen["lang"] == "fr" and "connectors" in seen   # **kw: injected
+    assert res.rows_affected is not None
+    bad = step.model_copy(update={"op_kwargs": {"apps_id": "two"}})
+    with pytest.raises(StepFailed, match="must be a number"):
+        await ReportStepExecutor(lambda: state).execute(bad, _ctx("run2"))

@@ -1,5 +1,20 @@
 # Liberty Next — Notes de version
 
+## 7.0.61 — non publiée
+
+- Tâches : une étape de rapport de plugin (`report:<scope>:<id>`) reçoit les paramètres de la
+  tâche et les paramètres utilisateur de l'exécution par-dessus ses propres `params`, typés selon
+  les paramètres déclarés du rapport.
+- Tableaux de bord : la page grandit et défile jusqu'en bas ; une carte de liens pleine largeur
+  montre tous ses liens ; plus d'icônes de barre latérale pour les menus des applications.
+- Tâches : un paramètre utilisateur sans `step` est un paramètre de la tâche, passé à toutes les
+  étapes ; ses choix peuvent venir d'une requête de lecture
+  (`choices_from = "query:<connecteur>/<requête>:<valeur>:<libellé>"`). La boîte « Exécuter avec
+  paramètres » de l'administration propose les mêmes listes.
+- nomaflow : la liste des tâches se cherche (id, description, étiquette), se filtre par
+  application, statut et étiquette (mémorisés par navigateur), se groupe par application en
+  groupes repliables, une ligne par tâche avec des actions en icônes.
+
 ## 7.0.60 — non publiée
 
 **Explorateur de données : modèles fournis par les préréglages, entrées de dictionnaire en un clic**
