@@ -181,6 +181,7 @@ tests/                    pytest (asyncio auto mode); SQLite fixtures; no live D
 | `/api/explorer` | `web/explorer.py` | the explorer models the caller may use (perm `explorer:{app}:{model}`), `{app}/{model}/model` with the discovered fields (`?refresh=1`), `POST {app}/query` (aggregate: rows / measures / filters bag / period / sort / limit), `POST {app}/detail` (rows, paged, `drill`), `POST {app}/calc/test`, `GET/PUT {app}/saved/{analyses|dashboards}` + `DELETE …/{id}`, `POST {app}/export` (xlsx / pdf) |
 | `/ai` | `ai/routes.py` | `POST /ai/chat` (SSE), `GET /ai/tools` — perm `ai:chat` |
 | `/admin` | `web/admin.py` (3.3k lines — the config builders' backend), `web/dictgen.py` | reload, `GET /admin/config/schema`, `GET/PUT /admin/config/<section>/parsed`, rename / move / clone / delete-with-deps / find-usages / dependencies / integrity, packages (build / import), versions, AI proposal apply, API test, dictionary scan — **superuser** |
+| `/admin/promotion` | `web/promotion.py` + `promotion.py` | promote to another instance: targets (`[promotion.targets.*]`, password ENC:), `push` (config package or approved change package → the target's preview / apply), history (`<config>/.promotion/`) — **superuser** |
 | `/admin/access` `/admin/jobs` `/admin/changesets` | `web/access.py`, `web/jobs.py`, `web/changesets.py` | roles / permissions, nomaflow jobs + runs + presets + `{job}/upload` / `runs/{id}/files/{name}` + `retention` / `missed` policies, change packages |
 | `/socket.io` | `sio.py` | JWT on handshake; locks, dashboard, log rooms |
 

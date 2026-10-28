@@ -57,6 +57,7 @@ from liberty.web import (
     notifications_router,
     logs_router,
     retention_router,
+    promotion_router,
 )
 
 _log = logging.getLogger("liberty")
@@ -732,6 +733,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(notifications_router)
     app.include_router(logs_router)
     app.include_router(retention_router)
+    app.include_router(promotion_router)
 
     @app.get("/health", tags=["meta"], summary="Liveness probe")
     async def health() -> dict[str, str]:

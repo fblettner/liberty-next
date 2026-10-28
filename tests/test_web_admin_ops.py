@@ -69,6 +69,10 @@ def _seed_auth(db_url: str) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path):
+    return make_env(tmp_path)
+
+
+def make_env(tmp_path: Path):
     """A small but complete config tree on two SQLite pools: connector ``foo`` (default pool,
     may also run on ``alt``), a screen + chart + dashboard + menu + dictionary scope + a
     shared action, nomaflow on the default pool (scheduler off)."""

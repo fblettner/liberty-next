@@ -23,6 +23,7 @@ from liberty.web.views import router as views_router
 from liberty.web.notifications import router as notifications_router
 from liberty.web.logs import router as logs_router
 from liberty.web.retention import router as retention_router
+from liberty.web.promotion import router as promotion_router
 
 __all__ = [
     "access_router",
@@ -48,4 +49,5 @@ __all__ = [
     "notifications_router",
     "logs_router",
     "retention_router",
+    "promotion_router",
 ]

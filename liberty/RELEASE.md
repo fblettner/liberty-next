@@ -20,6 +20,13 @@
   first, identical ones on demand — and a changed entity opens on its fields, here now / after the
   import; "Apply N change(s)" then writes it and shows the result. Build offers the new kinds:
   Explorer models, nomaflow jobs, notification rules, shared actions, the assistant per application.
+- Promotion to another instance (API; the screens follow): `[promotion.targets.<name>]` in
+  app.toml — the target's URL (with its sub-path) and a local superuser account there, the password
+  stored encrypted (`/admin/promotion/targets`, a sign-in test per target). `POST
+  /admin/promotion/push` builds a config package (the Package selection; connectors, pools and API
+  endpoints stay the target's unless picked) or takes an approved change package, signs in on the
+  target and returns its preview — or applies it there. An applied promotion is kept in a history
+  (`<config>/.promotion/`, `/admin/promotion/history`) and marks the change package exported.
 
 ## 7.0.63 — unreleased
 

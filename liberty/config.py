@@ -486,6 +486,25 @@ class ChangeSetsSettings(BaseModel):
     retention_days: int = Field(default=0, ge=0, le=36500)
 
 
+class PromotionTarget(BaseModel):
+    """Another Liberty instance this one promotes to (C11): its root URL (with its ``base_path``
+    when it has one) and the local account the source signs in with — a superuser there. The
+    password is stored ``ENC:`` (encrypted with this instance's master key) or as ``${VAR}``."""
+
+    label: str = ""
+    url: str
+    username: str = ""
+    password: str = ""
+    verify_ssl: bool = True
+    timeout_seconds: int = Field(default=120, ge=5, le=3600)
+
+
+class PromotionSettings(BaseModel):
+    """``[promotion.targets.<name>]`` — the instances "Promote to…" offers (Package, Changes)."""
+
+    targets: dict[str, PromotionTarget] = Field(default_factory=dict)
+
+
 class Settings(BaseModel):
     app: AppSettings = Field(default_factory=AppSettings)
     connectors: ConnectorSettings = Field(default_factory=ConnectorSettings)
@@ -505,6 +524,7 @@ class Settings(BaseModel):
     reports: ReportsSettings = Field(default_factory=ReportsSettings)
     changesets: ChangeSetsSettings = Field(default_factory=ChangeSetsSettings)
     notify: NotifySettings = Field(default_factory=NotifySettings)
+    promotion: PromotionSettings = Field(default_factory=PromotionSettings)
 
 
 def load_settings(

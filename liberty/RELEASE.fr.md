@@ -24,6 +24,14 @@
   ici maintenant / après l'import ; « Appliquer N changement(s) » l'écrit ensuite et affiche le
   résultat. Construire propose les nouveaux types : modèles de l'Explorateur, tâches nomaflow,
   règles de notification, actions partagées, l'assistant par application.
+- Promotion vers une autre instance (API ; les écrans suivent) : `[promotion.targets.<nom>]`
+  dans app.toml — l'URL de la cible (avec son sous-chemin) et un compte local superutilisateur
+  là-bas, le mot de passe stocké chiffré (`/admin/promotion/targets`, un test de connexion par
+  cible). `POST /admin/promotion/push` construit un paquet de configuration (la sélection de
+  Paquet ; connecteurs, pools et points d'accès d'API restent ceux de la cible sauf s'ils sont
+  choisis) ou prend un paquet de changements approuvé, se connecte à la cible et renvoie son aperçu
+  — ou l'y applique. Une promotion appliquée est gardée dans un historique (`<config>/.promotion/`,
+  `/admin/promotion/history`) et marque le paquet de changements comme exporté.
 
 ## 7.0.63 — non publiée
 
