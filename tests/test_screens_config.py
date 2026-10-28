@@ -714,3 +714,18 @@ def test_column_drill_names_a_row_menu_action() -> None:
     assert s.columns[0].drill == "roles"
     with pytest.raises(ValueError, match="unknown row-menu action 'ghost'"):
         Screen(id="users", label="Users", read_query="users_get", row_menu=[nav], columns=[ColumnHint(name="USR_ID", drill="ghost")])
+
+
+def test_open_url_action() -> None:
+    """``open_url``: a URL template, a new tab by default, a prompt like navigate; a javascript: /
+    data: address is refused at load (the runtime checks the filled URL again)."""
+    from pydantic import TypeAdapter
+
+    from liberty.screens.config import Action
+    ta = TypeAdapter(Action)
+    a = ta.validate_python({"id": "jde", "type": "open_url", "url": "https://jde.example.com/jde?user={AUUSER}"})
+    assert a.type == "open_url" and a.new_tab is True and a.prompt_fields == []
+    import pytest as _pytest
+    for bad in ("javascript:alert(1)", " DATA:text/html,x"):
+        with _pytest.raises(ValueError, match="http"):
+            ta.validate_python({"id": "x", "type": "open_url", "url": bad})

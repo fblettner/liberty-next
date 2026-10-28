@@ -26,7 +26,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import {
-  Boxes, ChevronDown, ChevronRight, CornerDownLeft, Edit3, FileText, GitBranch, LayoutList, Layers,
+  Boxes, ChevronDown, ChevronRight, CornerDownLeft, Edit3, ExternalLink, FileText, GitBranch, LayoutList, Layers,
   Link2, Plus, Repeat, Trash2, Zap,
 } from 'lucide-react'
 import {
@@ -128,6 +128,7 @@ function variantIcon(type: ActionType): ReactNode {
     case 'call_plugin': return <Boxes size={13} />
     case 'call_action': return <Link2 size={13} />
     case 'navigate': return <CornerDownLeft size={13} />
+    case 'open_url': return <ExternalLink size={13} />
     case 'if': return <GitBranch size={13} />
     case 'loop': return <Repeat size={13} />
     case 'chain': return <LayoutList size={13} />
@@ -166,6 +167,7 @@ function summarize(a: Row): string {
     const bindHint = binds ? ` · ${binds} bind${binds === 1 ? '' : 's'}` : ''
     return `↪ ${a.ref ?? '?'}${bindHint}`
   }
+  if (t === 'open_url') return `↗ ${a.url ?? '?'}${a.new_tab === false ? ' · this page' : ''}`
   if (t === 'navigate') {
     const conn = a.connector ? String(a.connector) : '<screen connector>'
     return `→ /sql/${conn}/${a.to ?? '?'}${a.inline ? ' · inline' : ''}`

@@ -143,3 +143,16 @@ def test_job_leaf_type() -> None:
         MenuItem(id="imp", label="x", type="job")
     tree = build_menu_tree(AppMenu(label="demo", items=[it]), app="nomademo", language=None, keep=lambda item, connector: True)
     assert tree[0]["type"] == "job" and tree[0]["target"] == "nomademo-load-items" and "connector" not in tree[0]
+
+
+def test_url_leaf_type() -> None:
+    """A ``url`` leaf opens an external address: no connector, an http(s) address or a path only,
+    emitted connector-less."""
+    it = MenuItem(id="jde", label="JD Edwards", type="url", target="https://jde.example.com/jde/E1Menu.maf")
+    with pytest.raises(ValueError, match="must not carry a `connector`"):
+        MenuItem(id="jde", label="x", type="url", target="https://x", connector="jdedwards")
+    for bad in ("javascript:alert(1)", "ftp://x", "data:text/html,x"):
+        with pytest.raises(ValueError, match="http"):
+            MenuItem(id="jde", label="x", type="url", target=bad)
+    tree = build_menu_tree(AppMenu(label="demo", items=[it]), app="nomajde", language=None, keep=lambda item, connector: True)
+    assert tree[0]["type"] == "url" and tree[0]["target"].startswith("https://") and "connector" not in tree[0]

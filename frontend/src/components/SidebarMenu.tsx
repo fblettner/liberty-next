@@ -12,6 +12,8 @@
 import { useMemo, useState, type ComponentType } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { leafPath } from '../services/menuPath'
+import { fillUrlTemplate, safeUrl } from '../services/urlTemplate'
+import { resolveSource } from '../pages/TableView/actionRunner'
 import styled from '@emotion/styled'
 import {
   ChevronRight,
@@ -154,6 +156,15 @@ const Leaf = styled(NavLink)`
   }
 `
 
+// A ``url`` leaf — an external address opened in a new tab; looks like any other leaf.
+const UrlLeaf = styled.a`
+  ${rowBase}
+  color: ${colors.text.muted};
+  padding: 7px 8px 7px ${CHEVRON_W + 8}px;
+  & svg { flex-shrink: 0; opacity: 0.65; }
+  &:hover { color: ${colors.text.primary}; border-color: ${colors.blue.border}; text-decoration: none; }
+`
+
 const ActionLeaf = styled.button`
   ${rowBase}
   background: none;
@@ -238,6 +249,11 @@ function Node({ node, openIds, app, onAction }: { node: MenuNode; openIds: Set<s
     </>
   )
   if (node.action && onAction) return <ActionLeaf type="button" title={node.label} onClick={() => onAction(node.action!)}>{inner}</ActionLeaf>
+  if (node.type === 'url') {
+    // the built-ins (``#LOGIN_USER#``) filled in; only http(s) or a path of this server is linked
+    const href = safeUrl(fillUrlTemplate(node.target ?? '', (n) => resolveSource(n, { INPUT: {} }, {})))
+    if (href) return <UrlLeaf href={href} target="_blank" rel="noopener noreferrer" title={node.label}>{inner}</UrlLeaf>
+  }
   return to ? (
     <Leaf to={to} end title={node.label}>{inner}</Leaf>
   ) : (

@@ -114,6 +114,16 @@
 - Appliquer un module : les colonnes de la grille vont dans une vue par défaut ; les colonnes du seul dialogue ne sont
   plus `hidden` (le dialogue retirait le champ d'une colonne masquée — les onglets Indicateurs / Codes catégorie /
   Adresses liées étaient vides).
+- Action `open_url` : ouvrir une adresse externe depuis un menu de ligne, un bouton de barre d'outils, un onglet de
+  dialogue, une colonne d'exploration ou une chaîne — `url` est un modèle (`{COLONNE}` depuis la ligne / le formulaire,
+  les champs de saisie, les chemins de chaîne, encodés ; `#LOGIN_USER#` et les autres variables ; un premier
+  paramètre est l'adresse elle-même), `new_tab` (activé par défaut), la saisie avant
+  exécution de `navigate`. Seules les adresses http(s) et les chemins de ce serveur s'ouvrent — refusé au chargement et
+  vérifié de nouveau sur l'URL remplie. Un `open_url` seul dans un menu de ligne part de la poignée de la ligne. Une
+  entrée de menu `url` ouvre une adresse dans un nouvel onglet (affichée sauf refus du menu). Les éditeurs d'actions la
+  proposent.
+- Catalogues de modules : le `row_menu` d'un écran (comme dans screens.toml) ; un paramètre `{ÉLÉMENT}` d'un `open_url`
+  nomme un élément de données et devient la colonne physique (`{AN8}` → `{ABAN8}`).
 
 ## 7.0.64 — non publiée
 

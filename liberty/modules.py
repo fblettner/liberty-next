@@ -123,6 +123,14 @@ class ModuleScreen(_Strict):
     details: list[ModuleDetail] = Field(default_factory=list)
     joins: list[ModuleJoin] = Field(default_factory=list, description="Lookup tables joined for a few columns (listed in ``columns`` / tabs like the table's own).")
     menu: bool | None = Field(default=None, description="A menu item for this screen; default: yes unless it is another screen's detail.")
+    row_menu: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "The screen's row-menu actions, as in screens.toml (an ``open_url`` to the source application…); "
+            "a ``{ITEM}`` placeholder of an ``open_url`` names a data item of the screen — the apply puts the "
+            "physical column in its place."
+        ),
+    )
     icon: str | None = None
 
     @field_validator("key", "columns", "filters")
@@ -197,6 +205,17 @@ class Module(_Strict):
                 walk(d.screen, (*path, d.screen))
         for sid in ids:
             walk(sid, (sid,))
+        return self
+
+    @model_validator(mode="after")
+    def _row_menu_actions(self) -> Module:
+        from pydantic import TypeAdapter
+
+        from liberty.screens.config import Action
+        adapter = TypeAdapter(Action)
+        for s in self.screens:
+            for a in s.row_menu:
+                adapter.validate_python(a)       # a malformed action fails at load, naming the module
         return self
 
     @model_validator(mode="after")

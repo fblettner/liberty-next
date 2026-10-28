@@ -184,6 +184,11 @@ LOOKUP_MODULE = textwrap.dedent("""
     table = "F0101"
     on = ["AN8"]
     columns = ["ALPH", "ALKY"]
+    [[modules.screens.row_menu]]
+    id = "open_in_jde"
+    type = "open_url"
+    label = "Open in JDE"
+    url = "https://jde.example.com/jde/ShortcutLauncher?OID=P04012&FormDSData=| |{AN8}|#LOGIN_USER#|{STEP.X}"
     """)
 
 
@@ -211,6 +216,11 @@ def test_one_to_one_detail_and_a_joined_lookup() -> None:
     bad = LOOKUP_MODULE.replace('key = ["AN8"]\nmenu = true', 'key = ["AN8", "CRRP"]\nmenu = true')
     with pytest.raises(ValueError, match="one-to-one"):
         Module.model_validate(tomllib.loads(bad)["modules"][0])
+    # the row menu: an open_url's data items become the physical columns, the rest left as it is
+    [act] = sup["row_menu"]
+    assert act["url"] == "https://jde.example.com/jde/ShortcutLauncher?OID=P04012&FormDSData=| |{A6AN8}|#LOGIN_USER#|{STEP.X}"
+    with pytest.raises(ValueError, match="open_url"):
+        Module.model_validate(tomllib.loads(LOOKUP_MODULE.replace('url = "https://jde', 'url = "javascript:x//jde'))["modules"][0])
     # a joined table not found is an error
     assert build_plan(m, {**live, "F0101": None}, existing_tables=set(), existing_screens=set(), existing_menu_ids=set()).errors
 

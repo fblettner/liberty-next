@@ -119,6 +119,9 @@ def _keeper(principal: Principal, dashboards: DashboardsFile, app: str, screens:
             perm = page_permission(item.target)
             return (perm is None or principal.has_permission(menu_perm)
                     or any(principal.has_permission(p) for p in (perm, *_INCLUDED_IN.get(perm, ()))))
+        if item.type == "url":
+            # An external address: nothing of ours to run — the roles filter + the menu deny gate it.
+            return True
         if item.type == "job":
             # A job leaf opens the job for the user to run: ``job:<id>`` (or a menu allow) shows
             # it, ``!job:<id>`` hides it. The user routes check the same permission.

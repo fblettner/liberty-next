@@ -44,7 +44,7 @@ type Row = Record<string, unknown>
 // minimum-viable shape when the operator switches types so SchemaForm doesn't render a sea of
 // validation red on first paint.
 export const ACTION_TYPES = [
-  'run_query', 'call_api', 'call_plugin', 'call_action', 'navigate', 'set_field', 'confirm', 'notify', 'send_notification', 'refresh',
+  'run_query', 'call_api', 'call_plugin', 'call_action', 'navigate', 'open_url', 'set_field', 'confirm', 'notify', 'send_notification', 'refresh',
   // Slice 4d step variants (Phase 6) — workflow control flow.
   'chain', 'if', 'loop', 'return',
 ] as const
@@ -56,6 +56,7 @@ export const ACTION_DEF_NAME: Record<ActionType, string> = {
   call_action: 'CallActionAction',
   send_notification: 'SendNotificationAction',
   navigate: 'NavigateAction',
+  open_url: 'OpenUrlAction',
   set_field: 'SetFieldAction',
   confirm: 'ConfirmAction',
   notify: 'NotifyAction',
@@ -72,6 +73,7 @@ export function blankActionOfType(t: ActionType, id: string): Row {
   if (t === 'call_plugin') base.callable = ''
   if (t === 'call_action') base.ref = ''
   if (t === 'navigate') base.to = ''
+  if (t === 'open_url') base.url = 'https://'
   if (t === 'set_field') base.target = ''
   if (t === 'confirm') base.message = ''
   if (t === 'notify') { base.message = ''; base.tone = 'info' }
@@ -98,6 +100,7 @@ export const ACTION_OVERRIDE_KEYS: Record<ActionType, ReadonlyArray<string>> = {
   call_action: ['ref', 'param_binds'],
   send_notification: ['rule', 'param_binds'],
   navigate: ['connector', 'to', 'screen', 'param_binds', 'inline'],
+  open_url: [],
   set_field: [],
   confirm: [],
   notify: [],
@@ -117,7 +120,7 @@ export const ACTION_OVERRIDE_KEYS: Record<ActionType, ReadonlyArray<string>> = {
 // open a single pre-fire prompt for the operator's inputs. For the rest (set_field / confirm
 // / notify / refresh / if / loop / return) the PromptField editor stays hidden — these are
 // internal steps that don't fire their own prompt sub-dialogs.
-export const PROMPTABLE_ACTION_TYPES = new Set<ActionType>(['run_query', 'call_api', 'call_plugin', 'navigate', 'chain', 'call_action'])
+export const PROMPTABLE_ACTION_TYPES = new Set<ActionType>(['run_query', 'call_api', 'call_plugin', 'navigate', 'open_url', 'chain', 'call_action'])
 export const PROMPT_FIELDS_KEY = 'prompt_fields'
 // PromptField has 11+ properties; split into Basic / Advanced / Lookup binds / Conditions so
 // each per-field expander reads like the visual builder's field inspector instead of a wall of

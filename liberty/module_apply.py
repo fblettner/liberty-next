@@ -94,6 +94,19 @@ class ModulePlan:
         }
 
 
+_ITEM_PLACEHOLDER = re.compile(r"\{([A-Z0-9#$@]{1,10})\}")
+
+
+def _physical_action(action: dict[str, Any], name: dict[str, str]) -> dict[str, Any]:
+    """A module's row-menu action for the generated screen: an ``open_url``'s ``{ITEM}`` placeholders
+    (data items of the screen) become the physical columns the row carries (``{AN8}`` → ``{ABAN8}``);
+    another placeholder (a built-in, a chain path, an unknown name) is left as it is."""
+    if action.get("type") != "open_url" or not isinstance(action.get("url"), str):
+        return dict(action)
+    url = _ITEM_PLACEHOLDER.sub(lambda m: "{" + name.get(m.group(1), m.group(1)) + "}", action["url"])
+    return {**action, "url": url}
+
+
 def build_plan(
     module: Module,
     live: dict[str, list[str] | None],
@@ -248,6 +261,8 @@ def build_plan(
             screen["views"] = [{"name": "Default", "default": True, "columns": shown}]
         if s.description:
             screen["description"] = s.description
+        if s.row_menu:
+            screen["row_menu"] = [_physical_action(a, name) for a in s.row_menu]
         plan.screen_defs[s.id] = screen
 
     # the menu: the folder, then an item per menu screen

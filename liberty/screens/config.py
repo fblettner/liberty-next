@@ -54,7 +54,7 @@ from pathlib import Path
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ``ParamBind`` lives in connectors.config (no upstream deps) so v2 has one single mechanism for
 # every parameter binding — lookups, actions, row menus, nested-tab read filters, cascading
@@ -511,6 +511,29 @@ class NavigateAction(_PromptableMixin, _ActionBase):
         return self
 
 
+_UNSAFE_URL = ("javascript:", "data:", "vbscript:", "file:")
+
+
+class OpenUrlAction(_PromptableMixin, _ActionBase):
+    """Open an external URL — "Open in JDE" from a user row, a supplier's web site, a document. The
+    ``url`` is a template: ``{NAME}`` takes a value of the firing context (a column of the row or a
+    field of the form, a prompt field, a chain path ``{step.first_row.X}``), URL-encoded;
+    ``#LOGIN_USER#`` and the other built-ins too. A placeholder at the very start
+    is the address itself and goes in as it is. Only ``http(s)`` addresses and paths of this server
+    are opened (the runtime checks the filled URL)."""
+
+    type: Literal["open_url"] = "open_url"
+    url: str = Field(description="The URL template — ``https://host/app?user={AUUSER}``.")
+    new_tab: bool = Field(default=True, description="Open in a new browser tab (off: replace this page).")
+
+    @field_validator("url")
+    @classmethod
+    def _safe_scheme(cls, v: str) -> str:
+        if v.strip().lower().startswith(_UNSAFE_URL):
+            raise ValueError("open_url: only http(s) addresses and paths of this server can be opened")
+        return v
+
+
 class SetFieldAction(_ActionBase):
     """Change the value of a field on the current form (only meaningful from a dialog context).
     ``target`` is the destination field; ``value`` is a literal or ``source`` reads from another
@@ -689,7 +712,7 @@ class ReturnAction(_ActionBase):
 # subclass when validating a raw dict (so screens.toml's `[[on_save]] type = "run_query"` validates).
 Action = Annotated[
     Union[
-        RunQueryAction, CallApiAction, CallPluginAction, CallActionAction, NavigateAction, SetFieldAction,
+        RunQueryAction, CallApiAction, CallPluginAction, CallActionAction, NavigateAction, OpenUrlAction, SetFieldAction,
         ConfirmAction, NotifyAction, SendNotificationAction, RefreshAction,
         ChainAction, IfAction, LoopAction, ReturnAction,
     ],

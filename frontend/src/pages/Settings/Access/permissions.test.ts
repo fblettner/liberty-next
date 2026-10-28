@@ -91,6 +91,12 @@ describe('parsePermissions / buildPermissions', () => {
     expect(leafVisible(['!dashboard:nomasx1.employees'], forest.nomasx1[1])).toBe(false)
     expect(leafVisible([], forest.nomasx1[2])).toBe(true)     // an open page is always shown
   })
+  it('a url leaf is shown unless the menu denies it', () => {
+    const f = buildMenuForest({ nomajde: { items: [{ id: 'jde', label: 'JDE', type: 'url', target: 'https://jde.example.com' }] } }, {})
+    expect(f.nomajde[0].targetPerm).toBeNull()
+    expect(leafVisible([], f.nomajde[0])).toBe(true)
+    expect(leafVisible(['*', '!menu:nomajde:jde'], f.nomajde[0])).toBe(false)
+  })
   it('a nomaflow page needs nomaflow:view (edit includes it), like the backend', () => {
     const f = buildMenuForest({ nomaflow: { items: [{ id: 'jobs', label: 'Jobs', type: 'page', target: '/nomaflow/schedule' }] } }, {})
     const jobs = f.nomaflow[0]

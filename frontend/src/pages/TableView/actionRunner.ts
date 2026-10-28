@@ -18,6 +18,7 @@
 // Slice B does *not* tackle: navigate (URL push from the runner), set_field side-effects,
 // confirm modals from inside the runner (the dialog injects its own confirm provider).
 import { api, ApiError } from '../../api/client'
+import { fillUrlTemplate, safeUrl } from '../../services/urlTemplate'
 import type { Action, Condition, ParamBind, PromptField, SharedAction } from '../../types/screens'
 
 export type Row = Record<string, unknown>
@@ -75,6 +76,8 @@ export interface ActionRunnerDeps {
    *  warning (ScreenDialog has no navigation target; row-menu / toolbar do). */
   /** `inline`: the action's own choice; undefined = follow the app's `drill_inline` default. */
   navigate?: (to: string, connector: string, params: Record<string, string>, screen?: string | null, inline?: boolean) => void
+  /** Opens an ``open_url`` action's URL — ``window.open`` when unset (injected by the tests). */
+  openUrl?: (url: string, newTab: boolean) => void
   /** Shared-action catalog (actions.toml, via ``GET /api/actions``), keyed by id — the runner
    *  resolves a ``call_action`` against this and inlines the referenced action's steps. */
   sharedActions?: Record<string, SharedAction>
@@ -605,6 +608,16 @@ async function runOneAction(
           // (don't silently auto-confirm; that could fire something irreversible).
           result.warnings.push(`confirm '${a.id}': no confirm provider`)
         }
+        break
+      }
+      case 'open_url': {
+        // Fill the template from the firing context (chain → form / row → built-ins), then open it —
+        // only an http(s) address or a path of this server; anything else is refused, not opened.
+        const url = safeUrl(fillUrlTemplate(a.url, (name) => resolveSource(name, ctx, formCtx)))
+        if (!url) throw new Error(`open_url '${a.id}': only http(s) addresses and paths of this server can be opened`)
+        const newTab = a.new_tab !== false
+        if (deps.openUrl) deps.openUrl(url, newTab)
+        else window.open(url, newTab ? '_blank' : '_self', 'noopener')
         break
       }
       case 'navigate': {

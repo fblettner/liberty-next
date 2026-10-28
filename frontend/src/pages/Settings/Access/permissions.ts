@@ -44,6 +44,7 @@ export function targetPermission(app: string, item: MenuItemRaw, screens: Record
   if (item.type === 'dashboard') return `dashboard:${item.target}`
   if (item.type === 'job') return `job:${item.target}`
   if (item.type === 'page') return pagePermission(item.target)
+  if (item.type === 'url') return null
   if (item.type === 'screen') {
     const scr = (screens[app] ?? []).find((s) => s.id === item.target)
     return scr ? `sql:${scr.connector}:${scr.read_query}` : null
@@ -89,6 +90,7 @@ export function flattenForest(forest: MenuForest): MenuNode[] {
 export function leafVisible(perms: string[], node: MenuNode): boolean {
   if (isDenied(perms, node.key)) return false
   if (node.type === 'dashboard') return !isDenied(perms, node.targetPerm ?? '')
+  if (node.type === 'url') return true   // an external address: the menu deny (above) gates it
   if (node.type === 'page') return node.targetPerm == null || hasPermission(perms, node.key)
     || [node.targetPerm, ...(INCLUDED_IN[node.targetPerm] ?? [])].some((p) => hasPermission(perms, p))
   if (node.targetPerm == null) return hasPermission(perms, node.key)

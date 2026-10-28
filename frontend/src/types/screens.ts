@@ -278,6 +278,13 @@ export type Action =
       param_binds?: ParamBind[]
       inline?: boolean | null // open the target inside the current tab (the in-place drill); blank = the app's drill_inline
     })
+  | (ActionCommon & PromptableAction & {
+      /** Open an external URL — ``{NAME}`` placeholders from the row / form / chain, ``#LOGIN_USER#``
+       *  built-ins; http(s) or a path of this server only (services/urlTemplate.ts). */
+      type: 'open_url'
+      url: string
+      new_tab?: boolean
+    })
   | (ActionCommon & {
       type: 'set_field'
       target: string

@@ -95,6 +95,14 @@
   unless the view places it itself — a view naming the code hid the label the grid shows beside it by default.
 - Apply module: the grid's columns go in a default view; the dialog-only columns are no longer `hidden` (the dialog
   dropped a hidden column's field — the Flags / Category codes / Related addresses tabs were empty).
+- `open_url` action: open an external address from a row menu, a toolbar button, a dialog tab, a drill column or a
+  chain — `url` is a template (`{COLUMN}` from the row / form, prompt fields, chain paths, URL-encoded; `#LOGIN_USER#`
+  and the other built-ins; a leading placeholder is the address itself), `new_tab`
+  (default on), the prompt-before-fire of `navigate`. Only http(s) addresses and paths of this server are opened —
+  refused at load and checked again on the filled URL. A lone `open_url` in a row menu fires from the row handle. A
+  `url` menu item opens an address in a new tab (shown unless the menu denies it). The action editors offer it.
+- Module catalogues: a screen's `row_menu` (as in screens.toml); an `open_url`'s `{ITEM}` placeholder names a data item
+  and becomes the physical column (`{AN8}` → `{ABAN8}`).
 
 ## 7.0.64 — unreleased
 

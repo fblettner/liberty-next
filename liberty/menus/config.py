@@ -54,7 +54,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 # ``screen`` and ``query`` are runtime-identical (both route to ``/sql/<connector>/<target>`` and
 # the TableView resolves any designed Screen by ``(connector, target)``); they differ only in what
 # the editor's target dropdown offers — designed screens vs raw queries.
-ItemType = Literal["screen", "query", "endpoint", "dashboard", "page", "job"]
+#  url       → an external address opened in a new tab — ``target`` is a URL template
+#              (``#LOGIN_USER#`` built-ins); http(s) or a path only.
+ItemType = Literal["screen", "query", "endpoint", "dashboard", "page", "job", "url"]
 
 
 class MenuItem(BaseModel):
@@ -78,7 +80,7 @@ class MenuItem(BaseModel):
     icon: str | None = Field(default=None, description="Lucide icon name (e.g. ``shield``, ``users``).")
     type: ItemType | None = Field(
         default=None,
-        description="Blank = folder; ``screen`` opens a designed screen; ``query`` opens a raw query/table view; ``endpoint`` opens an HTTP runner; ``dashboard`` opens a dashboard; ``page`` navigates to a registered frontend route; ``job`` opens a nomaflow job for the user to run (file upload, live log) — permission ``job:<id>``.",
+        description="Blank = folder; ``screen`` opens a designed screen; ``query`` opens a raw query/table view; ``endpoint`` opens an HTTP runner; ``dashboard`` opens a dashboard; ``page`` navigates to a registered frontend route; ``job`` opens a nomaflow job for the user to run (file upload, live log) — permission ``job:<id>``; ``url`` opens an external address (the target: an http(s) URL template with ``#LOGIN_USER#`` built-ins) in a new tab.",
         json_schema_extra={"x_enum_ref": "MENU_ITEM_TYPE"},
     )
     connector: str | None = Field(
@@ -129,6 +131,10 @@ class MenuItem(BaseModel):
         elif self.type == "job" and self.connector is not None:
             # A job leaf's target is a nomaflow job id (jobs.toml) — no connector either.
             raise ValueError(f"menu item {self.id!r}: a 'job' item must not carry a `connector` (target = the job id)")
+        elif self.type == "url" and self.connector is not None:
+            raise ValueError(f"menu item {self.id!r}: a 'url' item must not carry a `connector` (target = the address)")
+        elif self.type == "url" and not (self.target or "").strip().lower().startswith(("http://", "https://", "/")):
+            raise ValueError(f"menu item {self.id!r}: a 'url' item opens an http(s) address or a path of this server")
         elif self.type == "page" and self.connector is not None:
             # A page leaf's target is a frontend route, not a connector resource — a
             # `connector` here is a misconfiguration (same shape as the dashboard rule).
@@ -214,7 +220,7 @@ def build_menu_tree(
         # Dashboard + page leaves carry just `target` (the dashboard id / route path) — no
         # connector. The validator already rejected a stray connector on both, so we don't
         # need to handle one here.
-        connectorless = it.type in ("dashboard", "page", "job")
+        connectorless = it.type in ("dashboard", "page", "job", "url")
         connector = "" if connectorless else (it.connector or app)
         if keep is not None and not keep(it, connector):
             return None

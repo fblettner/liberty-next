@@ -674,7 +674,8 @@ export function ResultTable({
   // The row's action handle (the grid's leading cell): a single navigate action fires at once —
   // a drill — the handle showing the action's label; several actions open the row menu.
   const rowMenuHandle = useMemo(() => {
-    const only = rowMenu.length === 1 && rowMenu[0].type === 'navigate' ? rowMenu[0] : null
+    // a lone navigate / open_url fires at once from the row handle (a drill), no menu
+    const only = rowMenu.length === 1 && (rowMenu[0].type === 'navigate' || rowMenu[0].type === 'open_url') ? rowMenu[0] : null
     return only
       ? { icon: 'drill' as const, title: only.label || only.id, onClick: (row: DataRow) => { onCurrentRow?.(row); void runRowAction(only, row) } }
       : { icon: 'menu' as const, title: t('table.rowMenu'), onClick: openRowMenu }

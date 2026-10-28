@@ -98,3 +98,17 @@ describe('navigate', () => {
     expect(calls).toEqual([['roles_get', 'nomasx1', { USR_ID: '42' }, undefined, true], ['', 'nomasx1', {}, 'roles', undefined]])
   })
 })
+
+describe('open_url', () => {
+  it('fills the URL from the row and opens it; refuses another scheme', async () => {
+    const { runChain } = await import('./actionRunner')
+    const opened: [string, boolean][] = []
+    const deps = { defaultConnector: 'jdedwards', openUrl: (u: string, t: boolean) => { opened.push([u, t]) } }
+    const ok = await runChain([{ id: 'jde', type: 'open_url', url: 'https://jde.example.com/jde?user={AUUSER}' } as never], {}, { AUUSER: 'JDE USER' }, deps as never)
+    expect(ok.ok).toBe(true)
+    expect(opened).toEqual([['https://jde.example.com/jde?user=JDE%20USER', true]])
+    const bad = await runChain([{ id: 'x', type: 'open_url', url: '{U}', new_tab: false } as never], {}, { U: 'javascript:alert(1)' }, deps as never)
+    expect(bad.ok).toBe(false)
+    expect(opened).toHaveLength(1)
+  })
+})
