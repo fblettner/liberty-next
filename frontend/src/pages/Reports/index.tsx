@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { FileText, Play, RefreshCw, Download } from 'lucide-react'
+import { BookOpen, ClipboardList, FileText, Play, RefreshCw, Download } from 'lucide-react'
 import { api, apiDownload, ApiError } from '../../api/client'
 import {
   PageLayout,
@@ -34,7 +34,12 @@ import {
   ModalFooter,
   SpinnerRing,
   SearchSelect,
+  ViewCards,
 } from '../../common'
+import { useAuth } from '../../auth/AuthContext'
+import { getDocReports } from '../../services/docReports'
+import type { DocReport } from '../../types/docReports'
+import DocReportView from './DocReportView'
 import type { SearchSelectOption } from '../../common/SearchSelect'
 import { colors, fontSize, fonts } from '../../theme'
 import type { OutputFormat, ReportDef, ReportParam, ReportListResponse } from '../../types/reports'
@@ -67,7 +72,7 @@ const ToolbarSpacer = styled.div`flex: 1;`
 // catalogue), click "Run" → opens RunReportDialog.
 // --------------------------------------------------------------------------- //
 export default function Reports() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [reports, setReports] = useState<ReportDef[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -89,6 +94,16 @@ export default function Reports() {
 
   useEffect(() => { void reload() }, [reload])
 
+  // Superusers also get the documentation reports (implementation, technical) as cards above the list.
+  const { user } = useAuth()
+  const superuser = !!user?.is_superuser
+  const [view, setView] = useState<'apps' | 'implementation' | 'technical'>('apps')
+  const [docReports, setDocReports] = useState<DocReport[]>([])
+  useEffect(() => {
+    if (superuser) getDocReports(i18n.language?.startsWith('en') ? 'en' : 'fr').then(setDocReports).catch(() => setDocReports([]))
+  }, [superuser, i18n.language])
+  const doc = (k: 'implementation' | 'technical') => docReports.find((r) => r.kind === k)
+
   return (
     <PageLayout
       icon={<FileText size={18} />}
@@ -100,6 +115,16 @@ export default function Reports() {
         </Button>
       }
     >
+      {superuser && (
+        <div style={{ marginBottom: 16 }}>
+          <ViewCards value={view} onChange={setView} items={[
+            { id: 'apps', label: t('docReports.appReports'), desc: t('docReports.appReportsDesc'), icon: <FileText size={18} /> },
+            { id: 'implementation', label: doc('implementation')?.title ?? '…', desc: doc('implementation')?.subtitle ?? '', icon: <ClipboardList size={18} />, color: colors.purple.main },
+            { id: 'technical', label: doc('technical')?.title ?? '…', desc: doc('technical')?.subtitle ?? '', icon: <BookOpen size={18} />, color: colors.green.main },
+          ]} />
+        </div>
+      )}
+      {view !== 'apps' ? <DocReportView kind={view} report={doc(view)} /> : <>
       <Toolbar>
         <ToolbarSpacer />
         {reports && <Tag>{t('reports.count', { count: reports.length })}</Tag>}
@@ -133,6 +158,7 @@ export default function Reports() {
           </ReportCard>
         ))}
       </List>
+      </>}
 
       {running && (
         <RunReportDialog

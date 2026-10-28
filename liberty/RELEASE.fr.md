@@ -37,6 +37,17 @@
   tableau de bord — lit ses colonnes dans la liste du SELECT de son SQL) (`/admin/dev/data`). Configuration : l'en-tête compte ce
   qui se modifie dans un écran, ce qui reste dans le fichier / l'environnement et ce qui n'est pas
   dans l'interface, et un filtre d'état remplace la case à cocher.
+- Rapports → Rapport d'implémentation et Rapport technique (superutilisateur) : deux cartes au-dessus des rapports des
+  applications, les sections à inclure, la langue, le libellé de date de la page de garde, PDF ou Markdown
+  (`/admin/dev/reports`). Le rapport technique documente la version à partir du code en cours d'exécution
+  (architecture, modèle de données, référence de configuration et ses écarts, API avec l'accès de chaque route, lignes
+  de commande, paquetage, références dans le code) ; le rapport d'implémentation documente l'installation (composants
+  actifs, applications et menus, écrans, connecteurs et pools avec leur état de chargement, tableaux de bord /
+  graphiques / modèles de l'Explorateur, tâches, règles de notification, rôles et utilisateurs, dictionnaire, réglages
+  et API en annexe), secrets masqués.
+- Rapports PDF : un tableau aux identifiants longs (noms de requêtes, chemins) ne dépasse plus la marge
+  droite — les cellules les coupent après `_`, `.` ou `/`. Référence développeur → Configuration et le rapport
+  technique affichent un chemin par défaut sous la forme `${LIBERTY_APPS_DIR}/…` au lieu du chemin absolu du serveur.
 
 ## 7.0.64 — non publiée
 

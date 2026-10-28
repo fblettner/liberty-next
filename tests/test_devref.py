@@ -3,10 +3,13 @@ reads it."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
 from fastapi.testclient import TestClient
 
 from liberty.config import Settings
-from liberty.devref import FILE_ONLY, _select_columns, config_reference, ui_editors
+from liberty.devref import FILE_ONLY, _portable_path, _select_columns, config_reference, ui_editors
 from tests.test_web_admin_ops import _h, env  # noqa: F401 — the app fixture
 
 
@@ -111,3 +114,11 @@ def test_select_columns_reads_the_outer_select_list() -> None:
     assert _select_columns(sql) == ["apps_id", "n", "tone", "Quoted", "top"]
     assert _select_columns({"postgres": "SELECT a AS one FROM t", "oracle": "SELECT b FROM t"}) == ["one"]
     assert _select_columns("SELECT * FROM t") == []
+
+
+def test_default_paths_are_shown_relative_to_the_apps_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    apps = tmp_path / "apps" / "config"
+    monkeypatch.setenv("LIBERTY_APPS_DIR", str(apps))
+    assert _portable_path(apps / "screens.toml") == "${LIBERTY_APPS_DIR}/screens.toml"
+    assert _portable_path(apps.parent / "plugins" / "nomaflow" / "jobs.toml") == "${LIBERTY_APPS_DIR}/../plugins/nomaflow/jobs.toml"
+    assert _portable_path(Path("config/app.toml")) == "config/app.toml"

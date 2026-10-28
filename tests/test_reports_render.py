@@ -6,6 +6,7 @@ section markers in the HTML body) rather than pixel-perfect output."""
 from __future__ import annotations
 
 from liberty.reports.render import (
+    _soft_breaks_in_cells,
     BuildOptions,
     build_pdf,
     fix_notion_markdown,
@@ -230,3 +231,11 @@ def test_render_content_unknown_format_raises_value_error() -> None:
         assert "unsupported" in str(exc).lower()
     else:
         raise AssertionError("expected ValueError for unsupported format")
+
+
+def test_identifiers_in_table_cells_get_break_points() -> None:
+    html = '<td><code>nomasx1.security_users_get</code> 1.5 <a href="x_y.z">a/b</a></td><p>keep_me</p>'
+    out = _soft_breaks_in_cells(html)
+    assert "nomasx1.\u200bsecurity_\u200busers_\u200bget" in out
+    assert "1.5" in out and 'href="x_y.z"' in out and "a/\u200bb" in out
+    assert "<p>keep_me</p>" in out  # only inside cells

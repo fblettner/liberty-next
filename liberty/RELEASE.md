@@ -32,6 +32,16 @@
   (a table no screen shows — a dashboard's query — reads its columns from its SQL's select list)
   (`/admin/dev/data`). Configuration: the header counts what is edited in a screen, what stays in
   the file / environment and what is not in the UI, and a status filter replaces the checkbox.
+- Reports → Implementation report and Technical report (superuser): two cards above the applications' reports,
+  the sections to include, the language, the cover's date label, PDF or Markdown (`/admin/dev/reports`). The
+  technical report documents the release from the running code (architecture, data model, configuration reference
+  with its gaps, API with the access of every route, command lines, packaging, code references); the implementation
+  report documents this install (enabled components, applications and menus, screens, connectors and pools with their
+  load state, dashboards / charts / Explorer models, jobs, notification rules, roles and users, dictionary, settings
+  and API as appendices), secrets masked.
+- PDF reports: a table with long identifiers (query names, paths) no longer runs past the right margin —
+  the cells wrap them after `_`, `.` or `/`. Developer reference → Configuration and the technical report
+  show a default path as `${LIBERTY_APPS_DIR}/…` instead of the absolute path of the server.
 
 ## 7.0.64 — unreleased
 

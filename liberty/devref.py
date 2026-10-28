@@ -13,6 +13,7 @@ UI", plan priority 1).
 from __future__ import annotations
 
 import json
+import os
 import re
 import typing
 from functools import lru_cache
@@ -71,6 +72,21 @@ def _type_name(ann: Any) -> str:
     return text or str(ann).replace("typing.", "").replace("pathlib.", "")
 
 
+def _portable_path(path: Path) -> str:
+    """A default path as the operator would write it: under ``LIBERTY_APPS_DIR`` (or beside it, where
+    nomaflow's jobs.toml lives) as ``${LIBERTY_APPS_DIR}/…``, never the absolute path of the machine
+    that runs the reference."""
+    apps = os.environ.get("LIBERTY_APPS_DIR", "").strip()
+    if apps:
+        base = Path(apps)
+        for root, prefix in ((base, "${LIBERTY_APPS_DIR}"), (base.parent, "${LIBERTY_APPS_DIR}/..")):
+            try:
+                return f"{prefix}/{path.relative_to(root).as_posix()}"
+            except ValueError:
+                continue
+    return path.as_posix()
+
+
 def _default(field: Any) -> Any:
     if field.default_factory is not None:
         try:
@@ -81,6 +97,8 @@ def _default(field: Any) -> Any:
         value = field.default
     if isinstance(value, BaseModel):
         value = value.model_dump(mode="json")
+    if isinstance(value, Path):
+        return _portable_path(value)
     try:
         json.dumps(value)
         return value

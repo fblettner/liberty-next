@@ -225,6 +225,20 @@ def _tag_callouts_by_color(html: str) -> str:
     return re.sub(r"<blockquote>(.*?)</blockquote>", repl, html, flags=re.DOTALL)
 
 
+_CELL = re.compile(r"(<td[^>]*>)(.*?)(</td>)", re.DOTALL)
+_BREAK_AFTER = re.compile(r"(?<=\w)([_./])(?=[^\W\d])")
+
+
+def _soft_breaks_in_cells(html: str) -> str:
+    """Give the identifiers inside table cells (``nomasx1.security_users_get``, a path) a break
+    point after each ``_`` ``.`` ``/`` — a zero-width space in the text, never inside a tag — so a
+    narrow column wraps them between their words instead of overflowing the page."""
+    def cell(m: re.Match) -> str:
+        parts = re.split(r"(<[^>]+>)", m.group(2))
+        return m.group(1) + "".join(p if p.startswith("<") else _BREAK_AFTER.sub("\\1\u200b", p) for p in parts) + m.group(3)
+    return _CELL.sub(cell, html)
+
+
 def md_to_html_body(
     md_text: str,
     svg_text: Optional[str],
@@ -315,6 +329,7 @@ def md_to_html_body(
         html_body,
     )
 
+    html_body = _soft_breaks_in_cells(html_body)
     html_body = _tag_callouts_by_color(html_body)
     return html_body, toc_html
 
@@ -625,6 +640,10 @@ html, body {{
   vertical-align: top; font-size: 9pt;
 }}
 .content tbody tr:nth-child(even) td {{ background: #f8fafc; }}
+/* a long identifier (a query name, a column list) wraps inside its cell instead of pushing the
+   table past the right margin: at the break points _soft_breaks_in_cells adds, else anywhere */
+.content td {{ overflow-wrap: break-word; }}
+.content td code {{ font-size: 8pt; }}
 
 /* ============ CALLOUTS ============ */
 .content blockquote, .content .aside {{
