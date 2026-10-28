@@ -40,6 +40,11 @@ describe('ruleCell', () => {
     const c = col({ kind: 'lookup', connector: 'foo', query: 'roles_get', value: 'ROL_ID', label: 'ROL_NAME' })
     expect(ruleCell('7', c).kind).toBe('lookup-pending')
     expect(ruleCell('7', c, undefined, new Map([['7', 'Admins']]))).toEqual({ text: 'Admins', isNull: false, kind: 'lookup' })
+    // a JDE UDC key is right-justified ("       C") while the column holds "C": trim-tolerant, the exact key first
+    const udc = new Map([['       C', 'Customers'], ['       V', 'Suppliers'], ['V', 'Exact']])
+    expect(ruleCell('C', c, undefined, udc).text).toBe('Customers')
+    expect(ruleCell('V', c, undefined, udc).text).toBe('Exact')
+    expect(ruleCell('Z', c, undefined, udc)).toEqual({ text: 'Z', isNull: false, kind: 'plain' })
     expect(ruleCell('8', c, undefined, new Map([['7', 'Admins']]))).toEqual({ text: '8', isNull: false, kind: 'plain' })
   })
 })

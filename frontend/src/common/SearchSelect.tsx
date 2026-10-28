@@ -139,6 +139,15 @@ const CreateRow = styled.button`
   &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
 `
 
+/** The option a stored *value* shows as: exact match first, then trim-tolerant, so a JDE-padded
+ *  lookup value (option ``"      01"``) still shows its label when the stored value reads back as
+ *  ``"01"`` (or vice versa) — common after a UDC lookup moved to read JDE directly. Display only:
+ *  the stored value is never rewritten, so save keeps its form. Shared with the read-only field. */
+export function matchOption<T extends { value: string }>(options: readonly T[], value: string | null | undefined): T | undefined {
+  return options.find((o) => o.value === value)
+    ?? (value ? options.find((o) => o.value.trim() === String(value).trim()) : undefined)
+}
+
 export function SearchSelect({
   value, onChange, options: given, placeholder, anyLabel, loading, disabled, allowCustom, cellColumns, sort, clearable, size,
 }: {
@@ -234,12 +243,8 @@ export function SearchSelect({
     }
   }, [open])
 
-  // Exact match drives the trigger label; fall back to a trim-tolerant match so a JDE-padded
-  // lookup value (option ``"      01"``) still shows its label when the stored value reads back
-  // as ``"01"`` (or vice versa) — common after a UDC lookup moved to read JDE directly. Display
-  // only: the stored ``value`` passed to ``onChange`` is never rewritten, so save keeps its form.
-  const current = options.find((o) => o.value === value)
-    ?? (value ? options.find((o) => o.value.trim() === String(value).trim()) : undefined)
+  // Exact, then trim-tolerant (see matchOption) — the trigger label.
+  const current = matchOption(options, value)
   // Filterable cell columns + their distinct values (the facet chips). Computed once per options set.
   const facetCols = useMemo(() => {
     if (!cellColumns) return []

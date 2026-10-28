@@ -79,7 +79,18 @@ export function sharedToGridView(sv: SharedGridView, allColumnIds: string[]): Gr
   const byLower = new Map(allColumnIds.map((id) => [id.toLowerCase(), id] as const))
   const out: GridView = {}
   if (sv.columns?.length) {
-    const visible = sv.columns.map((c) => resolveCol(c, byLower))
+    // A view names the data columns; a LOOKUP / ENUM column's derived label column (``<id>__lookup`` /
+    // ``<id>__enum``) follows its code column unless the view places it itself — else naming the
+    // code would hide the description the grid shows beside it by default.
+    const named = sv.columns.map((c) => resolveCol(c, byLower))
+    const placed = new Set(named.map((n) => n.toLowerCase()))
+    const visible: string[] = []
+    for (const id of named) {
+      visible.push(id)
+      for (const companion of [`${id}__lookup`, `${id}__enum`]) {
+        if (byLower.has(companion.toLowerCase()) && !placed.has(companion.toLowerCase())) visible.push(resolveCol(companion, byLower))
+      }
+    }
     const visSet = new Set(visible)
     out.order = visible
     const vis: VisibilityState = {}

@@ -139,6 +139,9 @@ export function ScreenDialog({
   const [tabIdx, setTabIdx] = useState(0)
   const [formValues, setFormValues] = useState<Row>({})
   const [savedRow, setSavedRow] = useState<Row>({})  // the *original* values keyed by field name (for `:<FIELD>_ORIGINAL`)
+  // What the nested tabs bind from: every loaded column of the row (a link column need not be a
+  // field — a detail's key the screen hides), the live form values on top.
+  const bindValues = useMemo<Row>(() => ({ ...savedRow, ...formValues }), [savedRow, formValues])
   // Per-field "already-seeded" baseline for editable (lock=false) default_when rules: the forced
   // value last applied, so the seed fires once when the condition becomes active and the operator's
   // later edits aren't clobbered. Locked defaults don't use this (they force continuously).
@@ -303,6 +306,8 @@ export function ScreenDialog({
   // on those refs and the loop is gone.
   const { acquireLock, releaseLock } = useSio()
   const lockPayload = useMemo<LockPayload | null>(() => {
+    // a read-only screen writes nothing — no lock to take (it only blocked other readers)
+    if (screen.read_only) return null
     if (mode !== 'edit') {
       console.info("[lock] skip — mode is", mode)
       return null
@@ -323,7 +328,7 @@ export function ScreenDialog({
       kv[k] = String(v)
     }
     return { app: screen.app, screen: screen.id, key_values: kv }
-  }, [mode, keyColumns, row, valueFor, screen.app, screen.id])
+  }, [mode, keyColumns, row, valueFor, screen.app, screen.id, screen.read_only])
 
   // Watch the live lock map for this payload. ``locks`` updates as the server's
   // ``lock.acquired`` / ``lock.released`` broadcasts arrive; when Alice releases her lock,
@@ -941,14 +946,14 @@ export function ScreenDialog({
                 if (tab.type === 'nested_form') {
                   return (
                     <div key={tab.id} style={{ display: active ? 'block' : 'none' }}>
-                      <NestedFormView tab={tab} parentFormValues={formValues} parentConnector={connector} app={screen.app} parentMode={mode} parentDuplicating={duplicating} parentReadOnly={readOnly} />
+                      <NestedFormView tab={tab} parentFormValues={bindValues} parentConnector={connector} app={screen.app} parentMode={mode} parentDuplicating={duplicating} parentReadOnly={readOnly} />
                     </div>
                   )
                 }
                 if (tab.type === 'nested_table') {
                   return (
                     <div key={tab.id} style={{ display: active ? 'block' : 'none' }}>
-                      <NestedTableView tab={tab} parentFormValues={formValues} parentConnector={connector} app={screen.app} parentReadOnly={readOnly} />
+                      <NestedTableView tab={tab} parentFormValues={bindValues} parentConnector={connector} app={screen.app} parentReadOnly={readOnly} />
                     </div>
                   )
                 }

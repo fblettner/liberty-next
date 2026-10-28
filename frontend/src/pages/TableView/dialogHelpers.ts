@@ -127,6 +127,13 @@ export function activeRulesWhen<E extends { field: string; value: string | strin
  *  means "no narrowing" (a lookup), "this column keeps its current DB value" (a writable
  *  query), or "skip this fetch" (a nested form that needs its FK to resolve). Reserved
  *  built-ins (`#LOGIN_USER#`/`#SYSDATE#`/…) are skipped — wired in a future auth slice. */
+/** Whether every bind of *binds* got a value in *bound* — a nested tab filtered on part of its link
+ *  (an address's line number without the address) would show other parents' rows, so it loads
+ *  nothing until the whole link resolves. Built-in sources (``#…#``) are not the parent's to give. */
+export function bindsComplete(binds: ReadonlyArray<ParamBind> | undefined, bound: Record<string, string>): boolean {
+  return (binds ?? []).every((b) => (b.source?.startsWith('#') && (b.value == null || b.value === '')) || b.param in bound)
+}
+
 export function resolveBindList(binds: ReadonlyArray<ParamBind> | undefined, formValues: Row): Record<string, string> {
   const out: Record<string, string> = {}
   for (const b of binds ?? []) {

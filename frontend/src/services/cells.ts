@@ -23,6 +23,20 @@ export function enumMap(rule: Extract<DisplayRule, { kind: 'enum' }>): Map<strin
  *  the table render it differently (the boolean as an icon, an unresolved lookup as muted, …).
  *  `enumMaps` and `lookupMap` are passed in so callers can compute them once per column /
  *  per batch and reuse across rows. */
+// A lookup map keyed by the trimmed codes, built once per map: JDE stores UDC codes right-justified
+// (``"       C"``) while a column holds them short (``"C"``) — the trim-tolerant fallback the
+// dropdown applies too (``matchOption``), so the grid shows the description the dialog shows.
+const trimmedMaps = new WeakMap<Map<string, string>, Map<string, string>>()
+function trimmedLookup(map: Map<string, string>, raw: string): string | undefined {
+  let t = trimmedMaps.get(map)
+  if (!t) {
+    t = new Map()
+    for (const [k, v] of map) if (!t.has(k.trim())) t.set(k.trim(), v)
+    trimmedMaps.set(map, t)
+  }
+  return t.get(raw.trim())
+}
+
 export function ruleCell(
   value: unknown,
   column: Column,
@@ -51,7 +65,7 @@ export function ruleCell(
   }
   if (rule.kind === 'lookup') {
     if (lookupMap === undefined) return { text: raw, isNull: false, kind: 'lookup-pending' }
-    const hit = lookupMap.get(raw)
+    const hit = lookupMap.get(raw) ?? trimmedLookup(lookupMap, raw)
     return hit !== undefined ? { text: hit, isNull: false, kind: 'lookup' } : { text: raw, isNull: false, kind: 'plain' }
   }
   return { text: raw, isNull: false, kind: 'plain' }

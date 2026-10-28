@@ -127,7 +127,8 @@ def test_plan_reports_missing_and_existing() -> None:
     screen = plan.screen_defs["f0101"]
     assert screen["read_only"] is True and screen["read_query"] == "f0101_get"
     assert [c["name"] for c in screen["columns"]] == ["ABAN8", "ABALPH", "ABAT1"]
-    assert screen["columns"][2].get("hidden") is True                     # dialog only, not in the grid
+    assert "hidden" not in screen["columns"][2]                           # dialog only: kept for the dialog's field
+    assert screen["views"] == [{"name": "Default", "default": True, "columns": ["ABAN8", "ABALPH"]}]   # the grid
     general, who = screen["dialog"]["tabs"]
     assert [f["name"] for f in general["fields"]] == ["ABAN8", "ABALPH", "ABAT1"]
     assert who == {"id": "f0111", "label": "Who's Who", "type": "nested_table", "screen": "f0111", "hide_on_add": True,

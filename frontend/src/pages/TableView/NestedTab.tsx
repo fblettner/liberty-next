@@ -22,7 +22,7 @@ import { api, ApiError } from '../../api/client'
 import { Banner, SpinnerRing } from '../../common'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { NestedFormTab, NestedTableTab, ScreenDetail, ScreenField } from '../../types/screens'
-import { evalConditions, originalKeys, resolveBindList, type Row, valueFor, withUpper } from './dialogHelpers'
+import { bindsComplete, evalConditions, originalKeys, resolveBindList, type Row, valueFor, withUpper } from './dialogHelpers'
 import { CellWrap, FieldRow, isPassword } from './FieldRow'
 import { colors, fontSize } from '../../theme'
 // Circular import: ResultTable → ScreenDialog → (this module's) NestedFormView/NestedTableView,
@@ -149,7 +149,7 @@ export function NestedFormView({
   const boundKey = useMemo(() => JSON.stringify(bound), [bound])
   // Skip the fetch when no binds resolved (a not-yet-saved parent in "add" mode) or until the reused
   // screen's read_query has loaded (firing a query with an empty name would 404).
-  const hasBinds = Object.keys(bound).length > 0 && !!effRead
+  const hasBinds = Object.keys(bound).length > 0 && bindsComplete(tab.param_binds, bound) && !!effRead
 
   const [result, setResult] = useState<QueryResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -370,7 +370,7 @@ export function NestedTableView({
   const connector = effectiveConnector(tab, parentConnector)
   const bound = useMemo(() => resolveBindList(tab.param_binds, parentFormValues), [tab.param_binds, parentFormValues])
   const boundKey = useMemo(() => JSON.stringify(bound), [bound])
-  const hasBinds = Object.keys(bound).length > 0
+  const hasBinds = Object.keys(bound).length > 0 && bindsComplete(tab.param_binds, bound)
 
   const [nestedScreen, setNestedScreen] = useState<ScreenDetail | null>(null)
   const [result, setResult] = useState<QueryResult | null>(null)

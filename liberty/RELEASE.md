@@ -83,6 +83,18 @@
 - Screen Assistant → A module: the module catalogue (search, groups), the preview read on the live tables (per
   screen, as a tree of its details: table, prefix, columns, data items the table lacks, new / exists / replace; the menu;
   what blocks it), Replace with its warning, Apply — the sidebar refreshed, then Open the module's first screen.
+- Detail tabs (nested table / form) take their link values from the whole loaded row, not only from the dialog's
+  fields — a link column the screen keeps out of the form (a detail's key) was dropped, and the tab then filtered on
+  part of its key and showed other records' rows (Who's Who → Email listed every address's line-1 email); a tab whose
+  link is incomplete now loads nothing.
+- A `read_only` screen takes no record lock (it writes nothing; its dialog showed "Locked by …" to the next reader).
+- A read-only lookup field shows its description beside the code, and a grid lookup cell finds its description when
+  the stored code is shorter than the JDE UDC key (`"C"` against `"       C"`) — the trim-tolerant match the dropdown
+  already applied (`matchOption`).
+- A shared grid view that lists a LOOKUP / ENUM column keeps its description column right after it (`<col>__lookup`),
+  unless the view places it itself — a view naming the code hid the label the grid shows beside it by default.
+- Apply module: the grid's columns go in a default view; the dialog-only columns are no longer `hidden` (the dialog
+  dropped a hidden column's field — the Flags / Category codes / Related addresses tabs were empty).
 
 ## 7.0.64 — unreleased
 

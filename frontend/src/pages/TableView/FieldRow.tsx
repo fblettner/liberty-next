@@ -9,7 +9,7 @@
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Checkbox, Field, Input, SearchSelect } from '../../common'
+import { Checkbox, Field, Input, SearchSelect, matchOption } from '../../common'
 import type { Column } from '../../types/connectors'
 import type { ScreenField } from '../../types/screens'
 import { type LookupSpec, lookupKey, lookupOptions, lookupCellColumns, useLookupTables } from '../../services/lookups'
@@ -99,8 +99,19 @@ export function FieldRow({
     // A disabled enum shows its label, not the stored code.
     const opt = effectiveRule.values.find((v) => v.value === textValue)
     widget = <ReadOnlyBox aria-readonly>{opt?.label ?? (textValue || <span style={{ color: colors.text.muted }}>—</span>)}</ReadOnlyBox>
+  } else if (disabled && effectiveRule?.kind === 'lookup') {
+    // A disabled lookup shows its description beside the code, matched like the dropdown does
+    // (matchOption: exact, then JDE-padding tolerant) — a read-only screen's UDC values.
+    const opt = lookupData ? matchOption(lookupOptions(lookupData), textValue) : undefined
+    widget = (
+      <ReadOnlyBox aria-readonly>
+        {textValue
+          ? <>{textValue}{opt && opt.label !== opt.value && <span style={{ color: colors.text.secondary }}> — {opt.label}</span>}</>
+          : <span style={{ color: colors.text.muted }}>—</span>}
+      </ReadOnlyBox>
+    )
   } else if (disabled) {
-    // Read-only echo for the remaining kinds (text / number / date / lookup) — value visible + copyable.
+    // Read-only echo for the remaining kinds (text / number / date) — value visible + copyable.
     widget = <ReadOnlyBox aria-readonly>{textValue || <span style={{ color: colors.text.muted }}>—</span>}</ReadOnlyBox>
   } else if (effectiveRule?.kind === 'boolean') {
     const trueV = effectiveRule.true_value

@@ -215,7 +215,7 @@ def build_plan(
                 hint["key"] = True
             if item in links or item in s.filters:
                 hint["filter"] = True          # filtered in the database: the parent's binds, the filter panel
-            if (item in links and detail_only) or item not in grid:
+            if item in links and detail_only:
                 hint["hidden"] = True          # a link is shown where the screen is a list of its own
             columns.append(hint)
         tabs: list[dict[str, Any]] = []
@@ -241,6 +241,11 @@ def build_plan(
         screen = {"label": s.label, "connector": module.connector, "read_query": f"{s.id}_get",
                   "auto_load": True, "read_only": True, "columns": columns,
                   "dialog": {"title": s.label, "tabs": tabs}}
+        # the grid's columns as the default view — a dialog-only column must not be ``hidden``
+        # (the dialog drops a hidden column's field)
+        shown = [name[i] for i in grid if i in name and not (i in links and detail_only)]
+        if len(shown) < len(columns):
+            screen["views"] = [{"name": "Default", "default": True, "columns": shown}]
         if s.description:
             screen["description"] = s.description
         plan.screen_defs[s.id] = screen

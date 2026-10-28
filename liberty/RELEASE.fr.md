@@ -99,6 +99,21 @@
   (par écran, en arbre de ses détails : table, préfixe, colonnes, éléments de données absents de la table, nouveau /
   existe / remplacé ; le menu ; ce qui bloque), Remplacer avec son avertissement, Appliquer — la barre latérale
   rafraîchie, puis Ouvrir le premier écran du module.
+- Les onglets de détail (table / formulaire imbriqués) prennent leurs valeurs de lien dans toute la ligne chargée, pas
+  seulement dans les champs du dialogue — une colonne de lien tenue hors du formulaire (la clé d'un détail) était
+  perdue, et l'onglet filtrait alors sur une partie de sa clé et montrait les lignes d'autres enregistrements (Contacts →
+  E-mail listait l'e-mail de ligne 1 de toutes les adresses) ; un onglet au lien incomplet ne charge plus rien.
+- Un écran `read_only` ne pose plus de verrou d'enregistrement (il n'écrit rien ; son dialogue affichait « Verrouillé
+  par … » au lecteur suivant).
+- Un champ de liste en lecture seule affiche sa description à côté du code, et une cellule de liste dans la grille
+  trouve sa description quand le code stocké est plus court que la clé UDC JDE (`"C"` contre `"       C"`) — la
+  comparaison tolérante aux espaces que la liste déroulante appliquait déjà (`matchOption`).
+- Une vue de grille partagée qui liste une colonne LOOKUP / ENUM garde sa colonne de description juste après
+  (`<col>__lookup`), sauf si la vue la place elle-même — une vue nommant le code masquait le libellé que la grille
+  affiche à côté par défaut.
+- Appliquer un module : les colonnes de la grille vont dans une vue par défaut ; les colonnes du seul dialogue ne sont
+  plus `hidden` (le dialogue retirait le champ d'une colonne masquée — les onglets Indicateurs / Codes catégorie /
+  Adresses liées étaient vides).
 
 ## 7.0.64 — non publiée
 
