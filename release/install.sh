@@ -46,6 +46,14 @@
 #   --ssl none (default)
 #       HTTP only on :80.
 #
+# Database (default: embedded — the full layout's own Postgres, SQLite on light):
+#   --db external --db-host <host> [--db-port 5432] [--db-user liberty] [--db-name liberty]
+#                 [--db-password-env VAR]     # else prompted
+#       The framework database (and the licensed apps' schemas) on a PostgreSQL server outside
+#       the stack: the bundled Postgres isn't started (full), the connection is recorded in .env
+#       and in the compose chain, so every later start / upgrade keeps it. An existing install
+#       moves with ./liberty db external (and back with ./liberty db embedded).
+#
 # Re-running:
 #   .env already present + stack up → no-op (use ``docker compose pull && up -d`` to upgrade).
 #   .env already present + stack down → starts the stack with the existing .env.
@@ -83,6 +91,8 @@ SSL_EMAIL=""             # --email   (letsencrypt only — ACME contact)
 SSL_CERT_DIR=""          # --cert-dir  (provided only — abs host dir with cert files)
 SSL_CERT_FILE=""         # --cert-file (provided only — cert filename within cert-dir)
 SSL_KEY_FILE=""          # --key-file  (provided only — key  filename within cert-dir)
+DB_MODE="embedded"       # --db embedded|external
+DB_HOST=""; DB_PORT="5432"; DB_USER="liberty"; DB_NAME="liberty"; DB_PASSWORD_ENV=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -117,14 +127,23 @@ while [ $# -gt 0 ]; do
     --key-file)
       [ -z "${2:-}" ] && die "--key-file requires a value"
       SSL_KEY_FILE="$2"; shift 2 ;;
+    --db)
+      [ -z "${2:-}" ] && die "--db requires a value (embedded|external)"
+      DB_MODE="$2"; shift 2 ;;
+    --db-host) [ -z "${2:-}" ] && die "--db-host requires a value"; DB_HOST="$2"; shift 2 ;;
+    --db-port) [ -z "${2:-}" ] && die "--db-port requires a value"; DB_PORT="$2"; shift 2 ;;
+    --db-user) [ -z "${2:-}" ] && die "--db-user requires a value"; DB_USER="$2"; shift 2 ;;
+    --db-name) [ -z "${2:-}" ] && die "--db-name requires a value"; DB_NAME="$2"; shift 2 ;;
+    --db-password-env) [ -z "${2:-}" ] && die "--db-password-env requires a variable name"; DB_PASSWORD_ENV="$2"; shift 2 ;;
     --help|-h)
-      sed -n '4,46p' "$0"; exit 0 ;;
+      sed -n '4,54p' "$0"; exit 0 ;;
     *)
       die "Unknown argument: $1 (expected: light | full | prepare [flags])" ;;
   esac
 done
 
 # Cross-arg validation
+ENV_FILE_CHECK=".env"
 [ -n "$APPS_WHEEL" ] && [ "$LAYOUT" = "prepare" ] && die "--apps cannot be combined with 'prepare' (apps need a running stack)."
 
 # --reset is wipe-and-exit; combining with install flags is almost certainly a
@@ -141,6 +160,25 @@ if [ "$RESET" = "yes" ]; then
          ./install.sh $LAYOUT$combined …"
   fi
 fi
+
+case "$DB_MODE" in
+  embedded) ;;
+  external)
+    [ -z "$DB_HOST" ] && die "--db external requires --db-host <host>"
+    if [ -f "$ENV_FILE_CHECK" ]; then
+      die "--db external is for a new install; this one already has a .env — move it with: ./liberty db external --host $DB_HOST"
+    fi
+    if [ -n "$DB_PASSWORD_ENV" ]; then
+      DB_PASSWORD="${!DB_PASSWORD_ENV:-}"
+      [ -n "$DB_PASSWORD" ] || die "--db-password-env $DB_PASSWORD_ENV: that variable is empty or unset"
+    else
+      read -r -s -p "Password of ${DB_USER}@${DB_HOST}: " DB_PASSWORD; echo
+      [ -n "$DB_PASSWORD" ] || die "a password is required for the external database"
+    fi
+    case "$DB_PASSWORD" in *'$'*) die "the database password contains '\$' — docker compose would mangle it in .env; change it on the server";; esac
+    ;;
+  *) die "Unknown --db mode: $DB_MODE (expected: embedded | external)" ;;
+esac
 
 case "$SSL_MODE" in
   none) ;;
@@ -246,8 +284,10 @@ fi
 # into those volumes (postgres + pgadmin only init on first start). Catch this BEFORE
 # starting the stack so the user can choose --reset deliberately.
 stale_volumes() {
-  local found=()
-  for v in pg-data pgadmin-data liberty-data; do
+  local found=() vols="pg-data pgadmin-data liberty-data"
+  # An external database doesn't use pg-data: an old one left on the host is not in the way.
+  [ "$DB_MODE" = "external" ] && vols="pgadmin-data liberty-data"
+  for v in $vols; do
     docker volume inspect "$v" >/dev/null 2>&1 && found+=("$v")
   done
   printf '%s\n' "${found[@]}"
@@ -273,6 +313,11 @@ fi
 # docker compose calls — compose v2's project discovery looks for compose.yaml in cwd
 # BEFORE reading .env's COMPOSE_FILE, so we must set this in the shell env too).
 COMPOSE_FILE_LINE="docker-compose.${LAYOUT}.yml"
+# Overlays order: layout, database, TLS, apps (the apps overlay is always last).
+if [ "$DB_MODE" = "external" ]; then
+  COMPOSE_FILE_LINE="${COMPOSE_FILE_LINE}:docker-compose.external-db.yml"
+  [ "$LAYOUT" = "full" ] && COMPOSE_FILE_LINE="${COMPOSE_FILE_LINE}:docker-compose.no-embedded-db.yml"
+fi
 case "$SSL_MODE" in
   letsencrypt) COMPOSE_FILE_LINE="${COMPOSE_FILE_LINE}:docker-compose.tls-letsencrypt.yml" ;;
   provided)    COMPOSE_FILE_LINE="${COMPOSE_FILE_LINE}:docker-compose.tls-provided.yml" ;;
@@ -333,7 +378,7 @@ else
 
   LIBERTY_JWT_SECRET="$(gen_secret 48)"
   LIBERTY_MASTER_KEY="$(gen_secret 32)"   # always per-install random — no override flag
-  POSTGRES_PASSWORD="$(gen_secret 24)"
+  if [ "$DB_MODE" = "external" ]; then POSTGRES_PASSWORD="$DB_PASSWORD"; else POSTGRES_PASSWORD="$(gen_secret 24)"; fi
   PGADMIN_PASSWORD="$(gen_secret 16)"
   TRAEFIK_DASHBOARD_PASSWORD="$(gen_secret 16)"
   # apr1 (htpasswd) hash — accepted by Traefik's basicAuth; `$` doubled so compose keeps it literal.
@@ -402,11 +447,11 @@ COMPOSE_FILE=${COMPOSE_FILE_LINE}
 LIBERTY_JWT_SECRET=${LIBERTY_JWT_SECRET}
 LIBERTY_MASTER_KEY=${LIBERTY_MASTER_KEY}
 
-# ── FULL LAYOUT (ignored by the light compose) ─────────────────────────────
+# ── DATABASE ───────────────────────────────────────────────────────────────
+# Embedded (default): the full layout's own Postgres, with this password. External: the
+# server below — see docker-compose.external-db.yml (./liberty db external / embedded).
+$( [ "$DB_MODE" = "external" ] && printf 'DB_MODE=external\nPOSTGRES_HOST=%s\nPOSTGRES_PORT=%s\nPOSTGRES_USER=%s\nPOSTGRES_DB=%s\n' "$DB_HOST" "$DB_PORT" "$DB_USER" "$DB_NAME" || printf 'DB_MODE=embedded\n# POSTGRES_USER=liberty\n# POSTGRES_DB=liberty\n# POSTGRES_PORT=5432\n')
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-# POSTGRES_USER=liberty
-# POSTGRES_DB=liberty
-# POSTGRES_PORT=5432
 
 PGADMIN_PASSWORD=${PGADMIN_PASSWORD}
 # PGADMIN_EMAIL=admin@liberty.fr
@@ -574,11 +619,15 @@ case "$LAYOUT" in
     if [ -n "${TRAEFIK_DASHBOARD_PASSWORD:-}" ]; then
       echo "  Traefik:        admin / ${TRAEFIK_DASHBOARD_PASSWORD}   (dashboard at ${BASE:-http://localhost}/traefik — shown once; ./liberty dashboard-password regenerates)"
     fi
-    echo "  Postgres:       published on 127.0.0.1:${POSTGRES_PORT:-5432} only (POSTGRES_BIND=0.0.0.0 in .env to open it)"
-    POSTGRES_PASSWORD_LINE=$(grep -E '^POSTGRES_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)
-    POSTGRES_USER_LINE=$(grep -E '^POSTGRES_USER=' "$ENV_FILE" | cut -d= -f2- || true)
-    echo "  Postgres root:  ${POSTGRES_USER_LINE:-liberty} / ${POSTGRES_PASSWORD_LINE}"
-    echo "    (the licensed apps' nomasx1 + nomajde roles inherit this same password during deploy-databases)"
+    if [ "$DB_MODE" = "external" ]; then
+      echo "  Database:       external — ${DB_USER}@${DB_HOST}:${DB_PORT}/${DB_NAME} (the bundled Postgres is not started)"
+    else
+      echo "  Postgres:       published on 127.0.0.1:${POSTGRES_PORT:-5432} only (POSTGRES_BIND=0.0.0.0 in .env to open it)"
+      POSTGRES_PASSWORD_LINE=$(grep -E '^POSTGRES_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)
+      POSTGRES_USER_LINE=$(grep -E '^POSTGRES_USER=' "$ENV_FILE" | cut -d= -f2- || true)
+      echo "  Postgres root:  ${POSTGRES_USER_LINE:-liberty} / ${POSTGRES_PASSWORD_LINE}"
+      echo "    (the licensed apps' nomasx1 + nomajde roles inherit this same password during deploy-databases)"
+    fi
     ;;
 esac
 

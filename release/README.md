@@ -79,6 +79,7 @@ recomputes the compose chain**: the layout + TLS overlay + apps overlay live in 
 | `./liberty upgrade [--tag X] [--apps <wheel>] [--keep DAYS]` | `doctor` (advisory) → the running image is kept under a local `rollback-<stamp>` tag → backup (the upgrade aborts if the snapshot fails) → pull + recreate with the recorded chain → pending schema migrations → a **report** (JSON + Markdown under the config volume, shown in Settings → History → Upgrades) → `status`. |
 | `./liberty rollback [--yes]` | Back to the image that ran before the last upgrade and the volumes it snapshotted just before. Asks for confirmation (the restore drops everything written since), records a `rollback` report. |
 | `./liberty migrate [--dry-run]` | `liberty-admin migrate` inside the container — every app plugin's pending Alembic revisions (nomasx1 today). `--dry-run` lists them, exit 2 when some are pending. |
+| `./liberty db` · `db dump [file]` · `db external --host H …` · `db embedded` | Where the database is; a `pg_dumpall` of the bundled Postgres; move the app to a PostgreSQL server outside the stack (or back) — see [External database](#external-database). |
 | `./liberty backup [--keep DAYS]` / `./liberty restore <dir>` | Volume snapshots (= `backup.sh`) and the matching restore (stops the stack, restores every `<volume>.tar.gz` + the apps bind mount, starts again). |
 | `./liberty logs [-f]` | The `liberty-next` service's logs. |
 
@@ -199,6 +200,41 @@ stays), `tls.yml` is rewritten or removed, and `docker compose up -d` picks up t
 
 `./liberty install full` without `--ssl` runs HTTP-only on :80. Fine for local dev /
 behind another reverse proxy that terminates TLS upstream.
+
+### External database
+
+The framework database (users, job runs, change packages, saved views…) and the licensed apps'
+schemas can live on a PostgreSQL server **outside the stack** — a managed instance, a DBA-run
+server. It is recorded like TLS: two overlays in `COMPOSE_FILE`
+([`docker-compose.external-db.yml`](docker-compose.external-db.yml) passes the connection,
+[`docker-compose.no-embedded-db.yml`](docker-compose.no-embedded-db.yml) keeps the bundled
+Postgres from starting on the full layout) and the connection in `.env` (`POSTGRES_HOST`,
+`POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_DB`, `POSTGRES_PASSWORD`). Every later `start`,
+`upgrade` and `backup` follows it.
+
+**At install** — nothing bundled to start:
+
+```bash
+./liberty install full --db external --db-host db.example.com [--db-port 5432] \
+    [--db-user liberty] [--db-name liberty] [--db-password-env DB_PW]   # else prompted
+```
+
+**Later** — an install that started with the bundled Postgres moves its database:
+
+```bash
+./liberty db dump                         # pg_dumpall of the bundled Postgres → ./backups/…sql.gz
+gunzip -c ./backups/pg-dumpall-….sql.gz | psql -h db.example.com -U postgres -d postgres
+./liberty db external --host db.example.com [--port 5432] [--password-env DB_PW]
+```
+
+`db external` records the overlays and the connection, stops and removes the bundled `liberty-pg`
+container (its `pg-data` volume stays), rewrites the app's default pool (`liberty-admin
+set-default-pool`, password encrypted) and moves every pool that named the bundled server
+(`liberty-admin retarget-pools` — the apps' nomasx1 / nomajde / nomademo pools), then restarts.
+The **data is not copied**: restore the dump on the new server first. `./liberty db embedded`
+goes back to the bundled Postgres (as `pg-data` was left) — data written on the external server
+since is not copied back. With an external database, `./liberty backup` says so: back it up on
+its server.
 
 ### Backing up
 

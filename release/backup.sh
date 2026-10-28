@@ -140,6 +140,11 @@ fi
 
 echo
 ok "Backup complete: $TARGET_ABS"
+if grep -qE '^COMPOSE_FILE=.*docker-compose\.external-db\.yml' .env 2>/dev/null; then
+  echo
+  echo "! The database is EXTERNAL ($(grep -E '^POSTGRES_HOST=' .env | cut -d= -f2-)): it is not in this backup — back it up"
+  echo "  on its server (pg_dump / pg_dumpall). A pg-data volume here is the old bundled copy."
+fi
 echo
 echo "To restore one volume:"
 echo "  docker run --rm -v <volume>:/data -v $TARGET_ABS:/backup alpine \\"

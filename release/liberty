@@ -3,6 +3,7 @@
 # Liberty Next — the one operator command for a Docker install (Compose layouts).
 #
 #   liberty install [light|full] [--tag X] [--ssl letsencrypt|provided …] [--apps <wheel>]
+#                   [--db external --db-host H [--db-port P] [--db-user U] [--db-name D] [--db-password-env VAR]]
 #   liberty start | stop | restart            # the stack, with the compose chain recorded in .env
 #   liberty status                            # versions, chain in force, readiness, apps, last upgrade
 #   liberty doctor                            # what's wrong and how to fix it
@@ -16,11 +17,16 @@
 #   liberty backup [--keep DAYS] | liberty restore <backup-dir>
 #   liberty logs [-f]                         # the liberty-next service's logs
 #   liberty migrate [--dry-run]               # pending app schema migrations (liberty-admin migrate)
+#   liberty db                                # where the database is (embedded / external)
+#   liberty db dump [file.sql.gz]             # pg_dumpall of the bundled Postgres — to move it to a server
+#   liberty db external --host H [--port P] [--user U] [--name D] [--password-env VAR] [--yes]
+#                                             # the app moves to that server; the bundled Postgres stops
+#   liberty db embedded [--yes]               # back to the bundled Postgres (full) / SQLite (light)
 #
-# Design rule (the lesson behind this script): the compose chain — layout, TLS overlay, apps
-# overlay — is STATE, recorded in .env as COMPOSE_FILE. Only `ssl` and `apps` change it; every
-# other command reuses it verbatim. Recomputing it from an unrelated run's flags is what used
-# to drop the TLS + apps overlays on an upgrade ("all my config is gone").
+# Design rule (the lesson behind this script): the compose chain — layout, database overlays, TLS
+# overlay, apps overlay — is STATE, recorded in .env as COMPOSE_FILE. Only `db`, `ssl` and `apps`
+# change it; every other command reuses it verbatim. Recomputing it from an unrelated run's flags
+# is what used to drop the TLS + apps overlays on an upgrade ("all my config is gone").
 #
 # This script delegates to the historic scripts next to it (install.sh / install-apps.sh /
 # backup.sh / upgrade.sh), which keep working on their own.
@@ -41,7 +47,7 @@ ok()    { printf "${GREEN}✔${NC} %s\n" "$*"; }
 warn()  { printf "${YELLOW}!${NC} %s\n" "$*"; }
 die()   { printf "${RED}✗${NC} %s\n" "$*" >&2; exit 1; }
 
-usage() { sed -n '3,22p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '3,29p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # ── .env helpers ───────────────────────────────────────────────────────────────
 need_env() { [ -f "$ENV_FILE" ] || die ".env not found in $here — run './liberty install' first."; }
@@ -63,6 +69,16 @@ compose() { COMPOSE_FILE="$(chain)" docker compose "$@"; }
 layout_of_chain() { case "$(chain)" in docker-compose.light.yml*) echo light ;; docker-compose.full.yml*) echo full ;; docker-compose.swarm.yml*) echo swarm ;; *) echo unknown ;; esac; }
 tls_of_chain()    { case "$(chain)" in *tls-letsencrypt*) echo letsencrypt ;; *tls-provided*) echo provided ;; *) echo off ;; esac; }
 apps_in_chain()   { case ":$(chain):" in *:docker-compose.apps.yml:*) echo yes ;; *) echo no ;; esac; }
+db_mode()         { case ":$(chain):" in *:docker-compose.external-db.yml:*) echo external ;; *) echo embedded ;; esac; }
+db_where() {
+  if [ "$(db_mode)" = external ]; then
+    local u p d
+    u="$(env_get POSTGRES_USER)"; p="$(env_get POSTGRES_PORT)"; d="$(env_get POSTGRES_DB)"
+    printf 'external — %s@%s:%s/%s' "${u:-liberty}" "$(env_get POSTGRES_HOST)" "${p:-5432}" "${d:-liberty}"
+  elif [ "$(layout_of_chain)" = light ]; then printf 'embedded — SQLite (/data/liberty.db)'
+  else printf 'embedded — the bundled Postgres (pg)'; fi
+}
+env_unset() { grep -vE "^${1}=" "$ENV_FILE" > "${ENV_FILE}.tmp" && cat "${ENV_FILE}.tmp" > "$ENV_FILE" && rm -f "${ENV_FILE}.tmp"; }
 
 require_docker() {
   command -v docker >/dev/null 2>&1 || die "docker is not installed."
@@ -134,7 +150,12 @@ print(str(d["pending_total"]) + " pending (" + ", ".join(a + ": " + str(len(p)) 
 # ── commands ───────────────────────────────────────────────────────────────────
 cmd_install() {
   require_docker
-  exec ./install.sh "$@"
+  ./install.sh "$@"
+  # An external database: the app's pools follow it (init-db only seeds an EMPTY default pool —
+  # the light layout's points at SQLite — and the apps' pools may name the bundled host).
+  if [ -f "$ENV_FILE" ] && [ "$(db_mode)" = external ] && docker inspect "$SERVICE" >/dev/null 2>&1; then
+    db_point_pools "pg:5432"
+  fi
 }
 
 cmd_start()   { need_env; require_docker; info "Starting (chain: $(chain))"; compose up -d; wait_healthy || true; }
@@ -151,6 +172,7 @@ cmd_status() {
   printf "  tls           %s%s\n" "$tls" "$([ "$tls" != off ] && printf ' (%s)' "$(env_get LIBERTY_DOMAIN)")"
   printf "  apps overlay  %s%s\n" "$apps" "$([ "$apps" = yes ] && printf ' (%s)' "$(env_get APPS_HOST_PATH)")"
   printf "  image tag     %s\n" "${tag:-latest}"
+  printf "  database      %s\n" "$(db_where)"
   printf "  chain         %s\n" "$(chain)"
   running=$(docker inspect --format='{{.State.Status}}/{{.State.Health.Status}}' "$SERVICE" 2>/dev/null || echo "not running")
   printf "  container     %s\n" "$running"
@@ -196,6 +218,12 @@ cmd_doctor() {
   else
     warn "no APPS_HOST_PATH — open-framework install (no licensed apps linked)"
   fi
+  if [ "$(db_mode)" = external ]; then
+    [ -n "$(env_get POSTGRES_HOST)" ] && pass "database: $(db_where)" || fail "external database overlay in the chain but POSTGRES_HOST empty in .env" "./liberty db external --host …"
+    if [ "$(docker inspect --format='{{.State.Status}}' liberty-pg 2>/dev/null || true)" = running ]; then
+      warn "the bundled Postgres (liberty-pg) still runs while the app uses the external database — docker stop liberty-pg"
+    fi
+  fi
   local key v
   for key in LIBERTY_JWT_SECRET LIBERTY_MASTER_KEY; do
     v="$(env_get "$key")"
@@ -205,7 +233,7 @@ cmd_doctor() {
   done
   if [ "$(layout_of_chain)" = full ]; then
     if [ -z "$(env_get TRAEFIK_DASHBOARD_USERS)" ]; then fail "Traefik dashboard still uses the historic default password (no TRAEFIK_DASHBOARD_USERS in .env)" "./liberty dashboard-password"; else pass "Traefik dashboard has a per-install password"; fi
-    case "$(env_get POSTGRES_BIND)" in
+    [ "$(db_mode)" = external ] || case "$(env_get POSTGRES_BIND)" in
       ""|127.0.0.1|localhost) pass "Postgres published on the loopback only" ;;
       *) warn "Postgres published on $(env_get POSTGRES_BIND):$(env_get POSTGRES_PORT) — make sure a firewall covers it" ;;
     esac
@@ -334,6 +362,135 @@ cmd_restore() {
   fi
   ok "restore done — starting"
   compose up -d; wait_healthy || true
+}
+
+# ── database: embedded ⇄ external ─────────────────────────────────────────────
+# The chain records the mode (docker-compose.external-db.yml [+ no-embedded-db on full]), .env the
+# connection (POSTGRES_HOST / _PORT / _USER / _DB / _PASSWORD) — start / upgrade / backup follow.
+
+db_chain_set() {   # $1 = external | embedded — the db overlays right after the layout
+  local ch first rest add=""
+  ch="$(chain | tr ':' '\n' | grep -vE '^docker-compose\.(external-db|no-embedded-db)\.yml$' | paste -sd: -)"
+  first="${ch%%:*}"; rest="${ch#"$first"}"
+  if [ "$1" = external ]; then
+    add=":docker-compose.external-db.yml"
+    [ "$(layout_of_chain)" = full ] && add="${add}:docker-compose.no-embedded-db.yml"
+  fi
+  env_set COMPOSE_FILE "${first}${add}${rest}"
+}
+
+wait_running() {
+  local _
+  for _ in $(seq 1 60); do
+    [ "$(docker inspect --format='{{.State.Status}}' "$SERVICE" 2>/dev/null)" = running ] && return 0
+    sleep 1
+  done
+  die "$SERVICE did not start — ./liberty logs"
+}
+
+db_point_pools() {   # $1 = host:port the pools named before — rewrite default + retarget the rest
+  local from="$1" to
+  to="$(env_get POSTGRES_HOST):$(env_get POSTGRES_PORT)"; [ "$(db_mode)" = external ] || to="pg:5432"
+  to="${to%:}"; case "$to" in *:) to="${to}5432" ;; esac
+  wait_running
+  info "Pointing the default pool at the database (liberty-admin set-default-pool)"
+  in_container liberty-admin set-default-pool </dev/null || die "set-default-pool failed — see above"
+  if [ "$from" != "$to" ]; then
+    info "Moving the pools that named ${from} to ${to}"
+    in_container liberty-admin retarget-pools --from "$from" --to "$to" </dev/null || warn "retarget-pools reported a problem"
+  fi
+  compose restart "$SERVICE" >/dev/null; wait_healthy || true
+}
+
+cmd_db() {
+  need_env; require_docker
+  local action="${1:-status}"; shift || true
+  case "$action" in
+    status)   printf "database      %s\n" "$(db_where)" ;;
+    dump)     db_dump "$@" ;;
+    external) db_external "$@" ;;
+    embedded) db_embedded "$@" ;;
+    *) die "usage: ./liberty db [status] | db dump [file] | db external --host H [--port P] [--user U] [--name D] [--password-env VAR] [--yes] | db embedded [--yes]" ;;
+  esac
+}
+
+db_dump() {
+  [ "$(layout_of_chain)" = full ] && [ "$(db_mode)" = embedded ] || die "db dump reads the bundled Postgres (full layout, embedded database)"
+  local user out
+  user="$(env_get POSTGRES_USER)"; user="${user:-liberty}"
+  out="${1:-./backups/pg-dumpall-$(date -u +%Y%m%d-%H%M%S).sql.gz}"
+  mkdir -p "$(dirname "$out")"
+  info "pg_dumpall of the bundled Postgres (every database + the roles) → $out"
+  docker exec liberty-pg pg_dumpall -U "$user" | gzip > "$out" || die "pg_dumpall failed"
+  ok "dump written: $out ($(du -h "$out" | cut -f1))"
+  echo "  Restore it on the new server (as a superuser there), then switch:"
+  echo "    gunzip -c $out | psql -h <host> -U postgres -d postgres"
+  echo "    ./liberty db external --host <host>"
+}
+
+db_external() {
+  local host="" port="5432" user name pwenv="" yes=no pw=""
+  user="$(env_get POSTGRES_USER)"; user="${user:-liberty}"
+  name="$(env_get POSTGRES_DB)"; name="${name:-liberty}"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --host) host="${2:-}"; shift 2 ;;
+      --port) port="${2:-}"; shift 2 ;;
+      --user) user="${2:-}"; shift 2 ;;
+      --name) name="${2:-}"; shift 2 ;;
+      --password-env) pwenv="${2:-}"; shift 2 ;;
+      --yes) yes=yes; shift ;;
+      *) die "unknown argument: $1" ;;
+    esac
+  done
+  [ -n "$host" ] || die "usage: ./liberty db external --host H [--port P] [--user U] [--name D] [--password-env VAR] [--yes]"
+  [ "$(layout_of_chain)" != swarm ] || die "the swarm layout manages its database in docker-compose.swarm.yml"
+  local from
+  if [ "$(db_mode)" = external ]; then from="$(env_get POSTGRES_HOST):$(env_get POSTGRES_PORT)"; from="${from%:}"; else from="pg:5432"; fi
+  if [ -n "$pwenv" ]; then pw="${!pwenv:-}"; [ -n "$pw" ] || die "--password-env $pwenv: that variable is empty or unset"
+  else read -r -s -p "Password of ${user}@${host} (empty = keep the current one): " pw; echo; fi
+  case "$pw" in *'$'*) die "the password contains '\$' — docker compose would mangle it in .env; change it on the server" ;; esac
+  printf "${BOLD}Database → external${NC}\n  from  %s\n  to    %s@%s:%s/%s\n" "$(db_where)" "$user" "$host" "$port" "$name"
+  echo "  The DATA is not copied: restore a dump of the current database on ${host} first (./liberty db dump)."
+  [ "$(layout_of_chain)" = full ] && [ "$(db_mode)" = embedded ] && echo "  The bundled Postgres is then stopped; its pg-data volume is kept (./liberty db embedded comes back to it)."
+  if [ "$yes" != yes ]; then
+    local ans; read -r -p "Switch now? [y/N] " ans
+    case "$ans" in y|Y|yes) ;; *) die "cancelled — nothing changed" ;; esac
+  fi
+  if [ "$(db_mode)" = embedded ] && [ -n "$pw" ] && [ -z "$(env_get POSTGRES_PASSWORD_EMBEDDED)" ]; then
+    env_set POSTGRES_PASSWORD_EMBEDDED "$(env_get POSTGRES_PASSWORD)"   # what `db embedded` restores
+  fi
+  env_set DB_MODE external
+  env_set POSTGRES_HOST "$host"; env_set POSTGRES_PORT "$port"; env_set POSTGRES_USER "$user"; env_set POSTGRES_DB "$name"
+  [ -n "$pw" ] && env_set POSTGRES_PASSWORD "$pw"
+  db_chain_set external
+  info "Chain → $(chain)"
+  compose up -d --remove-orphans
+  docker stop liberty-pg >/dev/null 2>&1 && docker rm liberty-pg >/dev/null 2>&1 && info "bundled Postgres stopped (pg-data kept)" || true
+  db_point_pools "$from"
+  ok "database: $(db_where)"
+}
+
+db_embedded() {
+  local yes=no; [ "${1:-}" = "--yes" ] && yes=yes
+  [ "$(db_mode)" = external ] || die "the database is already embedded ($(db_where))"
+  local from; from="$(env_get POSTGRES_HOST):$(env_get POSTGRES_PORT)"; from="${from%:}"
+  printf "${BOLD}Database → embedded${NC}\n  from  %s\n  to    %s\n" "$(db_where)" \
+    "$([ "$(layout_of_chain)" = light ] && echo 'SQLite (/data/liberty.db)' || echo 'the bundled Postgres (pg-data as it was left)')"
+  echo "  The data written on the external server since the switch is NOT copied back."
+  if [ "$yes" != yes ]; then
+    local ans; read -r -p "Switch now? [y/N] " ans
+    case "$ans" in y|Y|yes) ;; *) die "cancelled — nothing changed" ;; esac
+  fi
+  local saved; saved="$(env_get POSTGRES_PASSWORD_EMBEDDED)"
+  [ -n "$saved" ] && env_set POSTGRES_PASSWORD "$saved" && env_unset POSTGRES_PASSWORD_EMBEDDED
+  env_set DB_MODE embedded
+  env_unset POSTGRES_HOST; env_unset POSTGRES_PORT
+  db_chain_set embedded
+  info "Chain → $(chain)"
+  compose up -d --remove-orphans
+  db_point_pools "$from"
+  ok "database: $(db_where)"
 }
 
 cmd_upgrade() {
@@ -492,6 +649,7 @@ case "$cmd" in
   restore)  cmd_restore "$@" ;;
   logs)     cmd_logs "$@" ;;
   migrate)  cmd_migrate "$@" ;;
+  db)       cmd_db "$@" ;;
   help|-h|--help) usage ;;
   *) die "unknown command: $cmd (try ./liberty help)" ;;
 esac

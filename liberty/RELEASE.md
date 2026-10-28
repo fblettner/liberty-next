@@ -34,6 +34,16 @@
   promotions applied from here; a row opens on the target's report.
 - Changes → Apply: a change whose drift can't be verified (no read query) can be forced — it never
   applied before, the force box only showed on conflicts.
+- Deployment: the database can live on a PostgreSQL server outside the stack. At install,
+  `./liberty install full --db external --db-host H [--db-port P] [--db-user U] [--db-name D]
+  [--db-password-env VAR]` starts no bundled Postgres; later, `./liberty db external --host H …`
+  moves an install (the app's default pool rewritten, the pools that named the bundled server —
+  the apps' — moved, the bundled Postgres stopped with its volume kept) and `./liberty db
+  embedded` comes back. Recorded in the compose chain (`docker-compose.external-db.yml`,
+  `docker-compose.no-embedded-db.yml`) and `.env`, so start / upgrade / backup follow it;
+  `./liberty db dump` takes a `pg_dumpall` of the bundled Postgres to carry the data over;
+  `status`, `doctor` and `backup` show where the database is. New `liberty-admin set-default-pool`
+  and `retarget-pools`.
 
 ## 7.0.63 — unreleased
 

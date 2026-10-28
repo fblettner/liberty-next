@@ -1,0 +1,18 @@
+# External database overlay — the framework database (users, job runs, change packages, saved
+# views…) and the licensed apps' schemas live on a PostgreSQL server OUTSIDE this stack.
+#
+# Recorded in COMPOSE_FILE (any layout) by:
+#   ./liberty install full --db external --db-host H [--db-port P] [--db-user U] [--db-name D]
+#   ./liberty db external --host H …          (an existing install moving its database)
+# The connection lives in .env (POSTGRES_HOST / _PORT / _USER / _PASSWORD / _DB) and is written
+# into the app's [pools.default] by `liberty-admin set-default-pool` (password encrypted with the
+# master key). On the full layout it comes with docker-compose.no-embedded-db.yml, which stops
+# the bundled Postgres from starting. Every later start / upgrade / backup reuses the chain.
+services:
+  liberty-next:
+    environment:
+      POSTGRES_HOST: "${POSTGRES_HOST:?POSTGRES_HOST is required with an external database — ./liberty db external --host …}"
+      POSTGRES_PORT: "${POSTGRES_PORT:-5432}"
+      POSTGRES_USER: "${POSTGRES_USER:-liberty}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}"
+      POSTGRES_DB: "${POSTGRES_DB:-liberty}"

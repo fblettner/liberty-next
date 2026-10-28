@@ -41,6 +41,17 @@
 - Changements → Appliquer : un changement dont la dérive ne peut pas être vérifiée (pas de requête
   de lecture) peut être forcé — il ne s'appliquait jamais, la case Forcer n'apparaissait que sur
   les conflits.
+- Déploiement : la base de données peut vivre sur un serveur PostgreSQL hors de la pile. À
+  l'installation, `./liberty install full --db external --db-host H [--db-port P] [--db-user U]
+  [--db-name D] [--db-password-env VAR]` ne démarre aucun Postgres embarqué ; plus tard,
+  `./liberty db external --host H …` déplace une installation (le pool par défaut réécrit, les
+  pools qui nommaient le serveur embarqué — ceux des applications — déplacés, le Postgres embarqué
+  arrêté avec son volume conservé) et `./liberty db embedded` revient en arrière. Enregistré dans la
+  chaîne compose (`docker-compose.external-db.yml`, `docker-compose.no-embedded-db.yml`) et `.env`,
+  donc démarrage / mise à niveau / sauvegarde le suivent ; `./liberty db dump` fait un
+  `pg_dumpall` du Postgres embarqué pour transporter les données ; `status`, `doctor` et `backup`
+  indiquent où est la base. Nouvelles commandes `liberty-admin set-default-pool` et
+  `retarget-pools`.
 
 ## 7.0.63 — non publiée
 

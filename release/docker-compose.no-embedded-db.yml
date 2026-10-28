@@ -1,0 +1,17 @@
+# Full layout without the bundled Postgres — goes with docker-compose.external-db.yml.
+# The `pg` service is moved into a profile that is never enabled, so it isn't started (its
+# pg-data volume is kept: `./liberty db embedded` brings it back); the services that waited for
+# it no longer require it. pgAdmin stays — point it at the external server.
+services:
+  pg:
+    profiles: ["embedded-db"]
+  liberty-next:
+    depends_on:
+      pg:
+        condition: service_healthy
+        required: false
+  pgadmin:
+    depends_on:
+      pg:
+        condition: service_started
+        required: false

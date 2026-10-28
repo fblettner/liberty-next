@@ -13,6 +13,8 @@
     liberty-admin run-install-jobs [--app X ...] [--force]
     liberty-admin migrate [--app X ...] [--dry-run] [--target-connector C] [--revision R] [--plugins-dir D] [--stamp]
     liberty-admin record-upgrade --kind upgrade|rollback [--fw-from V --fw-to V …] [--step name=status[:detail] …]
+    liberty-admin set-default-pool        # rewrite [pools.default] from POSTGRES_HOST/_PORT/_USER/_PASSWORD/_DB
+    liberty-admin retarget-pools --from pg:5432 --to db.example.com:5432   # every pool on that server
 
 Operates on whatever ``[auth] backend`` is configured in ``config/app.toml``: ``"toml"`` (the
 default) edits ``[auth] toml_path`` (``config/auth.toml``) — no database; ``"db"`` uses the
@@ -95,12 +97,13 @@ def _print(obj) -> None:
 # --------------------------------------------------------------------------- #
 
 
-async def _seed_default_pool(ctx: _Context) -> bool:
+async def _seed_default_pool(ctx: _Context, *, force: bool = False) -> bool:
     """If ``[pools.default]`` in connectors.toml has an empty url, write a working
     block. Picks the values based on what's in the environment:
       - POSTGRES_PASSWORD set → postgres url + password encrypted with LIBERTY_MASTER_KEY
       - POSTGRES_PASSWORD unset → sqlite (pipx / dev)
-    Preserves operator-set values (does NOT overwrite a non-empty url).
+    Preserves operator-set values (does NOT overwrite a non-empty url) — unless *force*
+    (``set-default-pool``: the database moved, the environment says where).
     Returns True if it wrote anything (caller reloads the registry).
     """
     from pathlib import Path
@@ -123,7 +126,7 @@ async def _seed_default_pool(ctx: _Context) -> bool:
     resolved = substitute_env(raw_doc)
     existing = (resolved.get("pools") or {}).get("default") or {}
     existing_url = (existing.get("url") or "").strip()
-    if existing_url:
+    if existing_url and not force:
         # Stale-from-previous-install detection. ``--reset`` wipes the named volumes
         # but NOT the /apps bind mount (that's the host filesystem) — so a previous
         # install's [pools.default] survives, including its ENC: password encrypted
@@ -719,6 +722,65 @@ def _add_password_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--password-env", metavar="VAR", help="read the password from this env var")
 
 
+async def _cmd_set_default_pool(ctx: _Context, args: argparse.Namespace) -> int:
+    """Rewrite ``[pools.default]`` from the environment (``POSTGRES_HOST`` / ``_PORT`` / ``_USER`` /
+    ``_PASSWORD`` / ``_DB``; the password encrypted with the master key) — the framework database
+    moved to another server (``./liberty db external``) or came back (``./liberty db embedded``)."""
+    if not os.environ.get("POSTGRES_PASSWORD", "").strip():
+        if not os.environ.get("LIBERTY_DB_URL", "").strip():
+            raise SystemExit("POSTGRES_PASSWORD is not set — nothing to point [pools.default] at")
+        # The light layout's own database (SQLite on its volume): follow LIBERTY_DB_URL again.
+        import tomlkit
+        doc = tomlkit.parse(Path(ctx.settings.connectors.config_path).read_text(encoding="utf-8"))
+        if "pools" not in doc:
+            doc["pools"] = tomlkit.table()
+        doc["pools"]["default"] = {"url": "${LIBERTY_DB_URL}", "pool_pre_ping": True}
+        Path(ctx.settings.connectors.config_path).write_text(tomlkit.dumps(doc), encoding="utf-8")
+        _print({"pool": "default", "url": "${LIBERTY_DB_URL}", "file": str(ctx.settings.connectors.config_path)})
+        return 0
+    if not await _seed_default_pool(ctx, force=True):
+        raise SystemExit("[pools.default] not written (see the message above)")
+    host = os.environ.get("POSTGRES_HOST", "pg")
+    _print({"pool": "default", "host": host, "port": os.environ.get("POSTGRES_PORT", "5432"),
+            "database": os.environ.get("POSTGRES_DB", "liberty"), "file": str(ctx.connectors_path)})
+    return 0
+
+
+_HOST_RE = r"@(\[[^\]]+\]|[^:/@?]+)(?::(\d+))?(?=[/?]|$)"
+
+
+def _retarget_url(url: str, old_host: str, old_port: str, new_host: str, new_port: str) -> str | None:
+    """*url* with its ``@host[:port]`` replaced when it names *old_host* (and *old_port*, the
+    default port when the url has none); ``None`` when it points elsewhere. A ``${VAR}`` host is
+    left alone (it already follows the environment)."""
+    import re
+    m = re.search(_HOST_RE, url)
+    if m is None or m.group(1) != old_host or (m.group(2) or "5432") != old_port:
+        return None
+    return url[:m.start()] + f"@{new_host}:{new_port}" + url[m.end():]
+
+
+async def _cmd_retarget_pools(ctx: _Context, args: argparse.Namespace) -> int:
+    """Point every pool whose url names ``--from host[:port]`` at ``--to host[:port]`` (the apps'
+    pools — nomasx1, nomajde… — live on the same server as the framework database)."""
+    import tomlkit
+    old_host, _, old_port = args.from_server.partition(":")
+    new_host, _, new_port = args.to_server.partition(":")
+    old_port, new_port = old_port or "5432", new_port or "5432"
+    doc = tomlkit.parse(ctx.connectors_path.read_text(encoding="utf-8"))
+    changed: list[dict[str, str]] = []
+    for name, pool in (doc.get("pools") or {}).items():
+        url = str(pool.get("url") or "")
+        new = _retarget_url(url, old_host, old_port, new_host, new_port)
+        if new is not None and new != url:
+            pool["url"] = new
+            changed.append({"pool": str(name), "from": url, "to": new})
+    if changed and not args.dry_run:
+        ctx.connectors_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    _print({"changed": changed, "dry_run": bool(args.dry_run), "file": str(ctx.connectors_path)})
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="liberty-admin", description=__doc__)
     parser.add_argument("--config-app", help="path to app.toml (default: config/app.toml)")
@@ -823,6 +885,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_rec.add_argument("--migrations", help="the JSON printed by `liberty-admin migrate`")
     p_rec.add_argument("--step", action="append", type=_parse_step, help="name=status[:detail] (status: ok|warn|fail|skipped); repeatable, in order")
     p_rec.set_defaults(func=_cmd_record_upgrade)
+
+    sub.add_parser(
+        "set-default-pool",
+        help="rewrite [pools.default] from POSTGRES_HOST / _PORT / _USER / _PASSWORD / _DB (the database moved)",
+    ).set_defaults(func=_cmd_set_default_pool)
+
+    p_rt = sub.add_parser("retarget-pools", help="point every pool on one database server at another")
+    p_rt.add_argument("--from", dest="from_server", required=True, help="host[:port] the pools name today (e.g. pg:5432)")
+    p_rt.add_argument("--to", dest="to_server", required=True, help="host[:port] they move to")
+    p_rt.add_argument("--dry-run", action="store_true", help="list the pools without writing")
+    p_rt.set_defaults(func=_cmd_retarget_pools)
 
     return parser
 

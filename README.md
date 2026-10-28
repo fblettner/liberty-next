@@ -109,7 +109,9 @@ cd liberty-next && git sparse-checkout set release && cd release
 ```
 
 `./liberty` is the one operator command: `status | doctor | start | stop | restart | logs |
-ssl | apps | upgrade | rollback | backup | restore | migrate`. An upgrade is
+ssl | apps | db | upgrade | rollback | backup | restore | migrate`. The database can live on an
+external PostgreSQL server — at install (`--db external --db-host …`) or later
+(`./liberty db external --host …`). An upgrade is
 `./liberty upgrade [--tag X.Y.Z]` (doctor → backup → pull → recreate → migrations → report),
 undone by `./liberty rollback`. The install prints the `admin` password once; the license key
 is set in Settings → App → License (encrypted at rest).
