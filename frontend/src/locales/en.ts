@@ -106,6 +106,8 @@ const en = {
     pickLogger: 'A module (liberty.jobs, nomasx1…)',
   },
   common: {
+    insertPlaceholder: 'Insert a placeholder',
+    selectShown: 'Select shown',
     chooseFile: 'Choose a file…',
     changeFile: 'Change…',
     noFile: 'No file chosen',

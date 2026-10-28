@@ -17,3 +17,14 @@ export function sortOptions<T extends Orderable>(options: T[]): T[] {
     })
     .map((x) => x.o)
 }
+
+/** Options in their display order: ungrouped first, then each ``group`` in the order met
+ *  (alphabetical with *sort*), each group's options sorted with *sort*. */
+export function orderOptions<T extends Orderable & { group?: string }>(options: T[], sort = false): T[] {
+  const base = sort ? sortOptions(options) : options
+  if (!base.some((o) => o.group)) return base
+  const order: string[] = []
+  for (const o of base) if (o.group && !order.includes(o.group)) order.push(o.group)
+  if (sort) order.sort((a, b) => collator.compare(a, b))
+  return [...base.filter((o) => !o.group), ...order.flatMap((g) => base.filter((o) => o.group === g))]
+}

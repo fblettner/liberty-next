@@ -10,7 +10,8 @@ import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, ArrowUp, ArrowDown, Trash2, Copy, Plus } from 'lucide-react'
-import { Input, Select, Button, Checkbox, Tag, StringListEditor, SearchSelect, type SearchSelectOption } from '../../common'
+import { Input, Select, Button, Checkbox, Tag, StringListEditor, SearchSelect, type SearchSelectOption, PlaceholderPicker } from '../../common'
+import { NOTIFY_STEP_TOKENS } from '../../services/placeholders'
 import { api } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { ConnectorMeta } from '../../types/connectors'
@@ -1145,6 +1146,8 @@ function ReportForm({ step, patch }: FormProps) {
 
 // ── notify (C5): the message, the recipients, the run's files attached ─────────────────
 function NotifyForm({ step, patch }: FormProps) {
+  const subjectRef = useRef<HTMLInputElement>(null)
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
   const { t } = useTranslation()
   const f = step as Record<string, unknown>
   const channels = (f.channels as string[] | undefined) ?? ['portal', 'email']
@@ -1159,11 +1162,17 @@ function NotifyForm({ step, patch }: FormProps) {
         </Field>
         <Field $span={3}>
           <FieldLabel>{t('nomaflow.steps.notifySubject')}</FieldLabel>
-          <Input value={String(f.subject ?? '')} onChange={(e) => patch({ subject: e.target.value } as Partial<StepConfig>)} placeholder="Sales digest {DATE}" />
+          <div style={{ display: 'flex', gap: 6 }}>
+            <Input ref={subjectRef} value={String(f.subject ?? '')} onChange={(e) => patch({ subject: e.target.value } as Partial<StepConfig>)} placeholder="Sales digest {DATE}" />
+            <PlaceholderPicker options={NOTIFY_STEP_TOKENS} value={String(f.subject ?? '')} onChange={(v) => patch({ subject: v } as Partial<StepConfig>)} targetRef={subjectRef} />
+          </div>
         </Field>
         <Field $span={3}>
           <FieldLabel>{t('nomaflow.steps.notifyBody')}</FieldLabel>
-          <TextArea value={typeof f.body === 'string' ? f.body : ''} onChange={(e) => patch({ body: e.target.value || undefined } as Partial<StepConfig>)} placeholder={t('nomaflow.steps.notifyBodyPlaceholder')} />
+          <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+            <TextArea ref={bodyRef} value={typeof f.body === 'string' ? f.body : ''} onChange={(e) => patch({ body: e.target.value || undefined } as Partial<StepConfig>)} placeholder={t('nomaflow.steps.notifyBodyPlaceholder')} />
+            <PlaceholderPicker options={NOTIFY_STEP_TOKENS} value={typeof f.body === 'string' ? f.body : ''} onChange={(v) => patch({ body: v || undefined } as Partial<StepConfig>)} targetRef={bodyRef} />
+          </div>
         </Field>
         <Field $span={2}>
           <FieldLabel>{t('nomaflow.steps.notifyAttach')}</FieldLabel>

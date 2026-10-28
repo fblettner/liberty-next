@@ -3,12 +3,13 @@
 // with its jobs and threshold, or "fired by a screen action"), the channels, the recipients, the
 // subject / body / link templates, and the action channel's target. "Send a test" dispatches the
 // rule with sample values through POST /admin/notify/test so SMTP and webhooks can be checked.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Bell, Plus, Send, Trash2, X } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Centered, Checkbox, Field, Input, SearchSelect, SpinnerRing, Tag, Textarea, useModals, type SearchSelectOption } from '../../common'
+import { Banner, Button, Card, Centered, Checkbox, Field, Input, SearchSelect, SpinnerRing, Tag, Textarea, useModals, type SearchSelectOption, PlaceholderPicker, SearchSelectMulti } from '../../common'
+import { JOB_EVENT_TOKENS, SCREEN_EVENT_TOKENS } from '../../services/placeholders'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { validateId } from '../../services/idValidator'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -81,6 +82,11 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
   const patch = (p: Partial<NotificationRule>) => setRule((r) => ({ ...r, ...p }))
   const setTrigger = (tr: RuleTrigger) => patch({ trigger: tr })
   const tr = rule.trigger
+  // the placeholders a message can use: the job event's fields, or a screen / action event's
+  const tokens = tr.kind === 'job' ? JOB_EVENT_TOKENS : SCREEN_EVENT_TOKENS
+  const subjectRef = useRef<HTMLInputElement>(null)
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
+  const linkRef = useRef<HTMLInputElement>(null)
   const apps = Object.keys(screens ?? {})
   const appOpts: SearchSelectOption[] = apps.map((a) => ({ value: a, label: a, mono: a }))
   const screenOpts: SearchSelectOption[] = tr.kind === 'screen' ? (screens?.[tr.app] ?? []).map((s) => ({ value: s.id, label: s.label || s.id, mono: s.id })) : []
@@ -161,10 +167,7 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
           {tr.kind === 'job' && (
             <Grid>
               <Field label={t('settings.notify.jobs')}>
-                <Chips>
-                  {(tr.jobs ?? []).map((j) => <PermChip key={j}>{j}<button type="button" onClick={() => setTrigger({ ...tr, jobs: (tr.jobs ?? []).filter((x) => x !== j) })}><X size={11} /></button></PermChip>)}
-                  <div style={{ minWidth: 160 }}><SearchSelect sort value="" onChange={(v) => { if (v && !(tr.jobs ?? []).includes(v)) setTrigger({ ...tr, jobs: [...(tr.jobs ?? []), v] }) }} options={jobOpts.filter((o) => !(tr.jobs ?? []).includes(o.value))} allowCustom placeholder={t('settings.notify.addJob')} /></div>
-                </Chips>
+                <SearchSelectMulti sort value={tr.jobs ?? []} onChange={(v) => setTrigger({ ...tr, jobs: v })} options={jobOpts} placeholder={t('settings.notify.addJob')} />
               </Field>
               <Field label={t('settings.notify.events')}>
                 <div style={{ display: 'flex', gap: 12, paddingTop: 8, flexWrap: 'wrap' }}>
@@ -205,9 +208,24 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
 
         <Section>
           <div className="h">{t('settings.notify.message')}</div>
-          <Field label={t('settings.notify.subject')}><Input value={rule.subject} onChange={(e) => patch({ subject: e.target.value })} placeholder="Period {PERIOD} closed by {USER}" /></Field>
-          <Field label={t('settings.notify.body')}><Textarea value={rule.body ?? ''} onChange={(e) => patch({ body: e.target.value || null })} rows={3} /></Field>
-          <Field label={t('settings.notify.link')}><Input value={rule.link ?? ''} onChange={(e) => patch({ link: e.target.value || null })} placeholder="/screen/nomajde/period_status" /></Field>
+          <Field label={t('settings.notify.subject')}>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <Input ref={subjectRef} value={rule.subject} onChange={(e) => patch({ subject: e.target.value })} placeholder="Period {PERIOD} closed by {USER}" />
+              <PlaceholderPicker options={tokens} value={rule.subject} onChange={(v) => patch({ subject: v })} targetRef={subjectRef} />
+            </div>
+          </Field>
+          <Field label={t('settings.notify.body')}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+              <Textarea ref={bodyRef} value={rule.body ?? ''} onChange={(e) => patch({ body: e.target.value || null })} rows={3} />
+              <PlaceholderPicker options={tokens} value={rule.body ?? ''} onChange={(v) => patch({ body: v || null })} targetRef={bodyRef} />
+            </div>
+          </Field>
+          <Field label={t('settings.notify.link')}>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <Input ref={linkRef} value={rule.link ?? ''} onChange={(e) => patch({ link: e.target.value || null })} placeholder="/screen/nomajde/period_status" />
+              <PlaceholderPicker options={tokens} value={rule.link ?? ''} onChange={(v) => patch({ link: v || null })} targetRef={linkRef} />
+            </div>
+          </Field>
         </Section>
       </Body>
       <Foot>

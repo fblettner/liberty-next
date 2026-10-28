@@ -30,6 +30,15 @@
   l'instance (le nom d'application du thème, sinon `[app] name`).
 - Profil : plus d'onglet Sécurité pour une session en authentification unique (pas de mot de
   passe local).
+- Listes déroulantes : les options d'un groupe se rangent sous un en-tête par groupe — les modèles
+  de l'Explorateur par module de préréglage (« JDE · Accounts Payable » : le `group` du préréglage,
+  ou celui du modèle), sinon par application (la liste fermée montre aussi le groupe), les colonnes
+  d'une règle de périmètre par connecteur ; un × facultatif efface ; une taille compacte. Une liste à plusieurs
+  valeurs (puces sur le déclencheur, « Tout ce qui est affiché », Effacer), utilisée d'abord pour
+  les tâches d'une règle de notification.
+- Un sélecteur de variables à côté des champs à modèle : le bouton { } liste les variables et
+  insère celle choisie au curseur — sujet, corps et lien d'une règle de notification (les champs
+  de l'événement de tâche ou d'écran), sujet et corps d'une étape de notification.
 
 ## 7.0.62 — non publiée
 

@@ -54,7 +54,7 @@ export interface ExplorerModel {
   undocumented?: number
 }
 
-export interface ExplorerModelSummary { app: string; model: string; label: string; description?: string | null; hub: string; entities: number; preset?: string | null; derived?: boolean }
+export interface ExplorerModelSummary { app: string; model: string; label: string; description?: string | null; hub: string; entities: number; preset?: string | null; derived?: boolean; group?: string | null }
 
 // ── the analysis definition ──────────────────────────────────────────────────
 

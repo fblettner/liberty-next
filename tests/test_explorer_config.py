@@ -203,3 +203,23 @@ def test_apply_preset_takes_the_table_label_and_cardinality() -> None:
     assert eff.entities["f0411"].label == "Vouchers" and eff.entities["f0411"].cardinality == "one"
     assert eff.entities["f0401"].label == "Supplier" and eff.entities["f0401"].cardinality == "one"
     assert eff.entities["f0414"].label == "F0414" and eff.entities["f0414"].cardinality == "many"
+
+
+def test_preset_models_take_the_preset_group() -> None:
+    """A model a preset ships is listed under the preset's group; a declared model on a preset
+    inherits it unless it names its own; a model without a preset has none."""
+    from liberty.explorer.config import add_preset_models
+    f = parse_explorer({"explorer": {"jde": {
+        "ab": {"preset": "address_book"},
+        "mine": {"preset": "gl", "group": "Finance"},
+        "plain": {**MODEL, "label": "Security"},
+    }}})
+    presets = [
+        {"id": "address_book", "app": "jde", "explorer": True, "group": "JDE · Address Book", "tables": [{"name": "F0101"}]},
+        {"id": "gl", "app": "jde", "group": "JDE · General Accounting", "tables": [{"name": "F0911"}]},
+        {"id": "ap_ledger", "app": "jde", "explorer": True, "group": "JDE · Accounts Payable", "tables": [{"name": "F0411"}]},
+    ]
+    add_preset_models(f, presets)
+    jde = f.explorer["jde"]
+    assert jde["ab"].group == "JDE · Address Book" and jde["mine"].group == "Finance" and jde["plain"].group is None
+    assert jde["ap_ledger"].derived and jde["ap_ledger"].group == "JDE · Accounts Payable"

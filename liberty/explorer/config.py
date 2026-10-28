@@ -136,6 +136,7 @@ class ExplorerModel(BaseModel):
     label: str | None = None
     description: str | None = None
     preset: str | None = Field(default=None, description="The Screen Assistant preset this model was filled from (Settings → Explorer applies it: tables → entities, base table → hub, joins → relations).")
+    group: str | None = Field(default=None, description="Where the model is listed in the Explorer's model picker (a header); blank = its preset's group, else the application.")
     hub: str = Field(default="", description="The entity every analysis starts from (the preset's base table when omitted).")
     entities: dict[str, ExplorerEntity] = Field(default_factory=dict)
     relations: list[ExplorerRelation] = Field(default_factory=list)
@@ -248,6 +249,12 @@ def add_preset_models(explorer: ExplorerFile, presets: list[dict[str, Any]]) -> 
     customises a shipped model: apply the preset in the builder, then edit). The model only
     names its preset; its entities, hub and relations are built from the preset at first use
     (:func:`liberty.explorer.model.build_model_view`)."""
+    groups = {str(p.get("id") or ""): p.get("group") for p in presets if p.get("group")}
+    # a declared model on a preset is listed under the preset's group unless it names its own
+    for models in explorer.explorer.values():
+        for m in models.values():
+            if m.preset and not m.group and groups.get(m.preset):
+                m.group = str(groups[m.preset])
     for p in presets:
         pid, app = str(p.get("id") or ""), str(p.get("app") or "")
         if not (p.get("explorer") and pid and app) or not set(pid) <= _ID_CHARS:
@@ -255,7 +262,7 @@ def add_preset_models(explorer: ExplorerFile, presets: list[dict[str, Any]]) -> 
         models = explorer.explorer.setdefault(app, {})
         if pid in models or any(m.preset == pid for m in models.values()):
             continue
-        m = ExplorerModel(label=p.get("label") or pid, description=p.get("description"), preset=pid, derived=True)
+        m = ExplorerModel(label=p.get("label") or pid, description=p.get("description"), preset=pid, derived=True, group=p.get("group"))
         m.id, m.app = pid, app
         models[pid] = m
     return explorer

@@ -108,6 +108,8 @@ const fr: Resources = {
     pickLogger: 'Un module (liberty.jobs, nomasx1…)',
   },
   common: {
+    insertPlaceholder: 'Insérer une variable',
+    selectShown: 'Tout ce qui est affiché',
     chooseFile: 'Choisir un fichier…',
     changeFile: 'Changer…',
     noFile: 'Aucun fichier choisi',

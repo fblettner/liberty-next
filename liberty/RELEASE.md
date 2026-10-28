@@ -25,6 +25,14 @@
 - An installable web app manifest (`/manifest.webmanifest`, public) named after the instance (the
   theme's app name, else `[app] name`).
 - Profile: no Security tab for a single-sign-on session (no local password).
+- Dropdowns: options with a group sit under a header per group — the Data Explorer's models per
+  preset module ("JDE · Accounts Payable": a preset's `group`, or a model's own `group`), else per
+  application (the closed picker shows the group too), a data-scope rule's columns per
+  connector; an optional × clears; a compact size. A multi-value dropdown (chips on the trigger, "Select shown", Clear),
+  first used for a notification rule's jobs.
+- A placeholder picker beside templated fields: the { } button lists the tokens and inserts the
+  one picked at the caret — a notification rule's subject, body and link (the job or screen
+  event's fields), a notify step's subject and body.
 
 ## 7.0.62 — unreleased
 

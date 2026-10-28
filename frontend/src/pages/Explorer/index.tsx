@@ -60,7 +60,7 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
   const lang = i18n.language || 'en'
   const { user } = useAuth()
   const modals = useModals()
-  const { currentApp, explorerModels } = useWorkspace()
+  const { currentApp, explorerModels, menus } = useWorkspace()
   const [models, setModels] = useState<ExplorerModelSummary[] | null>(null)
   const [app, setApp] = useState<string>('')
   const [modelId, setModelId] = useState<string>('')
@@ -332,7 +332,7 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
   return (
     <PageLayout icon={<Compass size={18} />} title={t('explorer.title')} description={<span>{model.label}{model.description ? ` — ${model.description}` : ''}{model.derived && model.preset ? ` · ${t('explorer.fromPreset', { preset: model.preset })}` : ''}</span>}
       headerRight={models && models.length > 0 ? (
-        <div style={{ width: 380 }}><SearchSelect sort value={`${app}/${modelId}`} options={models.map((m) => ({ value: `${m.app}/${m.model}`, label: m.label, mono: m.app }))}
+        <div style={{ width: 380 }}><SearchSelect sort value={`${app}/${modelId}`} options={models.map((m) => ({ value: `${m.app}/${m.model}`, label: m.label, group: m.group || menus?.[m.app]?.label || m.app }))}
           onChange={(v) => { const [a, m] = v.split('/'); if (a && m) { setApp(a); setModelId(m) } }} /></div>
       ) : undefined}>
       {model.warnings.length > 0 && user?.is_superuser && <Banner $tone="warning" style={{ marginBottom: 8 }}>{model.warnings.join(' · ')}</Banner>}

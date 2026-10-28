@@ -15,14 +15,18 @@
 //  · `sort` → the options in alphabetical order of their label (locale-aware, numeric) for the
 //    catalogue pickers — connectors, queries, screens, models, presets, roles — where the config
 //    order is arbitrary and the operator looks for a name.
+//  · `group` on an option → a header per group (the groups in the order met, sorted too with
+//    `sort`; ungrouped options first) — the Explorer's models per application, a scope rule's
+//    columns per connector.
+//  · `clearable` → an × on the trigger resets the value to ''; `size="sm"` → a 28px trigger.
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { ChevronDown, Check } from 'lucide-react'
+import { ChevronDown, Check, X } from 'lucide-react'
 import { SpinnerRing } from './Spinner'
-import { sortOptions } from '../services/options'
+import { orderOptions } from '../services/options'
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
 
 export interface SearchSelectOption {
@@ -38,8 +42,8 @@ export interface SearchSelectOption {
    *  ``display_fields``). Each option in the list should carry the same number of cells so the
    *  columns line up. Also matched by the search box. */
   cells?: string[]
-  /** Optional grouping key — consumed by the grouped suggestion overlay in ParamBindList's
-   *  ``SourcePathInput`` (chain inputs / step results / loop). SearchSelect itself ignores it. */
+  /** Optional grouping key: the options of a group sit under its header (and ParamBindList's
+   *  ``SourcePathInput`` overlay groups by it too). */
   group?: string
   /** Optional hierarchy depth — when set, the option's row is indented by this many levels so a
    *  flat list can convey a tree (e.g. a menu's parent picker). The trigger is unaffected. */
@@ -51,8 +55,8 @@ export interface SearchSelectOption {
 const PAD_X = '12px'
 
 const Wrap = styled.div`position: relative; flex: 1; min-width: 0;`
-const Trigger = styled.button<{ $open: boolean; $placeholder: boolean }>`
-  display: flex; align-items: center; gap: 6px; width: 100%; height: 32px; padding: 0 8px 0 ${PAD_X};
+const Trigger = styled.button<{ $open: boolean; $placeholder: boolean; $sm?: boolean }>`
+  display: flex; align-items: center; gap: 6px; width: 100%; height: ${({ $sm }) => ($sm ? '28px' : '32px')}; padding: 0 8px 0 ${PAD_X};
   border: 1px solid ${({ $open }) => ($open ? colors.blue.border : colors.border)};
   border-radius: ${radius.md}; background: ${colors.bg.input}; cursor: pointer;
   color: ${({ $placeholder }) => ($placeholder ? colors.text.muted : colors.text.primary)};
@@ -61,8 +65,15 @@ const Trigger = styled.button<{ $open: boolean; $placeholder: boolean }>`
   & .muted { color: ${colors.text.muted}; }
   & .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   & svg { flex-shrink: 0; color: ${colors.text.muted}; }
+  & .clear { display: inline-flex; padding: 2px; border-radius: ${radius.sm}; }
+  & .clear:hover svg { color: ${colors.text.primary}; }
   &:hover:not(:disabled) { border-color: ${colors.blue.border}; }
+  &:focus-visible { outline: none; border-color: ${colors.blue.main}; }
   &:disabled { opacity: 0.5; cursor: default; }
+`
+const GroupHead = styled.div`
+  padding: 8px ${PAD_X} 4px; font-size: ${fontSize.micro}; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: ${colors.text.muted}; font-family: ${fonts.sans};
 `
 // `position: fixed` + portaled to `document.body` so the dropdown escapes any `overflow: hidden`
 // ancestor — most notably the Modal frame, which would otherwise clip the panel when the user
@@ -129,7 +140,7 @@ const CreateRow = styled.button`
 `
 
 export function SearchSelect({
-  value, onChange, options: given, placeholder, anyLabel, loading, disabled, allowCustom, cellColumns, sort,
+  value, onChange, options: given, placeholder, anyLabel, loading, disabled, allowCustom, cellColumns, sort, clearable, size,
 }: {
   value: string
   onChange: (v: string) => void
@@ -150,9 +161,14 @@ export function SearchSelect({
    *  screens, models…) instead of the order given — see ``sortOptions``. Lists whose order means
    *  something (statuses, steps, join types) leave it off. */
   sort?: boolean
+  /** An × on the trigger (when a value is set) resets it to ''. */
+  clearable?: boolean
+  /** ``sm`` → a 28px trigger (toolbars, dense forms). */
+  size?: 'sm' | 'md'
 }) {
   const { t } = useTranslation()
-  const options = useMemo(() => (sort ? sortOptions(given) : given), [given, sort])
+  // with groups: ungrouped first, then each group in the order met (sorted too with ``sort``)
+  const options = useMemo(() => orderOptions(given, !!sort), [given, sort])
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   // facet filters: cell-column index → the ONE selected value (single-select per column — pick a
@@ -275,10 +291,16 @@ export function SearchSelect({
   // makes opening the dropdown janky. Render only the visible window (+overscan). The optional
   // "(any)" clear row is index 0 of the virtual list so the offsets stay simple.
   const listRef = useRef<HTMLDivElement>(null)
+  type Row = { kind: 'any' } | { kind: 'head'; label: string } | { kind: 'opt'; opt: SearchSelectOption }
   const rows = useMemo(() => {
-    const arr: ({ any: true } | { any: false; opt: SearchSelectOption })[] = []
-    if (anyLabel !== undefined) arr.push({ any: true })
-    for (const o of filtered) arr.push({ any: false, opt: o })
+    const arr: Row[] = []
+    if (anyLabel !== undefined) arr.push({ kind: 'any' })
+    let group: string | undefined
+    for (const o of filtered) {
+      if (o.group && o.group !== group) arr.push({ kind: 'head', label: o.group })
+      group = o.group
+      arr.push({ kind: 'opt', opt: o })
+    }
     return arr
   }, [filtered, anyLabel])
   const virt = useVirtualizer({
@@ -296,7 +318,9 @@ export function SearchSelect({
     if (current) {
       const body = current.mono && current.mono !== current.label
         ? <span className="lbl"><span className="mono">{current.mono}</span> <span className="muted">{current.label}</span></span>
-        : <span className="lbl">{current.label}</span>
+        : current.group
+          ? <span className="lbl"><span className="muted">{current.group} · </span>{current.label}</span>
+          : <span className="lbl">{current.label}</span>
       return current.icon ? <>{current.icon}{body}</> : body
     }
     if (value && allowCustom) return <span className="lbl"><span className="mono">{value}</span></span>
@@ -343,7 +367,14 @@ export function SearchSelect({
           {virt.getVirtualItems().map((vi) => {
             const it = rows[vi.index]
             const style: CSSProperties = { position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${vi.start}px)` }
-            if (it.any) {
+            if (it.kind === 'head') {
+              return (
+                <div key={`__head_${it.label}_${vi.index}`} data-index={vi.index} ref={virt.measureElement} style={style}>
+                  <GroupHead role="presentation">{it.label}</GroupHead>
+                </div>
+              )
+            }
+            if (it.kind === 'any') {
               return (
                 <div key="__any" data-index={vi.index} ref={virt.measureElement} style={style}>
                   <Item type="button" $active={value === ''} onClick={() => pick('')}>
@@ -380,8 +411,14 @@ export function SearchSelect({
 
   return (
     <Wrap ref={wrapRef}>
-      <Trigger ref={triggerRef} type="button" $open={open} $placeholder={!current && !(allowCustom && !!value)} disabled={disabled} onClick={() => !disabled && setOpen((o) => !o)}>
+      <Trigger ref={triggerRef} type="button" $sm={size === 'sm'} $open={open} $placeholder={!current && !(allowCustom && !!value)} disabled={disabled}
+        onClick={() => !disabled && setOpen((o) => !o)}>
         {triggerLabel}
+        {clearable && value && !disabled && (
+          <span className="clear" role="button" tabIndex={0} aria-label={t('common.clear')} title={t('common.clear')}
+            onClick={(e) => { e.stopPropagation(); onChange('') }}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onChange('') } }}><X size={13} /></span>
+        )}
         {loading ? <SpinnerRing size={14} /> : <ChevronDown size={14} />}
       </Trigger>
       {panel && createPortal(panel, document.body)}
