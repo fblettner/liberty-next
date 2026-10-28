@@ -20,6 +20,14 @@
   nouveau paramètre n'est ni modifiable ni expliqué.
 - Paramètres → App : modifier seulement les paramètres de notification active maintenant
   Enregistrer (ils n'entraient pas dans la détection des modifications).
+- Référence développeur → API : chaque route du serveur en cours d'exécution — méthode, chemin,
+  résumé, le module auquel elle appartient (par catégorie : Accès, Espace de travail,
+  Fonctionnalités, nomaflow et déploiement, Paramètres, Exploitation, Assistant) et l'accès qu'elle
+  exige, lu depuis le code (public, tout utilisateur connecté, superutilisateur, ou la permission
+  vérifiée comme `sql:{connector}:{query}`) ; une route s'ouvre sur son gestionnaire (fichier:ligne),
+  sa description, ses paramètres, sa requête (ses champs et un exemple JSON) et sa réponse (depuis
+  les modèles déclarés) ; liens vers /docs et /redoc (`/admin/dev/api`). La
+  Configuration affiche maintenant le libellé de chaque paramètre tel que dans son écran.
 
 ## 7.0.64 — non publiée
 

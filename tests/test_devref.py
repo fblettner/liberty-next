@@ -53,3 +53,28 @@ def test_every_setting_is_editable_or_explained() -> None:
     ``devref._OTHER_EDITORS``) or a reason in ``devref.FILE_ONLY``."""
     from liberty.devref import config_gaps
     assert config_gaps() == [], "settings not editable in the UI and not explained as file-only"
+
+
+def test_api_reference_reads_access_from_the_code(env) -> None:  # noqa: F811
+    from liberty.devref import api_reference
+    app, _ = env
+    routes = api_reference(app)
+    by = {(r["method"], r["path"]): r for r in routes}
+    public = {r["path"] for r in routes if r["access"] == "public"}
+    assert public == {"/health", "/ready", "/info", "/api/theme", "/manifest.webmanifest",
+                      "/auth/login", "/auth/refresh", "/auth/oidc/login", "/auth/oidc/callback"}
+    sql = by[("GET", "/api/sql/{connector}/{query}")]
+    assert sql["access"] == "permission" and sql["permissions"] == ["sql:{connector}:{query}"] and sql["file"] == "liberty/web/connectors.py"
+    assert by[("POST", "/admin/reload")]["access"] == "superuser"
+    assert by[("POST", "/ai/chat")]["permissions"] == ["ai:chat"]
+    assert by[("GET", "/admin/config/screens/parsed")]["group"] == "settings · screens"
+    assert all(r["category"] != "Other" for r in routes), [r["path"] for r in routes if r["category"] == "Other"]
+    login = by[("POST", "/auth/login")]
+    assert login["request"]["type"] == "LoginRequest" and {f["name"] for f in login["request"]["fields"]} == {"username", "password"}
+    assert login["request"]["example"] == {"username": "string", "password": "string"}
+    assert login["response"]["type"] == "TokenPair" and "access_token" in login["response"]["example"]
+    assert [(p["name"], p["in"]) for p in sql["parameters"]][:2] == [("connector", "path"), ("query", "path")]
+    assert by[("GET", "/admin/dev/config")]["response"] is None          # a plain dict: not declared
+    with TestClient(app) as client:
+        assert client.get("/admin/dev/api", headers=_h(client, "reader")).status_code == 403
+        assert client.get("/admin/dev/api", headers=_h(client, "admin")).json()["total"] == len(routes)

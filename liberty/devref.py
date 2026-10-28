@@ -189,3 +189,197 @@ def _config_reference() -> list[dict[str, Any]]:
 def config_gaps() -> list[str]:
     """The keys neither editable in the UI nor explained as file-only."""
     return [r["key"] for r in config_reference() if not r["editor"] and not r["file_only"]]
+
+
+# ── API: every route of the running app ─────────────────────────────────────────────────────────
+
+_IMPERATIVE = re.compile(r"""(?:require_permission\(\s*\w+\s*,\s*|has_permission\(\s*)f?["']([^"']+)["']""")
+
+
+def _access(route: Any) -> tuple[str, list[str]]:
+    """``(level, permissions)`` — level is public / signed-in / superuser / permission / role, read from
+    the route's dependencies; the permissions also come from the handler's own checks
+    (``require_permission(principal, f"sql:{connector}:{query}")``)."""
+    from liberty.auth import dependencies as deps
+    level, perms = "public", []
+    stack = list(getattr(route, "dependant", None).dependencies if getattr(route, "dependant", None) else [])
+    while stack:
+        d = stack.pop()
+        call = getattr(d, "call", None)
+        if call is deps.require_superuser:
+            level = "superuser"
+        elif call is deps.get_current_principal and level == "public":
+            level = "signed-in"
+        elif getattr(call, "__qualname__", "").startswith(("require_permission.", "require_role.")):
+            cells = {c.cell_contents for c in (call.__closure__ or ()) if isinstance(c.cell_contents, str)}
+            kind = "permission" if call.__qualname__.startswith("require_permission.") else "role"
+            perms += [f"{kind}:{c}" if kind == "role" else c for c in sorted(cells)]
+            if level in ("public", "signed-in"):
+                level = kind
+        stack.extend(getattr(d, "dependencies", []) or [])
+    try:
+        import inspect
+        src = inspect.getsource(route.endpoint)
+        for m in _IMPERATIVE.finditer(src):
+            if m.group(1) not in perms:
+                perms.append(m.group(1))
+    except (OSError, TypeError):
+        pass
+    if perms and level == "signed-in":
+        level = "permission"
+    return level, perms
+
+
+_CATEGORIES: dict[str, str] = {
+    "auth": "Access", "access": "Access",
+    "connectors": "Workspace", "screens": "Workspace", "menus": "Workspace", "charts": "Workspace",
+    "dashboards": "Workspace", "actions": "Workspace", "export": "Workspace", "views": "Workspace",
+    "theme": "Workspace", "license": "Workspace", "dictgen": "Workspace",
+    "explorer": "Features", "reports": "Features", "notifications": "Features", "plugins": "Features",
+    "jobs": "nomaflow & deployment", "changesets": "nomaflow & deployment", "promotion": "nomaflow & deployment",
+    "admin": "Settings", "logs": "Operations", "retention": "Operations", "developer": "Operations", "meta": "Operations",
+    "ai": "Assistant",
+}
+
+
+def _group(file: str, path: str) -> tuple[str, str]:
+    """``(group, category)`` of a route: its module (``web/jobs.py`` → jobs, ``auth/routes.py`` → auth),
+    the config builders of ``web/admin.py`` by section (``/admin/config/screens/…`` → settings · screens)."""
+    parts = file.split("/")
+    stem = parts[-1].removesuffix(".py") if parts else "other"
+    if stem == "routes" and len(parts) > 2:
+        stem = parts[-2]
+    elif stem == "main":
+        stem = "meta"
+    if stem == "admin":
+        segs = path.strip("/").split("/")
+        if len(segs) > 2 and segs[1] == "config":
+            return f"settings · {segs[2]}", "Settings"
+        return "admin", "Settings"
+    return stem, _CATEGORIES.get(stem, "Other")
+
+
+def _flat_routes(routes: Any, prefix: str = "") -> Any:
+    """``(prefix, APIRoute)`` for every route, descending into included routers (FastAPI ≥ 0.16x keeps
+    them wrapped — ``original_router`` + ``include_context.prefix`` — instead of copying the routes)."""
+    from fastapi.routing import APIRoute
+    for r in routes:
+        if isinstance(r, APIRoute):
+            yield prefix, r
+        elif getattr(r, "original_router", None) is not None:
+            ctx = getattr(r, "include_context", None)
+            yield from _flat_routes(r.original_router.routes, prefix + (getattr(ctx, "prefix", "") or ""))
+
+
+def _resolve(schema: Any, comps: dict[str, Any]) -> Any:
+    seen = 0
+    while isinstance(schema, dict) and "$ref" in schema and seen < 20:
+        schema = comps.get(schema["$ref"].rsplit("/", 1)[-1], {})
+        seen += 1
+    return schema if isinstance(schema, dict) else {}
+
+
+def _type_of(schema: Any, comps: dict[str, Any]) -> str:
+    sch = _resolve(schema, comps)
+    if "$ref" in (schema or {}):
+        return schema["$ref"].rsplit("/", 1)[-1]
+    for alt in ("anyOf", "oneOf"):
+        if alt in sch:
+            return " | ".join(_type_of(a, comps) for a in sch[alt])
+    t = sch.get("type", "any")
+    if t == "array":
+        return f"{_type_of(sch.get('items', {}), comps)}[]"
+    if sch.get("enum"):
+        return " | ".join(json.dumps(e) for e in sch["enum"][:6])
+    return str(t)
+
+
+def _example(schema: Any, comps: dict[str, Any], depth: int = 0) -> Any:
+    """An example value for a JSON schema (the OpenAPI one FastAPI builds from the Pydantic models)."""
+    sch = _resolve(schema, comps)
+    if depth > 6:
+        return None
+    if "example" in sch:
+        return sch["example"]
+    if "default" in sch and sch["default"] is not None:
+        return sch["default"]
+    if sch.get("enum"):
+        return sch["enum"][0]
+    for alt in ("anyOf", "oneOf"):
+        if alt in sch:
+            options = [a for a in sch[alt] if _resolve(a, comps).get("type") != "null"]
+            return _example(options[0], comps, depth + 1) if options else None
+    t = sch.get("type")
+    if t == "object" or "properties" in sch:
+        props = sch.get("properties") or {}
+        return {k: _example(v, comps, depth + 1) for k, v in props.items()}
+    if t == "array":
+        return [_example(sch.get("items", {}), comps, depth + 1)]
+    return {"string": "string", "integer": 0, "number": 0, "boolean": False}.get(str(t))
+
+
+def _meaningful(schema: Any, comps: dict[str, Any]) -> bool:
+    """A schema worth showing — not ``{}`` nor a bare ``dict[str, Any]``."""
+    sch = _resolve(schema, comps)
+    return bool(sch) and not (sch.get("type") == "object" and not sch.get("properties") and sch.get("additionalProperties") in (True, None))
+
+
+def _openapi_detail(op: dict[str, Any], comps: dict[str, Any]) -> dict[str, Any]:
+    params = [{"name": p.get("name"), "in": p.get("in"), "type": _type_of(p.get("schema", {}), comps),
+               "required": bool(p.get("required")), "description": p.get("description") or ""}
+              for p in op.get("parameters", [])]
+    body = ((op.get("requestBody") or {}).get("content") or {})
+    body_schema = (body.get("application/json") or next(iter(body.values()), {}) if body else {}).get("schema")
+    request = None
+    if body_schema is not None:
+        sch = _resolve(body_schema, comps)
+        req = set(sch.get("required") or [])
+        request = {
+            "type": _type_of(body_schema, comps),
+            "content": next(iter(body), "application/json"),
+            "fields": [{"name": k, "type": _type_of(v, comps), "required": k in req,
+                        "description": _resolve(v, comps).get("description") or v.get("description") or ""}
+                       for k, v in (sch.get("properties") or {}).items()],
+            "example": _example(body_schema, comps) if "properties" in sch or "$ref" in (body_schema or {}) else None,
+        }
+    response = None
+    for code in ("200", "201"):
+        content = ((op.get("responses") or {}).get(code) or {}).get("content") or {}
+        sch = (content.get("application/json") or {}).get("schema")
+        if sch is not None and _meaningful(sch, comps):
+            response = {"code": code, "type": _type_of(sch, comps), "example": _example(sch, comps)}
+            break
+        if content and "application/json" not in content:
+            response = {"code": code, "type": next(iter(content)), "example": None}
+            break
+    return {"parameters": params, "request": request, "response": response}
+
+
+def api_reference(app: Any) -> list[dict[str, Any]]:
+    """Every HTTP route of *app*: method, path, summary, group (the router tag), access, the handler."""
+    import inspect
+
+    spec = app.openapi()
+    comps = (spec.get("components") or {}).get("schemas") or {}
+    out: list[dict[str, Any]] = []
+    for prefix, route in _flat_routes(app.routes):
+        level, perms = _access(route)
+        try:
+            file = str(Path(inspect.getsourcefile(route.endpoint) or "").resolve().relative_to(_ROOT.parent))
+            line = inspect.getsourcelines(route.endpoint)[1]
+        except (OSError, TypeError, ValueError):
+            file, line = "", 0
+        doc = inspect.getdoc(route.endpoint) or ""
+        for method in sorted(m for m in (route.methods or ()) if m != "HEAD"):
+            out.append({
+                "method": method, "path": prefix + route.path, "summary": route.summary or route.name.replace("_", " "),
+                "description": doc,
+                "group": _group(file, prefix + route.path)[0], "category": _group(file, prefix + route.path)[1],
+                "tag": route.tags[0] if route.tags else "",
+                "access": level, "permissions": perms,
+                "file": file, "line": line, "in_schema": bool(route.include_in_schema),
+                "params": [p.name for p in route.dependant.path_params + route.dependant.query_params],
+                **_openapi_detail(((spec.get("paths") or {}).get(prefix + route.path) or {}).get(method.lower()) or {}, comps),
+            })
+    out.sort(key=lambda r: (r["path"], r["method"]))
+    return out

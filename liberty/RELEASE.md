@@ -17,6 +17,13 @@
   read-only with the reason. A test now fails when a new setting is neither editable nor explained.
 - Settings → App: editing only the notification settings now enables Save (they were left out of
   the unsaved-changes check).
+- Developer reference → API: every route of the running server — method, path, summary, the module
+  it belongs to (by category: Access, Workspace, Features, nomaflow & deployment, Settings,
+  Operations, Assistant) and the access it requires, read from the code (public, any signed-in user,
+  superuser, or the permission it checks such as `sql:{connector}:{query}`); a route opens on its
+  handler (file:line), description, parameters, request (its fields and an example JSON) and
+  response (from the declared models); links to /docs and /redoc (`/admin/dev/api`).
+  Configuration now shows each setting's label as in its screen.
 
 ## 7.0.64 — unreleased
 
