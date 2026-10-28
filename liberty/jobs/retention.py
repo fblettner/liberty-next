@@ -89,7 +89,7 @@ class SweepReport:
 
 
 async def sweep_run_history(
-    db: JobDatabase, policy: RetentionPolicy, *, now: datetime | None = None,
+    db: JobDatabase, policy: RetentionPolicy, *, now: datetime | None = None, dry_run: bool = False,
 ) -> SweepReport:
     """Run one cleanup pass against the nomaflow run tables. Returns the counts.
 
@@ -144,6 +144,8 @@ async def sweep_run_history(
                 delete(JobRun).where(JobRun.id.in_(cap_ids))
             )
             deleted_by_cap = cap_result.rowcount or 0
+        if dry_run:
+            await session.rollback()     # the counts are real, nothing is removed
 
     report = SweepReport(
         swept_at=now,
@@ -212,7 +214,7 @@ def watched_archives(registry: Any) -> list[Path]:
     return out
 
 
-def purge_work_area(root: Path, archives: list[Path], days: int, *, now: datetime | None = None) -> tuple[int, int, datetime | None]:
+def purge_work_area(root: Path, archives: list[Path], days: int, *, now: datetime | None = None, dry_run: bool = False) -> tuple[int, int, datetime | None]:
     """Delete the files older than *days* (by modification time) under the work area *root*
     (every job's uploads and run files, recursively) and directly inside each *archives* folder
     (the watched folders' done / failed). Nothing else is touched — an export's copy in its
@@ -230,7 +232,8 @@ def purge_work_area(root: Path, archives: list[Path], days: int, *, now: datetim
         try:
             st = p.stat()
             if st.st_mtime < limit:
-                p.unlink()
+                if not dry_run:
+                    p.unlink()
                 n += 1
                 size += st.st_size
         except OSError as exc:
@@ -245,6 +248,6 @@ def purge_work_area(root: Path, archives: list[Path], days: int, *, now: datetim
             for p in d.iterdir():
                 if p.is_file():
                     drop(p)
-    if n:
+    if n and not dry_run:
         _log.info("nomaflow.retention: %d work-area file(s) older than %d days deleted (%d bytes)", n, days, size)
     return n, size, cutoff

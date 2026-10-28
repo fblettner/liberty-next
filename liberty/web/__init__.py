@@ -21,6 +21,7 @@ from liberty.web.theme import router as theme_router
 from liberty.web.views import router as views_router
 from liberty.web.notifications import router as notifications_router
 from liberty.web.logs import router as logs_router
+from liberty.web.retention import router as retention_router
 
 __all__ = [
     "access_router",
@@ -44,4 +45,5 @@ __all__ = [
     "views_router",
     "notifications_router",
     "logs_router",
+    "retention_router",
 ]

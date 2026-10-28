@@ -470,6 +470,9 @@ class ChangeSetsSettings(BaseModel):
     pool: str = "default"
     enabled: bool = True
     post_apply: list[PostApplyStep] = Field(default_factory=list)
+    # Retention (Monitoring → Retention): exported / promoted packages and the import logs older
+    # than this many days are deleted; 0 = keep them all (the default — they are audit evidence).
+    retention_days: int = Field(default=0, ge=0, le=36500)
 
 
 class Settings(BaseModel):

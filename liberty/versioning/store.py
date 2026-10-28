@@ -235,7 +235,7 @@ class ConfigVersionStore:
                 self._drop(c, r["id"], r["snapshot_path"])
         return len(rows)
 
-    def purge(self, *, max_versions: int | None = None, max_age_days: int | None = None) -> int:
+    def purge(self, *, max_versions: int | None = None, max_age_days: int | None = None, dry_run: bool = False) -> int:
         """Apply a retention policy across every key and return the number of versions removed.
 
         Two independent rules, **OR-combined** — a version goes if EITHER applies:
@@ -267,7 +267,8 @@ class ConfigVersionStore:
                     too_many = mv is not None and idx >= mv
                     too_old = cutoff is not None and r["created_at"] < cutoff
                     if too_many or too_old:
-                        self._drop(c, r["id"], r["snapshot_path"])
+                        if not dry_run:
+                            self._drop(c, r["id"], r["snapshot_path"])
                         removed += 1
         return removed
 

@@ -1353,3 +1353,47 @@ def test_server_log_page_api(env, tmp_path, monkeypatch) -> None:
         client.post("/admin/logs/levels", json={"levels": {"liberty.jobs": "NOTSET"}, "persist": True}, headers=h)
         assert logging.getLogger("liberty.jobs").level == logging.NOTSET and "log_levels" not in app_toml.read_text()
         assert client.get("/admin/logs", headers=_h(client, "loader")).status_code == 403
+
+
+def test_retention_center(env, tmp_path) -> None:
+    """``/admin/retention``: every store with its policy and size; a dry run counts what would
+    go and leaves it; the real run removes it; stores without a purge (saved views, the server
+    log) or without a policy (change packages at 0 days) refuse; superuser only."""
+    import os
+    import sqlite3
+    from datetime import datetime, timedelta, timezone
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        old = (datetime.now(timezone.utc) - timedelta(days=90)).strftime("%Y-%m-%d %H:%M:%S")
+        with sqlite3.connect(tmp_path / "app.db") as c:
+            c.execute("INSERT INTO nomaflow_job_runs (id, job_id, trigger_kind, state, started_at, finished_at) VALUES ('old-run', 'ping', 'manual', 'SUCCEEDED', ?, ?)", (old, old))
+        upload = tmp_path / ".nomaflow" / "files" / "load-file" / "uploads" / "20260101-000000-old.csv"
+        upload.parent.mkdir(parents=True, exist_ok=True)
+        upload.write_text("a,b\n")
+        t = (datetime.now(timezone.utc) - timedelta(days=90)).timestamp()
+        os.utime(upload, (t, t))
+
+        stores = {s["id"]: s for s in client.get("/admin/retention", headers=h).json()["stores"]}
+        assert {"runs", "work_area", "config_versions", "server_log"} <= set(stores)
+        assert stores["runs"]["policy"]["days"] == 30 and stores["runs"]["size"]["rows"] >= 1
+        assert stores["work_area"]["size"]["files"] >= 1 and stores["server_log"]["can_run"] is False
+
+        dry = client.post("/admin/retention/runs/run", headers=h).json()
+        assert dry["dry_run"] is True and dry["deleted"] == 1
+        with sqlite3.connect(tmp_path / "app.db") as c:
+            assert c.execute("SELECT COUNT(*) FROM nomaflow_job_runs WHERE id = 'old-run'").fetchone()[0] == 1
+        assert client.post("/admin/retention/runs/run", params={"dry_run": "false"}, headers=h).json()["deleted"] == 1
+        with sqlite3.connect(tmp_path / "app.db") as c:
+            assert c.execute("SELECT COUNT(*) FROM nomaflow_job_runs WHERE id = 'old-run'").fetchone()[0] == 0
+
+        assert client.post("/admin/retention/work_area/run", headers=h).json()["deleted"] == 1 and upload.exists()
+        assert client.post("/admin/retention/work_area/run", params={"dry_run": "false"}, headers=h).json()["deleted"] == 1
+        assert not upload.exists()
+
+        assert client.post("/admin/retention/config_versions/run", headers=h).status_code == 200
+        assert client.post("/admin/retention/server_log/run", headers=h).status_code == 409
+        if "change_packages" in stores:
+            assert client.post("/admin/retention/change_packages/run", headers=h).status_code == 409   # 0 days = keep
+        assert client.post("/admin/retention/nope/run", headers=h).status_code == 404
+        assert client.get("/admin/retention", headers=_h(client, "loader")).status_code == 403

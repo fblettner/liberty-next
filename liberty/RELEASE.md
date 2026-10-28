@@ -10,6 +10,13 @@
   period), opens an exception, filters on one request, exports the matches as text and downloads
   the files; the levels per module change at once and are saved to `[app] log_levels`
   (`/admin/logs`, superuser). The live view stays as the first tab.
+- Monitoring → Retention: every store the server keeps growing in one place — job runs, job
+  files, notifications, config versions, change packages, saved views, the server log — with
+  what it keeps, where that is set, its size, a Preview (a dry run: what would go, nothing
+  deleted) and Run now (`/admin/retention`, superuser). Change packages get a policy:
+  `[changesets] retention_days` (0 = keep, the default) deletes exported / promoted packages and
+  import logs older than that, checked with the notifications retention every six hours; drafts
+  are never touched. Saved views are the users' own work: shown, never purged.
 
 ## 7.0.62 — unreleased
 

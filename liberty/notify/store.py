@@ -132,9 +132,20 @@ class NotificationStore:
         async with self.session() as s:
             return int((await s.execute(stmt)).rowcount or 0)
 
-    async def delete_older_than(self, days: int) -> int:
-        """Retention: drop read notifications older than *days*."""
+    async def delete_older_than(self, days: int, *, dry_run: bool = False) -> int:
+        """Retention: drop read notifications older than *days* (*dry_run*: count them only)."""
         cutoff = _utcnow() - timedelta(days=days)
         stmt = sa_delete(Notification).where(Notification.read_at.is_not(None), Notification.created_at < cutoff)
         async with self.session() as s:
-            return int((await s.execute(stmt)).rowcount or 0)
+            n = int((await s.execute(stmt)).rowcount or 0)
+            if dry_run:
+                await s.rollback()
+            return n
+
+    async def counts(self) -> dict[str, int]:
+        """``{total, read}`` — the Retention page's size of the inbox."""
+        from sqlalchemy import func, select
+        async with self.session() as s:
+            total = (await s.execute(select(func.count()).select_from(Notification))).scalar() or 0
+            read = (await s.execute(select(func.count()).select_from(Notification).where(Notification.read_at.is_not(None)))).scalar() or 0
+        return {"total": int(total), "read": int(read)}

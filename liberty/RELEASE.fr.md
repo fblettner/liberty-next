@@ -11,6 +11,15 @@
   requête, période), ouvre une exception, filtre sur une requête, exporte les résultats en texte
   et télécharge les fichiers ; les niveaux par module changent aussitôt et sont enregistrés dans
   `[app] log_levels` (`/admin/logs`, super-utilisateur). La vue en direct reste le premier onglet.
+- Supervision → Rétention : tous les stockages que le serveur fait grossir au même endroit —
+  exécutions et fichiers des tâches, notifications, versions de configuration, paquets de
+  modifications, vues enregistrées, journal du serveur — avec ce qu'ils gardent, où c'est réglé,
+  leur taille, un Aperçu (simulation : ce qui partirait, rien n'est supprimé) et Purger
+  (`/admin/retention`, super-utilisateur). Les paquets de modifications ont une politique :
+  `[changesets] retention_days` (0 = garder, par défaut) supprime les paquets exportés / promus et
+  les journaux d'import plus anciens, contrôlé avec la rétention des notifications toutes les six
+  heures ; les brouillons ne sont jamais touchés. Les vues enregistrées sont le travail des
+  utilisateurs : affichées, jamais purgées.
 
 ## 7.0.62 — non publiée
 

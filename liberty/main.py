@@ -55,6 +55,7 @@ from liberty.web import (
     views_router,
     notifications_router,
     logs_router,
+    retention_router,
 )
 
 _log = logging.getLogger("liberty")
@@ -299,6 +300,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # then every six hours. Best-effort: a failure is logged and retried next round.
             while True:
                 try:
+                    cdays = int(getattr(app.state.settings.changesets, "retention_days", 0) or 0)
+                    if cdays > 0 and getattr(app.state, "changesets_db", None) is not None:
+                        from liberty.retention_center import purge_change_packages
+                        res = await purge_change_packages(app.state.changesets_db, cdays)
+                        if res["packages"] or res["import_logs"]:
+                            _log.info("change packages: %s older than %d days dropped", res, cdays)
                     store = getattr(app.state, "notifications", None)
                     days = int(getattr(app.state.settings.notify, "retention_days", 0) or 0)
                     if store is not None and days > 0:
@@ -681,6 +688,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(views_router)
     app.include_router(notifications_router)
     app.include_router(logs_router)
+    app.include_router(retention_router)
 
     @app.get("/health", tags=["meta"], summary="Liveness probe")
     async def health() -> dict[str, str]:
