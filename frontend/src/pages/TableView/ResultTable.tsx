@@ -461,7 +461,9 @@ export function ResultTable({
     [editableWhen],
   )
   const canImport = canInsert && !!screen?.uploadable
-  const hasDialog = !!(screen?.dialog && (screen.update_query || screen.insert_query))
+  // A row opens the dialog on a writable screen — or on a ``read_only`` one, to browse the record and
+  // its detail tabs (the dialog is then view-only: no Save / Delete, every field disabled).
+  const hasDialog = !!(screen?.dialog && (screen.update_query || screen.insert_query || screen.read_only))
   // Dialog state — opens on Add / Edit-row when the screen has a `dialog`. `dlgRow` is the
   // initial values; `mode='edit'` also drives the `:<COL>_ORIGINAL` binds inside ScreenDialog.
   const [dlgOpen, setDlgOpen] = useState(false)

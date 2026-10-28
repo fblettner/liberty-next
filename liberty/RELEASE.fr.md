@@ -79,7 +79,22 @@
   d'application entier — un écran par table avec sa clé, ses colonnes de grille, ses onglets de dialogue et ses onglets
   de détail (l'écran enfant et la clé qu'il hérite), et le dossier de menu — colonnes nommées par élément de données, le
   préfixe JDE résolu plus tard depuis le schéma réel (`liberty/modules.py` : modèle, chargement, validation du graphe
-  des détails). L'application d'un module suit.
+  des détails). Appliquer un module (`/admin/assistant/modules`, `…/{id}/preview`, `…/{id}/apply`,
+  superutilisateur) : l'aperçu lit les tables réelles et donne, par écran, le préfixe trouvé, les colonnes, les éléments
+  de données absents de la table, ce qui est nouveau et ce qui existe ; l'application écrit les nouvelles requêtes de
+  lecture (`<écran>_get`, triées par la clé), les écrans en lecture seule avec leurs onglets de détail (filtrés sur la
+  clé héritée, masquée), le dossier et les entrées de menu — en ajout, l'existant n'est jamais écrasé, les trois
+  fichiers validés avant toute écriture — puis les entrées de dictionnaire de ses tables sous le périmètre de
+  l'application (libellés JDE, formats, listes UDC) et un rechargement. Une table ou une colonne clé introuvable le
+  bloque. Un détail peut être un-à-un (`cardinality = "one"` : le formulaire de l'enfant en onglet, pas une grille) ;
+  un écran peut joindre une table de référence pour quelques colonnes (`[[modules.screens.joins]]` — le nom de
+  l'adresse sur la liste des clients), placées dans l'ordre de colonnes du module ; `filters` nomme les colonnes du
+  panneau de filtres avancés (filtrées en base avant le chargement des lignes, colonnes jointes comprises) ;
+  `?replace=1` réécrit sur place les
+  requêtes, écrans et entrées de menu du module.
+- Un écran `read_only` avec un dialogue l'ouvre de nouveau sur une ligne (en consultation : champs désactivés, ni
+  Enregistrer ni Supprimer, ses onglets de détail en lecture seule) — la grille n'ouvrait le dialogue que si l'écran
+  avait une requête de modification ou de création.
 
 ## 7.0.64 — non publiée
 

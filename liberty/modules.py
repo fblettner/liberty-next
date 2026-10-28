@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -59,19 +59,41 @@ class DetailLink(_Strict):
 
 
 class ModuleDetail(_Strict):
-    """A nested table tab on the parent screen's dialog: *screen* (another screen of the module)
-    showing the rows whose *on* columns equal the parent's."""
+    """A tab on the parent screen's dialog showing *screen* (another screen of the module) for the
+    rows whose *on* columns equal the parent's: a grid (``many``, a nested table) or, for a record
+    the parent has at most one of (``one`` — the link covers the child's whole key), its form."""
 
     screen: str
     label: str
     l: dict[str, str] = Field(default_factory=dict, description="Translations of the label per language.")
     on: list[DetailLink] = Field(min_length=1)
+    cardinality: Literal["many", "one"] = "many"
 
     @field_validator("on", mode="before")
     @classmethod
     def _same_item(cls, v: Any) -> Any:
         # ``"AN8"`` is the same data item on both sides
         return [{"parent": x, "child": x} if isinstance(x, str) else x for x in (v or [])]
+
+
+class ModuleJoin(_Strict):
+    """A lookup table joined to the screen's table (LEFT JOIN) for a few of its columns — the name
+    of an address on a customer record. *on*: data items present on both tables."""
+
+    table: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_]*$")
+    schema_: str | None = Field(default=None, alias="schema", description="Overrides the module's schema token.")
+    prefix: str | None = Field(default=None, pattern=r"^[A-Z0-9]{1,4}$")
+    on: list[str] = Field(min_length=1)
+    columns: list[str] = Field(min_length=1, description="The joined table's columns brought in (data items).")
+
+    @field_validator("on", "columns")
+    @classmethod
+    def _items(cls, v: list[str]) -> list[str]:
+        import re
+        bad = [x for x in v if not re.match(_DATA_ITEM, x)]
+        if bad:
+            raise ValueError(f"not data items: {bad}")
+        return v
 
 
 class ModuleTab(_Strict):
@@ -96,12 +118,14 @@ class ModuleScreen(_Strict):
                                description="The column prefix (JDE: AB on F0101); resolved from the live schema when absent.")
     key: list[str] = Field(min_length=1)
     columns: list[str] = Field(default_factory=list, description="The grid's columns (data items); empty = every column of the table.")
+    filters: list[str] = Field(default_factory=list, description="The columns of the advanced filter panel (data items, joined ones too) — filtered in the database, before the rows are loaded.")
     tabs: list[ModuleTab] = Field(default_factory=list, description="The dialog's form tabs; none = one tab with the grid columns.")
     details: list[ModuleDetail] = Field(default_factory=list)
+    joins: list[ModuleJoin] = Field(default_factory=list, description="Lookup tables joined for a few columns (listed in ``columns`` / tabs like the table's own).")
     menu: bool | None = Field(default=None, description="A menu item for this screen; default: yes unless it is another screen's detail.")
     icon: str | None = None
 
-    @field_validator("key", "columns")
+    @field_validator("key", "columns", "filters")
     @classmethod
     def _items(cls, v: list[str]) -> list[str]:
         import re
@@ -113,9 +137,11 @@ class ModuleScreen(_Strict):
         return v
 
     def items(self) -> list[str]:
-        """Every data item the screen names (key, grid, dialog, detail links), in first-seen order."""
+        """Every data item the screen names (key, grid, dialog, detail links, joined columns), in
+        first-seen order."""
         out: list[str] = []
-        for x in [*self.key, *self.columns, *(f for t in self.tabs for f in t.fields), *(p.parent for d in self.details for p in d.on)]:
+        for x in [*self.key, *self.columns, *(f for t in self.tabs for f in t.fields), *(p.parent for d in self.details for p in d.on),
+                  *(c for j in self.joins for c in j.columns)]:
             if x not in out:
                 out.append(x)
         return out
@@ -161,6 +187,8 @@ class Module(_Strict):
                 missing = [p.child for p in d.on if p.child not in child.key]
                 if missing:
                     raise ValueError(f"screen {s.id!r}: detail {d.screen!r} links on {missing}, not in its key {child.key}")
+                if d.cardinality == "one" and {p.child for p in d.on} != set(child.key):
+                    raise ValueError(f"screen {s.id!r}: detail {d.screen!r} is one-to-one but links on part of its key {child.key}")
         # no cycle: a screen cannot (transitively) be its own detail
         def walk(sid: str, path: tuple[str, ...]) -> None:
             for d in by_id[sid].details:
@@ -169,6 +197,14 @@ class Module(_Strict):
                 walk(d.screen, (*path, d.screen))
         for sid in ids:
             walk(sid, (sid,))
+        return self
+
+    @model_validator(mode="after")
+    def _filters_shown(self) -> Module:
+        for s in self.screens:
+            unknown = [f for f in s.filters if f not in s.items()]
+            if unknown:
+                raise ValueError(f"screen {s.id!r}: filters {unknown} are not columns of the screen (key, columns, tabs or joins)")
         return self
 
     def detail_ids(self) -> set[str]:

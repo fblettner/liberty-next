@@ -67,7 +67,19 @@
 - Module catalogues (catalogue v2, step 1): a `[[modules]]` block beside the presets describes a whole application
   module — one screen per table with its key, grid columns, dialog tabs and detail tabs (the child screen and the key
   it inherits), and the menu folder — columns named by data item, the JDE prefix resolved later from the live schema
-  (`liberty/modules.py`: model, loader, validation of the detail graph). Applying a module comes next.
+  (`liberty/modules.py`: model, loader, validation of the detail graph). Apply a module
+  (`/admin/assistant/modules`, `…/{id}/preview`, `…/{id}/apply`, superuser): the preview reads the live tables and
+  says, per screen, the prefix found, the columns, the data items the table lacks, what is new and what exists; the
+  apply writes the new read queries (`<screen>_get`, ordered by the key), the read-only screens with their detail tabs
+  (filtered on the inherited key, hidden), the menu folder and items — additively, what exists is never overwritten,
+  the three files validated before any is written — then the dictionary entries of its tables under the app's scope
+  (JDE labels, formats, UDC lookups) and a reload. A table or a key column not found blocks it. A detail can be
+  one-to-one (`cardinality = "one"`: the child's form as a tab, not a grid); a screen can join a lookup table for a
+  few columns (`[[modules.screens.joins]]` — the address's name on a customer list), placed in the module's column
+  order; `filters` names the columns of the advanced filter panel (filtered in the database before the rows are
+  loaded, joined columns included); `?replace=1` rewrites the module's own queries, screens and menu items in place.
+- A `read_only` screen with a dialog opens it on a row again (view-only: fields disabled, no Save / Delete, its
+  detail tabs read-only) — the grid only opened the dialog when the screen had an update or insert query.
 
 ## 7.0.64 — unreleased
 

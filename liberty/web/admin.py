@@ -1173,6 +1173,130 @@ async def list_assistant_presets(request: Request, _: Superuser, connector: str 
     return {"presets": load_presets(presets_dir(request.app.state.settings.connectors.config_path), connector)}
 
 
+# ── module catalogues (catalogue v2): list, preview, apply ───────────────────────────────────
+# A module (``[[modules]]`` in the presets files, :mod:`liberty.modules`) is applied in one pass:
+# its tables' live columns are read, :func:`liberty.module_apply.build_plan` says what is new and
+# what exists already (never overwritten), then the new read queries / screens / menu items are
+# written additively, the dictionary entries created under the app's scope, and the runtime reloaded.
+
+def _modules_dir(request: Request) -> Path:
+    from liberty.presets import presets_dir
+    return presets_dir(request.app.state.settings.connectors.config_path)
+
+
+def _module_or_404(request: Request, module_id: str):
+    from liberty.modules import ModuleError, find_module
+    try:
+        module = find_module(_modules_dir(request), module_id)
+    except ModuleError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    if module is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"unknown module {module_id!r}")
+    return module
+
+
+async def _module_plan(request: Request, module: Any, *, replace: bool = False):
+    """The plan of *module* against the live tables and the current configuration files."""
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from liberty.connectors.base import ConnectorError
+    from liberty.connectors.introspect import introspect_pool, resolve_schema_token
+    from liberty.module_apply import build_plan
+    from liberty.web.rename import _load_doc
+
+    settings = request.app.state.settings
+    registry = request.app.state.connectors
+    try:
+        conn = registry.sql(module.connector)
+    except ConnectorError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    # every table of the module (the screens' and their joined lookups'), read once
+    wanted: dict[str, str | None] = {}
+    for s in module.screens:
+        wanted.setdefault(s.table.upper(), module.screen_schema(s))
+        for j in s.joins:
+            wanted.setdefault(j.table.upper(), j.schema_ or module.screen_schema(s))
+    live: dict[str, list[str] | None] = {}
+    for table_name, schema in wanted.items():
+        owner = resolve_schema_token(schema, registry.pools.schemas(conn.pool_name)) if schema else None
+        try:
+            info = await introspect_pool(registry.pools, conn.pool_name, only_schema=owner, name_like=table_name)
+        except SQLAlchemyError as exc:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=f"schema introspection failed: {exc}") from exc
+        table = next((t for t in info.get("tables", []) if str(t.get("name", "")).upper() == table_name), None)
+        live[table_name] = [str(c.get("name", "")) for c in table.get("columns", [])] if table else None
+    connectors = _load_doc("connectors", Path(settings.connectors.config_path))
+    conn_doc = (connectors.get("connectors") or {}).get(module.connector) or {}
+    screens = _load_doc("screens", Path(settings.screens.config_path))
+    menus = _load_doc("menus", Path(settings.menus.config_path))
+    return build_plan(
+        module, live,
+        existing_tables={str(t.get("name", "")).lower() for t in conn_doc.get("tables", [])},
+        existing_screens=set(((screens.get("screens") or {}).get(module.app) or {})),
+        existing_menu_ids={str(i.get("id")) for i in (((menus.get("menus") or {}).get(module.app) or {}).get("items") or [])},
+        replace=replace,
+    )
+
+
+@router.get("/assistant/modules", summary="List module catalogues")
+async def list_modules(request: Request, _: Superuser, connector: str | None = None) -> dict[str, Any]:
+    """The modules of the catalogue files (``[[modules]]`` beside the presets): id, label, group,
+    connector, app and their screens (id, table, label)."""
+    from liberty.modules import ModuleError, load_modules
+    try:
+        modules = load_modules(_modules_dir(request), connector)
+    except ModuleError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    return {"modules": [{
+        "id": m.id, "label": m.label, "l": m.l, "description": m.description, "group": m.group,
+        "connector": m.connector, "app": m.app,
+        "screens": [{"id": s.id, "table": s.table, "label": s.label, "details": [d.screen for d in s.details]} for s in m.screens],
+    } for m in modules]}
+
+
+@router.post("/assistant/modules/{module_id}/preview", summary="Preview applying a module")
+async def preview_module(module_id: str, request: Request, _: Superuser, replace: bool = False) -> dict[str, Any]:
+    """What applying the module would do — per screen its table, the resolved column prefix, the
+    columns found and the module's data items the table lacks, new / exists for the query, the
+    screen and the menu items — and the errors that block it (a table or a key column not found).
+    Reads the live schema; writes nothing. ``?replace=1`` previews rewriting the module's own
+    entries that exist (``replace``) instead of keeping them (``exists``)."""
+    plan = await _module_plan(request, _module_or_404(request, module_id), replace=replace)
+    return plan.summary()
+
+
+@router.post("/assistant/modules/{module_id}/apply", summary="Apply a module")
+async def apply_module(module_id: str, request: Request, _: Superuser, replace: bool = False) -> dict[str, Any]:
+    """Apply the module: the new read queries, screens (read-only, with their detail tabs) and menu
+    items written additively — what exists is kept as it is — then the dictionary entries of its
+    tables (the JDE data dictionary's labels, formats and UDC lookups) under the app's scope, and
+    the runtime reloaded. 422 with the plan when it has errors (nothing written). ``?replace=1``
+    rewrites the module's own queries, screens and menu items that exist — a screen customised
+    since its last apply loses those changes."""
+    from liberty.module_apply import write_plan
+    from liberty.runtime import rebuild_runtime
+    from liberty.web.dictgen import create_entries
+
+    module = _module_or_404(request, module_id)
+    plan = await _module_plan(request, module, replace=replace)
+    if plan.errors:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail={"message": "the module cannot be applied", **plan.summary()})
+    settings = request.app.state.settings
+    try:
+        write_plan(plan, connectors_path=settings.connectors.config_path, screens_path=settings.screens.config_path,
+                   menus_path=settings.menus.config_path, snapshot=lambda p: _snapshot_config(request, Path(p)))
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"the module's configuration does not validate: {exc}") from exc
+    # the new queries must exist before the dictionary scan reads through the connector
+    await rebuild_runtime(request.app)
+    state = request.app.state
+    dictionary = await create_entries(registry=state.connectors, settings=state.settings, scope=module.app,
+                                      sources=plan.dictionary_sources, versions=getattr(state, "config_versions", None))
+    if dictionary["created"]:
+        await rebuild_runtime(request.app, sections={"connectors"})
+    return {**plan.summary(), "dictionary": dictionary}
+
+
 @router.get("/config/charts/parsed", summary="Get charts config")
 async def get_charts_parsed(request: Request, _: Superuser) -> dict[str, Any]:
     """The current ``charts.toml`` parsed and normalised — ``{path, charts: {<id>: ChartConfig
