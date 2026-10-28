@@ -1,5 +1,17 @@
 # Liberty Next — Notes de version
 
+## 7.0.63 — non publiée
+
+- Supervision → Journal du serveur : le journal du serveur est désormais conservé sur disque — un
+  fichier JSON-lines à rotation par taille (`[app] log_file`, par défaut
+  `<dossier de config>/.logs/liberty.log` ; `log_file_max_mb` 10, `log_file_backups` 5) alimenté
+  par le framework, les applications et les avertissements des bibliothèques, quel que soit le
+  lanceur du serveur ; une rafale du même message est écrite une fois avec « repeated N times ».
+  La page le recherche (niveau, module, texte du message / module / exception / identifiant de
+  requête, période), ouvre une exception, filtre sur une requête, exporte les résultats en texte
+  et télécharge les fichiers ; les niveaux par module changent aussitôt et sont enregistrés dans
+  `[app] log_levels` (`/admin/logs`, super-utilisateur). La vue en direct reste le premier onglet.
+
 ## 7.0.62 — non publiée
 
 - nomaflow : le classeur / CSV téléversé pour une exécution peut être retéléchargé — sous l'étape

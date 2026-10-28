@@ -150,6 +150,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           custom / withdrawn rules, secrets always from the live connectors.toml
   schema_sync.py          create_all + forward-add model columns on the framework's own tables
   observability.py        X-Request-ID middleware (ASGI), request-id log filter, JSON formatter
+  logfile.py              the server log on disk (rotating JSON lines, repeats collapsed, `[app] log_levels`),
+                          installed by the lifespan; searched / exported / levels set by web/logs.py (/admin/logs)
   migrations/             v1 → v2 migration + `liberty-migrate diff` (kept for reference)
   sio.py                  Socket.IO: record locks (rooms), technical dashboard, log tail
   web/                    the HTTP layer — see the router table

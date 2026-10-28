@@ -54,6 +54,7 @@ from liberty.web import (
     theme_router,
     views_router,
     notifications_router,
+    logs_router,
 )
 
 _log = logging.getLogger("liberty")
@@ -155,6 +156,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.settings = settings
+        # The server log on disk (liberty.logfile) first, so the startup itself is in it.
+        from liberty.logfile import install as _install_server_log, uninstall as _uninstall_server_log
+        try:
+            app.state.log_handler = _install_server_log(settings)
+        except Exception as exc:  # noqa: BLE001 — an unwritable log folder must not stop the server
+            app.state.log_handler = None
+            logging.getLogger("liberty").warning("server log file unavailable: %s", exc)
         app.state.license = verify_license(settings.license.key, master_key=settings.crypto.master_key)
         if app.state.license.error and settings.license.key.strip():
             logging.getLogger("liberty.licensing").warning("license: %s", app.state.license.error)
@@ -322,6 +330,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if app.state.ai is not None:
                 await app.state.ai.aclose()
             await app.state.connectors.aclose()
+            _uninstall_server_log(getattr(app.state, "log_handler", None))
 
     # OpenAPI tag metadata — drives the per-section grouping + descriptions ReDoc shows at
     # /redoc. Tags align with the FastAPI router prefixes so every endpoint lands under a
@@ -671,6 +680,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(changesets_router)
     app.include_router(views_router)
     app.include_router(notifications_router)
+    app.include_router(logs_router)
 
     @app.get("/health", tags=["meta"], summary="Liveness probe")
     async def health() -> dict[str, str]:

@@ -56,3 +56,5 @@ docs/work/
 docker/instantclient/*/*.zip
 # the per-install notification rules (Settings → Notifications writes it); the example is the doc
 config/notifications.toml
+config/.logs/
+config/.nomaflow/

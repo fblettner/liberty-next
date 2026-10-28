@@ -1,5 +1,16 @@
 # Liberty Next — Release notes
 
+## 7.0.63 — unreleased
+
+- Monitoring → Server log: the server log is now kept on disk — a size-rotated JSON-lines file
+  (`[app] log_file`, default `<config dir>/.logs/liberty.log`; `log_file_max_mb` 10,
+  `log_file_backups` 5) fed by the framework, the apps and the libraries' warnings, whatever
+  launches the server; a burst of the same message is written once with "repeated N times". The
+  page searches it (level, module, text in the message / logger / exception / request id,
+  period), opens an exception, filters on one request, exports the matches as text and downloads
+  the files; the levels per module change at once and are saved to `[app] log_levels`
+  (`/admin/logs`, superuser). The live view stays as the first tab.
+
 ## 7.0.62 — unreleased
 
 - nomaflow: the spreadsheet / CSV uploaded for a run can be downloaded again — under the

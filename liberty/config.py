@@ -123,6 +123,13 @@ class AppSettings(BaseModel):
     # "text" (human-readable line, UTC timestamp, request id) or "json" (one object per line for a
     # log shipper). Every line carries the X-Request-ID of the request it was logged in.
     log_format: Literal["text", "json"] = "text"
+    # The server log on disk (liberty.logfile): a size-rotated JSON-lines file the Server log page
+    # searches. None = <config dir>/.logs/liberty.log; "" = no file.
+    log_file: str | None = None
+    log_file_max_mb: int = Field(default=10, ge=1, le=1024)
+    log_file_backups: int = Field(default=5, ge=0, le=100)
+    # Levels per logger, applied at startup and changeable from the page: {"liberty.jobs" = "DEBUG"}.
+    log_levels: dict[str, str] = Field(default_factory=dict)
     # Built frontend (Vite `dist/`) served as static; empty or missing dir → not mounted.
     static_dir: str = "frontend/dist"
     # When true, the server watches the config TOML files (menus / screens / dictionary /

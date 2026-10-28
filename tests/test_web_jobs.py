@@ -9,6 +9,7 @@ runs, and the endpoints hit the actual wiring rather than a mock.
 from __future__ import annotations
 
 import asyncio
+import logging
 import textwrap
 from pathlib import Path
 
@@ -1319,3 +1320,36 @@ def test_retention_policy_saves_with_a_blank_files_days(env) -> None:
         meta["retention"]["files_days"] = 7
         assert client.put("/admin/config/jobs/parsed", json={**parsed, "meta": meta}, headers=h).status_code == 200
         assert "files_days = 7" in jobs_toml.read_text()
+
+
+def test_server_log_page_api(env, tmp_path, monkeypatch) -> None:
+    """``/admin/logs``: the startup is in the file; search by level / module / text, the export
+    as text, the zip of the files, the levels changed at run time and saved to app.toml."""
+    import io
+    import zipfile
+    app_toml = tmp_path / "app.toml"
+    app_toml.write_text('[app]\nname = "Test"  # kept\n')
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(app_toml))
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        logging.getLogger("liberty.jobs.test").warning("disk almost full on %s", "/data")
+        body = client.get("/admin/logs", params={"level": "WARNING", "q": "disk almost"}, headers=h).json()
+        assert [e["msg"] for e in body["entries"]] == ["disk almost full on /data"]
+        assert body["entries"][0]["logger"] == "liberty.jobs.test" and "liberty.jobs" in body["modules"]
+        assert body["files"] and body["files"][0]["name"] == "liberty.log"
+        assert client.get("/admin/logs", params={"module": "liberty.jobs", "q": "disk"}, headers=h).json()["entries"]
+        assert not client.get("/admin/logs", params={"module": "liberty.auth", "q": "disk"}, headers=h).json()["entries"]
+        txt = client.get("/admin/logs/export", params={"q": "disk almost"}, headers=h)
+        assert txt.status_code == 200 and "disk almost full on /data" in txt.text and "attachment" in txt.headers["content-disposition"]
+        z = zipfile.ZipFile(io.BytesIO(client.get("/admin/logs/download", headers=h).content))
+        assert "liberty.log" in z.namelist()
+        lv = client.post("/admin/logs/levels", json={"levels": {"liberty.jobs": "DEBUG"}, "persist": True}, headers=h)
+        assert lv.status_code == 200 and lv.json()["levels"]["liberty.jobs"] == "DEBUG"
+        assert logging.getLogger("liberty.jobs").level == logging.DEBUG
+        saved = app_toml.read_text()
+        assert "log_levels" in saved and "liberty.jobs" in saved and "# kept" in saved
+        assert client.post("/admin/logs/levels", json={"levels": {"liberty.jobs": "LOUD"}}, headers=h).status_code == 422
+        client.post("/admin/logs/levels", json={"levels": {"liberty.jobs": "NOTSET"}, "persist": True}, headers=h)
+        assert logging.getLogger("liberty.jobs").level == logging.NOTSET and "log_levels" not in app_toml.read_text()
+        assert client.get("/admin/logs", headers=_h(client, "loader")).status_code == 403
