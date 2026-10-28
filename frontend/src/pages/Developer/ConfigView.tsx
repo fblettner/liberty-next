@@ -6,12 +6,12 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Search } from 'lucide-react'
-import { Banner, Button, Centered, Checkbox, Tag } from '../../common'
+import { Banner, Button, Centered, SearchSelect, Tag } from '../../common'
 import { DataTable } from '../../common/DataTable'
 import { Overlay, Modal, ModalHeader, ModalBody, ModalFooter } from '../../common/Modal'
 import { colors, fontSize } from '../../theme'
 import { ApiError } from '../../api/client'
-import { filterKeys, getConfigReference, keyLabel, keyStatus, readerModules, sectionCounts } from '../../services/devref'
+import { filterKeys, getConfigReference, keyLabel, keyStatus, readerModules, sectionCounts, statusCounts, type KeyStatus } from '../../services/devref'
 import type { ConfigKey, ConfigReference } from '../../types/devref'
 import { Doc } from './Doc'
 import { Body, Facts, Head, Label, Main, Mono, RefRow, Side, SideItem, SideList, SideSearch, TAGS_SHOWN, Tags } from './styled'
@@ -24,7 +24,7 @@ export default function ConfigView() {
   const [error, setError] = useState<string | null>(null)
   const [q, setQ] = useState('')
   const [section, setSection] = useState(ALL)
-  const [onlyGaps, setOnlyGaps] = useState(false)
+  const [status, setStatus] = useState<KeyStatus | ''>('')
   const [detail, setDetail] = useState<ConfigKey | null>(null)
 
   useEffect(() => {
@@ -33,7 +33,9 @@ export default function ConfigView() {
   const sections = useMemo(() => sectionCounts(ref?.keys ?? []), [ref])
   // Typing searches every section (the selected one is ignored); the left list shows each section's matches.
   const searching = q.trim() !== ''
-  const shown = useMemo(() => filterKeys(ref?.keys ?? [], q, searching ? ALL : section, onlyGaps, (k) => keyLabel(k, t)), [ref, q, section, onlyGaps, t, searching])
+  const shown = useMemo(() => filterKeys(ref?.keys ?? [], q, searching ? ALL : section, status, (k) => keyLabel(k, t)), [ref, q, section, status, t, searching])
+  // The header's counts: the keys in view (the section, or the search) before the status filter.
+  const counts = useMemo(() => statusCounts(filterKeys(ref?.keys ?? [], q, searching ? ALL : section, '', (k) => keyLabel(k, t))), [ref, q, section, t, searching])
   const matchCount = useMemo(() => {
     const m = new Map<string, number>()
     if (searching) for (const k of shown) m.set(k.section, (m.get(k.section) ?? 0) + 1)
@@ -72,7 +74,6 @@ export default function ConfigView() {
 
   if (error) return <Banner $tone="error">{error}</Banner>
   if (!ref) return <Centered />
-  const current = searching ? undefined : sections.find((s) => s.section === section)
 
   return (
     <>
@@ -101,12 +102,15 @@ export default function ConfigView() {
         <Main>
           <Head>
             <span className="title">{searching ? `“${q.trim()}”` : section === ALL ? 'app.toml' : `[${section}]`}</span>
-            <span className="sub">{t('developer.summary', {
-              editable: current ? current.total - current.gaps : ref.editable,
-              total: current ? current.total : ref.total,
-              gaps: current ? current.gaps : ref.gaps.length,
-            })}</span>
-            <span style={{ marginLeft: 'auto' }}><Checkbox checked={onlyGaps} onChange={setOnlyGaps} label={t('developer.onlyGaps')} /></span>
+            <span className="sub">{t('developer.summaryStatus', { editor: counts.editor, file: counts.file, gaps: counts.gap })}</span>
+            <span style={{ marginLeft: 'auto', width: 240 }}>
+              <SearchSelect size="sm" value={status} onChange={(v) => setStatus(v as KeyStatus | '')} anyLabel={t('developer.statusAll')}
+                options={[
+                  { value: 'editor', label: t('developer.statusEditor') },
+                  { value: 'file', label: t('developer.fileOnly') },
+                  { value: 'gap', label: t('developer.gap') },
+                ]} />
+            </span>
           </Head>
           <DataTable<ConfigKey> columns={columns} data={shown} tableId="developer:config" exportFilename="liberty-settings"
             onRowClick={setDetail} />

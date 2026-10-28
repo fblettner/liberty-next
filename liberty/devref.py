@@ -383,3 +383,197 @@ def api_reference(app: Any) -> list[dict[str, Any]]:
             })
     out.sort(key=lambda r: (r["path"], r["method"]))
     return out
+
+
+# ── Data model: the framework's tables + each connector's declared tables ───────────────────────
+
+_FRAMEWORK_MODELS = (
+    ("liberty.auth.models", "accounts"), ("liberty.jobs.models", "nomaflow"), ("liberty.changesets.models", "change packages"),
+    ("liberty.userviews.store", "saved views"), ("liberty.notify.store", "notifications"),
+)
+_FROM = re.compile(r"\bFROM\s+([#\w.$\"\[\]]+)", re.IGNORECASE)
+
+
+def _framework_tables() -> list[dict[str, Any]]:
+    import importlib
+    out: list[dict[str, Any]] = []
+    for module_name, group in _FRAMEWORK_MODELS:
+        mod = importlib.import_module(module_name)
+        base = getattr(mod, "Base", None)
+        if base is None:
+            continue
+        docs = {m.local_table.name: (m.class_.__doc__ or "").strip() for m in base.registry.mappers}
+        for t in base.metadata.sorted_tables:
+            fks = {fk.parent.name: f"{fk.column.table.name}.{fk.column.name}" for fk in t.foreign_keys}
+            out.append({
+                "id": f"framework:{t.name}", "name": t.name, "owner": "framework", "group": group,
+                "label": "", "description": docs.get(t.name, "").split("\n\n")[0],
+                "physical": t.name, "physical_raw": t.name, "key": [c.name for c in t.primary_key.columns],
+                "related": sorted({v.split(".")[0] for v in fks.values()} - {t.name}),
+                "slots": [], "used_by": [{"kind": "framework", "name": module_name}],
+                "columns": [{
+                    "name": c.name, "type": str(c.type), "label": "", "key": c.primary_key,
+                    "nullable": bool(c.nullable), "references": fks.get(c.name), "screens": [], "description": c.comment or "",
+                } for c in t.columns],
+            })
+    return out
+
+
+def _sql_text(sql: Any) -> str:
+    return sql if isinstance(sql, str) else " ".join(str(v) for v in (sql or {}).values())
+
+
+_SQL_NOISE = re.compile(r"--[^\n]*|/\*.*?\*/|'(?:[^']|'')*'", re.S)
+_OUT_NAME = re.compile(r'(?:\bAS\s+)?"?([A-Za-z_][\w$#]*)"?\s*$', re.I)
+
+
+def _select_columns(sql: Any) -> list[str]:
+    """The output names of a read query's outer SELECT list — each item's alias, else its bare column
+    (``t.col`` → ``col``); ``*`` and an unnamed expression are skipped. A per-dialect map reads its first
+    variant. For the tables no screen shows: their columns from the SQL itself, without a database."""
+    text = sql if isinstance(sql, str) else next(iter((sql or {}).values()), "")
+    s = _SQL_NOISE.sub(lambda m: "''" if m.group(0).startswith("'") else " ", str(text))
+    depth, start, items = 0, -1, []
+    for m in re.finditer(r"[(),]|\bSELECT\b|\bFROM\b", s, re.I):
+        tok = m.group(0).upper()
+        if tok == "(":
+            depth += 1
+        elif tok == ")":
+            depth -= 1
+        elif depth == 0 and tok == "SELECT" and start < 0:
+            start = m.end()
+        elif depth == 0 and start >= 0 and tok in (",", "FROM"):
+            items.append(s[start:m.start()])
+            start = m.end()
+            if tok == "FROM":
+                break
+    out: list[str] = []
+    for item in items:
+        item = re.sub(r"^\s*DISTINCT\s+", "", item, flags=re.I).strip()
+        named = _OUT_NAME.search(item)
+        if named and not item.endswith("*") and named.group(1).upper() not in out and not item.endswith(")"):
+            out.append(named.group(1))
+    return out
+
+
+def _connector_tables(state: Any) -> list[dict[str, Any]]:
+    """Every ``[[connectors.<c>.tables]]``: its CRUD slots, the physical table its read query selects
+    from, the columns its screens show (with the dictionary's labels), who uses it, its related
+    tables (the screens' nested tables)."""
+    reg = getattr(state, "connectors", None)
+    screens_cfg = getattr(state, "screens", None)
+    dictionary = getattr(reg, "dictionary", None) if reg is not None else None
+    if reg is None:
+        return []
+    jobs = raw_config_jobs(state)
+    explorer = raw_config_explorer(state)
+    from liberty.web.dependencies import raw_config
+    # (connector, query) → the dashboards / charts reading it (a widget's connector defaults to its app).
+    views: dict[tuple[str, str], list[dict[str, str]]] = {}
+    for app, boards in (raw_config(state, "dashboards.toml").get("dashboards") or {}).items():
+        for bid, board in (boards or {}).items():
+            for w in (board or {}).get("widgets") or [] if isinstance(board, dict) else []:
+                if isinstance(w, dict) and w.get("query"):
+                    use = {"kind": "dashboard", "name": f"{app}.{bid}"}
+                    lst = views.setdefault((str(w.get("connector") or app), str(w["query"])), [])
+                    if use not in lst:
+                        lst.append(use)
+    for scope, charts in (raw_config(state, "charts.toml").get("charts") or {}).items():
+        for cid, chart in (charts or {}).items():
+            if isinstance(chart, dict) and chart.get("query"):
+                views.setdefault((str(chart.get("connector") or scope), str(chart["query"])), []).append(
+                    {"kind": "chart", "name": f"{scope}.{cid}"})
+    screens: list[tuple[str, str, Any]] = [
+        (app, sid, s) for app, by in ((screens_cfg.screens or {}).items() if screens_cfg is not None else []) for sid, s in by.items()]
+    query_screen = {}   # (connector, query) → screen ids
+    for app, sid, s in screens:
+        conn = getattr(s, "connector", None) or app
+        for attr in ("read_query", "update_query", "insert_query", "delete_query"):
+            q = getattr(s, attr, None)
+            if q:
+                query_screen.setdefault((conn, q), []).append((app, sid, s))
+    out: list[dict[str, Any]] = []
+    for cname in reg.names():
+        cfg = getattr(reg.get(cname), "config", None)
+        tables = getattr(cfg, "tables", None) or []
+        prefix = int(getattr(cfg, "dd_prefix", 0) or 0)
+        for tdef in tables:
+            slots = {s: f"{tdef.name}_{s}" for s in ("get", "put", "post", "delete") if getattr(tdef, s, None) is not None}
+            get_sql = _sql_text(getattr(tdef.get, "sql", "")) if tdef.get is not None else ""
+            # #SCHEMA.CTL#.F0005#DBLINK.CTL# → F0005 (the placeholders kept in physical_raw); among
+            # several FROMs (joins, sub-queries) the one named like the table wins, else the first.
+            froms = [(raw.strip('"[]'), re.sub(r"#[^#]*#\.?", "", raw.strip('"[]')).split(".")[-1]) for raw in _FROM.findall(get_sql)]
+            raw_physical, physical = next((f for f in froms if f[1].lower() == tdef.name.lower()), froms[0] if froms else ("", ""))
+            users: list[dict[str, str]] = []
+            cols: dict[str, dict[str, Any]] = {}
+            keys: list[str] = []
+            related: set[str] = set()
+            for q in slots.values():
+                for app, sid, s in query_screen.get((cname, q), []):
+                    if {"kind": "screen", "name": f"{app}.{sid}"} not in users:
+                        users.append({"kind": "screen", "name": f"{app}.{sid}"})
+                    keys += [k for k in s.effective_key_columns() if k not in keys]
+                    for h in getattr(s, "columns", None) or []:
+                        col = cols.setdefault(h.name, {"name": h.name, "type": "", "label": "", "key": False, "nullable": True,
+                                                       "references": None, "screens": [], "description": ""})
+                        col["key"] = col["key"] or bool(getattr(h, "key", False))
+                        col["label"] = col["label"] or (h.label if isinstance(getattr(h, "label", None), str) else "") or ""
+                        if f"{app}.{sid}" not in col["screens"]:
+                            col["screens"].append(f"{app}.{sid}")
+                    dialog = getattr(s, "dialog", None)
+                    for tab in (getattr(dialog, "tabs", None) or []) if dialog is not None else []:
+                        child = getattr(tab, "screen", None) if getattr(tab, "type", None) == "nested_table" else None
+                        child_s = (screens_cfg.screens.get(app) or {}).get(child) if child and screens_cfg is not None else None
+                        rq = getattr(child_s, "read_query", None) if child_s is not None else None
+                        if rq and rq.endswith("_get"):
+                            related.add(rq[:-4])
+            for q in slots.values():
+                users += [u for u in views.get((cname, q), []) if u not in users]
+            # No screen shows this table (a dashboard's or an analysis's query): its columns from the SQL.
+            if not cols and tdef.get is not None:
+                for name in _select_columns(tdef.get.sql):
+                    cols[name] = {"name": name, "type": "", "label": "", "key": False, "nullable": True,
+                                  "references": None, "screens": [], "description": ""}
+            for job in jobs:
+                for step in job.get("steps") or []:
+                    if isinstance(step, dict) and step.get("query") in slots.values():
+                        users.append({"kind": "job", "name": str(job.get("id"))})
+                        break
+            for app, models in explorer.items():
+                for mid, model in (models or {}).items():
+                    ents = (model or {}).get("entities") or {}
+                    if any(isinstance(e, dict) and e.get("query") in slots.values() for e in ents.values()):
+                        users.append({"kind": "explorer", "name": f"{app}.{mid}"})
+            if dictionary is not None:
+                for col in cols.values():
+                    entry = dictionary.find_entry(col["name"].upper(), connector=cname)
+                    if entry is None and prefix and len(col["name"]) > prefix:
+                        entry = dictionary.find_entry(col["name"].upper()[prefix:], connector=cname)
+                    if entry is not None:
+                        col["label"] = col["label"] or (entry.label or "")
+                        col["type"] = entry.format or ""
+                        col["description"] = getattr(entry, "description", None) or ""
+            for col in cols.values():
+                col["key"] = col["key"] or col["name"] in keys
+            out.append({
+                "id": f"{cname}:{tdef.name}", "name": tdef.name, "owner": "connector", "group": cname,
+                "label": tdef.label or "", "description": tdef.description or "", "physical": physical, "physical_raw": raw_physical,
+                "key": keys, "related": sorted(related - {tdef.name}), "slots": list(slots),
+                "used_by": users, "columns": list(cols.values()),
+            })
+    return out
+
+
+def raw_config_jobs(state: Any) -> list[dict[str, Any]]:
+    from liberty.web.dependencies import raw_config
+    return [j for j in raw_config(state, "jobs.toml").get("jobs") or [] if isinstance(j, dict)]
+
+
+def raw_config_explorer(state: Any) -> dict[str, Any]:
+    from liberty.web.dependencies import raw_config
+    return raw_config(state, "explorer.toml").get("explorer") or {}
+
+
+def data_model(state: Any) -> list[dict[str, Any]]:
+    """The framework's own tables (SQLAlchemy models) then each connector's declared tables."""
+    return _framework_tables() + _connector_tables(state)

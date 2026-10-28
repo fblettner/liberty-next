@@ -43,3 +43,37 @@ export interface ApiRoute {
 }
 
 export interface ApiReference { routes: ApiRoute[]; total: number }
+
+export interface DataColumn {
+  name: string
+  type: string
+  label: string
+  key: boolean
+  nullable: boolean
+  /** ``table.column`` it references (framework tables' foreign keys). */
+  references: string | null
+  /** The screens that show it (connector tables). */
+  screens: string[]
+  description: string
+}
+
+export interface DataTableRef {
+  id: string
+  name: string
+  /** framework · connector */
+  owner: string
+  /** The framework area (nomaflow, accounts…) or the connector. */
+  group: string
+  label: string
+  description: string
+  physical: string
+  physical_raw: string
+  key: string[]
+  related: string[]
+  /** The CRUD queries a connector table declares (get / put / post / delete). */
+  slots: string[]
+  used_by: { kind: string; name: string }[]
+  columns: DataColumn[]
+}
+
+export interface DataModel { tables: DataTableRef[]; total: number }

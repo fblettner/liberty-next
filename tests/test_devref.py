@@ -6,7 +6,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from liberty.config import Settings
-from liberty.devref import FILE_ONLY, config_reference, ui_editors
+from liberty.devref import FILE_ONLY, _select_columns, config_reference, ui_editors
 from tests.test_web_admin_ops import _h, env  # noqa: F401 — the app fixture
 
 
@@ -78,3 +78,36 @@ def test_api_reference_reads_access_from_the_code(env) -> None:  # noqa: F811
     with TestClient(app) as client:
         assert client.get("/admin/dev/api", headers=_h(client, "reader")).status_code == 403
         assert client.get("/admin/dev/api", headers=_h(client, "admin")).json()["total"] == len(routes)
+
+
+def test_data_model_framework_and_connector_tables(env) -> None:  # noqa: F811
+    from liberty.devref import data_model
+    app, tmp = env
+    with open(tmp / "connectors.toml", "a") as f:
+        f.write('\n[[connectors.foo.tables]]\nname = "items"\nlabel = "Items"\n'
+                '[connectors.foo.tables.get]\nsql = "SELECT i.* FROM #SCHEMA#.ITEMS#DBLINK# i JOIN OTHER o ON 1 = 1"\n')
+    with open(tmp / "screens.toml", "a") as f:
+        f.write('\n[screens.foo.items]\nread_query = "items_get"\nkey_columns = ["ITEM_ID"]\n'
+                '[[screens.foo.items.columns]]\nname = "ITEM_ID"\n[[screens.foo.items.columns]]\nname = "USR_NAME"\n')
+    with TestClient(app) as client:
+        tables = {t["id"]: t for t in data_model(app.state)}
+        runs = tables["framework:nomaflow_job_runs"]
+        assert runs["group"] == "nomaflow" and runs["key"] == ["id"] and any(c["name"] == "state" for c in runs["columns"])
+        items = tables["foo:items"]
+        assert items["physical"] == "ITEMS" and items["slots"] == ["get"] and items["key"] == ["ITEM_ID"]
+        assert items["used_by"] == [{"kind": "screen", "name": "foo.items"}]
+        cols = {c["name"]: c for c in items["columns"]}
+        assert cols["ITEM_ID"]["key"] is True and cols["USR_NAME"]["label"] == "Username"   # the dictionary's label
+        body = client.get("/admin/dev/data", headers=_h(client, "admin")).json()
+        assert body["total"] == len(tables)
+
+
+def test_select_columns_reads_the_outer_select_list() -> None:
+    sql = """WITH x AS (SELECT a, b FROM t)
+    SELECT DISTINCT t.apps_id, COUNT(*) AS n, CASE WHEN a = ',' THEN 'x, y' END tone, "Quoted",
+        (SELECT MAX(z) FROM u) AS top, t.*, SUM(v)
+    FROM t -- a, b
+    WHERE k IN (SELECT k FROM w)"""
+    assert _select_columns(sql) == ["apps_id", "n", "tone", "Quoted", "top"]
+    assert _select_columns({"postgres": "SELECT a AS one FROM t", "oracle": "SELECT b FROM t"}) == ["one"]
+    assert _select_columns("SELECT * FROM t") == []

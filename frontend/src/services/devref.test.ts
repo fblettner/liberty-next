@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { apiGroups, CONFIG_LABELS, docBlocks, filterKeys, filterRoutes, keyLabel, keyStatus, readerModules, sectionCounts } from './devref'
-import type { ApiRoute, ConfigKey } from '../types/devref'
+import { apiGroups, CONFIG_LABELS, docBlocks, filterKeys, statusCounts, filterTables, tableGroups, filterRoutes, keyLabel, keyStatus, readerModules, sectionCounts } from './devref'
+import type { ApiRoute, ConfigKey, DataTableRef } from '../types/devref'
 
 const k = (key: string, over: Partial<ConfigKey> = {}): ConfigKey => ({
   key, section: key.split('.')[0], name: key.split('.')[1], type: 'str', default: null, description: null,
@@ -21,10 +21,10 @@ describe('filterKeys', () => {
     k('jobs.files_dir', { readers: [{ file: 'liberty/jobs/files.py', line: 3, snippet: '', via: null }] }),
   ]
   it('by section, gaps, text in key / description / reader file', () => {
-    expect(filterKeys(keys, '', 'app', false).map((x) => x.key)).toEqual(['app.name', 'app.base_path'])
-    expect(filterKeys(keys, '', '', true).map((x) => x.key)).toEqual(['app.base_path', 'jobs.files_dir'])
-    expect(filterKeys(keys, 'prefix', '', false).map((x) => x.key)).toEqual(['app.base_path'])
-    expect(filterKeys(keys, 'jobs/files', '', false).map((x) => x.key)).toEqual(['jobs.files_dir'])
+    expect(filterKeys(keys, '', 'app', '').map((x) => x.key)).toEqual(['app.name', 'app.base_path'])
+    expect(filterKeys(keys, '', '', 'gap').map((x) => x.key)).toEqual(['app.base_path', 'jobs.files_dir'])
+    expect(filterKeys(keys, 'prefix', '', '').map((x) => x.key)).toEqual(['app.base_path'])
+    expect(filterKeys(keys, 'jobs/files', '', '').map((x) => x.key)).toEqual(['jobs.files_dir'])
   })
 })
 
@@ -85,5 +85,26 @@ describe('docBlocks', () => {
       { kind: 'p', parts: [{ text: 'Each row runs ' }, { text: 'insert_query', code: true }, { text: ' with the same machinery.' }] },
       { kind: 'list', items: [[{ text: 'first item continued' }], [{ text: 'second' }]] },
     ])
+  })
+})
+
+describe('filterTables / tableGroups', () => {
+  const tb = (id: string, owner: string, group: string, over: Partial<DataTableRef> = {}): DataTableRef => ({
+    id, name: id.split(':')[1], owner, group, label: '', description: '', physical: '', physical_raw: '', key: [], related: [],
+    slots: [], used_by: [], columns: [], ...over,
+  })
+  const tables = [tb('jde:f0092', 'connector', 'jde', { columns: [{ name: 'ULUSER', type: '', label: 'User', key: true, nullable: true, references: null, screens: [], description: '' }] }),
+    tb('framework:runs', 'framework', 'nomaflow'), tb('jde:f0005', 'connector', 'jde')]
+  it('framework first, then connectors, tables by name', () => {
+    expect(tableGroups(tables).map((g) => [g.group, g.tables.map((t) => t.name)])).toEqual([['nomaflow', ['runs']], ['jde', ['f0005', 'f0092']]])
+  })
+  it('matches a column name or label', () => {
+    expect(filterTables(tables, 'user').map((t) => t.id)).toEqual(['jde:f0092'])
+  })
+})
+
+describe('statusCounts', () => {
+  it('counts each status apart (file-only is not editable)', () => {
+    expect(statusCounts([k('a.b', { editor: 'x' }), k('a.c', { file_only: 'env' }), k('a.d')])).toEqual({ editor: 1, file: 1, gap: 1 })
   })
 })

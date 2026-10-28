@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Request
 
 from liberty.auth.dependencies import require_superuser
 from liberty.auth.principal import Principal
-from liberty.devref import api_reference, config_reference
+from liberty.devref import api_reference, config_reference, data_model
 
 router = APIRouter(prefix="/admin/dev", tags=["admin"])
 Superuser = Annotated[Principal, Depends(require_superuser)]
@@ -28,3 +28,9 @@ async def get_config_reference(_: Superuser) -> dict[str, Any]:
 async def get_api_reference(request: Request, _: Superuser) -> dict[str, Any]:
     routes = api_reference(request.app)
     return {"routes": routes, "total": len(routes)}
+
+
+@router.get("/data", summary="The data model: framework tables + each connector's tables")
+async def get_data_model(request: Request, _: Superuser) -> dict[str, Any]:
+    tables = await asyncio.to_thread(data_model, request.app.state)
+    return {"tables": tables, "total": len(tables)}

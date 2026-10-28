@@ -1,20 +1,22 @@
 // The Developer page's data (C12): fetch + the filters, no React.
 import { api } from '../api/client'
-import type { ApiReference, ApiRoute, ConfigKey, ConfigReference } from '../types/devref'
+import type { ApiReference, ApiRoute, ConfigKey, ConfigReference, DataModel, DataTableRef } from '../types/devref'
 
 export const getConfigReference = () => api.get<ConfigReference>('/admin/dev/config')
 
 /** A key's status: edited in a screen, file-only on purpose, or a gap. */
-export function keyStatus(k: ConfigKey): 'editor' | 'file' | 'gap' {
+export function keyStatus(k: ConfigKey): KeyStatus {
   return k.editor ? 'editor' : k.file_only ? 'file' : 'gap'
 }
 
-/** The keys matching *q* (key, label, description, a reader's file) in *section*, gaps only when asked. */
-export function filterKeys(keys: ConfigKey[], q: string, section: string, onlyGaps: boolean, label?: (k: ConfigKey) => string): ConfigKey[] {
+export type KeyStatus = 'editor' | 'file' | 'gap'
+
+/** The keys matching *q* (key, label, description, a reader's file) in *section*, of *status* when given. */
+export function filterKeys(keys: ConfigKey[], q: string, section: string, status: KeyStatus | '', label?: (k: ConfigKey) => string): ConfigKey[] {
   const n = q.trim().toLowerCase()
   return keys.filter((k) =>
     (!section || k.section === section)
-    && (!onlyGaps || keyStatus(k) === 'gap')
+    && (!status || keyStatus(k) === status)
     && (!n || k.key.toLowerCase().includes(n) || (k.description ?? '').toLowerCase().includes(n)
       || (label ? label(k).toLowerCase().includes(n) : false)
       || k.readers.some((r) => r.file.toLowerCase().includes(n))))
@@ -29,6 +31,13 @@ export function readerModules(k: ConfigKey): string[] {
     const mod = parts.length > 2 ? parts[1] : (parts[parts.length - 1] ?? '').replace(/\.py$/, '')
     if (mod && !out.includes(mod)) out.push(mod)
   }
+  return out
+}
+
+/** How many keys of each status (edited in a screen / file or environment only / not in the UI). */
+export function statusCounts(keys: ConfigKey[]): Record<KeyStatus, number> {
+  const out: Record<KeyStatus, number> = { editor: 0, file: 0, gap: 0 }
+  for (const k of keys) out[keyStatus(k)] += 1
   return out
 }
 
@@ -154,4 +163,28 @@ function inlineParts(text: string): DocPart[] {
   }
   if (last < text.length) out.push({ text: text.slice(last) })
   return out
+}
+
+export const getDataModel = () => api.get<DataModel>('/admin/dev/data')
+
+/** The tables matching *q* in their name, label, physical name or one of their columns. */
+export function filterTables(tables: DataTableRef[], q: string): DataTableRef[] {
+  const n = q.trim().toLowerCase()
+  if (!n) return tables
+  return tables.filter((t) => t.name.toLowerCase().includes(n) || t.label.toLowerCase().includes(n)
+    || t.physical.toLowerCase().includes(n) || t.columns.some((c) => c.name.toLowerCase().includes(n) || c.label.toLowerCase().includes(n)))
+}
+
+/** The left list: framework areas first, then each connector, each with its tables in name order. */
+export function tableGroups(tables: DataTableRef[]): { owner: string; group: string; tables: DataTableRef[] }[] {
+  const by = new Map<string, { owner: string; group: string; tables: DataTableRef[] }>()
+  for (const t of tables) {
+    const k = `${t.owner}:${t.group}`
+    const g = by.get(k) ?? { owner: t.owner, group: t.group, tables: [] }
+    g.tables.push(t)
+    by.set(k, g)
+  }
+  return [...by.values()]
+    .map((g) => ({ ...g, tables: [...g.tables].sort((a, b) => a.name.localeCompare(b.name)) }))
+    .sort((a, b) => (a.owner === b.owner ? a.group.localeCompare(b.group) : a.owner === 'framework' ? -1 : 1))
 }

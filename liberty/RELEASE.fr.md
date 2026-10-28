@@ -28,6 +28,15 @@
   sa description, ses paramètres, sa requête (ses champs et un exemple JSON) et sa réponse (depuis
   les modèles déclarés) ; liens vers /docs et /redoc (`/admin/dev/api`). La
   Configuration affiche maintenant le libellé de chaque paramètre tel que dans son écran.
+- Référence développeur → Modèle de données : les tables du framework (comptes, nomaflow, paquets de
+  changements, vues enregistrées, notifications — depuis leurs modèles : colonnes, types, clés,
+  références) et les tables déclarées par chaque connecteur — la table physique de sa requête de
+  lecture, sa clé, ses requêtes, les écrans / tableaux de bord / graphiques / tâches / modèles de l'Explorateur qui l'utilisent, les
+  tables liées (les tables imbriquées des écrans, cliquables) et ses colonnes avec les libellés du
+  dictionnaire et les écrans qui les montrent (une table qu'aucun écran ne montre — la requête d'un
+  tableau de bord — lit ses colonnes dans la liste du SELECT de son SQL) (`/admin/dev/data`). Configuration : l'en-tête compte ce
+  qui se modifie dans un écran, ce qui reste dans le fichier / l'environnement et ce qui n'est pas
+  dans l'interface, et un filtre d'état remplace la case à cocher.
 
 ## 7.0.64 — non publiée
 

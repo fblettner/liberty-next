@@ -24,6 +24,14 @@
   handler (file:line), description, parameters, request (its fields and an example JSON) and
   response (from the declared models); links to /docs and /redoc (`/admin/dev/api`).
   Configuration now shows each setting's label as in its screen.
+- Developer reference → Data model: the framework's own tables (accounts, nomaflow, change packages,
+  saved views, notifications — from their models: columns, types, keys, references) and each
+  connector's declared tables — the physical table its read query selects from, its key, its queries,
+  the screens / dashboards / charts / jobs / Explorer models that use it, the related tables (the screens' nested tables,
+  clickable) and its columns with the dictionary's labels and the screens showing them
+  (a table no screen shows — a dashboard's query — reads its columns from its SQL's select list)
+  (`/admin/dev/data`). Configuration: the header counts what is edited in a screen, what stays in
+  the file / environment and what is not in the UI, and a status filter replaces the checkbox.
 
 ## 7.0.64 — unreleased
 
