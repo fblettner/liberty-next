@@ -4,7 +4,7 @@
 import { api, authHeaders } from '../api/client'
 import type { RunState } from '../pages/Nomaflow/types'
 
-export interface JobUpload { step: string; sheet: string | number | null; path: string | null; watch_dir: string | null }
+export interface JobUpload { step: string; sheet: string | number | null }
 export interface JobParam { name: string; label: string; step: string; default: string | null; required: boolean; choices: { value: string; label: string }[] }
 export interface UserJob { id: string; description: string | null; tags: string[]; uploads: JobUpload[]; params: JobParam[]; in_flight: boolean }
 export interface JobRunRow {

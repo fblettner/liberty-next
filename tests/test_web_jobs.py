@@ -118,6 +118,11 @@ name = "load"
 target = { connector = "db", table = "imported" }
 sheet = "Items"
 [[jobs.steps]]
+type = "file_load"
+name = "bundled"
+path = "/nowhere/bundled.csv"
+target = { connector = "db", table = "imported" }
+[[jobs.steps]]
 type = "python"
 name = "after"
 callable = "tests.test_web_jobs:_record_kwargs"
@@ -1076,7 +1081,7 @@ def test_user_job_routes(env) -> None:
         r = client.get("/api/jobs/load-file", headers=h)
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["job"]["id"] == "load-file" and body["job"]["uploads"] == [{"step": "load", "sheet": "Items", "path": None, "watch_dir": None}]
+        assert body["job"]["id"] == "load-file" and body["job"]["uploads"] == [{"step": "load", "sheet": "Items"}]
         assert body["runs"] == [] and body["job"]["in_flight"] is False
         assert body["job"]["params"] == [
             {"name": "mode", "label": "Mode", "step": "after", "default": "full", "required": False, "choices": [{"value": "full", "label": "full"}, {"value": "delta", "label": "delta"}]},

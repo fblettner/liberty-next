@@ -679,12 +679,14 @@ def _user_job(request: Request, job_id: str, principal: Principal):
 
 
 def _upload_steps(job) -> list[dict[str, Any]]:
-    """The ``file_load`` steps a user feeds a file to (one upload per step and run)."""
+    """The ``file_load`` steps a user feeds a file to (one upload per step and run): the enabled
+    ones with neither a configured ``path`` nor a ``watch_dir`` — a step that knows its file (the
+    bundled samples, a watched folder) takes none."""
     out: list[dict[str, Any]] = []
     for s in job.steps:
-        if getattr(s.type, "value", s.type) != "file_load" or not s.enabled:
+        if getattr(s.type, "value", s.type) != "file_load" or not s.enabled or s.path or s.watch_dir:
             continue
-        out.append({"step": s.name, "sheet": s.sheet, "path": s.path, "watch_dir": s.watch_dir})
+        out.append({"step": s.name, "sheet": s.sheet})
     return out
 
 
