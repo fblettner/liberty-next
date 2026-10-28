@@ -102,8 +102,10 @@
   sens. Désactivé par défaut : rien ne change tant que l'opérateur ne l'active pas.
 - Cellules-liens : l'indication de colonne `drill = "<id d'action du menu de ligne>"` affiche la
   valeur comme un lien qui déclenche cette action `navigate` pour la ligne — la colonne clé est la
-  navigation, sans poignée ni menu. Paramètres → Écrans propose les actions du menu de ligne dans
-  le champ ; un identifiant inconnu est refusé au chargement.
+  navigation, sans poignée ni menu. Automatique aussi : un écran avec une seule action `navigate`
+  et une colonne clé obtient le lien sur sa première colonne clé sans aucun réglage. Paramètres →
+  Écrans propose les actions du menu de ligne dans le champ ; un identifiant inconnu est refusé au
+  chargement.
 - Tableaux de bord : l'étiquette d'une ligne de liste se place sur la ligne du titre, la ligne
   reste sur deux hauteurs.
 

@@ -351,8 +351,8 @@ const DetailTr = styled.tr` td { background: ${colors.bg.card}; padding: 0; } `
 // clear affordance; blue under the pointer.
 const RowMenuBtn = styled.button`
   display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0;
-  border: none; border-radius: ${radius.sm}; background: none; cursor: pointer; color: ${colors.text.muted}; opacity: 0.35;
-  tr:hover & { opacity: 1; }
+  border: 1px solid ${colors.border}; border-radius: ${radius.sm}; background: ${colors.bg.input}; cursor: pointer; color: ${colors.text.secondary};
+  tr:hover & { color: ${colors.text.primary}; border-color: ${colors.blue.border}; }
   &:hover { background: ${colors.blue.bg}; color: ${colors.blue.main}; }
 `
 const GroupCount = styled.span`color: ${colors.text.muted}; font-weight: 400;`

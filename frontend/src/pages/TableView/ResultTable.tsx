@@ -1694,11 +1694,15 @@ export function ResultTable({
       })
     }
     // Link-style cells (``ColumnHint.drill``): the value fires the named row-menu action for its row
-    // — the key column IS the drill. Not in batch-edit mode (the cell is an input there).
+    // — the key column IS the drill. Automatic too: a screen with ONE row-menu navigate action and
+    // a key column gets the link on its first key column, nothing to configure. Not in batch-edit
+    // mode (the cell is an input there).
     if (!editMode) {
+      const lone = rowMenu.length === 1 && rowMenu[0].type === 'navigate' ? rowMenu[0] : null
+      const firstKey = shownColumns.find((x) => x.key && !x.hidden)?.name
       for (const def of out) {
         const c = shownColumns.find((x) => x.name === def.id)
-        const action = c?.drill ? rowMenu.find((a) => a.id === c.drill) : undefined
+        const action = c?.drill ? rowMenu.find((a) => a.id === c.drill) : (lone && c && c.name === firstKey ? lone : undefined)
         if (!c || !action) continue
         const inner = def.cell
         def.cell = (info) => {
