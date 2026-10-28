@@ -26,7 +26,7 @@ import { ListWidget } from './ListWidget'
 import { BarsWidget } from './BarsWidget'
 import { TextWidget } from './TextWidget'
 import { LinksWidget } from './LinksWidget'
-import { colors, fontSize, fonts, radius } from '../../theme'
+import { colors, fontSize, radius } from '../../theme'
 
 // CSS-grid layout: 12 cols on desktop, collapse to 6 on tablet, 1 on mobile so dashboards stay
 // useful on a phone. Each row is 180px tall by default — fits a KPI card snugly; charts in the
@@ -47,16 +47,6 @@ const WidgetFrame = styled.div<{ $cs: number; $rs: number }>`
   grid-column: span ${({ $cs }) => $cs};
   grid-row: span ${({ $rs }) => $rs};
   display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0;
-`
-const WidgetTitle = styled.div`
-  /* Small caps-y label above each card — matches the rest of the app's section headers
-     (Tag/Sub typography), reads as a quiet caption rather than competing with the card. */
-  font-size: ${fontSize.micro}; color: ${colors.text.muted};
-  font-family: ${fonts.sans}; font-weight: 600; letter-spacing: 0.04em;
-  padding: 0 4px; flex-shrink: 0;
-`
-const WidgetSub = styled.span`
-  display: block; font-weight: 400; letter-spacing: 0; text-transform: none; font-size: ${fontSize.micro}; color: ${colors.text.muted}; margin-top: 1px;
 `
 const EmptyState = styled.div`
   color: ${colors.text.muted}; font-size: ${fontSize.sm};
@@ -213,11 +203,7 @@ function WidgetCell({
   const common = { filters, filterValues, period, selection, refreshKey }
   return (
     <WidgetFrame $cs={widget.col_span} $rs={widget.row_span}>
-      {/* a card widget (kpi, stat, list, bars) carries its own title inside (nomaubl's cards); a chart
-          or a table keeps the caption above, with the subtitle under it */}
-      {widget.label && (widget.type === 'chart' || widget.type === 'table') && (
-        <WidgetTitle>{widget.label}{widget.description && <WidgetSub>{widget.description}</WidgetSub>}</WidgetTitle>
-      )}
+      {/* every widget carries its title and description inside its card (nomaubl's cards) */}
       {widget.type === 'chart'
         ? <ChartWidget widget={widget} {...common} />
         : widget.type === 'table'

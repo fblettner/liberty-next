@@ -11,7 +11,7 @@
 //
 // The renderChart function (the per-type chart picker) lives here too so it stays next to the
 // helpers it depends on. ChartView's `renderChart` (used by its preview path) re-imports.
-import { useCallback, useId, useMemo } from 'react'
+import { useCallback, useId, useMemo, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend,
@@ -84,11 +84,13 @@ export interface ChartCanvasProps {
    *  (which triggers Recharts' "width(0) and height(0)" warning during loading transitions).
    *  Recharts' own type narrows percentage strings to the `${number}%` template; we mirror it. */
   height?: number | `${number}%`
+  /** Shown at the top inside the chart's card (a dashboard widget's title + description). */
+  header?: ReactNode
 }
 
 /** The rendering half of a chart — used by ChartView (with an editable spec above) and
  *  DashboardView's chart widget (no editing). */
-export function ChartCanvas({ result, spec, connector, emptyMessage, noDataMessage, height = '100%' }: ChartCanvasProps) {
+export function ChartCanvas({ result, spec, connector, emptyMessage, noDataMessage, height = '100%', header }: ChartCanvasProps) {
   const allCols = useMemo(() => result.columns.filter((c) => !c.hidden), [result])
   const data = useMemo(() => buildChartData(result, spec), [result, spec])
   const showLegend = spec.showLegend ?? (spec.series ? true : spec.y.length > 1)
@@ -126,10 +128,11 @@ export function ChartCanvas({ result, spec, connector, emptyMessage, noDataMessa
   // render as transparent rectangles). Strip the colons to make the id URL-safe everywhere.
   const gradId = useId().replace(/:/g, '')
 
-  if (!spec.x || spec.y.length === 0) return <Frame><EmptyHint>{emptyMessage ?? 'Pick X and Y columns.'}</EmptyHint></Frame>
-  if (data.length === 0) return <Frame><EmptyHint>{noDataMessage ?? 'No data.'}</EmptyHint></Frame>
+  if (!spec.x || spec.y.length === 0) return <Frame>{header}<EmptyHint>{emptyMessage ?? 'Pick X and Y columns.'}</EmptyHint></Frame>
+  if (data.length === 0) return <Frame>{header}<EmptyHint>{noDataMessage ?? 'No data.'}</EmptyHint></Frame>
   return (
     <Frame>
+      {header}
       <ResponsiveContainer width="100%" height={height}>
         {renderChart(spec, data, allCols, { showLegend, formatX, seriesName, gradId })}
       </ResponsiveContainer>

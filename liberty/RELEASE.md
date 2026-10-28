@@ -43,6 +43,13 @@
 - Config merge (apps upgrade, Package & Deploy): a shipped value that is a whole `${VAR}` or
   `${VAR:-default}` reference belongs to the install — the live value wins, booleans, numbers and
   the install's own reference included (several AIS connections, each on its own variable). Before, a TLS check switched off in Settings was switched back on.
+- Jobs: a deadline — `alerts.finish_by = "07:00"` (the job's timezone). On a day the job is
+  scheduled, a successful run must have finished by then; otherwise the new `late` job event goes
+  to the notification rules and the job's alert recipients, saying whether the run is still going,
+  failed or never started. Checked with the missed schedules; set in the job editor (Alerts).
+- Dashboards: chart and table widgets carry their title and description inside their card, like
+  the other widgets.
+- nomaflow: a reload no longer leaves the "All" of a per-value run on the previous connectors.
 
 ## 7.0.60 — unreleased
 

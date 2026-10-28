@@ -178,6 +178,7 @@ async def build_nomaflow(
     on_finished: Any | None = None,
     on_missed: Any | None = None,
     state: Any | None = None,
+    on_late: Any | None = None,
 ) -> NomaflowComponents | None:
     """Build the nomaflow stack from a (settings, connectors) pair, or return
     None if the deployment isn't carrying enough to start it.
@@ -281,6 +282,7 @@ async def build_nomaflow(
         on_missed=on_missed,
         connectors=connectors,
         state=state,
+        on_late=on_late,
     )
 
     if settings.jobs.enabled:

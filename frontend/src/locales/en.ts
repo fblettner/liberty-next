@@ -735,6 +735,8 @@ const en = {
       alertsOnFailure: 'On failure',
       alertsLongRun: 'Warn if a run exceeds (minutes)',
       alertsLongRunPlaceholder: 'e.g. 60',
+      alertsFinishBy: 'Must have succeeded by',
+      alertsFinishByHint: "On a day the job is scheduled, a successful run must have finished by this time (the job's timezone); otherwise the late alert goes out.",
       alertsRecipients: 'Recipients (usernames or roles)',
       stepsSection: 'Steps ({{count}})',
       paramsSection: 'Shared params',

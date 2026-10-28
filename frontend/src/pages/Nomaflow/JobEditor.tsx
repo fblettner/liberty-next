@@ -586,6 +586,14 @@ export default function JobEditor() {
                     placeholder={t('nomaflow.editor.alertsLongRunPlaceholder')}
                   />
                 </FieldWrap>
+                <FieldWrap>
+                  <FieldLabel title={t('nomaflow.editor.alertsFinishByHint')}>{t('nomaflow.editor.alertsFinishBy')}</FieldLabel>
+                  <Input
+                    type="time"
+                    value={job.alerts.finish_by ?? ''}
+                    onChange={(e) => patch({ alerts: { ...job.alerts!, finish_by: e.target.value ? e.target.value.slice(0, 5) : null } })}
+                  />
+                </FieldWrap>
                 <FieldWrap $full>
                   <FieldLabel>{t('nomaflow.editor.alertsRecipients')}</FieldLabel>
                   <Input

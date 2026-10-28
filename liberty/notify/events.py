@@ -72,11 +72,12 @@ def fire_job_event(
 ) -> list[asyncio.Task]:
     """A finished run: ``failure`` / ``succeeded`` / ``canceled`` from the state, plus ``long_run``
     when a rule's threshold is met; a ``MISSED`` row (a scheduled fire that never ran) is the
-    ``missed`` event with ``EXPECTED_AT``. *extra_recipients* (the job's own
+    ``missed`` event with ``EXPECTED_AT``; ``LATE`` (no successful run by ``alerts.finish_by``) is
+    the ``late`` event, ``EXPECTED_AT`` the deadline. *extra_recipients* (the job's own
     ``alerts.recipients``) get a plain failure message even without a rule."""
     if dispatcher is None:
         return []
-    event = {"FAILED": "failure", "SUCCEEDED": "succeeded", "CANCELED": "canceled", "MISSED": "missed"}.get(state, state.lower())
+    event = {"FAILED": "failure", "SUCCEEDED": "succeeded", "CANCELED": "canceled", "MISSED": "missed", "LATE": "late"}.get(state, state.lower())
     payload = {
         "JOB": job_id, "RUN_ID": run_id, "STATE": state, "ERROR": error or "",
         "DURATION_MINUTES": round(duration_minutes, 1) if duration_minutes is not None else "", "ROWS": rows if rows is not None else "",
@@ -90,6 +91,10 @@ def fire_job_event(
             tasks.append(_spawn(dispatch_rule(dispatcher, rid, r, payload)))
     if extra_recipients:
         recipients = [x if ":" in x else f"email:{x}" for x in extra_recipients]
+        if event == "late":   # the job's own deadline (alerts.finish_by): its recipients always hear of it
+            msg = Message(subject=f"Job {job_id} is late", body=error or "", link=f"/nomaflow/runs/{run_id}" if run_id else "/nomaflow/runs",
+                          rule=f"job:{job_id}:late", payload=payload)
+            tasks.append(_spawn(dispatcher.dispatch(msg, channels=["portal", "email"], recipients=recipients)))
         if event == "failure" and on_failure:
             msg = Message(subject=f"Job {job_id} failed", body=error or "", link=f"/nomaflow/runs/{run_id}", rule=f"job:{job_id}", payload=payload)
             tasks.append(_spawn(dispatcher.dispatch(msg, channels=["portal", "email"], recipients=recipients)))

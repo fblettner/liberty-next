@@ -263,10 +263,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 expected_at=expected.isoformat(timespec="minutes") if expected is not None else None,
             )
 
+        async def _on_run_late(job: Any, reason: str, deadline: Any, first: Any) -> None:
+            # Past the job's alerts.finish_by without a successful run (liberty.jobs.sla) → the
+            # ``late`` job rules + the job's own alerts.recipients.
+            alerts = getattr(job, "alerts", None)
+            fire_job_event(
+                getattr(app.state, "notification_rules", None), getattr(app.state, "notify", None),
+                job_id=job.id, run_id="", state="LATE", error=reason, duration_minutes=None, rows=None,
+                expected_at=deadline.isoformat(timespec="minutes"),
+                extra_recipients=list(alerts.recipients) if alerts is not None and alerts.recipients else None,
+            )
+
         app.state.jobs = await build_nomaflow(
             settings, app.state.connectors, sio_layer=sio_layer,
             changesets=app.state.changesets_db, on_finished=_on_run_finished, on_missed=_on_run_missed,
-            state=lambda: app.state,
+            state=lambda: app.state, on_late=_on_run_late,
         )
         # Optional filesystem watcher — when ``[app] hot_reload = true``, edits to the
         # config TOMLs reload the matching subsystem without an explicit Settings →

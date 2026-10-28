@@ -62,6 +62,8 @@ export interface JobRetry {
 export interface JobAlerts {
   on_failure: boolean
   on_long_run_minutes: number | null
+  /** HH:MM (the job's timezone): a scheduled day's run must have succeeded by then, else the `late` event. */
+  finish_by?: string | null
   recipients: string[]
 }
 

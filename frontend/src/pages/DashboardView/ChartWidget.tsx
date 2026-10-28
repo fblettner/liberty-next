@@ -18,12 +18,13 @@ import type { QueryResult } from '../../types/connectors'
 import type { ChartWidgetWire, DashboardFilterWire, DashboardPeriodWire } from '../../types/dashboards'
 import type { ChartSpec } from '../../types/charts'
 import { buildWidgetFilterParams, buildWidgetPeriodParams, type PeriodSelection } from './widgetFilters'
+import { Sub, Title } from './cardParts'
 import { colors, glass, radius, shadow } from '../../theme'
 
 // Mirrors ChartCanvas's Frame so the loading placeholder looks identical to the loaded chart —
 // no visible flash when data lands. Glass surface + shadow + inset highlight = same depth.
 const Placeholder = styled.div<{ $h: number }>`
-  height: ${({ $h }) => $h}px; min-width: 0;
+  height: ${({ $h }) => $h}px; min-width: 0; padding: 14px; flex-direction: column;
   border: 1px solid ${colors.border}; border-radius: ${radius.lg};
   background: ${colors.bg.card};
   ${glass.surface}
@@ -32,7 +33,8 @@ const Placeholder = styled.div<{ $h: number }>`
 `
 
 const ROW_PX = 150          // matches DashboardView's `grid-auto-rows`
-const FRAME_CHROME = 50     // title + gap + the canvas's own border/padding + legend
+const FRAME_CHROME = 50     // the canvas's own border/padding + legend; the title inside adds HEADER_PX
+const HEADER_PX = 44        // the title + description inside the card
 
 export interface ChartWidgetProps {
   widget: ChartWidgetWire
@@ -84,11 +86,18 @@ export function ChartWidget({ widget, filters, filterValues, period, selection, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [widget.connector, widget.query, filterParamsKey, refreshKey])
 
-  const chartHeight = Math.max(180, widget.row_span * ROW_PX - FRAME_CHROME)
+  const chartHeight = Math.max(180, widget.row_span * ROW_PX - FRAME_CHROME - (widget.label ? (widget.description ? HEADER_PX : HEADER_PX - 18) : 0))
+  // the title and description inside the card, like the stat / list / bars cards
+  const header = widget.label ? (
+    <div style={{ marginBottom: 8, alignSelf: 'stretch' }}>
+      <Title>{widget.label}</Title>
+      {widget.description && <Sub>{widget.description}</Sub>}
+    </div>
+  ) : null
 
   if (error) return <Banner $tone="error">{error}</Banner>
   if (!result) return (
-    <Placeholder $h={chartHeight}><SpinnerRing size={20} thickness={2} /></Placeholder>
+    <Placeholder $h={chartHeight + FRAME_CHROME}>{header}<div style={{ flex: 1, display: 'flex', alignItems: 'center' }}><SpinnerRing size={20} thickness={2} /></div></Placeholder>
   )
   // The wire `spec` uses snake_case (it came from the backend); ChartCanvas reads the runtime
   // camelCase shape. Map every optional field through — missing ``colors`` / ``y_axis`` here is
@@ -107,5 +116,5 @@ export function ChartWidget({ widget, filters, filterValues, period, selection, 
     ...(widget.spec.colors ? { colors: widget.spec.colors } : {}),
     ...(widget.spec.y_axis ? { yAxis: widget.spec.y_axis } : {}),
   }
-  return <ChartCanvas result={result} spec={runtimeSpec} connector={widget.connector} height={chartHeight} />
+  return <ChartCanvas result={result} spec={runtimeSpec} connector={widget.connector} height={chartHeight} header={header} />
 }

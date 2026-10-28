@@ -90,6 +90,7 @@ class JobScheduler:
         on_missed: OnMissed | None = None,
         connectors: Any = None,
         state: Any = None,
+        on_late: Any = None,
     ) -> None:
         self._registry = registry
         self._runner = runner
@@ -98,6 +99,11 @@ class JobScheduler:
         # registry is the one used; ``connectors`` is the fallback (tests, no app).
         self._connectors = connectors
         self._state = state
+        # ``await on_late(job, reason, deadline, first_expected)`` for each job past its
+        # ``alerts.finish_by`` without a successful run (liberty.jobs.sla). Best-effort.
+        self._on_late = on_late
+        self._late_judged: set[tuple[str, str]] = set()
+        self._last_late: Any = None
         self._on_dropped_fire = on_dropped_fire
         # ``await on_missed(job, run, reason)`` for every MISSED row this scheduler records —
         # a dropped concurrent fire, or a gap the periodic check found. Best-effort.
@@ -264,8 +270,9 @@ class JobScheduler:
 
     async def _fan_out(self, job: Job, params_override: dict | None) -> list[Any] | None:
         from liberty.jobs.fanout import fan_out_values
-        connectors = getattr(self._state, "connectors", None) or self._connectors
-        explorer = getattr(self._state, "explorer", None)
+        state = self._state() if callable(self._state) else self._state   # wiring passes ``lambda: app.state``
+        connectors = getattr(state, "connectors", None) or self._connectors
+        explorer = getattr(state, "explorer", None)
         return await fan_out_values(job, params_override, connectors=connectors, explorer=explorer)
 
     async def _run_each(
@@ -421,7 +428,17 @@ class JobScheduler:
             watermarks=self._missed_watermarks, started_at=self._started_at or datetime.now(timezone.utc),
             on_missed=self._on_missed,
         )
+        # the deadlines (alerts.finish_by) on the same beat — cheap when no job declares one
+        from liberty.jobs.sla import check_late
+        try:
+            self._last_late = await check_late(self._runner._db, self._registry, judged=self._late_judged, on_late=self._on_late)  # noqa: SLF001
+        except Exception:
+            _log.exception("nomaflow.sla check raised — will retry on next interval")
         return self._last_missed
+
+    @property
+    def last_late(self) -> Any:
+        return self._last_late
 
     @property
     def last_missed(self) -> MissedReport | None:

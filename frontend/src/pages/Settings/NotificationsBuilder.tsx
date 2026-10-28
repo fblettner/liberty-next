@@ -43,7 +43,7 @@ const Chips = styled.div`display: flex; flex-wrap: wrap; gap: 5px; align-items: 
 const Placeholder = styled(Card)`flex: 1; display: flex; align-items: center; justify-content: center; color: ${colors.text.muted}; font-size: ${fontSize.sm};`
 
 const SCREEN_EVENTS: ScreenEvent[] = ['insert', 'update', 'delete']
-const JOB_EVENTS: JobEvent[] = ['failure', 'succeeded', 'canceled', 'missed', 'long_run']
+const JOB_EVENTS: JobEvent[] = ['failure', 'succeeded', 'canceled', 'missed', 'long_run', 'late']
 const CHANNELS: NotificationChannel[] = ['portal', 'email', 'action']
 
 type Doc = Record<string, NotificationRule>

@@ -737,6 +737,8 @@ const fr: Resources = {
       alertsOnFailure: 'En cas d\'échec',
       alertsLongRun: 'Avertir si une exécution dépasse (minutes)',
       alertsLongRunPlaceholder: 'ex. 60',
+      alertsFinishBy: 'Doit avoir réussi avant',
+      alertsFinishByHint: "Un jour où la tâche est planifiée, une exécution réussie doit être terminée à cette heure (fuseau de la tâche) ; sinon l'alerte de retard part.",
       alertsRecipients: 'Destinataires (utilisateurs ou rôles)',
       stepsSection: 'Étapes ({{count}})',
       paramsSection: 'Paramètres partagés',

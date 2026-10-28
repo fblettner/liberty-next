@@ -53,6 +53,15 @@
   la valeur en place l'emporte, booléens, nombres et référence propre à l'installation compris
   (plusieurs connexions AIS, chacune sur sa variable). Avant, une vérification TLS
   désactivée dans les Paramètres était réactivée.
+- Tâches : une échéance — `alerts.finish_by = "07:00"` (fuseau de la tâche). Un jour où la tâche
+  est planifiée, une exécution réussie doit être terminée à cette heure ; sinon le nouvel
+  événement de tâche `late` part vers les règles de notification et les destinataires d'alerte de
+  la tâche, en disant si l'exécution tourne encore, a échoué ou n'a pas démarré. Contrôlé avec les
+  planifications manquées ; réglé dans l'éditeur de tâche (Alertes).
+- Tableaux de bord : les graphiques et tableaux portent leur titre et leur description dans leur
+  carte, comme les autres widgets.
+- nomaflow : un rechargement ne laisse plus le « Tout » d'une exécution par valeur sur les
+  connecteurs précédents.
 
 ## 7.0.60 — non publiée
 

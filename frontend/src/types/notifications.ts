@@ -17,7 +17,7 @@ export interface Notification {
 
 export type NotificationChannel = 'portal' | 'email' | 'action'
 export type ScreenEvent = 'insert' | 'update' | 'delete'
-export type JobEvent = 'failure' | 'succeeded' | 'canceled' | 'missed' | 'long_run'
+export type JobEvent = 'failure' | 'succeeded' | 'canceled' | 'missed' | 'long_run' | 'late'
 
 export interface RuleWhen { field: string; value: string | string[] }
 

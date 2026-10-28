@@ -15,6 +15,7 @@ import { enumMap, ruleCell } from '../../services/cells'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { DashboardFilterWire, DashboardPeriodWire, TableWidgetWire } from '../../types/dashboards'
 import { buildWidgetFilterParams, buildWidgetPeriodParams, type PeriodSelection } from './widgetFilters'
+import { Sub, Title } from './cardParts'
 import { colors, fontSize, fonts, glass, radius, shadow } from '../../theme'
 
 const Frame = styled.div`
@@ -109,11 +110,18 @@ export function TableWidget({ widget, filters, filterValues, period, selection, 
   }, [result, widget.max_rows])
 
   if (error) return <Banner $tone="error">{error}</Banner>
-  if (!result) return <Frame><Center><SpinnerRing size={20} thickness={2} /></Center></Frame>
-  if (rows.length === 0 || cols.length === 0) return <Frame><Empty>—</Empty></Frame>
+  const header = widget.label ? (
+    <div style={{ padding: '14px 16px 6px' }}>
+      <Title>{widget.label}</Title>
+      {widget.description && <Sub>{widget.description}</Sub>}
+    </div>
+  ) : null
+  if (!result) return <Frame>{header}<Center><SpinnerRing size={20} thickness={2} /></Center></Frame>
+  if (rows.length === 0 || cols.length === 0) return <Frame>{header}<Empty>—</Empty></Frame>
 
   return (
     <Frame>
+      {header}
       <Table>
         <thead>
           <tr>{cols.map((c) => <Th key={c.name} $right={isNumericish(c)}>{c.label ?? c.name}</Th>)}</tr>

@@ -93,6 +93,11 @@ class JobAlerts(BaseModel):
 
     on_failure: bool = True
     on_long_run_minutes: int | None = Field(None, ge=1)
+    # The deadline: on a day the job is expected to run (a schedule fires before it), a successful
+    # run must have finished by this local time ("HH:MM", the job's timezone) — else the ``late``
+    # job event (liberty.jobs.sla).
+    finish_by: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$",
+                                  description="Local time (HH:MM, the job's timezone) by which a scheduled day's run must have succeeded; else the `late` event.")
     recipients: list[str] = Field(default_factory=list)
 
 

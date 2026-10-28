@@ -714,6 +714,7 @@ async def get_missed_status(request: Request, _: Superuser) -> dict[str, Any]:
     return {
         "policy": comps.registry.config.meta.missed.model_dump(),
         "last_check": last.to_dict() if last is not None else None,
+        "last_late": comps.scheduler.last_late.to_dict() if comps.scheduler.last_late is not None else None,
     }
 
 
