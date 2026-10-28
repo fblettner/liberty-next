@@ -42,6 +42,7 @@
   déclencheur, durée, lignes, l'erreur sous une exécution en échec et une barre de progression
   pendant l'exécution ; elle se rafraîchit seule tant qu'une exécution tourne. S'appuie sur
   `GET /admin/jobs/runs`. La page Détail d'exécution perd ses boutons retour.
+- Barre latérale : une icône de menu `shieldalert`.
 
 ## 7.0.60 — non publiée
 

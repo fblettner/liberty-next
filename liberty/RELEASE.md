@@ -34,6 +34,7 @@
   (the application of a per-application run), trigger, duration, rows, the error under a failed
   run and a progress bar while one runs; it refreshes itself while a run is going. Backed by
   `GET /admin/jobs/runs`. The Run detail page loses its back buttons.
+- Sidebar: a `shieldalert` menu icon.
 
 ## 7.0.60 — unreleased
 
