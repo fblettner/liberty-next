@@ -569,7 +569,7 @@ export function ResultTable({
   // `editMode` is declared further down; we read it via a ref so the openRowMenu callback can sit
   // here (next to its peers) without a TDZ issue. The ref is kept in sync below via a small effect.
   const editModeRef = useRef(false)
-  const openRowMenu = useCallback((row: DataRow, e: React.MouseEvent<HTMLTableRowElement>) => {
+  const openRowMenu = useCallback((row: DataRow, e: React.MouseEvent<HTMLElement>) => {
     if (rowMenu.length === 0 || editModeRef.current) return
     onCurrentRow?.(row)
     setMenuState({ row, x: e.clientX, y: e.clientY })
@@ -1828,6 +1828,7 @@ export function ResultTable({
         // Right-click → row context menu when the screen carries any `row_menu` actions and
         // we're not in batch-edit mode (in batch mode the row controls are the actions).
         onRowContextMenu={rowMenu.length > 0 && !editMode ? openRowMenu : undefined}
+        rowMenuButton={rowMenu.length > 0 && !editMode}
         onPasteRows={editMode && canInsert ? onPasteRows : undefined}
         toolbar={
           !(canBulkEdit || (canInsert && hasDialog) || canImport || screen?.export || screenActions.length > 0) ? undefined : !editMode ? (

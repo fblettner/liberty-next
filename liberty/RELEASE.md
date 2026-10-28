@@ -75,6 +75,11 @@
   (the tabs close when the operator picks another application, the new home kept) and `tabs_max`
   (default 5; the oldest tab closes when the limit is reached).
 
+**Grid: a visible handle for the row menu**
+- Every row of a screen with `row_menu` actions carries a "⋯" button in its first column (so it
+  stays in view on a wide table) that opens the same menu as the right-click. Nothing else in
+  the drill mechanics changes.
+
 ## 7.0.59 — unreleased
 
 **Fixes from the documentation review (2026-10-27)**

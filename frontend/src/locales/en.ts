@@ -172,6 +172,7 @@ const en = {
   },
   table: {
     rowReadOnly: 'Read-only row',
+    rowMenu: 'Row actions',
     writable: 'writable',
     run: 'Run',
     runWritableConfirm: 'Run the writable query "{{q}}"? This may modify data.',

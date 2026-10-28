@@ -174,6 +174,7 @@ const fr: Resources = {
   },
   table: {
     rowReadOnly: 'Ligne en lecture seule',
+    rowMenu: 'Actions de la ligne',
     writable: 'modifiable',
     run: 'Exécuter',
     runWritableConfirm: 'Exécuter la requête modifiable « {{q}} » ? Cela peut modifier des données.',

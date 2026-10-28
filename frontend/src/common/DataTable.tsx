@@ -44,7 +44,7 @@ import { useTranslation } from 'react-i18next'
 import {
   ArrowUp, ArrowDown, ChevronsUpDown, Search, Filter, FilterX, Columns3, Group, Download, FileText,
   Table as TableIcon, ChevronDown, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Check,
-  LayoutGrid, Trash2,
+  LayoutGrid, Trash2, MoreHorizontal,
 } from 'lucide-react'
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
 import { ColumnFilterControl, type FilterMeta } from './DataTableFilter'
@@ -99,7 +99,10 @@ export interface DataTableProps<T extends object> {
    *  the slice-4 ``Action`` chain bound to each row). ``event.preventDefault()`` is called for you
    *  so the browser's native context menu doesn't appear; we don't suppress it on the table chrome
    *  itself, so headers / pagination still get their native menu. */
-  onRowContextMenu?: (row: T, event: React.MouseEvent<HTMLTableRowElement>) => void
+  onRowContextMenu?: (row: T, event: React.MouseEvent<HTMLElement>) => void
+  /** A visible way into the row menu: a leading "⋯" cell on every data row (the first column, so it
+   *  stays in view on a wide table) that opens the same menu as the right-click. */
+  rowMenuButton?: boolean
   /** Master/detail: when provided, every row gets a leading chevron and expanding it renders
    *  `renderDetail(row)` in a full-width row beneath. Generic — the consumer owns the detail
    *  content (e.g. a lazily-fetched nested grid). Rows are rendered non-virtualized in this mode
@@ -343,6 +346,13 @@ const RowExpandBtn = styled.button`
   & svg { color: ${colors.text.muted}; flex-shrink: 0; }
 `
 const DetailTr = styled.tr` td { background: ${colors.bg.card}; padding: 0; } `
+// The row menu's visible handle (``rowMenuButton``): muted until the row is hovered.
+const RowMenuBtn = styled.button`
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0;
+  border: 1px solid transparent; border-radius: ${radius.sm}; background: none; cursor: pointer; color: ${colors.text.muted};
+  tr:hover & { color: ${colors.text.primary}; border-color: ${colors.border}; }
+  &:hover { background: ${colors.bg.input}; color: ${colors.blue.main}; }
+`
 const GroupCount = styled.span`color: ${colors.text.muted}; font-weight: 400;`
 const Empty = styled.div`padding: 36px; text-align: center; color: ${colors.text.muted}; font-size: ${fontSize.base}; font-family: ${fonts.sans};`
 const PaginationRow = styled.div`display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px 0; flex-wrap: wrap;`
@@ -379,7 +389,7 @@ const colHeaderText = (col: { id: string; columnDef: { header?: unknown } }): st
 
 // ── component ───────────────────────────────────────────────────────────────
 export function DataTable<T extends object>({
-  columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize: initialPageSizeProp, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, onPasteRows, renderDetail, chromeless, getSubRows, onRowExpand, subRowCount,
+  columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize: initialPageSizeProp, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, rowMenuButton, onPasteRows, renderDetail, chromeless, getSubRows, onRowExpand, subRowCount,
 }: DataTableProps<T>) {
   const { t } = useTranslation()
 
@@ -828,7 +838,8 @@ export function DataTable<T extends object>({
   const showAll = pageSize === PAGE_SIZE_ALL
   const from = totalRows === 0 ? 0 : (showAll ? 1 : pageIndex * pageSize + 1)
   const to = showAll ? totalRows : Math.min((pageIndex + 1) * pageSize, totalRows)
-  const visibleColCount = table.getVisibleLeafColumns().length
+  const menuCol = !!rowMenuButton && onRowContextMenu != null
+  const visibleColCount = table.getVisibleLeafColumns().length + (menuCol ? 1 : 0)
   const groupableCols = table.getAllLeafColumns().filter((c) => c.getCanGroup())
 
   // One data/group row. ``virtualIndex`` (virtualized path only) wires the virtualizer's
@@ -869,6 +880,16 @@ export function DataTable<T extends object>({
         onClick={onClick} onContextMenu={onContextMenu}
         style={clickable ? { cursor: 'pointer' } : undefined}
       >
+        {menuCol && (
+          <Td style={{ width: 34, minWidth: 34, padding: '2px 6px' }}>
+            {contextable && (
+              <RowMenuBtn type="button" title={t('table.rowMenu')} aria-label={t('table.rowMenu')}
+                onClick={(e) => { e.stopPropagation(); onRowContextMenu!(row.original, e) }}>
+                <MoreHorizontal size={14} />
+              </RowMenuBtn>
+            )}
+          </Td>
+        )}
         {cells.map((cell) => (
           <Td
             key={cell.id}
@@ -1081,6 +1102,7 @@ export function DataTable<T extends object>({
           <thead>
             {showFilters && (
               <tr ref={filterRowRef}>
+                {menuCol && <FilterTh style={{ width: 34 }} />}
                 {table.getHeaderGroups()[0]?.headers.map((h) => (
                   <FilterTh key={h.id}>
                     <ColumnFilterControl column={h.column} />
@@ -1090,6 +1112,7 @@ export function DataTable<T extends object>({
             )}
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
+                {menuCol && <Th style={{ width: 34, minWidth: 34, padding: '8px 6px' }} aria-label={t('table.rowMenu')} />}
                 {hg.headers.map((h) => {
                   const canSort = h.column.getCanSort()
                   const sorted = h.column.getIsSorted()

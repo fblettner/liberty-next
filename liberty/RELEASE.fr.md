@@ -88,6 +88,11 @@
   application, le nouvel accueil conservé) et `tabs_max` (5 par défaut ; le plus ancien onglet se
   ferme à la limite).
 
+**Grille : une poignée visible pour le menu de ligne**
+- Chaque ligne d'un écran doté d'actions `row_menu` porte un bouton « ⋯ » dans sa première
+  colonne (il reste visible sur une table large) qui ouvre le même menu que le clic droit. Rien
+  d'autre ne change dans la mécanique de navigation.
+
 ## 7.0.59 — non publiée
 
 **Corrections issues de la revue de documentation (27/10/2026)**
