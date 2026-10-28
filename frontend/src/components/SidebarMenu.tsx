@@ -29,6 +29,15 @@ import {
   Database,
   FileText,
   Filter,
+  LayoutDashboard,
+  Compass,
+  FileBarChart,
+  Code2,
+  Rocket,
+  Receipt,
+  BookOpen,
+  ShieldCheck,
+  Wrench,
   Play,
   RefreshCw,
   Upload,
@@ -66,6 +75,8 @@ const ICONS: Record<string, LucideIcon> = {
   shield: Shield, table: Table, tag: Tag, trendingup: TrendingUp,
   user: User, usercheck: UserCheck, users: Users,
   play: Play, upload: Upload, refreshcw: RefreshCw,
+  layoutdashboard: LayoutDashboard, compass: Compass, filebarchart: FileBarChart, code: Code2,
+  rocket: Rocket, receipt: Receipt, book: BookOpen, shieldcheck: ShieldCheck, wrench: Wrench,
 }
 export function iconFor(name: string | undefined): LucideIcon | null {
   return name ? (ICONS[name.toLowerCase().replace(/[^a-z0-9]/g, '')] ?? null) : null

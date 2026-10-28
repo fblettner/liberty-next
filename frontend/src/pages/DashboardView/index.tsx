@@ -14,7 +14,7 @@ import { useBranding } from '../../branding/BrandingContext'
 import { lastFetchedAt } from '../../services/widgetCache'
 import { downloadDashboardExport, exportPeriod } from '../../services/dashboards'
 import { Banner, Centered, Mono, PageLayout, Stack } from '../../common'
-import type { Dashboard, DashboardFilterWire, DashboardWidget, TextWidgetWire } from '../../types/dashboards'
+import type { Dashboard, DashboardFilterWire, DashboardWidget, LinksWidgetWire, TextWidgetWire } from '../../types/dashboards'
 import { isPreset, rangeForPreset, type DatePreset, type DateRange } from '../../services/period'
 import type { PeriodSelection } from './widgetFilters'
 import { ChartWidget } from './ChartWidget'
@@ -142,7 +142,7 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
       title={dashboard.label}
       description={dashboard.description ? <span>{dashboard.description}</span> : <Mono>{dashboardId}</Mono>}
     >
-      <Stack gap={14} style={{ flex: 1, minHeight: 0 }}>
+      <Stack gap={14} style={{ flex: "1 0 auto" }}>
         <FilterBar
           filters={filters}
           values={filterValues}
@@ -166,7 +166,7 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
           // row, no scrollbar); everything else lays out in the 12-column grid of fixed rows
           segments(dashboard.widgets).map((seg, k) => (
             seg.text ? (
-              <TextWidget key={k} widget={seg.text} />
+              seg.text.type === 'links' ? <LinksWidget key={k} widget={seg.text} natural /> : <TextWidget key={k} widget={seg.text} />
             ) : (
               <Grid key={k}>
                 {seg.widgets.map((w, i) => (
@@ -181,13 +181,14 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
   )
 }
 
-/** The widget list cut into runs: a full-width text widget stands alone (rendered at its natural
- *  height), the widgets between two of them form one grid. */
-function segments(widgets: DashboardWidget[]): ({ text: TextWidgetWire; widgets?: undefined } | { text?: undefined; widgets: DashboardWidget[] })[] {
-  const out: ({ text: TextWidgetWire; widgets?: undefined } | { text?: undefined; widgets: DashboardWidget[] })[] = []
+/** The widget list cut into runs: a full-width text or links widget stands alone (rendered at its
+ *  natural height — no fixed row, no inner scrollbar), the widgets between them form one grid. */
+type Segment = { text: TextWidgetWire | LinksWidgetWire; widgets?: undefined } | { text?: undefined; widgets: DashboardWidget[] }
+function segments(widgets: DashboardWidget[]): Segment[] {
+  const out: Segment[] = []
   let run: DashboardWidget[] = []
   for (const w of widgets) {
-    if (w.type === 'text' && w.col_span >= 12) {
+    if ((w.type === 'text' || w.type === 'links') && w.col_span >= 12) {
       if (run.length) { out.push({ widgets: run }); run = [] }
       out.push({ text: w })
     } else run.push(w)

@@ -26,7 +26,7 @@ const Entry = styled.button`
   & .arrow { margin-left: auto; flex: none; color: ${colors.text.muted}; margin-top: 3px; }
 `
 
-export function LinksWidget({ widget }: { widget: LinksWidgetWire }) {
+export function LinksWidget({ widget, natural }: { widget: LinksWidgetWire; natural?: boolean }) {
   const { menus } = useWorkspace()
   const navigate = useNavigate()
   interface Entry { key: string; label: string; description: string | null; Icon: LucideIcon; external: string | null; path: string | null }
@@ -42,7 +42,7 @@ export function LinksWidget({ widget }: { widget: LinksWidgetWire }) {
     return [{ key: link.menu as string, label: link.label ?? item.label, description: link.description ?? null, Icon, external: null, path }]
   })
   return (
-    <Card>
+    <Card style={natural ? { flex: '0 0 auto' } : undefined}>
       {(widget.label || widget.description) && (
         <div>
           {widget.label && <Title>{widget.label}</Title>}
@@ -50,7 +50,7 @@ export function LinksWidget({ widget }: { widget: LinksWidgetWire }) {
         </div>
       )}
       {entries.length === 0 ? <Empty>—</Empty> : (
-        <Grid $cols={Math.max(1, widget.columns)}>
+        <Grid $cols={Math.max(1, widget.columns)} style={natural ? { overflow: 'visible' } : undefined}>
           {entries.map((e) => (
             <Entry key={e.key} type="button" onClick={() => { if (e.external) window.open(e.external, '_blank', 'noreferrer'); else if (e.path) navigate(e.path) }}>
               <e.Icon className="ic" size={16} />
