@@ -30,6 +30,18 @@
   planification, fuseau, préréglages, alertes, reprises, niveau de log, délai, valeurs de
   paramètres) conservés ; une tâche reçoit un indicateur `override`. Utilisé par l'installateur
   des applications.
+- Tâches : `for_each = "<param>"` lance une tâche une fois par valeur quand ce paramètre en
+  porte plusieurs (une liste, `"1,3"`, ou `"all"` = tous les choix du paramètre utilisateur de ce
+  nom), une exécution après l'autre, chacune avec une seule valeur ; une planification ou un
+  préréglage avec `"all"` couvre toutes les valeurs. Un paramètre utilisateur `multiple = true`
+  s'affiche en cases à cocher avec « Tout », sur la page de l'utilisateur et dans « Exécuter avec
+  paramètres ».
+- nomaflow : une page Exécutions (`/nomaflow/runs`) remplace la grille générique : recherche,
+  filtres tâche, période et état (les pastilles d'état comptent les exécutions), exécutions
+  groupées par jour avec leurs paramètres (l'application d'une exécution par application),
+  déclencheur, durée, lignes, l'erreur sous une exécution en échec et une barre de progression
+  pendant l'exécution ; elle se rafraîchit seule tant qu'une exécution tourne. S'appuie sur
+  `GET /admin/jobs/runs`. La page Détail d'exécution perd ses boutons retour.
 
 ## 7.0.60 — non publiée
 

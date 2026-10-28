@@ -30,7 +30,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -88,9 +88,16 @@ class JobScheduler:
         *,
         on_dropped_fire: Hook | None = None,
         on_missed: OnMissed | None = None,
+        connectors: Any = None,
+        state: Any = None,
     ) -> None:
         self._registry = registry
         self._runner = runner
+        # For a ``for_each`` job's "all": the choices of its parameter may come from a query
+        # (or the Explorer models). ``state`` (app.state) is read at fire time so a reload's
+        # registry is the one used; ``connectors`` is the fallback (tests, no app).
+        self._connectors = connectors
+        self._state = state
         self._on_dropped_fire = on_dropped_fire
         # ``await on_missed(job, run, reason)`` for every MISSED row this scheduler records —
         # a dropped concurrent fire, or a gap the periodic check found. Best-effort.
@@ -225,6 +232,18 @@ class JobScheduler:
         handle to the asyncio Task.
         """
         trigger = ManualTrigger(triggered_by=triggered_by)
+        values = await self._fan_out(job, params_override)
+        if values is not None:
+            if not values:
+                raise ValueError(f"{job.for_each}: no value to run the job for")
+            first = await self._runner.create_run(job, trigger)
+            task = asyncio.create_task(self._run_each(
+                job, values, first=(trigger, first), triggered_by=triggered_by,
+                op_kwargs_overrides=op_kwargs_overrides, params_override=params_override,
+                step_enabled_overrides=step_enabled_overrides, log_level=log_level,
+            ))
+            task.add_done_callback(_log_orphan_task_exception)
+            return first.id
         run = await self._runner.create_run(job, trigger)
         task = asyncio.create_task(
             self._runner.execute_run(
@@ -240,6 +259,53 @@ class JobScheduler:
         # own stdout (not just in the per-run log buffer).
         task.add_done_callback(_log_orphan_task_exception)
         return run.id
+
+    # -- one run per value (for_each) ------------------------------------ #
+
+    async def _fan_out(self, job: Job, params_override: dict | None) -> list[Any] | None:
+        from liberty.jobs.fanout import fan_out_values
+        connectors = getattr(self._state, "connectors", None) or self._connectors
+        explorer = getattr(self._state, "explorer", None)
+        return await fan_out_values(job, params_override, connectors=connectors, explorer=explorer)
+
+    async def _run_each(
+        self, job: Job, values: list[Any], *, first: tuple[Any, Any] | None, triggered_by: str,
+        op_kwargs_overrides: dict | None = None, params_override: dict | None = None,
+        step_enabled_overrides: dict[str, bool] | None = None, log_level: str | None = None,
+    ) -> None:
+        """Run *job* once per value of its ``for_each`` parameter, one after another. *first* is
+        the (trigger, run) already allocated for the first value (the manual fire returns its
+        id; a scheduled fire keeps its trigger there so the missed-run check sees it); the next
+        runs are manual runs ``triggered_by`` the same origin. The job counts as in flight for
+        the whole chain, so a scheduled fire does not slip in between two values. A failed value
+        does not stop the next ones."""
+        name = job.for_each or ""
+        hold = job.id not in self._in_flight
+        if hold:
+            self._in_flight.add(job.id)
+        try:
+            for i, value in enumerate(values):
+                if i == 0 and first is not None:
+                    trigger, run = first
+                else:
+                    trigger = ManualTrigger(triggered_by=triggered_by)
+                    run = await self._runner.create_run(job, trigger)
+                _log.info("nomaflow.for_each job=%s %s=%r (%d/%d) run=%s", job.id, name, value, i + 1, len(values), run.id)
+                try:
+                    await self._runner.execute_run(
+                        job, trigger, run,
+                        op_kwargs_overrides=op_kwargs_overrides,
+                        params_override={**(params_override or {}), name: value},
+                        step_enabled_overrides=step_enabled_overrides,
+                        log_level=log_level,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:  # the runner persisted FAILED; carry on with the next value
+                    _log.exception("nomaflow.for_each job=%s %s=%r raised", job.id, name, value)
+        finally:
+            if hold:
+                self._in_flight.discard(job.id)
 
     # -- retention sweep ------------------------------------------------- #
 
@@ -466,7 +532,20 @@ class JobScheduler:
             trigger = ScheduledTrigger(
                 fired_at=datetime.now(timezone.utc), preset_name=preset_name,
             )
-            if preset is not None:
+            values = await self._fan_out(job, preset.params if preset is not None else None)
+            if values is not None:
+                if values:
+                    first_run = await self._runner.create_run(job, trigger)
+                    await self._run_each(
+                        job, values, first=(trigger, first_run), triggered_by=f"schedule:{preset_name or job.id}",
+                        op_kwargs_overrides=(preset.op_kwargs or None) if preset else None,
+                        params_override=(preset.params or None) if preset else None,
+                        step_enabled_overrides=(preset.step_enabled or None) if preset else None,
+                        log_level=preset.log_level if preset else None,
+                    )
+                else:
+                    _log.warning("nomaflow.scheduler %r: for_each %r resolved to no value — nothing run", job_id, job.for_each)
+            elif preset is not None:
                 # Empty dicts → None so the runner's "no override" fast path is taken.
                 await self._runner.run(
                     job, trigger,

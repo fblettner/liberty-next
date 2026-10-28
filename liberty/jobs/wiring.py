@@ -279,6 +279,8 @@ async def build_nomaflow(
         runner,
         on_dropped_fire=broadcaster.broadcast if broadcaster else None,
         on_missed=on_missed,
+        connectors=connectors,
+        state=state,
     )
 
     if settings.jobs.enabled:

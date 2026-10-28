@@ -27,13 +27,13 @@ const SectionHead = styled.button`
   font-family: ${fonts.sans}; font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.secondary}; text-transform: uppercase; letter-spacing: 0.04em;
   &:disabled { cursor: default; }
 `
-const Group = styled.div`border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.card}; overflow: hidden; margin-bottom: 10px;`
+const Group = styled.div`flex: none; border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.card}; overflow: hidden; margin-bottom: 10px;`
 const DayHead = styled.div`padding: 7px 12px; background: ${colors.bg.input}; font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.primary};`
 const Row = styled.div`
-  display: grid; grid-template-columns: 64px minmax(200px, 1.3fr) minmax(0, 1.5fr) 110px 110px; align-items: center; gap: 12px;
+  display: grid; grid-template-columns: 80px minmax(200px, 1.3fr) minmax(0, 1.5fr) 110px 110px; align-items: center; gap: 12px;
   padding: 8px 12px; border-top: 1px solid ${colors.border}; cursor: pointer; font-size: ${fontSize.sm}; color: ${colors.text.secondary};
   &:hover { background: var(--hover-subtle); }
-  & .time { font-family: ${fonts.mono}; font-size: ${fontSize.md}; color: ${colors.text.primary}; }
+  & .time { font-family: ${fonts.mono}; font-size: ${fontSize.md}; color: ${colors.text.primary}; white-space: nowrap; }
   & .id { font-family: ${fonts.mono}; color: ${colors.text.primary}; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   & .sched { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
   & .sched .cron { font-family: ${fonts.mono}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; }

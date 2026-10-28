@@ -3,6 +3,8 @@ import { explorerModelOf, isPageTabPath } from './pageTabs'
 
 describe('pageTabs', () => {
   it('recognises the fixed page paths and an Explorer model link', () => {
+    expect(isPageTabPath('/nomaflow/runs')).toBe(true)
+    expect(isPageTabPath('/nomaflow/runs/abc')).toBe(false)
     expect(isPageTabPath('/explorer')).toBe(true)
     expect(isPageTabPath('/explorer/nomasx1/sod')).toBe(true)
     expect(isPageTabPath('/explorer/nomasx1')).toBe(false)

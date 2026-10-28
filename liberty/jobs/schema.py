@@ -423,7 +423,8 @@ class UserParam(BaseModel):
     default: str | None = Field(default=None, description="Pre-selected value.")
     required: bool = False
     choices: list[str] = Field(default_factory=list, description="Fixed choices (a dropdown).")
-    choices_from: str | None = Field(default=None, description="A dynamic choice list: ``explorer_models:<app>``.")
+    choices_from: str | None = Field(default=None, description="A dynamic choice list: ``explorer_models:<app>`` or ``query:<connector>/<query>:<value>:<label>``.")
+    multiple: bool = Field(default=False, description="Several values may be picked (checkboxes, with All); the value is a list — with the job's ``for_each`` naming this parameter, one run per value.")
 
     def label_for(self, language: str | None) -> str:
         if language and self.l.get(language):
@@ -481,6 +482,9 @@ class Job(BaseModel):
     # Typical usage: deploy-databases (1) → init-db (2) → init-schema (3) →
     # import-reference (4). One-shot bootstrap of a fresh deployment.
     install_step: int | None = Field(default=None, ge=1)
+    # One run per value of this parameter when it holds several (a list, "1,3", or "all" = every
+    # choice of the user parameter of that name) — see liberty.jobs.fanout. Each run sees one value.
+    for_each: str | None = Field(default=None, description="A parameter whose several values (a list, a comma list, or `all`) make one run per value, one after another.")
     # The operator's fork: an apps upgrade leaves this job exactly as saved (see
     # liberty.config_merge.merge_jobs — without it, the steps are refreshed from the product and
     # only the operator's fields — enabled, schedule, presets, … — are kept).
@@ -520,6 +524,12 @@ class Job(BaseModel):
             raise ValueError(
                 f"job {self.id!r}: scheduled presets must have unique names; duplicated: {dupes}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _for_each_names_a_param(self) -> "Job":
+        if self.for_each and self.for_each not in self.params and not any(p.name == self.for_each for p in self.user_params):
+            raise ValueError(f"job {self.id!r}: for_each {self.for_each!r} is neither a job param nor a user param")
         return self
 
 

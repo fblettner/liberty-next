@@ -24,6 +24,16 @@
   product's steps refreshed, the operator's fields (enabled, schedule, timezone, presets, alerts,
   retry, log level, timeout, parameter values) kept; a job gets an `override` flag. Used by the
   apps installer.
+- Jobs: `for_each = "<param>"` runs a job once per value when that parameter holds several (a
+  list, `"1,3"`, or `"all"` = every choice of the user parameter of that name), one run after
+  another, each with a single value; a scheduled fire or preset with `"all"` covers every value.
+  A user parameter with `multiple = true` shows as checkboxes with "All", on the user's page and
+  in "Run with parameters".
+- nomaflow: a Job Runs page (`/nomaflow/runs`) replaces the generic grid: search, job, period
+  and state filters (the state chips count the runs), runs grouped by day with their parameters
+  (the application of a per-application run), trigger, duration, rows, the error under a failed
+  run and a progress bar while one runs; it refreshes itself while a run is going. Backed by
+  `GET /admin/jobs/runs`. The Run detail page loses its back buttons.
 
 ## 7.0.60 — unreleased
 

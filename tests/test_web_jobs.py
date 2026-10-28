@@ -159,6 +159,21 @@ params = { apps_id = 42 }
 step_enabled = { extra = false }
 
 [[jobs]]
+id = "per-app"
+description = "One run per application picked (for_each)."
+for_each = "apps_id"
+params = { apps_id = 1 }
+[[jobs.steps]]
+type = "python"
+name = "echo"
+callable = "tests.test_web_jobs:_record_kwargs"
+[[jobs.user_params]]
+name = "apps_id"
+label = "Applications"
+multiple = true
+choices = ["1", "2", "3"]
+
+[[jobs]]
 id = "shared-params"
 description = "Job-level params merged under every step's op_kwargs (step wins on conflict)."
 params = { apps_id = 99, source_connector = "src_default" }
@@ -224,7 +239,7 @@ def _seed_db(db_url: str) -> None:
             await svc.get_or_create_role("admin", permissions=["*"])
             await svc.create_user("admin", password="adminpw", is_superuser=True, roles=["admin"])
             await svc.create_user("reader", password="readerpw")
-            await svc.get_or_create_role("loader", permissions=["job:load-file", "job:manual-only", "job:pick-app"])
+            await svc.get_or_create_role("loader", permissions=["job:load-file", "job:manual-only", "job:pick-app", "job:per-app"])
             await svc.create_user("loader", password="loaderpw", roles=["loader"])
         await pools.dispose()
     asyncio.run(go())
@@ -276,7 +291,7 @@ def test_list_jobs_returns_catalogue_with_operational_flags(env) -> None:
         assert r.status_code == 200
         body = r.json()
         ids = {j["id"]: j for j in body["jobs"]}
-        assert set(ids) == {"ping", "manual-only", "disabled", "echo-kwargs", "load-file", "pick-app", "shared-params"}
+        assert set(ids) == {"ping", "manual-only", "disabled", "echo-kwargs", "load-file", "pick-app", "per-app", "shared-params"}
         # Only the enabled+scheduled job is registered with the scheduler
         assert ids["ping"]["registered_with_scheduler"] is True
         assert ids["manual-only"]["registered_with_scheduler"] is False
@@ -416,7 +431,7 @@ def test_get_jobs_parsed_returns_catalogue(env) -> None:
         body = r.json()
         assert body["path"].endswith("jobs.toml")
         ids = {j["id"] for j in body["jobs"]}
-        assert ids == {"ping", "manual-only", "disabled", "echo-kwargs", "load-file", "pick-app", "shared-params"}
+        assert ids == {"ping", "manual-only", "disabled", "echo-kwargs", "load-file", "pick-app", "per-app", "shared-params"}
 
 
 def test_get_jobs_parsed_requires_superuser(env) -> None:
@@ -992,7 +1007,7 @@ def test_admin_reload_includes_nomaflow_state(env) -> None:
         assert "nomaflow" in body
         nf = body["nomaflow"]
         assert nf["enabled"] is True
-        assert set(nf["jobs"]) == {"ping", "manual-only", "disabled", "echo-kwargs", "load-file", "pick-app", "shared-params"}
+        assert set(nf["jobs"]) == {"ping", "manual-only", "disabled", "echo-kwargs", "load-file", "pick-app", "per-app", "shared-params"}
         assert nf["scheduled_jobs"] == ["ping"]
 
 
@@ -1106,8 +1121,8 @@ def test_user_job_routes(env) -> None:
         assert body["job"]["id"] == "load-file" and body["job"]["uploads"] == [{"step": "load", "sheet": "Items"}]
         assert body["runs"] == [] and body["job"]["in_flight"] is False
         assert body["job"]["params"] == [
-            {"name": "mode", "label": "Mode", "step": "after", "default": "full", "required": False, "choices": [{"value": "full", "label": "full"}, {"value": "delta", "label": "delta"}]},
-            {"name": "note", "label": "note", "step": "after", "default": None, "required": False, "choices": []},
+            {"name": "mode", "label": "Mode", "step": "after", "default": "full", "required": False, "multiple": False, "choices": [{"value": "full", "label": "full"}, {"value": "delta", "label": "delta"}]},
+            {"name": "note", "label": "note", "step": "after", "default": None, "required": False, "multiple": False, "choices": []},
         ]
         assert client.post("/api/jobs/load-file/run", json={"params": {"mode": "nope"}}, headers=h).status_code == 422
         # the file must be uploaded through this job (a path elsewhere is refused)
@@ -1150,7 +1165,7 @@ def test_job_level_param_with_query_choices(env) -> None:
     with TestClient(app) as client:
         admin = client.get("/admin/jobs", headers=_h(client, "admin")).json()["jobs"]
         pick = next(j for j in admin if j["id"] == "pick-app")
-        assert pick["user_params"] == [{"name": "apps_id", "label": "Application", "step": None, "default": None, "required": False, "choices": [{"value": "42", "label": "42"}]}]
+        assert pick["user_params"] == [{"name": "apps_id", "label": "Application", "step": None, "default": None, "required": False, "multiple": False, "choices": [{"value": "42", "label": "42"}]}]
         assert "user_params" not in next(j for j in admin if j["id"] == "ping")
         h = _h(client, "loader")
         assert client.post("/api/jobs/pick-app/run", json={"params": {"apps_id": "7"}}, headers=h).status_code == 422
@@ -1190,3 +1205,71 @@ def test_user_run_with_a_preset(env) -> None:
         assert [k.get("part") for k in fire({})] == [None, "extra"]          # no preset: both steps
         ran = fire({"preset": "Echo only"})
         assert len(ran) == 1 and ran[0]["apps_id"] == 42                     # extra skipped, preset's apps_id
+
+
+def test_for_each_runs_once_per_value(env) -> None:
+    """A ``for_each`` job with a ``multiple`` parameter: the picked values make one run each, one
+    after another, each seeing a single typed value; "all" means every choice; a value outside
+    the choices is refused; a single default value stays one plain run."""
+    import time
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "loader")
+        assert client.post("/api/jobs/per-app/run", json={"params": {"apps_id": ["1", "9"]}}, headers=h).status_code == 422
+
+        def fire(body: dict, expect: int) -> list[int]:
+            RECORDED_PER_STEP.clear()
+            r = client.post("/api/jobs/per-app/run", json=body, headers=h)
+            assert r.status_code == 200, r.text
+            for _ in range(200):
+                runs = client.get("/api/jobs/per-app", headers=h).json()["runs"]
+                if len(RECORDED_PER_STEP) >= expect and all(x["state"] not in ("QUEUED", "RUNNING") for x in runs):
+                    break
+                time.sleep(0.05)
+            return [k["apps_id"] for k in RECORDED_PER_STEP]
+
+        assert fire({"params": {"apps_id": ["1", "3"]}}, 2) == [1, 3]
+        assert fire({"params": {"apps_id": "all"}}, 3) == [1, 2, 3]
+        assert fire({}, 1) == [1]
+        assert len(client.get("/api/jobs/per-app", headers=h).json()["runs"]) == 6
+        # the Job Runs listing: filtered by job, each run with its value, counts per state
+        ah = _h(client, "admin")
+        body = client.get("/admin/jobs/runs", params={"job": "per-app"}, headers=ah).json()
+        assert body["total"] == 6 and body["counts"] == {"SUCCEEDED": 6}
+        assert sorted(r["params"].get("apps_id") for r in body["runs"] if r["params"]) == [1, 1, 2, 3, 3]   # the plain default run has no override
+        assert client.get("/admin/jobs/runs", params={"job": "per-app", "state": "failed"}, headers=ah).json()["runs"] == []
+        page = client.get("/admin/jobs/runs", params={"q": "per-a", "limit": 2, "hours": 1}, headers=ah).json()
+        assert len(page["runs"]) == 2 and page["total"] == 6
+        assert client.get("/admin/jobs/runs", headers=_h(client, "loader")).status_code == 403
+
+
+async def test_fan_out_values_shapes() -> None:
+    from liberty.jobs.fanout import fan_out_values
+    from liberty.jobs.schema import Job
+    job = Job.model_validate({"id": "j", "for_each": "apps_id", "params": {"apps_id": 1},
+                              "steps": [{"type": "python", "name": "s", "callable": "m:f"}],
+                              "user_params": [{"name": "apps_id", "multiple": True, "choices": ["1", "2"]}]})
+    assert await fan_out_values(job, None, connectors=None) is None                    # the plain default
+    assert await fan_out_values(job, {"apps_id": "2,1,2"}, connectors=None) == [2, 1]
+    assert await fan_out_values(job, {"apps_id": ["all"]}, connectors=None) == [1, 2]
+    assert await fan_out_values(job, {"apps_id": "00A"}, connectors=None) is None
+    import pytest
+    with pytest.raises(ValueError):
+        Job.model_validate({"id": "k", "for_each": "nope", "steps": [{"type": "python", "name": "s", "callable": "m:f"}]})
+
+
+def test_for_each_from_the_admin_run_dialog(env) -> None:
+    """The admin "Run with parameters" dialog sends the picked values as a list (or "all") in
+    ``params``, with step toggles: one run per value as well."""
+    import time
+    app, _ = env
+    with TestClient(app) as client:
+        ah = _h(client, "admin")
+        RECORDED_PER_STEP.clear()
+        r = client.post("/admin/jobs/per-app/run", json={"params": {"apps_id": ["2", "3"]}, "step_enabled": {"echo": True}}, headers=ah)
+        assert r.status_code == 200, r.text
+        for _ in range(200):
+            if len(RECORDED_PER_STEP) >= 2:
+                break
+            time.sleep(0.05)
+        assert [k["apps_id"] for k in RECORDED_PER_STEP] == [2, 3]

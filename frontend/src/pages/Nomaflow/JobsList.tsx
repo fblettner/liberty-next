@@ -17,6 +17,8 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 import type { JobSummary, JobsListResponse, JobsParsedResponse, StepConfig } from './types'
 import { STATE_TONE, relative, uploadJobFile } from './util'
 import { applyPresetState } from './presetState'
+import { toMulti } from '../../services/multiChoice'
+import { MultiChoice } from '../../common/MultiChoice'
 
 /** The tag that puts a job in the "Main jobs" group at the top of the list. */
 const MAIN_TAG = 'main'
@@ -38,7 +40,7 @@ const TagFilterClear = styled.button`
 `
 const List = styled.div`display: flex; flex-direction: column; gap: 10px;`
 // The compact list: one group per application, one line per job.
-const Group = styled.div`border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.card}; overflow: hidden;`
+const Group = styled.div`flex: none; border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.card}; overflow: hidden;`
 const GroupHead = styled.button`
   display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px; border: none; cursor: pointer;
   background: ${colors.bg.input}; color: ${colors.text.primary}; font-family: ${fonts.sans}; font-size: ${fontSize.base}; font-weight: 600; text-align: left;
@@ -813,7 +815,10 @@ function RunWithParamsModal({
     return (
       <ParamRow key={key}>
         <ParamKey title={declared?.label}>{key}</ParamKey>
-        {declared ? (
+        {declared?.multiple ? (
+          <MultiChoice value={toMulti(v)} choices={declared.choices} emptyHint={t('jobrun.multiNone')}
+            onChange={(nv) => setter(Array.isArray(nv) && nv.length === 0 ? (step ? null : jobParams[key] ?? null) : nv)} />
+        ) : declared ? (
           <SearchSelect sort
             value={v == null ? '' : String(v)}
             options={declared.choices}

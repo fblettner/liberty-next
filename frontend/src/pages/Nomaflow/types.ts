@@ -35,7 +35,7 @@ export interface JobSummary {
   preset_schedules?: PresetSchedule[]
   /** The parameters the job declares a choice list for (`user_params`, resolved): the
    *  Run-with-parameters modal shows them as dropdowns. `step` null = a job-level parameter. */
-  user_params?: { name: string; label: string; step: string | null; choices: { value: string; label: string }[] }[]
+  user_params?: { name: string; label: string; step: string | null; multiple?: boolean; choices: { value: string; label: string }[] }[]
 }
 
 export interface PresetSchedule {

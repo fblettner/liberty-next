@@ -10,7 +10,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useNavigate, useParams } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, Download, Pause, Play, RefreshCw, ScrollText, Workflow } from 'lucide-react'
+import { Download, Pause, Play, RefreshCw, ScrollText, Workflow } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { PageLayout, Button, Banner, Centered, Card, Tag, Mono } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -185,22 +185,6 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
       description={data ? `${data.run.job_id} · ${runId}` : runId}
     >
       <Toolbar>
-        {/* Two back links because the Run detail is reachable from two places:
-              * the Job Runs list (Operations → Job Runs menu, a query screen at
-                ``/sql/nomaflow/list_runs``) — the operator-flow primary, since
-                operators triage failed runs by browsing the run list and clicking
-                in;
-              * the JobsList page (``/nomaflow``) — for the "what's the state of
-                THIS job's last run" drill-down (last-run state badge → run detail).
-            A single back link forced operators on the wrong starting screen, and
-            relying on browser history is unreliable when these open as workspace
-            tabs (history may not exist). Two compact ghost buttons solve it. */}
-        <Button $variant="ghost" $size="sm" onClick={() => navigate('/sql/nomaflow/list_runs')}>
-          <ArrowLeft size={14} /> {t('nomaflow.run.backToRuns')}
-        </Button>
-        <Button $variant="ghost" $size="sm" onClick={() => navigate('/nomaflow')}>
-          <ArrowLeft size={14} /> {t('nomaflow.editor.backToJobs')}
-        </Button>
         <Spacer />
         {active && <LiveDot>{t('nomaflow.run.live')}</LiveDot>}
         <Button $variant="ghost" $size="sm" onClick={load}>

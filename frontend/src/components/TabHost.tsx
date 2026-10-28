@@ -25,6 +25,7 @@ const Monitoring = lazy(() => import('../pages/Monitoring'))
 const PAGE_COMPONENTS: Record<string, LazyExoticComponent<ComponentType>> = {
   '/nomaflow': lazy(() => import('../pages/Nomaflow')),
   '/nomaflow/schedule': lazy(() => import('../pages/Nomaflow/Schedule')),
+  '/nomaflow/runs': lazy(() => import('../pages/Nomaflow/RunsList')),
   '/nomaflow/package': lazy(() => import('../pages/Nomaflow/PackagePage')),
   '/nomaflow/changes': lazy(() => import('../pages/Nomaflow/ChangesPage')),
   '/nomaflow/integrity': lazy(() => import('../pages/Nomaflow/IntegrityPage')),

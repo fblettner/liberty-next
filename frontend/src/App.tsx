@@ -99,6 +99,7 @@ export default function App() {
         <Route path="nomaflow/jobs/new" element={<NomaflowEditor />} />
         <Route path="nomaflow/jobs/:id" element={<NomaflowEditor />} />
         <Route path="nomaflow/schedule" element={<TabRoute kind="page" />} />
+        <Route path="nomaflow/runs" element={<TabRoute kind="page" />} />
         <Route path="nomaflow/package" element={<TabRoute kind="page" />} />
         <Route path="nomaflow/changes" element={<TabRoute kind="page" />} />
         <Route path="nomaflow/integrity" element={<TabRoute kind="page" />} />

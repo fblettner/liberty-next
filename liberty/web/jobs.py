@@ -322,13 +322,16 @@ async def run_job_now(
     # return) then spawns execute_run as a background task. The runner persists
     # every state transition to the DB; if this process dies the row stays
     # RUNNING and is swept on the next startup via mark_orphan_runs_failed.
-    run_id = await scheduler.fire_now_async(
-        job, triggered_by=principal.username,
-        op_kwargs_overrides=overrides,
-        params_override=params_override,
-        step_enabled_overrides=step_enabled_overrides,
-        log_level=log_level,
-    )
+    try:
+        run_id = await scheduler.fire_now_async(
+            job, triggered_by=principal.username,
+            op_kwargs_overrides=overrides,
+            params_override=params_override,
+            step_enabled_overrides=step_enabled_overrides,
+            log_level=log_level,
+        )
+    except ValueError as exc:  # a for_each job with nothing to run for
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     return {
         "job_id": job_id,
         "run_id": run_id,
@@ -470,6 +473,80 @@ def _step_dict(step: Any, extras: dict[str, Any] | None = None) -> dict[str, Any
         # didn't write any — keeps the wire payload terse for the common case.
         "extras": extras,
     }
+
+
+@router.get("/runs", summary="List runs")
+async def list_runs(
+    request: Request, _: Superuser,
+    job: str | None = None, state: str | None = None, q: str | None = None,
+    hours: int | None = None, limit: int = 100, offset: int = 0,
+) -> dict[str, Any]:
+    """The run history for the Job Runs page, newest first: ``job`` (exact id), ``state`` (one or
+    several, comma-separated), ``q`` (a substring of the job id, who triggered it or the error),
+    ``hours`` (started within the last N hours). Each run carries its per-fire ``params`` (the
+    application of a for_each run…) and, while running, its step ``progress``. ``counts`` gives
+    the runs per state under the same filters minus ``state`` (the page's state chips), ``total``
+    the matching runs."""
+    import json
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import desc, func, or_, select
+
+    from liberty.jobs.models import JobRun, RunOverrides, StepRun
+
+    comps = _components(request)
+    limit = max(1, min(limit, 500))
+    conds = []
+    if job:
+        conds.append(JobRun.job_id == job)
+    if q:
+        like = f"%{q.strip()}%"
+        conds.append(or_(JobRun.job_id.ilike(like), JobRun.triggered_by.ilike(like), JobRun.error_message.ilike(like)))
+    if hours:
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
+        conds.append(func.coalesce(JobRun.started_at, JobRun.scheduled_at) >= since)
+    states = [x.strip().upper() for x in (state or "").split(",") if x.strip()]
+    async with comps.db.session() as session:
+        counts = {row[0]: row[1] for row in (await session.execute(
+            select(JobRun.state, func.count()).where(*conds).group_by(JobRun.state)
+        )).all()}
+        listed = conds + ([JobRun.state.in_(states)] if states else [])
+        total = (await session.execute(select(func.count()).select_from(JobRun).where(*listed))).scalar() or 0
+        runs = (await session.execute(
+            select(JobRun).where(*listed)
+            .order_by(desc(func.coalesce(JobRun.started_at, JobRun.scheduled_at)), desc(JobRun.id))
+            .limit(limit).offset(offset)
+        )).scalars().all()
+        ids = [r.id for r in runs]
+        params: dict[str, dict[str, Any]] = {}
+        if ids:
+            for row in (await session.execute(select(RunOverrides).where(RunOverrides.run_id.in_(ids)))).scalars().all():
+                try:
+                    params[row.run_id] = (json.loads(row.overrides_json or "{}") or {}).get("params") or {}
+                except json.JSONDecodeError:
+                    pass
+        live = [r.id for r in runs if r.state == "RUNNING"]
+        done: dict[str, int] = {}
+        if live:
+            for rid, n in (await session.execute(
+                select(StepRun.run_id, func.count(func.distinct(StepRun.step_index)))
+                .where(StepRun.run_id.in_(live), StepRun.state.in_(("SUCCEEDED", "FAILED", "CANCELED")))
+                .group_by(StepRun.run_id)
+            )).all():
+                done[rid] = n
+    out = []
+    for r in runs:
+        d = _run_dict(r)
+        d["params"] = params.get(r.id, {})
+        if r.state == "RUNNING":
+            try:
+                total_steps = len(comps.registry.get(r.job_id).steps)
+            except Exception:  # noqa: BLE001 — a job gone since: no progress shown
+                total_steps = 0
+            if total_steps:
+                d["progress"] = {"done": done.get(r.id, 0), "total": total_steps}
+        out.append(d)
+    return {"runs": out, "counts": counts, "total": total}
 
 
 @router.get("/runs/{run_id}", summary="Get run detail")
@@ -689,54 +766,16 @@ def _upload_steps(job) -> list[dict[str, Any]]:
 
 
 async def _user_params(request: Request, job, language: str | None, *, cache: dict | None = None) -> list[dict[str, Any]]:
-    """The job's ``user_params`` with their choices resolved: fixed ``choices``,
-    ``choices_from = "explorer_models:<app>"`` (the app's Explorer models) or
-    ``"query:<connector>/<query>:<value column>:<label column>"`` (a read query's rows; a query
-    that fails yields no choice — the field then takes free text). *cache* shares the query
-    results between the jobs of one listing."""
+    """The job's ``user_params`` with their choices resolved (:mod:`liberty.jobs.choices`: fixed
+    ``choices``, an app's Explorer models, a read query's rows — a query that fails yields no
+    choice and the field takes free text). *cache* shares the query results between the jobs of
+    one listing."""
+    from liberty.jobs.choices import param_choices
     cache = {} if cache is None else cache
     out: list[dict[str, Any]] = []
     for p in job.user_params:
-        choices: list[dict[str, str]] = [{"value": c, "label": c} for c in p.choices]
-        if p.choices_from:
-            kind, _, arg = p.choices_from.partition(":")
-            if kind == "explorer_models":
-                explorer = getattr(request.app.state, "explorer", None)
-                for app, mid, m in (explorer.items() if explorer is not None else []):
-                    if app == arg:
-                        choices.append({"value": mid, "label": m.label or mid})
-            elif kind == "query":
-                if arg not in cache:
-                    cache[arg] = await _query_choices(request, arg)
-                choices.extend(cache[arg])
-        out.append({"name": p.name, "label": p.label_for(language), "step": p.step, "default": p.default, "required": p.required, "choices": choices})
-    return out
-
-
-async def _query_choices(request: Request, spec: str) -> list[dict[str, str]]:
-    """``<connector>/<query>:<value column>:<label column>`` → ``[{value, label}]`` (columns
-    matched without case); [] when the query is missing, writable or fails (logged)."""
-    target, _, cols = spec.partition(":")
-    connector, _, query = target.partition("/")
-    value_col, _, label_col = cols.partition(":")
-    if not (connector and query and value_col):
-        return []
-    try:
-        conn = request.app.state.connectors.sql(connector)
-        if conn.get_query(query).writable:
-            return []
-        res = await conn.execute(query, {})
-    except Exception as exc:  # noqa: BLE001 — a choice list never breaks the page
-        _log.warning("nomaflow job choices %s: %s", spec, exc)
-        return []
-    out: list[dict[str, str]] = []
-    for row in res.rows:
-        low = {str(k).lower(): v for k, v in row.items()}
-        v = low.get(value_col.lower())
-        if v is None:
-            continue
-        lab = low.get((label_col or value_col).lower())
-        out.append({"value": str(v).strip(), "label": f"{lab} ({str(v).strip()})" if lab not in (None, "") and str(lab) != str(v) else str(v).strip()})
+        choices = await param_choices(p, connectors=request.app.state.connectors, explorer=getattr(request.app.state, "explorer", None), cache=cache)
+        out.append({"name": p.name, "label": p.label_for(language), "step": p.step, "default": p.default, "required": p.required, "multiple": p.multiple, "choices": choices})
     return out
 
 
@@ -800,6 +839,27 @@ async def user_run(job_id: str, request: Request, principal: CurrentPrincipal, b
         p = declared.get(name)
         if p is None:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"{name!r} is not a parameter of this job")
+        if p["multiple"]:
+            # several values: a list (or "a,b"), or "all" = every choice (a for_each job then runs
+            # once per value); each value must be one of the choices
+            from liberty.jobs.fanout import ALL, typed
+            items = [str(x).strip() for x in (value if isinstance(value, list) else str(value or "").split(","))]
+            items = [x for x in items if x]
+            if not items:
+                continue
+            if any(x.lower() in ALL for x in items):
+                many: Any = "all"
+            else:
+                allowed = {c["value"] for c in p["choices"]}
+                bad = [x for x in items if allowed and x not in allowed]
+                if bad:
+                    raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"{name!r}: {bad[0]!r} is not one of the choices")
+                many = [typed(x) for x in items]
+            if p["step"]:
+                overrides.setdefault(p["step"], {})[name] = many
+            else:
+                job_level[name] = many
+            continue
         v = "" if value is None else str(value).strip()
         if p["choices"] and v and v not in {c["value"] for c in p["choices"]}:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"{name!r}: {v!r} is not one of the choices")
@@ -825,11 +885,14 @@ async def user_run(job_id: str, request: Request, principal: CurrentPrincipal, b
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"{step!r}: upload the file first")
         overrides.setdefault(step, {})["file"] = str(p)
     _log.info("nomaflow.user fire job=%s preset=%s triggered_by=%s overrides=%s", job_id, preset.name if preset else None, principal.username, {s: sorted(k) for s, k in overrides.items()} or None)
-    run_id = await comps.scheduler.fire_now_async(
-        job, triggered_by=principal.username, op_kwargs_overrides=overrides or None, params_override=job_level or None,
-        step_enabled_overrides=dict(preset.step_enabled) if preset and preset.step_enabled else None,
-        log_level=preset.log_level if preset else None,
-    )
+    try:
+        run_id = await comps.scheduler.fire_now_async(
+            job, triggered_by=principal.username, op_kwargs_overrides=overrides or None, params_override=job_level or None,
+            step_enabled_overrides=dict(preset.step_enabled) if preset and preset.step_enabled else None,
+            log_level=preset.log_level if preset else None,
+        )
+    except ValueError as exc:  # a for_each job with nothing to run for
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     return {"job_id": job_id, "run_id": run_id, "triggered_by": principal.username, "status": "queued"}
 
 

@@ -11,6 +11,8 @@ import { Banner, Button, Centered, FileInput, Input, PageLayout, SearchSelect, S
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { findMenuLabel } from '../../services/menuLabels'
 import { splitJobTarget } from '../../services/menuPath'
+import { toMulti } from '../../services/multiChoice'
+import { MultiChoice } from '../../common/MultiChoice'
 import { downloadRunFile, durationOf, filesInLog, getJob, getRun, isActive, runJob, uploadFile, type JobRunDetail, type JobRunRow, type UserJob } from '../../services/jobRunner'
 import { STATE_TONE, relative } from '../Nomaflow/util'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -45,7 +47,7 @@ export default function JobRunner({ jobId: target }: { jobId: string }) {
   const [runs, setRuns] = useState<JobRunRow[]>([])
   const [error, setError] = useState<string | null>(null)
   const [files, setFiles] = useState<Record<string, File | null>>({})
-  const [params, setParams] = useState<Record<string, string>>({})
+  const [params, setParams] = useState<Record<string, string | string[]>>({})
   const [busy, setBusy] = useState<'upload' | 'run' | null>(null)
   const [picked, setPicked] = useState<string | null>(null)      // the run whose log is shown
   const [detail, setDetail] = useState<JobRunDetail | null>(null)
@@ -86,7 +88,7 @@ export default function JobRunner({ jobId: target }: { jobId: string }) {
     if (!job) return
     const missing = job.uploads.filter((u) => !files[u.step])
     if (missing.length) { setError(t('jobrun.fileRequired')); return }
-    const blank = job.params.find((p) => p.required && !(params[p.name] ?? '').trim())
+    const blank = job.params.find((p) => p.required && !String(params[p.name] ?? '').trim())
     if (blank) { setError(t('jobrun.paramRequired', { name: blank.label })); return }
     setError(null)
     try {
@@ -117,9 +119,12 @@ export default function JobRunner({ jobId: target }: { jobId: string }) {
             {job.params.map((p) => (
               <Field key={p.name}>
                 <span>{p.label}{p.required ? ' *' : ''}</span>
-                {p.choices.length > 0
-                  ? <SearchSelect sort value={params[p.name] ?? ''} onChange={(v) => setParams((c) => ({ ...c, [p.name]: v }))} options={p.choices} anyLabel={p.required ? undefined : t('jobrun.anyChoice')} disabled={busy != null || inFlight} />
-                  : <Input value={params[p.name] ?? ''} onChange={(e) => setParams((c) => ({ ...c, [p.name]: e.target.value }))} disabled={busy != null || inFlight} />}
+                {p.multiple && p.choices.length > 0
+                  ? <MultiChoice value={toMulti(params[p.name])} choices={p.choices} disabled={busy != null || inFlight} emptyHint={t('jobrun.multiNone')}
+                      onChange={(v) => setParams((c) => ({ ...c, [p.name]: v === 'all' ? 'all' : v }))} />
+                  : p.choices.length > 0
+                  ? <SearchSelect sort value={String(params[p.name] ?? '')} onChange={(v) => setParams((c) => ({ ...c, [p.name]: v }))} options={p.choices} anyLabel={p.required ? undefined : t('jobrun.anyChoice')} disabled={busy != null || inFlight} />
+                  : <Input value={String(params[p.name] ?? '')} onChange={(e) => setParams((c) => ({ ...c, [p.name]: e.target.value }))} disabled={busy != null || inFlight} />}
               </Field>
             ))}
             {job.uploads.map((u) => (
