@@ -8,7 +8,7 @@ export interface PageContext {
   /** The route that published this context (``location.pathname``). */
   path: string
   app?: string | null
-  kind: 'screen' | 'sql'
+  kind: 'screen' | 'sql' | 'explorer'
   /** The page's friendly title (the screen's label / the query's description). */
   title: string
   connector: string
@@ -22,6 +22,8 @@ export interface PageContext {
   columns?: string[]
   /** The row the user last clicked (or opened the row menu on). */
   row?: Record<string, unknown> | null
+  /** An Explorer page: the model and the analysis on the canvas (its entity, rows, measures, period). */
+  explorer?: { app: string; model: string; entity?: string; rows?: string[]; measures?: string[]; period?: string | null; analysis?: string | null }
 }
 
 /** The hard cap on the rendered text — the backend caps at the same size (an uncached block is paid on every turn). */
@@ -67,6 +69,13 @@ function clipCell(v: unknown): unknown {
 export function renderPageContext(c: PageContext): string {
   const lines: string[] = []
   lines.push(`app: ${c.app || c.connector}`)
+  if (c.kind === 'explorer' && c.explorer) {
+    const x = c.explorer
+    lines.push(`page: Data Explorer — model ${x.app}/${x.model} (${c.title}); use explorer_fields / explorer_query on it, explorer_save_analysis to save an analysis the user asks for`)
+    if (x.analysis) lines.push(`saved analysis open: ${x.analysis}`)
+    if (x.entity) lines.push(`analysis on the canvas: entity ${x.entity}; rows ${x.rows?.length ? x.rows.join(', ') : 'none'}; measures ${x.measures?.length ? x.measures.join(', ') : 'none'}; period ${x.period ?? 'none'}`)
+    return lines.join('\n')
+  }
   if (c.screen) lines.push(`screen: ${c.screen} — ${c.title} (connector ${c.connector}, read query ${c.query})`)
   else lines.push(`query: ${c.connector}.${c.query} — ${c.title}`)
   const f = filterLines(c.filters)

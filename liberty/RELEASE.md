@@ -65,6 +65,15 @@
   a ranking, a trend or a comparison through the Explorer models (dimensions, measures,
   filters, period, sort, Top N) under the caller's scope, instead of declaring that no
   aggregate query exists. On by default (`[ai] explorer_tools = false` to remove them).
+- The assistant also saves what the user asks for: `explorer_saved`, `explorer_save_analysis` (the
+  definition is run once before it is stored, private unless shared) and `explorer_save_dashboard`
+  (tiles of saved analyses). The Explorer page publishes its context to the chat (the model, the
+  analysis on the canvas), and `[ai.<app>.screens.explorer]` starters show there.
+
+**Workspace tabs: an operator policy** (`[app]` in app.toml, Settings → App)
+- `tabs_multi` (off: one page at a time, opening another replaces it), `tabs_close_on_app_switch`
+  (the tabs close when the operator picks another application, the new home kept) and `tabs_max`
+  (default 5; the oldest tab closes when the limit is reached).
 
 ## 7.0.59 — unreleased
 

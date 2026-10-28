@@ -40,7 +40,10 @@ async def tools(tmp_path):
             await c.execute(text("INSERT INTO dim_company VALUES (:a, :b, :c)"), {"a": r[0], "b": r[1], "c": r[2]})
     screens = ScreensFile(screens={"shop": {"sales": Screen(id="sales", label="Sales", read_query="fact_sales_get", columns=[ColumnHint(name="SOLD_ON", format="date"), ColumnHint(name="QTY", label="Quantity")])}})
     explorer = parse_explorer({"explorer": {"shop": {"sales": {**MODEL, "label": "Shop sales", "analyses": {"by_company": {"label": "By company", "definition": {"entity": "sales", "view": "table", "rows": [], "measures": []}}}}}, "other": {"x": {"hub": "x", "entities": {"x": {"query": "fact_sales_get", "connector": "shop"}}}}}})
-    st = SimpleNamespace(connectors=registry, screens=screens, explorer=explorer, explorer_cache=ModelCache())
+    from liberty.userviews import UserViewStore
+    uv = UserViewStore(registry.pools, "default")
+    await uv.create_schema()
+    st = SimpleNamespace(connectors=registry, screens=screens, explorer=explorer, explorer_cache=ModelCache(), user_views=uv)
     yield {t.name: t for t in build_explorer_tools(lambda: st)}, {t.name: t for t in build_explorer_tools(lambda: st, allowed=["shop"])}
     await registry.pools.dispose()
 
@@ -75,6 +78,9 @@ async def test_models_fields_and_query(tools) -> None:
     )
     dim = r["columns"][0]["key"]
     assert {row[dim]: row["count(*)"] for row in r["rows"]} == {"2026-01": 2, "2026-02": 2}
+    # a sort on a field that is not in the result is dropped and reported, not an error
+    r = await all_tools["explorer_query"].func("shop", "sales", rows=[{"field": "company.NAME"}], measures=[{"field": "sales.QTY", "agg": "sum"}], sort=[{"key": "sales.SOLD_ON", "dir": "desc"}, {"key": "sum(sales.QTY)", "dir": "desc"}])
+    assert r["warnings"] and "sales.SOLD_ON" in r["warnings"][0] and [row["company.NAME"] for row in r["rows"]][0] == "Corp one"
     # an unknown model, a model outside the allowed apps
     with pytest.raises(ValueError, match="no explorer model"):
         await all_tools["explorer_query"].func("shop", "ghost")
@@ -91,3 +97,36 @@ def test_tools_are_registered_in_the_assistant() -> None:
     assert {"explorer_models", "explorer_fields", "explorer_query"} <= names
     b = build_assistant(AISettings(enabled=True, api_key="", explorer_tools=False), st.connectors, state=lambda: st)
     assert "explorer_query" not in b.tools.names()
+
+
+@pytest.mark.asyncio
+async def test_save_analysis_and_dashboard_for_the_user(tools) -> None:
+    """The assistant saves an analysis under the caller (the definition run first), lists the
+    saved objects, builds a dashboard of them; a wrong field or an unknown tile is refused."""
+    from liberty.auth.scope import current_username
+    all_tools, _ = tools
+    token = current_username.set("alice")
+    try:
+        r = await all_tools["explorer_save_analysis"].func(
+            "shop", "sales", "Revenue by company", {"view": "bar", "rows": [{"field": "company.NAME"}], "measures": [{"field": "sales.REVENUE", "agg": "sum"}], "sort": [{"key": "sum(sales.REVENUE)", "dir": "desc"}]},
+            description="Who sells the most",
+        )
+        assert r["saved"]["name"] == "Revenue by company" and r["saved"]["shared"] is False and r["preview"]["groups"] == 3
+        assert r["preview"]["columns"] == ["company.NAME", "sum(sales.REVENUE)"] and r["preview"]["first_rows"][0]["company.NAME"] == "Corp one"
+        aid = r["saved"]["id"]
+        saved = await all_tools["explorer_saved"].func("shop", "sales")
+        assert [a["id"] for a in saved["analyses"]] == [aid] and saved["analyses"][0]["owner"] == "alice" and saved["dashboards"] == []
+        # a wrong field never gets saved
+        with pytest.raises(Exception, match="GHOST"):
+            await all_tools["explorer_save_analysis"].func("shop", "sales", "Broken", {"rows": [{"field": "company.GHOST"}], "measures": [{"agg": "count"}]})
+        assert len((await all_tools["explorer_saved"].func("shop", "sales"))["analyses"]) == 1
+        d = await all_tools["explorer_save_dashboard"].func("shop", "sales", "Sales board", [{"analysis": aid, "w": 4, "h": "m", "title": "Revenue"}], period="thisYear")
+        assert d["saved"]["name"] == "Sales board"
+        saved = await all_tools["explorer_saved"].func("shop", "sales")
+        assert [x["id"] for x in saved["dashboards"]] == [d["saved"]["id"]]
+        with pytest.raises(ValueError, match="unknown analysis"):
+            await all_tools["explorer_save_dashboard"].func("shop", "sales", "Bad", [{"analysis": "nope"}])
+    finally:
+        current_username.reset(token)
+    with pytest.raises(ValueError, match="no user"):
+        await all_tools["explorer_save_analysis"].func("shop", "sales", "X", {"measures": [{"agg": "count"}]})

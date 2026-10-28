@@ -153,6 +153,12 @@ class AppSettings(BaseModel):
     default_period: str = "thisMonth"
     default_page_size: int = 50
     dashboard_cache_seconds: int = 60
+    # The workspace tabs: several open at once (``tabs_multi``; off = one page at a time, opening
+    # another replaces it), closed when the operator switches application, and how many at most
+    # (the oldest closes when the limit is reached).
+    tabs_multi: bool = True
+    tabs_close_on_app_switch: bool = False
+    tabs_max: int = Field(default=5, ge=1, le=50)
 
 
 class ConnectorSettings(BaseModel):

@@ -30,6 +30,9 @@ interface AppSection {
   default_period: string
   default_page_size: number
   dashboard_cache_seconds: number
+  tabs_multi: boolean
+  tabs_close_on_app_switch: boolean
+  tabs_max: number
 }
 interface AiSection {
   enabled: boolean
@@ -154,7 +157,7 @@ const PERIOD_PRESETS = ['thisMonth', 'lastMonth', 'thisQuarter', 'thisYear', 'la
 const DEFAULTS: {
   app: AppSection; ai: AiSection; license: LicenseSection; oidc: OidcSection; notify: NotifySection; branding: BrandingFields;
 } = {
-  app: { name: 'Liberty Next', host: '0.0.0.0', port: 8000, log_level: 'info', hot_reload: false, default_language: 'en', oracle_thick: false, default_period: 'thisMonth', default_page_size: 50, dashboard_cache_seconds: 60 },
+  app: { name: 'Liberty Next', host: '0.0.0.0', port: 8000, log_level: 'info', hot_reload: false, default_language: 'en', oracle_thick: false, default_period: 'thisMonth', default_page_size: 50, dashboard_cache_seconds: 60, tabs_multi: true, tabs_close_on_app_switch: false, tabs_max: 5 },
   ai: {
     enabled: true, model: 'claude-opus-4-8', max_tokens: 8192, max_iterations: 8, system_prompt: '',
     thinking: false, effort: '', request_timeout: 120,
@@ -397,6 +400,17 @@ export default function AppBuilder() {
                 <Input type="number" min={0} max={3600} value={app.dashboard_cache_seconds}
                   onChange={(e) => setApp({ ...app, dashboard_cache_seconds: Math.max(0, Number(e.target.value) || 0) })} style={{ width: 110 }} />
               </Field>
+            </RowFlex>
+            <RowFlex>
+              <Checkbox label={t('settings.app.tabsMulti')}
+                checked={app.tabs_multi} onChange={(c) => setApp({ ...app, tabs_multi: c })} />
+              <Checkbox label={t('settings.app.tabsCloseOnSwitch')}
+                checked={app.tabs_close_on_app_switch} onChange={(c) => setApp({ ...app, tabs_close_on_app_switch: c })} />
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <span>{t('settings.app.tabsMax')}</span>
+                <Input type="number" min={1} max={50} value={app.tabs_max} disabled={!app.tabs_multi}
+                  onChange={(e) => setApp({ ...app, tabs_max: Math.min(50, Math.max(1, Number(e.target.value) || 5)) })} style={{ width: 72 }} />
+              </label>
             </RowFlex>
             <Checkbox label={t('settings.app.hotReload')}
               checked={app.hot_reload} onChange={(c) => setApp({ ...app, hot_reload: c })} />

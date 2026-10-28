@@ -22,7 +22,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from liberty.auth.authstore import AuthBackend
 from liberty.auth.oidc import OIDCClient
 from liberty.auth.principal import Principal
-from liberty.auth.scope import current_scope
+from liberty.auth.scope import current_scope, current_username
 from liberty.auth.tokens import ACCESS, TokenError, TokenService
 
 _bearer = HTTPBearer(auto_error=False, description="Liberty access token")
@@ -87,6 +87,7 @@ async def get_current_principal(
     # worker thread whose context copy is thrown away). SQLConnector.execute() falls back to it when no explicit
     # scope is passed; a background job has no request and stays unrestricted.
     current_scope.set(principal.data_scope)
+    current_username.set(principal.username)
     return principal
 
 

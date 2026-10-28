@@ -7,6 +7,10 @@ comparisons without a hand-written aggregate query.
 * ``explorer_query`` — one aggregate: rows (dimensions, optionally bucketed by month / quarter /
   year), measures (sum / avg / min / max / count / count_distinct), filters, a period, a sort, a
   Top N — the same engine as the Explorer page, under the caller's row-level scope.
+* ``explorer_saved`` / ``explorer_save_analysis`` / ``explorer_save_dashboard`` — the user's
+  saved analyses and dashboards of a model, and saving a new one on their behalf (the analysis
+  definition is run once first, so a wrong field never gets saved; private to the user unless
+  ``shared``).
 
 Everything reads ``app.state`` at call time through the ``state`` callable, so a reload is seen;
 nothing writes.
@@ -99,18 +103,142 @@ def build_explorer_tools(state: Callable[[], Any], *, allowed: list[str] | None 
         from liberty.explorer.engine import AggregateRequest, run_aggregate
         st = state()
         view = await _view(app, model)
+        # the engine sorts on result columns only: a row's key (``field`` or ``field:bucket``) or a
+        # measure's (``agg(field)`` / ``count(*)``) — anything else is dropped and reported, not an error
+        keys = {(f"{r['field']}:{r['bucket']}" if r.get("bucket") else r["field"]) for r in rows or [] if r.get("field")}
+        keys |= {(f"{m.get('agg', 'sum')}({m['field']})" if m.get("field") else "count(*)") for m in measures or []}
+        warnings: list[str] = []
+        kept_sort = []
+        for s_ in sort or []:
+            if s_.get("key") in keys:
+                kept_sort.append(s_)
+            else:
+                warnings.append(f"sort on {s_.get('key')!r} ignored: not a row or a measure of this query (keys: {sorted(keys)})")
         req = AggregateRequest.model_validate({
-            "rows": rows or [], "measures": measures or [], "filters": filters or {}, "sort": sort or [],
+            "rows": rows or [], "measures": measures or [], "filters": filters or {}, "sort": kept_sort,
             "limit": max(1, min(int(limit or 100), 10000)), **({"period": period} if period else {}),
         })
         res = await run_aggregate(st.connectors, getattr(st, "screens", None), view, req, scope=current_scope.get(), debug=False)
-        return {
+        out = {
             "columns": [{"key": c["key"], "label": c.get("label") or c["key"], "kind": c["kind"], **({"aggregate": c["aggregate"]} if c.get("aggregate") else {})} for c in res.get("columns", [])],
             "rows": res.get("rows", []), "groups": res.get("groups"), "scanned": res.get("scanned"), "truncated": res.get("truncated", False),
         }
+        if warnings:
+            out["warnings"] = warnings
+        return out
+
+    def _store() -> Any:
+        from liberty.explorer.store import AnalysisStore
+        views = getattr(state(), "user_views", None)
+        if views is None:
+            raise ValueError("saved analyses are not available (no user-views store)")
+        return AnalysisStore(views)
+
+    def _username() -> str:
+        from liberty.auth.scope import current_username
+        name = current_username.get()
+        if not name:
+            raise ValueError("no user to save for (not inside a request)")
+        return name
+
+    async def explorer_saved(app: str, model: str) -> dict[str, Any]:
+        """The saved analyses and dashboards of an Explorer model the user can see (shared ones
+        and their own): ids, names, descriptions. An analysis id is what a dashboard tile names.
+
+        Args:
+            app: the application.
+            model: the model id.
+        """
+        from liberty.explorer.store import KIND_ANALYSIS, KIND_DASHBOARD
+        _model(app, model)
+        store, user = _store(), _username()
+        out: dict[str, Any] = {}
+        for kind, key in ((KIND_ANALYSIS, "analyses"), (KIND_DASHBOARD, "dashboards")):
+            items = await store.list(f"{app}/{model}", kind, user)
+            out[key] = [{"id": i["id"], "name": i["name"], "description": i.get("description"), "shared": i.get("shared"), "owner": i.get("owner")} for i in items]
+        return out
+
+    async def explorer_save_analysis(
+        app: str, model: str, name: str, definition: dict[str, Any], description: str | None = None, shared: bool = False,
+    ) -> dict[str, Any]:
+        """Save an analysis on an Explorer model for the user — it then appears in the Data
+        Explorer's saved analyses (and can be put on a dashboard). The definition is RUN once
+        before saving, so a wrong field is refused rather than stored. Build it from
+        explorer_fields: {"entity": "<hub or entity id>", "view": "table" | "pivot" | "bar" |
+        "line" | "pie" | "kpi", "rows": [{"field": "entity.FIELD", "bucket": "month"?}],
+        "measures": [{"field": "entity.FIELD" | null, "agg": "sum" | "avg" | "min" | "max" | "count" | "count_distinct"}],
+        "filterRows": [{"field": "entity.FIELD", "op": "equals" | "contains" | "in" | "gt" | "lt" | "between" | "empty" | "notEmpty", "value": "…", "valueTo": "…"?}],
+        "period": {"field": "entity.DATE_FIELD", "preset": "all" | "thisMonth" | "lastMonth" | "thisYear" | "last12" | "last30" | "custom", "range": {"dateFrom": "", "dateTo": ""}} | null,
+        "sort": [{"key": "sum(entity.FIELD)", "dir": "desc"}], "limit": 100}. Ask the user which
+        model and what they want to see (rows, figures, period) when it is not clear.
+
+        Args:
+            app: the application.
+            model: the model id.
+            name: the analysis name (what the user will look for).
+            definition: the analysis definition (see above).
+            description: one line on what the analysis shows.
+            shared: true to share it with every user of the model (default: private to the user).
+        """
+        from liberty.auth.scope import current_scope
+        from liberty.explorer.engine import run_aggregate
+        from liberty.explorer.report import definition_to_aggregate
+        from liberty.explorer.store import KIND_ANALYSIS
+        st = state()
+        view = await _view(app, model)
+        d = dict(definition or {})
+        d.setdefault("entity", view.model.hub); d.setdefault("view", "table")
+        for k, v in (("rows", []), ("measures", []), ("filterRows", []), ("sort", []), ("calculated", []), ("period", None)):
+            d.setdefault(k, v)
+        d["limit"] = max(1, min(int(d.get("limit") or 100), 10000))
+        if d["view"] != "detail":
+            req = definition_to_aggregate(d)
+            res = await run_aggregate(st.connectors, getattr(st, "screens", None), view, req, scope=current_scope.get(), debug=False)
+            preview = {"groups": res.get("groups"), "columns": [c["key"] for c in res.get("columns", [])], "first_rows": res.get("rows", [])[:3]}
+        else:
+            preview = {}
+        rec = await _store().save(f"{app}/{model}", KIND_ANALYSIS, _username(), obj_id=None, name=name, definition=d, description=description, shared=shared)
+        return {"saved": {"id": rec["id"], "name": rec["name"], "shared": rec["shared"]}, "preview": preview,
+                "where": f"Data Explorer → {app} / {model} → saved analyses"}
+
+    async def explorer_save_dashboard(
+        app: str, model: str, name: str, tiles: list[dict[str, Any]], description: str | None = None, period: str | None = None, shared: bool = False,
+    ) -> dict[str, Any]:
+        """Save a dashboard of saved analyses on an Explorer model for the user (Data Explorer →
+        Dashboards). Each tile names a saved analysis (explorer_saved, or one you just saved with
+        explorer_save_analysis): {"analysis": "<id>", "w": 1-4 (of 4 columns), "h": "s" | "m" | "l", "title": "…"?}.
+
+        Args:
+            app: the application.
+            model: the model id.
+            name: the dashboard name.
+            tiles: the tiles, in display order.
+            description: one line on what it shows.
+            period: a period preset applied to every tile ("thisMonth", "lastMonth", "thisYear", "last12", "last30", "all"); blank = each analysis keeps its own.
+            shared: true to share it with every user of the model.
+        """
+        from liberty.explorer.store import KIND_ANALYSIS, KIND_DASHBOARD
+        _model(app, model)
+        store, user = _store(), _username()
+        known = {i["id"] for i in await store.list(f"{app}/{model}", KIND_ANALYSIS, user)}
+        clean = []
+        for t_ in tiles or []:
+            aid = str(t_.get("analysis") or "")
+            if aid not in known:
+                raise ValueError(f"unknown analysis {aid!r} (call explorer_saved; known: {sorted(known)})")
+            w = int(t_.get("w") or 2); h = str(t_.get("h") or "m")
+            clean.append({"analysis": aid, "w": max(1, min(w, 4)), "h": h if h in ("s", "m", "l") else "m", **({"title": str(t_["title"])} if t_.get("title") else {})})
+        if not clean:
+            raise ValueError("a dashboard needs at least one tile")
+        definition = {"period": {"preset": period, "range": {"dateFrom": "", "dateTo": ""}} if period else None, "tiles": clean}
+        rec = await store.save(f"{app}/{model}", KIND_DASHBOARD, user, obj_id=None, name=name, definition=definition, description=description, shared=shared)
+        return {"saved": {"id": rec["id"], "name": rec["name"], "shared": rec["shared"]}, "where": f"Data Explorer → {app} / {model} → dashboards"}
 
     return [
         tool(explorer_models, summary_keys=("app",)),
         tool(explorer_fields, summary_keys=("app", "model")),
         tool(explorer_query, summary_keys=("app", "model")),
+        tool(explorer_saved, summary_keys=("app", "model")),
+        tool(explorer_save_analysis, summary_keys=("app", "model", "name")),
+        tool(explorer_save_dashboard, summary_keys=("app", "model", "name")),
     ]

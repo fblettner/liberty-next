@@ -64,6 +64,8 @@ interface WorkspaceState {
   currentApp: string | null // the explicitly picked app; null = "(all apps)"
   currentMenu: AppMenuTree | null // the menu the Sidebar shows (the picked app's, or — with one app — that one's)
   setCurrentApp: (name: string | null) => void
+  /** Bumped on every explicit app pick (the switcher) — the tabs close on it when the operator asked. */
+  appSwitches: number
   /** The pools the current app can run against (union of the >1-pool connectors its screens use).
    *  Empty ⇒ no picker (single-pool). */
   currentPoolOptions: string[]
@@ -194,9 +196,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // silently switched the picker. Operators found that confusing; staying on the chosen app is
   // clearer, and a borrowed query still opens fine, it just doesn't hijack the switcher.)
 
+  const [appSwitches, setAppSwitches] = useState(0)
   const setCurrentApp = useCallback((name: string | null) => {
     setCurrentAppState(name)
     writeApp(name)
+    if (name) setAppSwitches((n) => n + 1)
     // When the operator explicitly picks an app (the workspace picker → this callback) and
     // that app has a configured ``home_path``, navigate straight there. Cancel the redirect
     // when ``name == null`` (the "all apps" reset) — the operator stays on whatever page they
@@ -296,8 +300,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   )
 
   const value = useMemo<WorkspaceState>(
-    () => ({ connectors, apps, menus, screens, dashboards, sharedActions, explorerModels, license, error, currentApp, currentMenu, setCurrentApp, currentPoolOptions, currentPool, setCurrentPool, refresh, findScreen, findScreenById }),
-    [connectors, apps, menus, screens, dashboards, sharedActions, explorerModels, license, error, currentApp, currentMenu, setCurrentApp, currentPoolOptions, currentPool, setCurrentPool, refresh, findScreen, findScreenById],
+    () => ({ connectors, apps, menus, screens, dashboards, sharedActions, explorerModels, license, error, currentApp, currentMenu, setCurrentApp, currentPoolOptions, currentPool, setCurrentPool, refresh, findScreen, findScreenById, appSwitches }),
+    [connectors, apps, menus, screens, dashboards, sharedActions, explorerModels, license, error, currentApp, currentMenu, setCurrentApp, currentPoolOptions, currentPool, setCurrentPool, refresh, findScreen, findScreenById, appSwitches],
   )
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
 }

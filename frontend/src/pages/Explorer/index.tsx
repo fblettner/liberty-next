@@ -7,6 +7,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
+import { useLocation } from 'react-router-dom'
+import { setPageContext } from '../../services/aiContext'
 import { BookOpen, Compass, Play, Table2, List, ArrowLeft, Code2, X, Grid3x3, BarChart3, LineChart, PieChart, Gauge, Save, Copy, Trash2, LayoutDashboard, FlaskConical, Pencil, FileDown } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
@@ -146,6 +148,17 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
     } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) } finally { setDictBusy(false) }
   }
 
+  // The assistant's page context while this Explorer tab is the active route: the model and the
+  // analysis on the canvas, so "create an analysis…" lands on the right model.
+  const location = useLocation()
+  const onThisTab = location.pathname === '/explorer' || location.pathname.startsWith('/explorer/')
+  useEffect(() => {
+    if (!onThisTab || !model) return
+    setPageContext({
+      path: location.pathname, app, kind: 'explorer', title: model.label, connector: app, query: modelId, screen: 'explorer',
+      explorer: { app, model: modelId, entity: def?.entity, rows: def?.rows.map((r) => r.field), measures: def?.measures.map((m) => `${m.agg}(${m.field ?? '*'})`), period: def?.period ? `${def.period.field} ${def.period.preset}` : null, analysis: currentAnalysis?.name ?? null },
+    })
+  }, [onThisTab, location.pathname, app, modelId, model, def, currentAnalysis])
   const entities = useMemo(() => (model ? withCalculated(model, def?.calculated ?? [], calcTypes) : []), [model, def?.calculated, calcTypes])
   const fields = useMemo(() => fieldIndex(entities), [entities])
   const used = useMemo(() => (def ? usedKeys(def) : new Set<string>()), [def])

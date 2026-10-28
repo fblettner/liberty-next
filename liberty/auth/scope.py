@@ -333,3 +333,6 @@ class DataScope:
 
 
 current_scope: ContextVar[DataScope | None] = ContextVar("liberty_data_scope", default=None)
+# The caller's username for the request, next to its scope — what a tool that saves something on
+# the user's behalf (the assistant saving an analysis) signs it with. None outside a request.
+current_username: ContextVar[str | None] = ContextVar("liberty_username", default=None)

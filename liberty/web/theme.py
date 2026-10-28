@@ -51,5 +51,8 @@ async def get_theme(request: Request) -> dict[str, Any]:
         "default_period": s.app.default_period,
         "default_page_size": s.app.default_page_size,
         "dashboard_cache_seconds": s.app.dashboard_cache_seconds,
+        "tabs_multi": s.app.tabs_multi,
+        "tabs_close_on_app_switch": s.app.tabs_close_on_app_switch,
+        "tabs_max": s.app.tabs_max,
     }
     return resolved

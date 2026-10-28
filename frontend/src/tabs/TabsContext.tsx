@@ -5,7 +5,9 @@
 // the loaded result, an in-progress edit — is preserved. The framework pages (Connectors /
 // Assistant / Settings) are NOT tabs (separate phase / a drawer for AI). The set + the active
 // tab persist to sessionStorage, so a page refresh restores them.
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode, useRef } from 'react'
+import { useBranding } from '../branding/BrandingContext'
+import { useWorkspace } from '../workspace/WorkspaceContext'
 
 // The set of "tab kinds" the workspace knows how to host. Adding a new one means three coordinated
 // edits: the union here, the path builder below, and the TabHost render switch. ``nomaflow_run``
@@ -46,6 +48,21 @@ export function tabPath(t: Pick<Tab, 'kind' | 'connector' | 'target'>): string {
   return `/${t.kind}/${encodeURIComponent(t.connector)}/${encodeURIComponent(t.target)}`
 }
 
+/** The application a tab belongs to: the connector of a screen / query / endpoint tab, the scope
+ *  of a dashboard id (``nomajde.overview``), the app of an Explorer model page; null for the
+ *  framework tabs (settings, monitoring, a plain page) — those belong to no application. A job tab
+ *  names no app: it is treated as the other application's and closes on a switch. */
+export function tabApp(t: Pick<Tab, 'kind' | 'connector' | 'target'>): string | null {
+  if (t.kind === 'settings' || t.kind === 'monitoring' || t.kind === 'nomaflow_run') return null
+  if (t.kind === 'dashboard') return t.target.includes('.') ? t.target.split('.')[0] : t.target
+  if (t.kind === 'job') return ''
+  if (t.kind === 'page') {
+    const m = /^\/explorer\/([^/]+)\//.exec(t.target)
+    return m ? decodeURIComponent(m[1]) : null
+  }
+  return t.connector
+}
+
 interface TabsState {
   tabs: Tab[]
   activeId: string | null
@@ -73,12 +90,36 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     try { sessionStorage.setItem(KEY, JSON.stringify({ tabs, activeId })) } catch { /* ignore */ }
   }, [tabs, activeId])
 
+  // The operator's tab policy ([app] in app.toml, served with the theme): one page at a time,
+  // a cap on the open tabs (the oldest closes), the tabs closed on an app switch.
+  const { ui } = useBranding()
+  const { appSwitches, currentApp } = useWorkspace()
+  const multi = ui.tabs_multi !== false
+  const max = Math.max(1, ui.tabs_max || 5)
   const openOrActivate = useCallback((t: Omit<Tab, 'id'>) => {
     const id = tabId(t.kind, t.connector, t.target)
-    setS((s) =>
-      s.activeId === id ? s : s.tabs.some((x) => x.id === id) ? { ...s, activeId: id } : { tabs: [...s.tabs, { ...t, id }], activeId: id },
-    )
-  }, [])
+    setS((s) => {
+      if (s.activeId === id) return s
+      if (s.tabs.some((x) => x.id === id)) return { ...s, activeId: id }
+      if (!multi) return { tabs: [{ ...t, id }], activeId: id }
+      const kept = s.tabs.length >= max ? s.tabs.slice(s.tabs.length - max + 1) : s.tabs
+      return { tabs: [...kept, { ...t, id }], activeId: id }
+    })
+  }, [multi, max])
+  const switchesSeen = useRef(appSwitches)
+  useEffect(() => {
+    if (switchesSeen.current === appSwitches) return
+    switchesSeen.current = appSwitches
+    if (!ui.tabs_close_on_app_switch || !currentApp) return
+    // every tab of another application closes; the framework tabs (settings, monitoring) and the
+    // tabs of the picked app (its home, opened by the switch itself) stay
+    setS((s) => {
+      const kept = s.tabs.filter((x) => tabApp(x) === null || tabApp(x) === currentApp)
+      if (kept.length === s.tabs.length) return s
+      const activeId = kept.some((x) => x.id === s.activeId) ? s.activeId : (kept[kept.length - 1]?.id ?? null)
+      return { tabs: kept, activeId }
+    })
+  }, [appSwitches, currentApp, ui.tabs_close_on_app_switch])
   const setActive = useCallback((id: string) => setS((s) => (s.activeId === id || !s.tabs.some((x) => x.id === id) ? s : { ...s, activeId: id })), [])
   const close = useCallback((id: string) => {
     setS((s) => {

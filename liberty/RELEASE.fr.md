@@ -76,6 +76,17 @@
   (dimensions, mesures, filtres, période, tri, Top N) dans le périmètre de l'appelant, au lieu
   d'annoncer qu'aucune requête agrégée n'existe. Actifs par défaut (`[ai] explorer_tools =
   false` pour les retirer).
+- L'assistant enregistre aussi ce que l'utilisateur demande : `explorer_saved`,
+  `explorer_save_analysis` (la définition est exécutée une fois avant d'être enregistrée, privée
+  sauf partage) et `explorer_save_dashboard` (des tuiles d'analyses enregistrées). La page
+  Explorateur publie son contexte au chat (le modèle, l'analyse sur le canevas) et les questions de
+  départ `[ai.<app>.screens.explorer]` s'y affichent.
+
+**Onglets de l'espace de travail : une politique opérateur** (`[app]` dans app.toml, Paramètres → App)
+- `tabs_multi` (désactivé : une page à la fois, en ouvrir une autre la remplace),
+  `tabs_close_on_app_switch` (les onglets se ferment quand l'opérateur choisit une autre
+  application, le nouvel accueil conservé) et `tabs_max` (5 par défaut ; le plus ancien onglet se
+  ferme à la limite).
 
 ## 7.0.59 — non publiée
 

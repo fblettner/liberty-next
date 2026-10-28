@@ -14,7 +14,7 @@ import { useBranding } from '../../branding/BrandingContext'
 import { lastFetchedAt } from '../../services/widgetCache'
 import { downloadDashboardExport, exportPeriod } from '../../services/dashboards'
 import { Banner, Centered, Mono, PageLayout, Stack } from '../../common'
-import type { Dashboard, DashboardFilterWire, DashboardWidget } from '../../types/dashboards'
+import type { Dashboard, DashboardFilterWire, DashboardWidget, TextWidgetWire } from '../../types/dashboards'
 import { isPreset, rangeForPreset, type DatePreset, type DateRange } from '../../services/period'
 import type { PeriodSelection } from './widgetFilters'
 import { ChartWidget } from './ChartWidget'
@@ -162,15 +162,38 @@ export default function DashboardView({ dashboardId }: { dashboardId: string }) 
         {dashboard.widgets.length === 0 ? (
           <EmptyState>{t('dashboard.empty')}</EmptyState>
         ) : (
-          <Grid>
-            {dashboard.widgets.map((w, i) => (
-              <WidgetCell key={i} widget={w} filters={filters} filterValues={filterValues} period={period} selection={selection} refreshKey={refreshKey} />
-            ))}
-          </Grid>
+          // a full-width text widget flows at its natural height between the grids (no fixed
+          // row, no scrollbar); everything else lays out in the 12-column grid of fixed rows
+          segments(dashboard.widgets).map((seg, k) => (
+            seg.text ? (
+              <TextWidget key={k} widget={seg.text} />
+            ) : (
+              <Grid key={k}>
+                {seg.widgets.map((w, i) => (
+                  <WidgetCell key={i} widget={w} filters={filters} filterValues={filterValues} period={period} selection={selection} refreshKey={refreshKey} />
+                ))}
+              </Grid>
+            )
+          ))
         )}
       </Stack>
     </PageLayout>
   )
+}
+
+/** The widget list cut into runs: a full-width text widget stands alone (rendered at its natural
+ *  height), the widgets between two of them form one grid. */
+function segments(widgets: DashboardWidget[]): ({ text: TextWidgetWire; widgets?: undefined } | { text?: undefined; widgets: DashboardWidget[] })[] {
+  const out: ({ text: TextWidgetWire; widgets?: undefined } | { text?: undefined; widgets: DashboardWidget[] })[] = []
+  let run: DashboardWidget[] = []
+  for (const w of widgets) {
+    if (w.type === 'text' && w.col_span >= 12) {
+      if (run.length) { out.push({ widgets: run }); run = [] }
+      out.push({ text: w })
+    } else run.push(w)
+  }
+  if (run.length) out.push({ widgets: run })
+  return out
 }
 
 /** One cell in the grid. Picks the renderer by widget kind; both renderers fetch their own query.

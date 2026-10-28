@@ -38,8 +38,14 @@ export interface UiDefaults {
   default_page_size: number
   /** How long a dashboard widget's result is reused when the dashboard is reopened; 0 = always refetch. */
   dashboard_cache_seconds: number
+  /** Several workspace tabs at once; off = one page at a time (opening another replaces it). */
+  tabs_multi: boolean
+  /** Close the open tabs when the operator switches application. */
+  tabs_close_on_app_switch: boolean
+  /** How many tabs at most; the oldest closes when the limit is reached. */
+  tabs_max: number
 }
-export const UI_DEFAULTS: UiDefaults = { default_period: 'thisMonth', default_page_size: 50, dashboard_cache_seconds: 60 }
+export const UI_DEFAULTS: UiDefaults = { default_period: 'thisMonth', default_page_size: 50, dashboard_cache_seconds: 60, tabs_multi: true, tabs_close_on_app_switch: false, tabs_max: 5 }
 
 export interface ResolvedTheme {
   preset: string
