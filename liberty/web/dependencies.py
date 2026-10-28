@@ -16,8 +16,10 @@ Design notes:
     the target if it carries the same master_key); env-var references (``${VAR}``) likewise.
     The package writer surfaces a warning listing the env vars the operator must set on the
     target.
-  * nomaflow jobs are NOT followed from screen / dashboard seeds — the user manages job
-    deployment separately (Per-job export is a separate path; see ``export_job``).
+  * nomaflow jobs are NOT followed from screen / dashboard seeds — a job is a seed of its own
+    (Package & Deploy / promotion), like an Explorer model, a notification rule or an app's AI
+    block. Those four are read from their TOML file (what the operator wrote, ``${VAR}`` kept),
+    not from the loaded state (an Explorer model derived from a preset isn't in the file).
 """
 
 from __future__ import annotations
@@ -46,7 +48,7 @@ class Dependency:
     matching TOML file. Secrets are NOT stripped here; the package writer handles that
     based on a list of well-known fields."""
 
-    kind: str                       # screen / connector / pool / query / dictionary_entry / lookup / sequence / enum / chart / dashboard / menu_item / api_endpoint
+    kind: str                       # screen / connector / pool / query / dictionary_entry / lookup / sequence / enum / chart / dashboard / menu_item / api_endpoint / action / explorer_model / job / notification_rule / ai
     name: str                       # the entity id within its scope
     scope: str | None               # app for screens / menu items, connector for queries / charts / API endpoints, "shared" or connector for dictionary kinds, None for top-level
     config: dict[str, Any]
@@ -167,6 +169,14 @@ def _resolve(state: Any, seed: Seed) -> tuple[Dependency | None, list[tuple[Seed
         return _resolve_chart(state, seed)
     if seed.kind == "action":
         return _resolve_action(state, seed)
+    if seed.kind == "explorer_model":
+        return _resolve_explorer_model(state, seed)
+    if seed.kind == "job":
+        return _resolve_job(state, seed)
+    if seed.kind == "notification_rule":
+        return _resolve_raw(state, seed, "notifications.toml", ["notifications"])
+    if seed.kind == "ai":
+        return _resolve_raw(state, seed, "ai.toml", ["ai"])
     return None, []
 
 
@@ -556,4 +566,80 @@ def _resolve_chart(state: Any, seed: Seed) -> tuple[Dependency | None, list[tupl
         refs.append((Seed("connector", c_conn), f"chart {seed.scope}.{seed.name}"))
     if c_q and c_conn:
         refs.append((Seed("query", c_q, c_conn), f"chart {seed.scope}.{seed.name} query"))
+    return dep, refs
+
+
+# File-read kinds (Explorer models, jobs, notification rules, AI blocks) ---------------------
+
+def raw_config(state: Any, filename: str) -> dict[str, Any]:
+    """*filename* (``explorer.toml``, ``jobs.toml``…) of this install as written, ``{}`` when absent."""
+    import tomllib
+
+    from liberty.web.package_import import package_files
+    settings = getattr(state, "settings", None)
+    path = package_files(settings).get(filename) if settings is not None else None
+    if path is None or not path.exists():
+        return {}
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+    except (tomllib.TOMLDecodeError, OSError):
+        return {}
+
+
+def _resolve_raw(state: Any, seed: Seed, filename: str, parents: list[str]) -> tuple[Dependency | None, list[tuple[Seed, str]]]:
+    node: Any = raw_config(state, filename)
+    for p in parents:
+        node = node.get(p) if isinstance(node, dict) else None
+    value = node.get(seed.name) if isinstance(node, dict) else None
+    if not isinstance(value, dict):
+        return None, []
+    return Dependency(kind=seed.kind, name=seed.name, scope=seed.scope, config=value), []
+
+
+def _resolve_explorer_model(state: Any, seed: Seed) -> tuple[Dependency | None, list[tuple[Seed, str]]]:
+    """An Explorer model (scope = its app) and the queries / connectors its entities read."""
+    if not seed.scope:
+        return None, []
+    model = ((raw_config(state, "explorer.toml").get("explorer") or {}).get(seed.scope) or {}).get(seed.name)
+    if not isinstance(model, dict):
+        return None, []
+    dep = Dependency(kind="explorer_model", name=seed.name, scope=seed.scope, config=model)
+    refs: list[tuple[Seed, str]] = []
+    model_conn = model.get("connector") or seed.scope
+    for eid, ent in (model.get("entities") or {}).items():
+        if not isinstance(ent, dict):
+            continue
+        conn = ent.get("connector") or model_conn
+        refs.append((Seed("connector", conn), f"explorer {seed.scope}.{seed.name} entity {eid}"))
+        if ent.get("query"):
+            refs.append((Seed("query", ent["query"], conn), f"explorer {seed.scope}.{seed.name} entity {eid}"))
+    return dep, refs
+
+
+def _resolve_job(state: Any, seed: Seed) -> tuple[Dependency | None, list[tuple[Seed, str]]]:
+    """A nomaflow job and what its steps name: queries (and their connectors), called jobs."""
+    job = next((j for j in raw_config(state, "jobs.toml").get("jobs") or []
+                if isinstance(j, dict) and j.get("id") == seed.name), None)
+    if job is None:
+        return None, []
+    dep = Dependency(kind="job", name=seed.name, scope=None, config=job)
+    refs: list[tuple[Seed, str]] = []
+    default_conn = (job.get("step_defaults") or {}).get("connector")
+    for step in job.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        where = f"job {seed.name} step {step.get('name', '?')}"
+        conn = step.get("connector") or default_conn
+        if conn:
+            refs.append((Seed("connector", conn), where))
+            if step.get("query"):
+                refs.append((Seed("query", step["query"], conn), where))
+        if step.get("target_connector") and step.get("target_query"):
+            refs.append((Seed("query", step["target_query"], step["target_connector"]), where))
+        for side in ("source", "target"):
+            ep = step.get(side)
+            if isinstance(ep, dict) and ep.get("connector"):
+                refs.append((Seed("connector", ep["connector"]), where))
+        if step.get("target_job_id"):
+            refs.append((Seed("job", step["target_job_id"]), f"{where} call_job"))
     return dep, refs

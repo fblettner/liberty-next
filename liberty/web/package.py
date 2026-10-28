@@ -8,6 +8,13 @@ queries, menus include only the items the screens reach, etc.
 Secrets are NOT stripped — ``ENC:...`` and ``${VAR}`` references pass through verbatim
 so a target install with the same master_key / env vars round-trips cleanly. The
 ``MANIFEST.md`` lists the env vars the operator must set on the target.
+
+With *settings*, every entity is taken from this install's TOML files as written (sparse, the
+``${VAR}`` references unresolved) — so the importer's diff against the target's own file shows
+real changes, not every default value; the dependency's model dump is the fallback (a preset-
+derived Explorer model, a screen version bundle built without settings). A connector's queries
+ship even when the connector itself isn't selected: the importer merges them into the target's
+connector item by item.
 """
 
 from __future__ import annotations
@@ -19,7 +26,51 @@ from typing import Any
 
 import tomli_w
 
-from liberty.web.dependencies import Manifest
+from liberty.config_merge import get_path
+from liberty.web.dependencies import Dependency, Manifest
+from liberty.web.package_import import CONNECTOR_ITEMS, package_files
+
+
+class _Source:
+    """The source install's config files, read once each — where an entity is taken from."""
+
+    def __init__(self, settings: Any | None) -> None:
+        self.paths = package_files(settings) if settings is not None else {}
+        self._docs: dict[str, dict[str, Any]] = {}
+
+    def doc(self, filename: str) -> dict[str, Any]:
+        if filename not in self._docs:
+            import tomllib
+            path = self.paths.get(filename)
+            try:
+                self._docs[filename] = tomllib.loads(path.read_text(encoding="utf-8")) if path and path.exists() else {}
+            except (tomllib.TOMLDecodeError, OSError):
+                self._docs[filename] = {}
+        return self._docs[filename]
+
+    def connector(self, name: str) -> dict[str, Any] | None:
+        raw = (self.doc("connectors.toml").get("connectors") or {}).get(name)
+        return raw if isinstance(raw, dict) else None
+
+    def value(self, d: Dependency) -> Any:
+        """*d* as written in its file, else its model dump."""
+        raw: Any = None
+        if self.paths:
+            k, scope = d.kind, d.scope or "shared"
+            if k in ("screen", "chart", "dashboard"):
+                f = f"{k}s.toml"
+                raw = get_path(self.doc(f), f"{k}/{d.scope}", d.name, f)
+            elif k in ("dictionary_entry", "lookup", "sequence", "enum"):
+                singular = "entry" if k == "dictionary_entry" else k
+                raw = get_path(self.doc("dictionary.toml"), f"{singular}/{scope}", d.name, "dictionary.toml")
+            elif k == "action":
+                raw = (self.doc("actions.toml").get("actions") or {}).get(d.name)
+            elif k == "pool":
+                raw = (self.doc("connectors.toml").get("pools") or {}).get(d.name)
+            elif k == "menu_item":
+                items = ((self.doc("menus.toml").get("menus") or {}).get(d.scope) or {}).get("items") or []
+                raw = next((it for it in items if isinstance(it, dict) and str(it.get("id")) == d.name), None)
+        return raw if isinstance(raw, dict) else d.config
 
 
 def build_package_zip(
@@ -27,6 +78,8 @@ def build_package_zip(
     *,
     source_install: str = "",
     include: set[tuple[str, str | None, str]] | None = None,
+    settings: Any | None = None,
+    source_version: str | None = None,
 ) -> bytes:
     """Serialise *manifest* into a ZIP archive — returns the raw bytes ready to stream.
 
@@ -40,24 +93,25 @@ def build_package_zip(
         kept = [d for d in manifest.deps if d.key() in include]
         from dataclasses import replace
         filtered = replace(manifest, deps=kept)
+    src = _Source(settings)
     files: dict[str, str] = {}
-    if c := _build_connectors_toml(filtered):
-        files["connectors.toml"] = c
-    if c := _build_dictionary_toml(filtered):
-        files["dictionary.toml"] = c
-    if c := _build_screens_toml(filtered):
-        files["screens.toml"] = c
-    if c := _build_menus_toml(filtered):
-        files["menus.toml"] = c
-    if c := _build_charts_toml(filtered):
-        files["charts.toml"] = c
-    if c := _build_dashboards_toml(filtered):
-        files["dashboards.toml"] = c
+    for name, build in (
+        ("connectors.toml", _build_connectors_toml), ("dictionary.toml", _build_dictionary_toml),
+        ("screens.toml", _build_screens_toml), ("menus.toml", _build_menus_toml),
+        ("charts.toml", _build_charts_toml), ("dashboards.toml", _build_dashboards_toml),
+        ("actions.toml", _build_actions_toml), ("explorer.toml", _build_explorer_toml),
+        ("notifications.toml", _build_notifications_toml), ("jobs.toml", _build_jobs_toml),
+        ("ai.toml", _build_ai_toml),
+    ):
+        if c := build(filtered, src):
+            files[name] = c
     # Machine-readable closure (kinds / counts / deps / missing / warnings) — informational, the
-    # same shape the dependency-inspect UI renders. Ignored by the importer (like MANIFEST.md); the
-    # version-history detail view reads it back to show what a stored bundle contains.
+    # same shape the dependency-inspect UI renders, plus where the package comes from (the
+    # importer warns when it's a newer framework). The version-history detail view reads it back
+    # to show what a stored bundle contains.
     import json
-    files["manifest.json"] = json.dumps(filtered.to_dict(), indent=2)
+    files["manifest.json"] = json.dumps(
+        {**filtered.to_dict(), "source": {"install": source_install, "version": source_version}}, indent=2)
     files["MANIFEST.md"] = _build_manifest_md(filtered, source_install=source_install, files=list(files))
 
     buf = io.BytesIO()
@@ -97,13 +151,11 @@ def _trim_queries(connector_cfg: dict[str, Any], wanted: set[str]) -> dict[str, 
     return out
 
 
-def _build_connectors_toml(manifest: Manifest) -> str:
-    """``[connectors.<name>]`` blocks for each referenced connector, plus ``[pools.<name>]``
-    blocks for pools they depend on. Connector queries are trimmed to those the seeds use."""
-    connectors = _by_kind(manifest, "connector")
-    if not connectors:
-        return ""
-    # Group queries + api_endpoints by connector so we know which to keep.
+def _build_connectors_toml(manifest: Manifest, src: _Source) -> str:
+    """``[connectors.<name>]`` for each connector the package reaches, trimmed to the queries /
+    endpoints the seeds use, plus ``[pools.<name>]`` for the selected pools. A connector that isn't
+    itself selected ships its items only (no header): the importer merges them into the target's."""
+    selected = {c.name: c for c in _by_kind(manifest, "connector")}
     wanted_per_conn: dict[str, set[str]] = {}
     for q in _by_kind(manifest, "query"):
         wanted_per_conn.setdefault(q.scope or "", set()).add(q.name)
@@ -113,15 +165,23 @@ def _build_connectors_toml(manifest: Manifest) -> str:
     # Pools first so they appear at the top of the file.
     pools = _by_kind(manifest, "pool")
     if pools:
-        out["pools"] = {p.name: p.config for p in pools}
-    out["connectors"] = {
-        c.name: _trim_queries(c.config, wanted_per_conn.get(c.name, set()))
-        for c in connectors
-    }
-    return tomli_w.dumps(out)
+        out["pools"] = {p.name: src.value(p) for p in pools}
+    conns: dict[str, Any] = {}
+    for name in [*selected, *[n for n in wanted_per_conn if n and n not in selected]]:
+        full = src.connector(name) or (selected[name].config if name in selected else None)
+        if full is None:
+            continue
+        trimmed = _trim_queries(full, wanted_per_conn.get(name, set()))
+        if name not in selected:
+            trimmed = {arr: trimmed[arr] for arr in CONNECTOR_ITEMS if trimmed.get(arr)}
+        if trimmed:
+            conns[name] = trimmed
+    if conns:
+        out["connectors"] = conns
+    return tomli_w.dumps(out, multiline_strings=True) if out else ""
 
 
-def _build_dictionary_toml(manifest: Manifest) -> str:
+def _build_dictionary_toml(manifest: Manifest, src: _Source) -> str:
     """Assemble dictionary entries / lookups / sequences / enums from every referenced
     dictionary dep, grouping shared at the top and per-connector under ``[connectors.<name>]``."""
     entries = _by_kind(manifest, "dictionary_entry")
@@ -139,55 +199,79 @@ def _build_dictionary_toml(manifest: Manifest) -> str:
         else:
             scoped.setdefault(scope, {}).setdefault(coll, {})[name] = cfg
 
-    for d in entries:    stash(d.scope or "shared", "entries", d.name, d.config)
-    for d in lookups:    stash(d.scope or "shared", "lookups", d.name, d.config)
-    for d in sequences:  stash(d.scope or "shared", "sequences", d.name, d.config)
-    for d in enums:      stash(d.scope or "shared", "enums", d.name, d.config)
+    for d in entries:    stash(d.scope or "shared", "entries", d.name, src.value(d))
+    for d in lookups:    stash(d.scope or "shared", "lookups", d.name, src.value(d))
+    for d in sequences:  stash(d.scope or "shared", "sequences", d.name, src.value(d))
+    for d in enums:      stash(d.scope or "shared", "enums", d.name, src.value(d))
     if scoped:
         out["connectors"] = scoped
-    return tomli_w.dumps(out)
+    return tomli_w.dumps(out, multiline_strings=True)
 
 
-def _build_screens_toml(manifest: Manifest) -> str:
-    screens = _by_kind(manifest, "screen")
-    if not screens:
+def _scoped(manifest: Manifest, src: _Source, kind: str, root: str) -> str:
+    """``[<root>.<scope>.<name>]`` for every *kind* dep (screens / charts / dashboards / explorer)."""
+    deps = _by_kind(manifest, kind)
+    if not deps:
         return ""
     grouped: dict[str, dict[str, Any]] = {}
-    for s in screens:
-        grouped.setdefault(s.scope or "_unscoped", {})[s.name] = s.config
-    return tomli_w.dumps({"screens": grouped})
+    for d in deps:
+        grouped.setdefault(d.scope or "_unscoped", {})[d.name] = src.value(d)
+    return tomli_w.dumps({root: grouped}, multiline_strings=True)
 
 
-def _build_menus_toml(manifest: Manifest) -> str:
+def _flat(manifest: Manifest, src: _Source, kind: str, root: str) -> str:
+    """``[<root>.<name>]`` for every *kind* dep (actions / notification rules / AI blocks)."""
+    deps = _by_kind(manifest, kind)
+    if not deps:
+        return ""
+    return tomli_w.dumps({root: {d.name: src.value(d) for d in deps}}, multiline_strings=True)
+
+
+def _build_screens_toml(manifest: Manifest, src: _Source) -> str:
+    return _scoped(manifest, src, "screen", "screens")
+
+
+def _build_actions_toml(manifest: Manifest, src: _Source) -> str:
+    return _flat(manifest, src, "action", "actions")
+
+
+def _build_explorer_toml(manifest: Manifest, src: _Source) -> str:
+    return _scoped(manifest, src, "explorer_model", "explorer")
+
+
+def _build_notifications_toml(manifest: Manifest, src: _Source) -> str:
+    return _flat(manifest, src, "notification_rule", "notifications")
+
+
+def _build_ai_toml(manifest: Manifest, src: _Source) -> str:
+    return _flat(manifest, src, "ai", "ai")
+
+
+def _build_jobs_toml(manifest: Manifest, src: _Source) -> str:
+    jobs = _by_kind(manifest, "job")
+    if not jobs:
+        return ""
+    return tomli_w.dumps({"jobs": [src.value(j) for j in jobs]}, multiline_strings=True)
+
+
+def _build_menus_toml(manifest: Manifest, src: _Source) -> str:
     items = _by_kind(manifest, "menu_item")
     if not items:
         return ""
     # Group items by app and assemble as the AppMenu shape ``{<app>: {items: [...]}}``.
     by_app: dict[str, list[dict[str, Any]]] = {}
     for it in items:
-        by_app.setdefault(it.scope or "_unscoped", []).append(it.config)
+        by_app.setdefault(it.scope or "_unscoped", []).append(src.value(it))
     out = {"menus": {app: {"items": items_list} for app, items_list in by_app.items()}}
-    return tomli_w.dumps(out)
+    return tomli_w.dumps(out, multiline_strings=True)
 
 
-def _build_charts_toml(manifest: Manifest) -> str:
-    charts = _by_kind(manifest, "chart")
-    if not charts:
-        return ""
-    grouped: dict[str, dict[str, Any]] = {}
-    for c in charts:
-        grouped.setdefault(c.scope or "_unscoped", {})[c.name] = c.config
-    return tomli_w.dumps({"charts": grouped})
+def _build_charts_toml(manifest: Manifest, src: _Source) -> str:
+    return _scoped(manifest, src, "chart", "charts")
 
 
-def _build_dashboards_toml(manifest: Manifest) -> str:
-    dashboards = _by_kind(manifest, "dashboard")
-    if not dashboards:
-        return ""
-    grouped: dict[str, dict[str, Any]] = {}
-    for d in dashboards:
-        grouped.setdefault(d.scope or "_unscoped", {})[d.name] = d.config
-    return tomli_w.dumps({"dashboards": grouped})
+def _build_dashboards_toml(manifest: Manifest, src: _Source) -> str:
+    return _scoped(manifest, src, "dashboard", "dashboards")
 
 
 # ── MANIFEST.md ──────────────────────────────────────────────────────────────────────────
@@ -232,7 +316,8 @@ def _build_manifest_md(manifest: Manifest, *, source_install: str, files: list[s
     lines.append(f"Files: {', '.join(f'`{f}`' for f in files)}")
     lines.append("")
     for kind in ("connector", "pool", "query", "api_endpoint", "screen", "menu_item",
-                 "dashboard", "chart", "dictionary_entry", "lookup", "sequence", "enum"):
+                 "dashboard", "chart", "dictionary_entry", "lookup", "sequence", "enum",
+                 "action", "explorer_model", "notification_rule", "job", "ai"):
         deps = by_kind.get(kind, [])
         if not deps:
             continue

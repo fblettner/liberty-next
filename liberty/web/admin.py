@@ -2471,8 +2471,10 @@ async def build_package_endpoint(body: BuildPackageBody, request: Request, _: Su
     include_set: set[tuple[str, str | None, str]] | None = None
     if body.include is not None:
         include_set = {(i.kind, i.scope, i.name) for i in body.include}
+    from liberty import __version__
     src = getattr(request.app.state.settings.app, "name", "liberty-next")
-    blob = build_package_zip(manifest, source_install=src, include=include_set)
+    blob = build_package_zip(manifest, source_install=src, include=include_set,
+                             settings=request.app.state.settings, source_version=__version__)
     return Response(
         content=blob,
         media_type="application/zip",
@@ -2491,17 +2493,18 @@ MAX_PACKAGE_BYTES = 50 * 1024 * 1024
 async def import_package_endpoint(
     request: Request, _: Superuser,
     strategy: str = "overwrite",
+    dry_run: bool = False,
 ):
-    """Apply a package ZIP (produced by /admin/build-package) to this install's config files.
+    """Apply — or, with ``dry_run``, preview — a package ZIP (produced by /admin/build-package,
+    here or on another instance) on this install's config files.
 
     Multipart upload — the ZIP is the request body's ``package`` file part; the strategy
     is a query param: ``merge`` / ``overwrite`` / ``replace_all`` (see
     liberty/web/package_import.py for semantics).
 
-    Returns ``{report: {files: [...], warnings: [...], reloaded: bool}}`` with per-file
-    counts of added / replaced / skipped entities. Reloads the framework after a
-    successful apply so the new config is live for the next request."""
-    _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
+    Returns ``{report: {files: [...], warnings, summary, dry_run, source, reloaded}}``: per file
+    the plan of its entities (``new`` / ``changed`` with a field diff / ``identical`` / ``kept`` /
+    ``skipped`` / ``removed``). An apply snapshots every config file first and reloads after."""
     # ``request.form()`` yields Starlette's UploadFile; ``fastapi.UploadFile`` is a *subclass*
     # of it, so an isinstance check against the FastAPI class is always False for a real
     # upload — that made every import read as "missing 'package' file part" until 7.0.57.
@@ -2523,10 +2526,16 @@ async def import_package_endpoint(
     if len(blob) > MAX_PACKAGE_BYTES:
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE,
                             detail=f"package upload exceeds {MAX_PACKAGE_BYTES // (1024 * 1024)} MB")
+    from liberty import __version__
+    if not dry_run:
+        _snapshot_all_config(request)  # cross-file mutation — snapshot all config first
     try:
-        report = apply_package_zip(zip_bytes=blob, strategy=strategy, settings=request.app.state.settings)  # type: ignore[arg-type]
+        report = apply_package_zip(zip_bytes=blob, strategy=strategy, settings=request.app.state.settings,  # type: ignore[arg-type]
+                                   dry_run=dry_run, version=__version__)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if dry_run:
+        return {"report": report.to_dict()}
     # Reload — same path the structured PUT endpoints expect operators to call afterwards.
     try:
         await reload_connectors(request, _)

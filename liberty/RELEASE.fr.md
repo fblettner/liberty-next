@@ -1,5 +1,24 @@
 # Liberty Next — Notes de version
 
+## 7.0.64 — non publiée
+
+- Paquets et déploiement : un import peut être prévisualisé (`/admin/import-package?dry_run=true`) :
+  le plan liste chaque élément — nouveau, modifié (avec ses champs avant / après), identique,
+  conservé (`override = true` ici), ignoré, supprimé — avec des avertissements quand le paquet
+  vient d'un framework plus récent ou porte des valeurs `ENC:` que la clé maîtresse de cette
+  instance ne sait pas déchiffrer. Une application renvoie le même plan.
+- Paquets et déploiement : un paquet porte aussi les actions partagées, les modèles de
+  l'Explorateur de données (avec leurs analyses), les règles de notification, les tâches nomaflow
+  et les questions de départ et procédures de l'assistant d'une application. Une tâche qui existe
+  déjà sur la cible garde sa planification, son activation, son fuseau, ses préréglages, ses
+  alertes, ses reprises, son niveau de journal et son délai ; une nouvelle tâche arrive désactivée.
+- Paquets et déploiement : un paquet est construit à partir des fichiers tels qu'écrits (valeurs
+  non renseignées et références `${VAR}` conservées), et les requêtes, tables, séquences, listes de
+  valeurs et points d'accès d'un connecteur sont importés un par un — importer un paquet ne
+  remplace plus un connecteur entier (ses autres requêtes étaient perdues), et les requêtes d'un
+  écran partent même quand son connecteur n'est pas sélectionné. `connectors.toml` et `jobs.toml`
+  gardent leurs commentaires à l'import.
+
 ## 7.0.63 — non publiée
 
 - Supervision → Journal du serveur : le journal du serveur est désormais conservé sur disque — un

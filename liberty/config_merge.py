@@ -75,6 +75,7 @@ def enumerate_entities(data: dict[str, Any], filename: str) -> Iterator[tuple[st
         actions.toml     actions.<id>
         explorer.toml    explorer.<app>.<model>
         ai.toml          ai.<app> (the whole block: starters, screens, playbooks)
+        notifications.toml  notifications.<rule id>
         menus.toml       menus.<app> (the header: everything but items) · menus.<app>.items[].id
     """
     if filename == "connectors.toml":
@@ -113,6 +114,9 @@ def enumerate_entities(data: dict[str, Any], filename: str) -> Iterator[tuple[st
         for app, block in (data.get("ai") or {}).items():
             if isinstance(block, dict):
                 yield "ai", {app: block}
+    elif filename == "notifications.toml":
+        for n, v in (data.get("notifications") or {}).items():
+            yield "notification_rule", {n: v}
     elif filename == "menus.toml":
         for app, app_menu in (data.get("menus") or {}).items():
             if not isinstance(app_menu, dict):
@@ -151,6 +155,8 @@ def resolve_path(kind: str, name: str, filename: str) -> tuple[list[str], str]:
         return ["explorer", scope], name
     if filename == "ai.toml":
         return ["ai"], name
+    if filename == "notifications.toml":
+        return ["notifications"], name
     if filename == "menus.toml" and kind == "menu_app":
         return ["menus"], name
     raise KeyError(f"{kind!r} is not a dict-keyed entity of {filename}")

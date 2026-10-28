@@ -1,5 +1,21 @@
 # Liberty Next — Release notes
 
+## 7.0.64 — unreleased
+
+- Package & Deploy: an import can be previewed (`/admin/import-package?dry_run=true`): the plan
+  lists every entity — new, changed (with its fields before / after), identical, kept (`override
+  = true` here), skipped, removed — with warnings when the package comes from a newer framework or
+  carries `ENC:` values this instance's master key can't decrypt. An apply returns the same plan.
+- Package & Deploy: a package now also carries shared actions, Data Explorer models (with their
+  analyses), notification rules, nomaflow jobs and an application's AI starters and playbooks.
+  A job that already exists on the target keeps its schedule, enabled flag, timezone, presets,
+  alerts, retry, log level and timeout; a new job arrives disabled.
+- Package & Deploy: a package is built from the files as written (unset values and `${VAR}`
+  references kept), and a connector's queries, tables, sequences, lookups and endpoints are
+  imported one by one — importing a package no longer replaces a whole connector (its other
+  queries were lost), and a screen's queries ship even when its connector isn't selected.
+  `connectors.toml` and `jobs.toml` keep their comments through an import.
+
 ## 7.0.63 — unreleased
 
 - Monitoring → Server log: the server log is now kept on disk — a size-rotated JSON-lines file

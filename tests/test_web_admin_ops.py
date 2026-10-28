@@ -13,6 +13,7 @@ stayed broken for months).
 from __future__ import annotations
 
 import asyncio
+import json
 import io
 import sqlite3
 import textwrap
@@ -267,6 +268,35 @@ def test_build_package_then_import_round_trips(env) -> None:
         report = imp.json()["report"]
         assert report["reloaded"] is True and not any(f["errors"] for f in report["files"])
         assert "users" in app.state.screens.screens["foo"]
+
+
+def test_package_is_built_from_the_files_and_previews_identical(env) -> None:
+    """C11 1a: the package carries what the files say (no model defaults), a connector left out of the
+    selection still ships the queries the screen uses, and previewing it here changes nothing."""
+    import tomllib
+    app, tmp = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        seeds = [{"kind": "screen", "name": "users", "scope": "foo"}]
+        deps = client.post("/admin/find-dependencies", json={"seeds": seeds}, headers=h).json()["deps"]
+        include = [{"kind": d["kind"], "scope": d["scope"], "name": d["name"]} for d in deps if d["kind"] not in ("connector", "pool")]
+        r = client.post("/admin/build-package", json={"seeds": seeds, "include": include}, headers=h)
+        assert r.status_code == 200, r.text
+        zf = zipfile.ZipFile(io.BytesIO(r.content))
+        screens = tomllib.loads(zf.read("screens.toml").decode())
+        assert screens == {"screens": {"foo": {"users": tomllib.loads((tmp / "screens.toml").read_text())["screens"]["foo"]["users"]}}}
+        conns = tomllib.loads(zf.read("connectors.toml").decode())
+        assert set(conns["connectors"]["foo"]) == {"queries"}            # items only, no header
+        assert {q["name"] for q in conns["connectors"]["foo"]["queries"]} == {"users_get", "users_put"}
+        assert json.loads(zf.read("manifest.json"))["source"]["version"]
+        before = (tmp / "connectors.toml").read_text()
+        prev = client.post("/admin/import-package?strategy=overwrite&dry_run=true", headers=h,
+                           files={"package": ("p.zip", r.content, "application/zip")})
+        assert prev.status_code == 200, prev.text
+        rep = prev.json()["report"]
+        assert rep["dry_run"] is True and rep["reloaded"] is False and not rep["warnings"]
+        assert rep["summary"]["identical"] >= 4 and rep["summary"]["new"] == 0 and rep["summary"]["changed"] == 0
+        assert (tmp / "connectors.toml").read_text() == before
 
 
 # ── clone / delete with dependencies ───────────────────────────────────────────────
