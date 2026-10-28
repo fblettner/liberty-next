@@ -696,3 +696,10 @@ def test_editable_when_rule_and_row_predicate() -> None:
         read_query = "dims_get"
     """))).screens["sales"]["dims"]
     assert plain.is_row_editable({}) is True
+
+
+def test_navigate_inline_flag() -> None:
+    """``inline = true`` on a navigate action opens the target inside the current tab; off by default."""
+    from liberty.screens.config import NavigateAction
+    a = NavigateAction(id="roles", to="roles_get", inline=True)
+    assert a.inline is True and NavigateAction(id="x", screen="s").inline is None   # blank = the app's drill_inline

@@ -44,7 +44,7 @@ import { useTranslation } from 'react-i18next'
 import {
   ArrowUp, ArrowDown, ChevronsUpDown, Search, Filter, FilterX, Columns3, Group, Download, FileText,
   Table as TableIcon, ChevronDown, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Check,
-  LayoutGrid, Trash2, MoreHorizontal,
+  LayoutGrid, Trash2, MoreHorizontal, CornerDownRight,
 } from 'lucide-react'
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
 import { ColumnFilterControl, type FilterMeta } from './DataTableFilter'
@@ -100,9 +100,10 @@ export interface DataTableProps<T extends object> {
    *  so the browser's native context menu doesn't appear; we don't suppress it on the table chrome
    *  itself, so headers / pagination still get their native menu. */
   onRowContextMenu?: (row: T, event: React.MouseEvent<HTMLElement>) => void
-  /** A visible way into the row menu: a leading "⋯" cell on every data row (the first column, so it
-   *  stays in view on a wide table) that opens the same menu as the right-click. */
-  rowMenuButton?: boolean
+  /** A visible way into the row's actions: a quiet handle in a leading cell (the first column, so
+   *  it stays in view on a wide table). ``icon`` "menu" opens the row menu (the right-click's),
+   *  "drill" means the handle fires one action directly; ``title`` is its tooltip. */
+  rowMenuButton?: { icon: 'menu' | 'drill'; title: string; onClick: (row: T, event: React.MouseEvent<HTMLElement>) => void }
   /** Master/detail: when provided, every row gets a leading chevron and expanding it renders
    *  `renderDetail(row)` in a full-width row beneath. Generic — the consumer owns the detail
    *  content (e.g. a lazily-fetched nested grid). Rows are rendered non-virtualized in this mode
@@ -346,12 +347,13 @@ const RowExpandBtn = styled.button`
   & svg { color: ${colors.text.muted}; flex-shrink: 0; }
 `
 const DetailTr = styled.tr` td { background: ${colors.bg.card}; padding: 0; } `
-// The row menu's visible handle (``rowMenuButton``): muted until the row is hovered.
+// The row's action handle (``rowMenuButton``): barely there until the row is hovered, then a
+// clear affordance; blue under the pointer.
 const RowMenuBtn = styled.button`
   display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0;
-  border: 1px solid transparent; border-radius: ${radius.sm}; background: none; cursor: pointer; color: ${colors.text.muted};
-  tr:hover & { color: ${colors.text.primary}; border-color: ${colors.border}; }
-  &:hover { background: ${colors.bg.input}; color: ${colors.blue.main}; }
+  border: none; border-radius: ${radius.sm}; background: none; cursor: pointer; color: ${colors.text.muted}; opacity: 0.35;
+  tr:hover & { opacity: 1; }
+  &:hover { background: ${colors.blue.bg}; color: ${colors.blue.main}; }
 `
 const GroupCount = styled.span`color: ${colors.text.muted}; font-weight: 400;`
 const Empty = styled.div`padding: 36px; text-align: center; color: ${colors.text.muted}; font-size: ${fontSize.base}; font-family: ${fonts.sans};`
@@ -838,7 +840,7 @@ export function DataTable<T extends object>({
   const showAll = pageSize === PAGE_SIZE_ALL
   const from = totalRows === 0 ? 0 : (showAll ? 1 : pageIndex * pageSize + 1)
   const to = showAll ? totalRows : Math.min((pageIndex + 1) * pageSize, totalRows)
-  const menuCol = !!rowMenuButton && onRowContextMenu != null
+  const menuCol = rowMenuButton != null
   const visibleColCount = table.getVisibleLeafColumns().length + (menuCol ? 1 : 0)
   const groupableCols = table.getAllLeafColumns().filter((c) => c.getCanGroup())
 
@@ -881,11 +883,11 @@ export function DataTable<T extends object>({
         style={clickable ? { cursor: 'pointer' } : undefined}
       >
         {menuCol && (
-          <Td style={{ width: 34, minWidth: 34, padding: '2px 6px' }}>
-            {contextable && (
-              <RowMenuBtn type="button" title={t('table.rowMenu')} aria-label={t('table.rowMenu')}
-                onClick={(e) => { e.stopPropagation(); onRowContextMenu!(row.original, e) }}>
-                <MoreHorizontal size={14} />
+          <Td style={{ width: 30, minWidth: 30, padding: '2px 4px' }}>
+            {!groupLike && (
+              <RowMenuBtn type="button" title={rowMenuButton!.title} aria-label={rowMenuButton!.title}
+                onClick={(e) => { e.stopPropagation(); rowMenuButton!.onClick(row.original, e) }}>
+                {rowMenuButton!.icon === 'drill' ? <CornerDownRight size={13} /> : <MoreHorizontal size={13} />}
               </RowMenuBtn>
             )}
           </Td>
@@ -1102,7 +1104,7 @@ export function DataTable<T extends object>({
           <thead>
             {showFilters && (
               <tr ref={filterRowRef}>
-                {menuCol && <FilterTh style={{ width: 34 }} />}
+                {menuCol && <FilterTh style={{ width: 30 }} />}
                 {table.getHeaderGroups()[0]?.headers.map((h) => (
                   <FilterTh key={h.id}>
                     <ColumnFilterControl column={h.column} />
@@ -1112,7 +1114,7 @@ export function DataTable<T extends object>({
             )}
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
-                {menuCol && <Th style={{ width: 34, minWidth: 34, padding: '8px 6px' }} aria-label={t('table.rowMenu')} />}
+                {menuCol && <Th style={{ width: 30, minWidth: 30, padding: '8px 4px' }} aria-label={rowMenuButton!.title} />}
                 {hg.headers.map((h) => {
                   const canSort = h.column.getCanSort()
                   const sorted = h.column.getIsSorted()

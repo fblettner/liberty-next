@@ -495,6 +495,14 @@ class NavigateAction(_PromptableMixin, _ActionBase):
         default_factory=list,
         description="Forwarded as ``?<param>=<value>`` query-string entries. The target's filter panel seeds from these.",
     )
+    inline: bool | None = Field(
+        default=None,
+        description=(
+            "Open the target INSIDE the current tab, as a panel over this grid with a breadcrumb and a Back "
+            "button (the Explorer's drill), instead of a new tab; the grid behind keeps its rows and filters. "
+            "Blank = the application's ``[app] drill_inline`` default (Settings → App)."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check_target(self) -> NavigateAction:

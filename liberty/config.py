@@ -159,6 +159,9 @@ class AppSettings(BaseModel):
     tabs_multi: bool = True
     tabs_close_on_app_switch: bool = False
     tabs_max: int = Field(default=5, ge=1, le=50)
+    # How a row-menu / toolbar ``navigate`` action opens its target when the action does not say
+    # (``inline`` blank): a new tab (default), or a panel inside the current tab with a breadcrumb.
+    drill_inline: bool = False
 
 
 class ConnectorSettings(BaseModel):

@@ -12,6 +12,8 @@
 // queries are fetched once via services/lookups.useLookupBatch. Each column also declares its
 // filter kind so DataTable's per-column filter row shows the right control.
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useBranding } from '../../branding/BrandingContext'
+import type { DrillTarget } from '../../services/drill'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
 import type { ColumnDef, VisibilityState } from '@tanstack/react-table'
@@ -374,7 +376,7 @@ function columnVisibleNow(c: Column, activeFilters: Record<string, string>): boo
 }
 
 export function ResultTable({
-  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters, screen, addSeed, nestedDialog, renderDetail, embedded, getSubRows, onRowExpand, subRowCount, tableId: tableIdOverride, onCurrentRow,
+  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters, screen, addSeed, nestedDialog, renderDetail, embedded, getSubRows, onRowExpand, subRowCount, tableId: tableIdOverride, onCurrentRow, onDrill,
 }: {
   result: QueryResult
   connector: string
@@ -384,6 +386,8 @@ export function ResultTable({
   deleteQuery?: string | null
   keyColumns?: string[]  // result columns that identify a row (v1's col_key) — used by the Excel import to match
   onSaved?: () => void
+  /** An inline `navigate` action (`inline = true`): the parent opens the target as a panel in this tab. */
+  onDrill?: (target: DrillTarget) => void
   runControl?: React.ReactNode    // the Run button — sits just right of the grid's search box
   maxRowsControl?: React.ReactNode  // the Max-rows input — sits at the far right, before the Filters button
   activeFilters?: Record<string, string>  // current server-filter values — drives `visible_when` columns
@@ -565,6 +569,8 @@ export function ResultTable({
     [screen],
   )
   const [menuState, setMenuState] = useState<{ row: DataRow; x: number; y: number } | null>(null)
+  // The app's default for a drill whose action does not say (`[app] drill_inline`).
+  const drillInlineDefault = useBranding().ui.drill_inline === true
   const closeMenu = useCallback(() => setMenuState(null), [])
   // `editMode` is declared further down; we read it via a ref so the openRowMenu callback can sit
   // here (next to its peers) without a TDZ issue. The ref is kept in sync below via a small effect.
@@ -621,7 +627,13 @@ export function ResultTable({
       defaultConnector: connector,
       requestPrompt,
       sharedActions: sharedActions ?? undefined,
-      navigate: (to, conn, params, screen) => {
+      navigate: (to, conn, params, screen, inline) => {
+        if ((inline ?? drillInlineDefault) && onDrill) {
+          // the in-place drill: the parent TableView opens the target over this grid
+          setMenuBusy(null); closeMenu()
+          onDrill({ connector: conn, query: to, screen: screen ?? null, params })
+          return
+        }
         const qs = new URLSearchParams()
         for (const [k, v] of Object.entries(params)) {
           if (v != null && v !== '') qs.set(k, String(v))
@@ -647,7 +659,15 @@ export function ResultTable({
     if (result.warnings.length > 0) {
       console.info('row-menu warnings:', result.warnings)
     }
-  }, [connector, onSaved, closeMenu, navigate, requestPrompt, sharedActions])
+  }, [connector, onSaved, closeMenu, navigate, requestPrompt, sharedActions, onDrill, drillInlineDefault])
+  // The row's action handle (the grid's leading cell): a single navigate action fires at once —
+  // a drill — the handle showing the action's label; several actions open the row menu.
+  const rowMenuHandle = useMemo(() => {
+    const only = rowMenu.length === 1 && rowMenu[0].type === 'navigate' ? rowMenu[0] : null
+    return only
+      ? { icon: 'drill' as const, title: only.label || only.id, onClick: (row: DataRow) => { onCurrentRow?.(row); void runRowAction(only, row) } }
+      : { icon: 'menu' as const, title: t('table.rowMenu'), onClick: openRowMenu }
+  }, [rowMenu, runRowAction, openRowMenu, onCurrentRow, t])
   // Screen-level actions — v1's NOMAJDE toolbar buttons ("Create Role" / "Reset Password" / etc.)
   // attach here. Fire with **no row context** (the user uses row_menu for row-bound actions);
   // ParamBinds resolve to literal `value`s only — a `source` bind against an unset form falls
@@ -704,7 +724,8 @@ export function ResultTable({
       defaultConnector: connector,
       requestPrompt,
       sharedActions: sharedActions ?? undefined,
-      navigate: (to, conn, params, screen) => {
+      navigate: (to, conn, params, screen, inline) => {
+        if ((inline ?? drillInlineDefault) && onDrill) { onDrill({ connector: conn, query: to, screen: screen ?? null, params }); return }
         const qs = new URLSearchParams()
         for (const [k, v] of Object.entries(params)) {
           if (v != null && v !== '') qs.set(k, String(v))
@@ -726,7 +747,7 @@ export function ResultTable({
     const msg = result.warnings.length > 0 ? result.warnings.join(' · ') : `${a.label || a.id} · ${t('common.done')}`
     setActionStatus({ message: msg, tone: 'ok' })
     onSaved?.()
-  }, [connector, onSaved, navigate, requestPrompt, sharedActions])
+  }, [connector, onSaved, navigate, requestPrompt, sharedActions, onDrill, drillInlineDefault])
 
   // the columns to actually show: drop any whose `visible_when` filter doesn't match right now
   // (TableView passes a memoized `activeFilters`, so this stays referentially stable across
@@ -1828,7 +1849,7 @@ export function ResultTable({
         // Right-click → row context menu when the screen carries any `row_menu` actions and
         // we're not in batch-edit mode (in batch mode the row controls are the actions).
         onRowContextMenu={rowMenu.length > 0 && !editMode ? openRowMenu : undefined}
-        rowMenuButton={rowMenu.length > 0 && !editMode}
+        rowMenuButton={rowMenu.length > 0 && !editMode ? rowMenuHandle : undefined}
         onPasteRows={editMode && canInsert ? onPasteRows : undefined}
         toolbar={
           !(canBulkEdit || (canInsert && hasDialog) || canImport || screen?.export || screenActions.length > 0) ? undefined : !editMode ? (

@@ -175,6 +175,8 @@ const fr: Resources = {
   table: {
     rowReadOnly: 'Ligne en lecture seule',
     rowMenu: 'Actions de la ligne',
+    drillBack: 'Retour',
+    drillScreenMissing: 'L’écran « {{screen}} » de {{app}} ne vous est pas accessible.',
     writable: 'modifiable',
     run: 'Exécuter',
     runWritableConfirm: 'Exécuter la requête modifiable « {{q}} » ? Cela peut modifier des données.',
@@ -2288,6 +2290,7 @@ const fr: Resources = {
       tabsMulti: 'Plusieurs onglets à la fois (sinon : une page à la fois)',
       tabsCloseOnSwitch: 'Fermer les onglets au changement d’application',
       tabsMax: 'Onglets au maximum',
+      drillInline: 'Les navigations s’ouvrent dans l’onglet courant (un panneau avec fil d’Ariane) sauf si l’action en décide autrement',
       hotReload: 'Recharger à chaud les fichiers TOML de configuration quand ils changent',
       oracleThick: 'Mode épais Oracle (OCI python-oracledb — requis pour le chiffrement réseau natif / NNE)',
       licenseSection: 'Licence',

@@ -125,4 +125,4 @@ def test_admin_put_requires_superuser(app) -> None:
 def test_theme_carries_the_ui_defaults(app) -> None:
     with TestClient(app) as client:
         ui = client.get("/api/theme").json()["ui"]
-        assert ui == {"default_period": "thisMonth", "default_page_size": 50, "dashboard_cache_seconds": 60, "tabs_multi": True, "tabs_close_on_app_switch": False, "tabs_max": 5}
+        assert ui == {"default_period": "thisMonth", "default_page_size": 50, "dashboard_cache_seconds": 60, "tabs_multi": True, "tabs_close_on_app_switch": False, "tabs_max": 5, "drill_inline": False}

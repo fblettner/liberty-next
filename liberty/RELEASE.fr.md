@@ -89,9 +89,19 @@
   ferme à la limite).
 
 **Grille : une poignée visible pour le menu de ligne**
-- Chaque ligne d'un écran doté d'actions `row_menu` porte un bouton « ⋯ » dans sa première
-  colonne (il reste visible sur une table large) qui ouvre le même menu que le clic droit. Rien
-  d'autre ne change dans la mécanique de navigation.
+- Chaque ligne d'un écran doté d'actions `row_menu` porte une poignée discrète dans sa première
+  colonne (elle reste visible sur une table large), plus nette au survol : une action `navigate`
+  seule se déclenche aussitôt (la poignée porte son libellé), plusieurs actions ouvrent le même
+  menu que le clic droit. Rien d'autre ne change dans la mécanique de navigation.
+- Navigation sur place, en option : une action `navigate` avec `inline = true` ouvre sa cible
+  (une requête ou un écran, avec les liaisons de la ligne) dans un panneau à l'intérieur de
+  l'onglet courant, par-dessus la grille d'origine, avec un fil d'Ariane et un bouton Retour ; la
+  grille derrière garde ses lignes et ses filtres, et une navigation depuis le panneau s'emboîte de
+  la même façon. `[app] drill_inline` (Paramètres → App) fixe le comportement de toute
+  navigation dont l'action ne dit rien ; l'option `inline` de l'action l'emporte dans les deux
+  sens. Désactivé par défaut : rien ne change tant que l'opérateur ne l'active pas.
+- Tableaux de bord : l'étiquette d'une ligne de liste se place sur la ligne du titre, la ligne
+  reste sur deux hauteurs.
 
 ## 7.0.59 — non publiée
 

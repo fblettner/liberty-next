@@ -168,7 +168,7 @@ function summarize(a: Row): string {
   }
   if (t === 'navigate') {
     const conn = a.connector ? String(a.connector) : '<screen connector>'
-    return `→ /sql/${conn}/${a.to ?? '?'}`
+    return `→ /sql/${conn}/${a.to ?? '?'}${a.inline ? ' · inline' : ''}`
   }
   if (t === 'if') {
     const c = (a.condition && typeof a.condition === 'object' ? a.condition : null) as Row | null

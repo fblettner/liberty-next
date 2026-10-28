@@ -14,6 +14,8 @@ import { colors, radius, fontSize, fonts } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { findMenuLabel } from '../../services/menuLabels'
 import { setPageContext } from '../../services/aiContext'
+import { bindsToSearchParams, type DrillTarget, type EmbeddedDrill } from '../../services/drill'
+import { ChevronRight, ArrowLeft } from 'lucide-react'
 import { tabPath } from '../../tabs/TabsContext'
 import type { ScreenDetail } from '../../types/screens'
 import { Meta } from './styled'
@@ -67,7 +69,20 @@ const ViewToggle = styled.div`
   }
 `
 
-export default function TableView({ connector, query, screenApp, screenId }: { connector: string; query: string; screenApp?: string; screenId?: string }) {
+/** The breadcrumb of an in-place drill: Back, the levels above (clickable), the current one. */
+const CrumbBar = styled.div`
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex-shrink: 0; padding: 6px 10px; margin-bottom: 8px;
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.card};
+  font-family: ${fonts.sans}; font-size: ${fontSize.sm}; color: ${colors.text.muted};
+  & button { display: inline-flex; align-items: center; gap: 4px; border: none; background: none; cursor: pointer; color: ${colors.text.secondary}; font: inherit; padding: 2px 6px; border-radius: ${radius.sm}; }
+  & button:hover { color: ${colors.blue.main}; background: ${colors.blue.bg}; }
+  & .here { color: ${colors.text.primary}; font-weight: 600; }
+  & svg { color: ${colors.text.muted}; }
+`
+
+export default function TableView({ connector, query, screenApp, screenId, embedded }: { connector: string; query: string; screenApp?: string; screenId?: string
+  /** Set when this view is an in-place drill opened by a parent grid: its binds, the crumbs above it, Back. */
+  embedded?: EmbeddedDrill }) {
   const { t } = useTranslation()
   const modals = useModals()
   const { menus, findScreen, findScreenById } = useWorkspace()
@@ -77,8 +92,11 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
   // deep-linkable / shareable. Only consumed once per (connector, query) mount; subsequent
   // user edits to the param form are not reflected back into the URL (the form is the source
   // of truth after that point).
-  const [searchParams] = useSearchParams()
+  const [urlParams] = useSearchParams()
   const location = useLocation()
+  // The drill binds: the URL's query string for a tab; the parent's binds for an in-place drill
+  // (the same shape, so the seeding below is one code path).
+  const searchParams = useMemo(() => (embedded ? bindsToSearchParams(embedded.binds) : urlParams), [embedded, urlParams])
   // Drill-down binds (bugfix): a row-menu ``navigate`` pushes ``/sql/<c>/<q>?<binds>`` to filter the
   // destination by the clicked row. ``drillKey`` is the URL query string; ``lastDrillKey`` is the
   // binds we've already applied to the filter/param state. The ``applyDrill`` effect (below
@@ -355,7 +373,8 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
   // another tab's drill URL. A screen tab routes through ``/screen/<app>/<id>`` (not
   // ``/sql/<connector>/<query>``), so match the right path — otherwise the drill binds (filters
   // passed between screens) never seed and auto_load runs unfiltered.
-  const onThisTab = location.pathname === (
+  // An in-place drill lives in its parent's tab: it is "on its tab" exactly when the parent is.
+  const onThisTab = embedded ? embedded.active : location.pathname === (
     screenId
       ? tabPath({ kind: 'screen', connector: screenApp ?? connector, target: screenId })
       : tabPath({ kind: 'sql', connector, target: query })
@@ -444,14 +463,19 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
   // so the chat drawer can send it along (services/aiContext; the chat renders + caps the text).
   const [currentRow, setCurrentRow] = useState<Record<string, unknown> | null>(null)
   useEffect(() => { setCurrentRow(null) }, [result])
+  // The in-place drill opened from this grid (a `navigate` action with `inline = true`): rendered
+  // over this view inside the same tab, this view staying mounted behind it with its rows and
+  // filters. A drill from the drilled view nests the same way.
+  const [drill, setDrill] = useState<DrillTarget | null>(null)
+  useEffect(() => { setDrill(null) }, [connector, query])
   useEffect(() => {
-    if (!onThisTab) return
+    if (!onThisTab || drill) return
     setPageContext({
       path: location.pathname, app: screenApp ?? connector, kind: screenId ? 'screen' : 'sql', title: friendlyName,
       connector, query, screen: screen?.id ?? screenId ?? null, filters: summaryParams,
       rowCount: result?.rows.length, truncated: result?.truncated, columns: result?.columns.map((c) => c.name), row: currentRow,
     })
-  }, [onThisTab, location.pathname, screenApp, connector, query, screenId, screen, friendlyName, summaryParams, result, currentRow])
+  }, [onThisTab, drill, location.pathname, screenApp, connector, query, screenId, screen, friendlyName, summaryParams, result, currentRow])
 
   if (metaErr)
     return (
@@ -467,6 +491,7 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
     )
 
   const hasSelectResult = result?.statement_type === 'SELECT'
+  const crumbs = embedded?.crumbs ?? []
   // override this run's row cap (DbVisualizer-style) — blank = the configured connector/pool/query cap
   const maxRowsField = meta.statement_type === 'SELECT' ? (
     <MaxRowsBox title={t('table.maxRowsHint')}>
@@ -497,6 +522,31 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
   const showBar = paramNames.length > 0 || !hasSelectResult
 
   return (
+    <>
+    {drill && (() => {
+      // A screen target resolves like the /screen/<app>/<id> route does (ScreenTab): the screen's
+      // own connector and read query, the screen pinned; a query target opens as is.
+      const scr = drill.screen ? findScreenById(drill.connector, drill.screen) : null
+      const crumbsBelow = [...crumbs, { label: friendlyName, onClick: () => setDrill(null) }]
+      const embeddedDrill = { binds: drill.params, crumbs: crumbsBelow, onBack: () => setDrill(null), active: onThisTab }
+      if (drill.screen && !scr) return <Banner $tone="error">{t('table.drillScreenMissing', { screen: drill.screen, app: drill.connector })}</Banner>
+      return scr
+        ? <TableView connector={scr.connector} query={scr.read_query} screenApp={drill.connector} screenId={drill.screen ?? undefined} embedded={embeddedDrill} />
+        : <TableView connector={drill.connector} query={drill.query} embedded={embeddedDrill} />
+    })()}
+    {embedded && !drill && (
+      <CrumbBar>
+        <button type="button" onClick={embedded.onBack}><ArrowLeft size={13} /> {t('table.drillBack')}</button>
+        {crumbs.map((c, i) => (
+          <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <button type="button" onClick={c.onClick}>{c.label}</button>
+            <ChevronRight size={12} />
+          </span>
+        ))}
+        <span className="here">{friendlyName}</span>
+      </CrumbBar>
+    )}
+    <div style={{ display: drill ? 'none' : 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
     <PageLayout
       icon={<TableIcon size={18} />}
       title={
@@ -627,6 +677,7 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
                 keyColumns={screen?.key_columns ?? meta.key_columns}
                 onSaved={run}
                 onCurrentRow={setCurrentRow}
+                onDrill={setDrill}
                 runControl={runBtn}
                 maxRowsControl={maxRowsField}
                 activeFilters={activeFilters}
@@ -645,5 +696,7 @@ export default function TableView({ connector, query, screenApp, screenId }: { c
         )}
       </Stack>
     </PageLayout>
+    </div>
+    </>
   )
 }

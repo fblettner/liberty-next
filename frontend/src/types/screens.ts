@@ -276,6 +276,7 @@ export type Action =
       connector?: string | null  // blank → the firing screen's effective connector
       screen?: string | null  // target screen id → opens /screen/<connector>/<screen>
       param_binds?: ParamBind[]
+      inline?: boolean | null // open the target inside the current tab (the in-place drill); blank = the app's drill_inline
     })
   | (ActionCommon & {
       type: 'set_field'

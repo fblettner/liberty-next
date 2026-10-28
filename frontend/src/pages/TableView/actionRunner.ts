@@ -73,7 +73,8 @@ export interface ActionRunnerDeps {
    *  row-menu / toolbar use ``/sql/<connector>/<to>?<qs>``, or ``/screen/<connector>/<screen>``
    *  when the action pins a specific screen). When unset, ``navigate`` actions land a soft
    *  warning (ScreenDialog has no navigation target; row-menu / toolbar do). */
-  navigate?: (to: string, connector: string, params: Record<string, string>, screen?: string | null) => void
+  /** `inline`: the action's own choice; undefined = follow the app's `drill_inline` default. */
+  navigate?: (to: string, connector: string, params: Record<string, string>, screen?: string | null, inline?: boolean) => void
   /** Shared-action catalog (actions.toml, via ``GET /api/actions``), keyed by id — the runner
    *  resolves a ``call_action`` against this and inlines the referenced action's steps. */
   sharedActions?: Record<string, SharedAction>
@@ -615,7 +616,7 @@ async function runOneAction(
         if (deps.navigate) {
           const target = a.connector || deps.defaultConnector
           const bound = resolveBinds(a.param_binds, ctx, formCtx)
-          deps.navigate(a.to ?? '', target, bound, a.screen)
+          deps.navigate(a.to ?? '', target, bound, a.screen, a.inline == null ? undefined : a.inline)
           // The route change will unmount the firing surface — abort the rest of the chain.
           return { abort: true }
         }

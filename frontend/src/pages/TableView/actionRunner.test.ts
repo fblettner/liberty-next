@@ -86,3 +86,15 @@ describe('evalCondition', () => {
     expect(evalCondition({ source: 'select_workbench.rows.0.FSSETY', operator: 'less_than', value: '2' }, ctx, form)).toBe(true)
   })
 })
+
+
+describe('navigate', () => {
+  it('hands the inline flag to the navigate dependency', async () => {
+    const { runChain } = await import('./actionRunner')
+    const calls: unknown[][] = []
+    const deps = { defaultConnector: 'nomasx1', navigate: (...args: unknown[]) => { calls.push(args) } }
+    await runChain([{ id: 'a', type: 'navigate', to: 'roles_get', param_binds: [{ param: 'USR_ID', source: 'usr_id' }], inline: true } as never], {}, { usr_id: '42' }, deps as never)
+    await runChain([{ id: 'b', type: 'navigate', screen: 'roles', param_binds: [] } as never], {}, {}, deps as never)
+    expect(calls).toEqual([['roles_get', 'nomasx1', { USR_ID: '42' }, undefined, true], ['', 'nomasx1', {}, 'roles', undefined]])
+  })
+})

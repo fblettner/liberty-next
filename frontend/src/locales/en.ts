@@ -173,6 +173,8 @@ const en = {
   table: {
     rowReadOnly: 'Read-only row',
     rowMenu: 'Row actions',
+    drillBack: 'Back',
+    drillScreenMissing: 'Screen "{{screen}}" of {{app}} is not available to you.',
     writable: 'writable',
     run: 'Run',
     runWritableConfirm: 'Run the writable query "{{q}}"? This may modify data.',
@@ -2295,6 +2297,7 @@ const en = {
       tabsMulti: 'Several tabs at once (off: one page at a time)',
       tabsCloseOnSwitch: 'Close the tabs when switching application',
       tabsMax: 'Tabs at most',
+      drillInline: 'Drill-downs open inside the current tab (a panel with a breadcrumb) unless the action says otherwise',
       hotReload: 'Hot-reload config TOML files on change',
       oracleThick: 'Oracle thick mode (python-oracledb OCI — required for Native Network Encryption / NNE)',
       licenseSection: 'License',

@@ -33,6 +33,7 @@ interface AppSection {
   tabs_multi: boolean
   tabs_close_on_app_switch: boolean
   tabs_max: number
+  drill_inline: boolean
 }
 interface AiSection {
   enabled: boolean
@@ -157,7 +158,7 @@ const PERIOD_PRESETS = ['thisMonth', 'lastMonth', 'thisQuarter', 'thisYear', 'la
 const DEFAULTS: {
   app: AppSection; ai: AiSection; license: LicenseSection; oidc: OidcSection; notify: NotifySection; branding: BrandingFields;
 } = {
-  app: { name: 'Liberty Next', host: '0.0.0.0', port: 8000, log_level: 'info', hot_reload: false, default_language: 'en', oracle_thick: false, default_period: 'thisMonth', default_page_size: 50, dashboard_cache_seconds: 60, tabs_multi: true, tabs_close_on_app_switch: false, tabs_max: 5 },
+  app: { name: 'Liberty Next', host: '0.0.0.0', port: 8000, log_level: 'info', hot_reload: false, default_language: 'en', oracle_thick: false, default_period: 'thisMonth', default_page_size: 50, dashboard_cache_seconds: 60, tabs_multi: true, tabs_close_on_app_switch: false, tabs_max: 5, drill_inline: false },
   ai: {
     enabled: true, model: 'claude-opus-4-8', max_tokens: 8192, max_iterations: 8, system_prompt: '',
     thinking: false, effort: '', request_timeout: 120,
@@ -412,6 +413,8 @@ export default function AppBuilder() {
                   onChange={(e) => setApp({ ...app, tabs_max: Math.min(50, Math.max(1, Number(e.target.value) || 5)) })} style={{ width: 72 }} />
               </label>
             </RowFlex>
+            <Checkbox label={t('settings.app.drillInline')}
+              checked={app.drill_inline} onChange={(c) => setApp({ ...app, drill_inline: c })} />
             <Checkbox label={t('settings.app.hotReload')}
               checked={app.hot_reload} onChange={(c) => setApp({ ...app, hot_reload: c })} />
             <Checkbox label={t('settings.app.oracleThick')}

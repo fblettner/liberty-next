@@ -34,14 +34,17 @@ export function ListWidget({ widget, ...common }: { widget: ListWidgetWire } & W
                 <Line key={i}>
                   {toneC && <Dot $tone={tone} />}
                   <Main>
-                    <div className="t">{titleC ? String(r[titleC] ?? '') : ''}</div>
+                    {/* the tag sits on the title line: a row stays two lines high on both sides */}
+                    <div className="t">
+                      {titleC ? String(r[titleC] ?? '') : ''}
+                      {tagC && r[tagC] != null && String(r[tagC]) !== '' && <Pill $tone={tone} style={{ marginTop: 0, marginLeft: 8, verticalAlign: 'middle' }}>{String(r[tagC])}</Pill>}
+                    </div>
                     {subC && r[subC] != null && <Muted>{String(r[subC])}</Muted>}
                   </Main>
-                  {(valueC || countC || tagC) && (
+                  {(valueC || countC) && (
                     <Num>
                       {valueC && <div className="v">{formatValue(r[valueC], widget.format, widget.unit, lang)}</div>}
                       {count != null && <Muted>{widget.count_label ? widget.count_label.replace('{n}', formatValue(count, 'integer', null, lang)) : formatValue(count, 'integer', null, lang)}</Muted>}
-                      {tagC && r[tagC] != null && String(r[tagC]) !== '' && <Pill $tone={tone}>{String(r[tagC])}</Pill>}
                     </Num>
                   )}
                 </Line>

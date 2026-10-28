@@ -76,9 +76,17 @@
   (default 5; the oldest tab closes when the limit is reached).
 
 **Grid: a visible handle for the row menu**
-- Every row of a screen with `row_menu` actions carries a "⋯" button in its first column (so it
-  stays in view on a wide table) that opens the same menu as the right-click. Nothing else in
-  the drill mechanics changes.
+- Every row of a screen with `row_menu` actions carries a quiet handle in its first column (so it
+  stays in view on a wide table), brighter on hover: a lone `navigate` action fires at once (the
+  handle shows its label), several actions open the same menu as the right-click. Nothing else
+  in the drill mechanics changes.
+- In-place drill, opt-in: a `navigate` action with `inline = true` opens its target (a query or a
+  screen, with the row's binds) as a panel inside the current tab, over the grid it came from, with
+  a breadcrumb and a Back button; the grid behind keeps its rows and filters, and a drill from the
+  panel nests the same way. `[app] drill_inline` (Settings → App) sets the default for every
+  drill whose action does not say; an action's own `inline` overrides it either way. Off by
+  default, so nothing changes until the operator turns it on.
+- Dashboards: a list row's tag sits on the title line, so a row stays two lines high.
 
 ## 7.0.59 — unreleased
 

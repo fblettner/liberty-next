@@ -54,5 +54,6 @@ async def get_theme(request: Request) -> dict[str, Any]:
         "tabs_multi": s.app.tabs_multi,
         "tabs_close_on_app_switch": s.app.tabs_close_on_app_switch,
         "tabs_max": s.app.tabs_max,
+        "drill_inline": s.app.drill_inline,
     }
     return resolved

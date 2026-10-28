@@ -97,7 +97,7 @@ export const ACTION_OVERRIDE_KEYS: Record<ActionType, ReadonlyArray<string>> = {
   call_plugin: ['callable', 'param_binds'],
   call_action: ['ref', 'param_binds'],
   send_notification: ['rule', 'param_binds'],
-  navigate: ['connector', 'to', 'screen', 'param_binds'],
+  navigate: ['connector', 'to', 'screen', 'param_binds', 'inline'],
   set_field: [],
   confirm: [],
   notify: [],

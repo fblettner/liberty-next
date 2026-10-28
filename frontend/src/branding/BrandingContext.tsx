@@ -44,8 +44,10 @@ export interface UiDefaults {
   tabs_close_on_app_switch: boolean
   /** How many tabs at most; the oldest closes when the limit is reached. */
   tabs_max: number
+  /** A drill (a `navigate` action that does not say) opens inside the current tab rather than a new one. */
+  drill_inline: boolean
 }
-export const UI_DEFAULTS: UiDefaults = { default_period: 'thisMonth', default_page_size: 50, dashboard_cache_seconds: 60, tabs_multi: true, tabs_close_on_app_switch: false, tabs_max: 5 }
+export const UI_DEFAULTS: UiDefaults = { default_period: 'thisMonth', default_page_size: 50, dashboard_cache_seconds: 60, tabs_multi: true, tabs_close_on_app_switch: false, tabs_max: 5, drill_inline: false }
 
 export interface ResolvedTheme {
   preset: string
