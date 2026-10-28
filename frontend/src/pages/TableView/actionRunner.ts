@@ -173,6 +173,8 @@ interface BuiltinProvider {
   email?: string | null
   /** Current i18n language tag, ``en`` / ``fr`` / …. */
   language?: string | null
+  /** The install's named addresses (``[app] external_urls``) — ``#URL.<NAME>#``. */
+  urls?: Record<string, string>
 }
 let authProvider: BuiltinProvider = {}
 
@@ -197,6 +199,10 @@ function resolveBuiltin(key: string): string | undefined {
   }
   if (k === 'LANGUAGE' || k === 'LANG') {
     return authProvider.language ?? undefined
+  }
+  // An install's named address (``[app] external_urls``): ``#URL.JDE_WEB#``.
+  if (k.startsWith('URL.')) {
+    return authProvider.urls?.[k.slice(4)] ?? undefined
   }
   // Date / time — resolved lazily at each call (so a chain spanning seconds picks them up).
   // ``SYSDATE`` matches Oracle's lingo; ``CURRENT_DATE`` matches Postgres + v1 dd_rules.

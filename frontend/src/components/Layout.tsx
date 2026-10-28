@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next'
 import { Sun, Moon, LogOut, User, Sparkles, X, Bell, Compass, Blocks } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { useTabs } from '../tabs/TabsContext'
+import { api } from '../api/client'
 import { LANGUAGE_KEY, type Language } from '../i18n'
 import { useAuth } from '../auth/AuthContext'
 import { installAuthBuiltins } from '../pages/TableView/actionRunner'
@@ -170,13 +171,20 @@ export default function Layout() {
   // / ``#LOGIN_EMAIL#`` / ``#LANGUAGE#`` resolve to these values at run time; the date-bound
   // built-ins (``#SYSDATE#`` / ``#NOW#``) compute lazily from the JS clock. Re-installs whenever
   // the user logs in/out or the language changes — covers the post-login + post-switch races.
+  // ``#URL.<NAME>#`` — the install's named addresses (``[app] external_urls``), fetched once signed in.
+  const [externalUrls, setExternalUrls] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (!user) { setExternalUrls({}); return }
+    api.get<{ urls: Record<string, string> }>('/api/external-urls').then((r) => setExternalUrls(r.urls ?? {})).catch(() => setExternalUrls({}))
+  }, [user])
   useEffect(() => {
     installAuthBuiltins({
       username: user?.username ?? null,
       email: user?.email ?? null,
       language: i18n.language ?? null,
+      urls: externalUrls,
     })
-  }, [user?.username, user?.email, i18n.language])
+  }, [user?.username, user?.email, i18n.language, externalUrls])
 
   const toggleTheme = () => {
     setDark((d) => {

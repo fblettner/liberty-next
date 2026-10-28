@@ -1857,7 +1857,7 @@ _APP_SAFE_KEYS = {
     "name", "host", "port", "log_level", "hot_reload", "default_language", "oracle_thick",
     "default_period", "default_page_size", "dashboard_cache_seconds",
     "tabs_multi", "tabs_close_on_app_switch", "tabs_max", "drill_inline",
-    "log_format", "log_file", "log_file_max_mb", "log_file_backups", "base_path",
+    "log_format", "log_file", "log_file_max_mb", "log_file_backups", "base_path", "external_urls",
 }
 _AI_SAFE_KEYS = {
     "enabled", "model", "max_tokens", "max_iterations", "system_prompt", "thinking",

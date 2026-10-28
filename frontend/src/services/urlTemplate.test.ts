@@ -12,6 +12,13 @@ describe('urlTemplate', () => {
   it('takes a leading placeholder as the address itself', () => {
     expect(fillUrlTemplate('{BASE}/E1Menu.maf?u={AUUSER}', resolve)).toBe('https://jde.example.com/jde/E1Menu.maf?u=JDE%20USER')
   })
+  it('takes a named address of the install as the address (#URL.NAME#)', () => {
+    const r = (n: string) => ({ '#URL.JDE_WEB#': 'https://jde:8080/jde', AN8: 27 } as Record<string, unknown>)[n]
+    expect(fillUrlTemplate('#URL.JDE_WEB#/ShortcutLauncher?OID=P01012&FormDSData=| |{AN8}|', r))
+      .toBe('https://jde:8080/jde/ShortcutLauncher?OID=P01012&FormDSData=| |27|')
+    // not set on this install → no address, so the URL is refused rather than opened relative
+    expect(safeUrl(fillUrlTemplate('#URL.NONE#/x', r))).toBeNull()
+  })
   it('opens only http(s) and paths of this server', () => {
     expect(safeUrl('https://x.y/z')).toBe('https://x.y/z')
     expect(safeUrl('/screen/a/b')).toBe('/screen/a/b')

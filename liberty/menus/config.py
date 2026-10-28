@@ -55,7 +55,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 # the TableView resolves any designed Screen by ``(connector, target)``); they differ only in what
 # the editor's target dropdown offers — designed screens vs raw queries.
 #  url       → an external address opened in a new tab — ``target`` is a URL template
-#              (``#LOGIN_USER#`` built-ins); http(s) or a path only.
+#              (``#LOGIN_USER#`` built-ins, ``#URL.NAME#`` = ``[app] external_urls``); http(s) or a path only.
 ItemType = Literal["screen", "query", "endpoint", "dashboard", "page", "job", "url"]
 
 
@@ -133,7 +133,7 @@ class MenuItem(BaseModel):
             raise ValueError(f"menu item {self.id!r}: a 'job' item must not carry a `connector` (target = the job id)")
         elif self.type == "url" and self.connector is not None:
             raise ValueError(f"menu item {self.id!r}: a 'url' item must not carry a `connector` (target = the address)")
-        elif self.type == "url" and not (self.target or "").strip().lower().startswith(("http://", "https://", "/")):
+        elif self.type == "url" and not (self.target or "").strip().lower().startswith(("http://", "https://", "/", "#url.")):
             raise ValueError(f"menu item {self.id!r}: a 'url' item opens an http(s) address or a path of this server")
         elif self.type == "page" and self.connector is not None:
             # A page leaf's target is a frontend route, not a connector resource — a

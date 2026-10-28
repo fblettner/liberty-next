@@ -1854,3 +1854,33 @@ def test_api_connector_settings_from_the_environment(env, monkeypatch) -> None:
         assert r.status_code != 422, r.text
     cfg = parse_connectors({"connectors": {"ais": remote}}).connectors["ais"]
     assert cfg.verify_ssl is False and cfg.base_url == "https://ais.example.com/jderest/v2" and cfg.auth_username == "JDE"
+
+
+def test_external_urls_setting_and_route(env, tmp_path, monkeypatch) -> None:
+    """``[app] external_urls`` — named addresses an ``open_url`` writes as ``#URL.NAME#``: set from the
+    App editor (round trip to app.toml), validated (upper-case name, http(s)), served to signed-in
+    users only (an internal address is not for the sign-in page)."""
+    import tomllib
+
+    from liberty.config import AppSettings
+    with pytest.raises(ValueError, match="upper case"):
+        AppSettings(external_urls={"jde": "https://x"})
+    with pytest.raises(ValueError, match="http"):
+        AppSettings(external_urls={"JDE_WEB": "javascript:alert(1)"})
+    assert AppSettings(external_urls={"JDE_WEB": " https://jde:8080/jde/ "}).external_urls == {"JDE_WEB": "https://jde:8080/jde"}
+
+    app, _conn_toml, _db_url = env
+    app_toml = tmp_path / "app.toml"
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(app_toml))
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        assert client.get("/api/external-urls").status_code == 401
+        assert client.get("/api/external-urls", headers=h).json() == {"urls": {}}
+        r = client.put("/admin/config/app/parsed", json={"app": {"external_urls": {"JDE_WEB": "https://jde.example.com:8080/jde"}}}, headers=h)
+        assert r.status_code == 200, r.text
+        assert tomllib.loads(app_toml.read_text(encoding="utf-8"))["app"]["external_urls"] == {"JDE_WEB": "https://jde.example.com:8080/jde"}
+        assert client.get("/admin/config/app/parsed", headers=h).json()["app"]["external_urls"] == {"JDE_WEB": "https://jde.example.com:8080/jde"}
+        # live at once — the save swaps app.state.settings, no restart
+        assert client.get("/api/external-urls", headers=h).json() == {"urls": {"JDE_WEB": "https://jde.example.com:8080/jde"}}
+        bad = client.put("/admin/config/app/parsed", json={"app": {"external_urls": {"JDE_WEB": "ftp://x"}}}, headers=h)
+        assert bad.status_code == 422

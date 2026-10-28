@@ -518,7 +518,9 @@ class OpenUrlAction(_PromptableMixin, _ActionBase):
     """Open an external URL — "Open in JDE" from a user row, a supplier's web site, a document. The
     ``url`` is a template: ``{NAME}`` takes a value of the firing context (a column of the row or a
     field of the form, a prompt field, a chain path ``{step.first_row.X}``), URL-encoded;
-    ``#LOGIN_USER#`` and the other built-ins too. A placeholder at the very start
+    ``#LOGIN_USER#`` and the other built-ins too; ``#URL.NAME#`` is the install's address named ``NAME``
+    in ``[app] external_urls`` (set in the App editor — the shipped file carries no customer address).
+    A placeholder at the very start
     is the address itself and goes in as it is. Only ``http(s)`` addresses and paths of this server
     are opened (the runtime checks the filled URL)."""
 

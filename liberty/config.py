@@ -137,6 +137,21 @@ class AppSettings(BaseModel):
     # (the SPA resolves its assets, API calls, socket and routes against it) and used as the
     # app's root_path (the URLs the server builds, e.g. the OIDC callback). Restart to apply.
     base_path: str = ""
+    # Named addresses of the systems this install links to — ``JDE_WEB = "https://jde:8080/jde"``.
+    # An ``open_url`` action / a ``url`` menu item writes ``#URL.JDE_WEB#/…`` instead of the address,
+    # so the shipped screens carry no customer address; each install sets its own here (App editor).
+    external_urls: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("external_urls")
+    @classmethod
+    def _check_external_urls(cls, v: dict[str, str]) -> dict[str, str]:
+        import re
+        for name, url in v.items():
+            if not re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
+                raise ValueError(f"external_urls: {name!r} — a name in upper case (letters, digits, _)")
+            if not str(url).strip().lower().startswith(("http://", "https://")):
+                raise ValueError(f"external_urls: {name} must be an http(s) address")
+        return {k: str(u).strip().rstrip("/") for k, u in v.items()}
 
     @field_validator("base_path")
     @classmethod

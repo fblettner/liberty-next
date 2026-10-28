@@ -11,6 +11,7 @@ import styled from '@emotion/styled'
 import {
   Save, Undo2, Settings as SettingsIcon, Sparkles, AlertTriangle, X,
   ChevronDown, ChevronRight, KeyRound, ShieldCheck, FileText, RefreshCw, Bell, ScrollText, Workflow, GitCompare, Lock, Plus,
+  Monitor, ExternalLink,
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
@@ -34,6 +35,8 @@ interface AppSection {
   tabs_close_on_app_switch: boolean
   tabs_max: number
   drill_inline: boolean
+  /** ``NAME → address`` — what ``#URL.NAME#`` becomes in an ``open_url`` / a ``url`` menu item. */
+  external_urls: Record<string, string>
   log_format: string
   /** null = the default file; '' = off. */
   log_file: string | null
@@ -193,7 +196,7 @@ const DEFAULTS: {
   app: AppSection; ai: AiSection; license: LicenseSection; oidc: OidcSection; notify: NotifySection; branding: BrandingFields;
   auth: AuthSection; jobs: JobsSection; changesets: ChangesetsSection;
 } = {
-  app: { name: 'Liberty Next', host: '0.0.0.0', port: 8000, log_level: 'info', hot_reload: false, default_language: 'en', oracle_thick: false, default_period: 'thisMonth', default_page_size: 50, dashboard_cache_seconds: 60, tabs_multi: true, tabs_close_on_app_switch: false, tabs_max: 5, drill_inline: false, log_format: 'text', log_file: null, log_file_max_mb: 10, log_file_backups: 5, base_path: '' },
+  app: { name: 'Liberty Next', host: '0.0.0.0', port: 8000, log_level: 'info', hot_reload: false, default_language: 'en', oracle_thick: false, default_period: 'thisMonth', default_page_size: 50, dashboard_cache_seconds: 60, tabs_multi: true, tabs_close_on_app_switch: false, tabs_max: 5, drill_inline: false, log_format: 'text', log_file: null, log_file_max_mb: 10, log_file_backups: 5, base_path: '', external_urls: {} },
   ai: {
     enabled: true, model: 'claude-opus-4-8', max_tokens: 8192, max_iterations: 8, system_prompt: '',
     thinking: false, effort: '', request_timeout: 120,
@@ -219,10 +222,10 @@ const DEFAULTS: {
   changesets: { enabled: true, pool: 'default', retention_days: 0 },
 }
 
-type SectionKey = 'app' | 'license' | 'ai' | 'oidc' | 'notify' | 'branding' | 'log' | 'auth' | 'jobs' | 'changesets' | 'readonly'
+type SectionKey = 'app' | 'display' | 'links' | 'license' | 'ai' | 'oidc' | 'notify' | 'branding' | 'log' | 'auth' | 'jobs' | 'changesets' | 'readonly'
 const OPEN_STORAGE_KEY = 'liberty:appbuilder:open'
 const DEFAULT_OPEN: Record<SectionKey, boolean> = {
-  app: true, license: false, ai: false, oidc: false, notify: false, branding: false,
+  app: true, display: false, links: false, license: false, ai: false, oidc: false, notify: false, branding: false,
   log: false, auth: false, jobs: false, changesets: false, readonly: false,
 }
 
@@ -236,7 +239,7 @@ function loadOpenState(): Record<SectionKey, boolean> {
 }
 
 export default function AppBuilder() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [app, setApp] = useState<AppSection>(DEFAULTS.app)
   const [ai, setAi] = useState<AiSection>(DEFAULTS.ai)
   const [license, setLicense] = useState<LicenseSection>(DEFAULTS.license)
@@ -363,10 +366,11 @@ export default function AppBuilder() {
 
   if (loading) return <SpinnerRing size={16} thickness={2} />
 
+  // each section with its title, so the page lists them in alphabetical order of the current language
   const renderSection = (
     key: SectionKey, title: string, icon: ReactNode, badge: string, body: ReactNode,
-  ) => (
-    <Panel>
+  ): { key: SectionKey; title: string; node: ReactNode } => ({ key, title, node: (
+    <Panel key={key}>
       <PanelHeader type="button" onClick={() => toggleSection(key)} aria-expanded={open[key]}>
         <span className="chev">{open[key] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
         <span className="icon">{icon}</span>
@@ -375,7 +379,7 @@ export default function AppBuilder() {
       </PanelHeader>
       {open[key] && <PanelBody>{body}</PanelBody>}
     </Panel>
-  )
+  ) })
 
   return (
     <Shell>
@@ -408,9 +412,10 @@ export default function AppBuilder() {
       )}
 
       <Stack>
-        {renderSection(
+        {[
+        renderSection(
           'app',
-          t('settings.app.appSection'),
+          t('settings.app.serverSection'),
           <SettingsIcon size={14} />,
           `${app.name} · :${app.port} · ${app.log_level}`,
           <>
@@ -432,6 +437,25 @@ export default function AppBuilder() {
                   <SearchSelect value={app.log_level} options={choices.log_levels.map((l) => ({ value: l, label: l }))} onChange={(v) => setApp({ ...app, log_level: v })} />
                 </div>
               </Field>
+            </RowFlex>
+            <Checkbox label={t('settings.app.hotReload')}
+              checked={app.hot_reload} onChange={(c) => setApp({ ...app, hot_reload: c })} />
+            <Checkbox label={t('settings.app.oracleThick')}
+              checked={app.oracle_thick} onChange={(c) => setApp({ ...app, oracle_thick: c })} />
+            <Field label={t('settings.app.basePath')}>
+              <Input value={app.base_path} onChange={(e) => setApp({ ...app, base_path: e.target.value })}
+                placeholder="/liberty" style={{ width: 220, fontFamily: fonts.mono }} />
+            </Field>
+          </>,
+        ),
+
+        renderSection(
+          'display',
+          t('settings.app.displaySection'),
+          <Monitor size={14} />,
+          `${app.default_language} · ${t(`period.${app.default_period}`)} · ${app.default_page_size}`,
+          <>
+            <RowFlex>
               <Field label={t('settings.app.defaultLanguage')}>
                 <Input value={app.default_language}
                   onChange={(e) => setApp({ ...app, default_language: e.target.value })} style={{ width: 110 }} />
@@ -466,18 +490,22 @@ export default function AppBuilder() {
             </RowFlex>
             <Checkbox label={t('settings.app.drillInline')}
               checked={app.drill_inline} onChange={(c) => setApp({ ...app, drill_inline: c })} />
-            <Checkbox label={t('settings.app.hotReload')}
-              checked={app.hot_reload} onChange={(c) => setApp({ ...app, hot_reload: c })} />
-            <Checkbox label={t('settings.app.oracleThick')}
-              checked={app.oracle_thick} onChange={(c) => setApp({ ...app, oracle_thick: c })} />
-            <Field label={t('settings.app.basePath')}>
-              <Input value={app.base_path} onChange={(e) => setApp({ ...app, base_path: e.target.value })}
-                placeholder="/liberty" style={{ width: 220, fontFamily: fonts.mono }} />
-            </Field>
           </>,
-        )}
+        ),
 
-        {renderSection(
+        renderSection(
+          'links',
+          t('settings.app.externalUrls'),
+          <ExternalLink size={14} />,
+          Object.keys(app.external_urls ?? {}).join(' · ') || '—',
+          <>
+            <Hint style={{ marginBottom: 6 }}>{t('settings.app.externalUrlsHint')}</Hint>
+            <ClaimsEditor value={app.external_urls ?? {}} onChange={(v) => setApp({ ...app, external_urls: v })}
+              addLabel={t('settings.app.externalUrlsAdd')} keyPlaceholder="JDE_WEB" valuePlaceholder="https://jde.example.com:8080/jde" arrow="=" valueWidth={340} />
+          </>,
+        ),
+
+        renderSection(
           'log',
           t('settings.app.logSection'),
           <ScrollText size={14} />,
@@ -510,9 +538,9 @@ export default function AppBuilder() {
               </>
             )}
           </>,
-        )}
+        ),
 
-        {renderSection(
+        renderSection(
           'auth',
           t('settings.app.authSection'),
           <ShieldCheck size={14} />,
@@ -545,9 +573,9 @@ export default function AppBuilder() {
               <NumField label={t('settings.app.authWindow')} value={auth.login_window_seconds} min={10} onChange={(v) => setAuth({ ...auth, login_window_seconds: v })} />
             </RowFlex>
           </>,
-        )}
+        ),
 
-        {renderSection(
+        renderSection(
           'jobs',
           t('settings.app.jobsSection'),
           <Workflow size={14} />,
@@ -565,9 +593,9 @@ export default function AppBuilder() {
               <Input value={jobs.files_dir ?? ''} onChange={(e) => setJobs({ ...jobs, files_dir: e.target.value || null })} style={{ fontFamily: fonts.mono }} />
             </Field>
           </>,
-        )}
+        ),
 
-        {renderSection(
+        renderSection(
           'changesets',
           t('settings.app.changesetsSection'),
           <GitCompare size={14} />,
@@ -581,9 +609,9 @@ export default function AppBuilder() {
               <NumField label={t('settings.app.changesetsRetention')} value={changesets.retention_days} min={0} onChange={(v) => setChangesets({ ...changesets, retention_days: v })} />
             </RowFlex>
           </>,
-        )}
+        ),
 
-        {renderSection(
+        renderSection(
           'license',
           t('settings.app.licenseSection'),
           <ShieldCheck size={14} />,
@@ -602,9 +630,9 @@ export default function AppBuilder() {
                 style={{ fontFamily: fonts.mono }} />
             </Field>
           </>,
-        )}
+        ),
 
-        {renderSection(
+        renderSection(
           'ai',
           t('settings.app.aiSection'),
           <Sparkles size={14} />,
@@ -709,9 +737,9 @@ export default function AppBuilder() {
                 onChange={(e) => setAi({ ...ai, web_fetch_max_uses: Number(e.target.value) || 0 })} style={{ width: 130 }} />
             </Field>
           </>,
-        )}
+        ),
 
-        {renderSection(
+        renderSection(
           'notify',
           t('settings.app.notifySection'),
           <Bell size={14} />,
@@ -764,9 +792,9 @@ export default function AppBuilder() {
               </Field>
             </RowFlex>
           </>,
-        )}
+        ),
 
-        {renderSection(
+        renderSection(
           'oidc',
           t('settings.app.oidcSection'),
           <KeyRound size={14} />,
@@ -837,9 +865,9 @@ export default function AppBuilder() {
                 style={{ fontFamily: fonts.mono, width: 320 }} />
             </Field>
           </>,
-        )}
+        ),
 
-        {renderSection(
+        renderSection(
           'branding',
           t('settings.app.brandingSection'),
           <FileText size={14} />,
@@ -899,9 +927,9 @@ export default function AppBuilder() {
               </Field>
             </RowFlex>
           </>,
-        )}
+        ),
 
-        {readonly.length > 0 && renderSection(
+        readonly.length > 0 && renderSection(
           'readonly',
           t('settings.app.readonlySection'),
           <Lock size={14} />,
@@ -918,7 +946,11 @@ export default function AppBuilder() {
               ))}
             </ReadonlyGrid>
           </>,
-        )}
+        ),
+        ].filter((x) => !!x)
+          // the read-only list stays last
+          .sort((x, y) => Number(x.key === 'readonly') - Number(y.key === 'readonly') || x.title.localeCompare(y.title, i18n.language))
+          .map((x) => x.node)}
       </Stack>
     </Shell>
   )
@@ -1005,17 +1037,21 @@ function PoolSelect({ value, pools, onChange }: { value: string; pools?: string[
   )
 }
 
-/** ``attribute → claim`` rows (``[oidc] attribute_claims``): the data-scope attributes read from the token. */
-function ClaimsEditor({ value, onChange, addLabel }: { value: Record<string, string>; onChange: (v: Record<string, string>) => void; addLabel: string }) {
+/** ``key → value`` rows — ``[oidc] attribute_claims`` (the data-scope attributes read from the token,
+ *  the defaults below) and ``[app] external_urls`` (named addresses). */
+function ClaimsEditor({ value, onChange, addLabel, keyPlaceholder = 'company', valuePlaceholder = 'org_id', arrow = '←', valueWidth = 220 }: {
+  value: Record<string, string>; onChange: (v: Record<string, string>) => void; addLabel: string
+  keyPlaceholder?: string; valuePlaceholder?: string; arrow?: string; valueWidth?: number
+}) {
   const rows = Object.entries(value)
   const setRow = (i: number, k: string, c: string) => onChange(Object.fromEntries(rows.map(([rk, rc], j) => (j === i ? [k, c] : [rk, rc]))))
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {rows.map(([k, c], i) => (
         <RowFlex key={i}>
-          <Input value={k} onChange={(e) => setRow(i, e.target.value, c)} placeholder="company" style={{ width: 180, fontFamily: fonts.mono }} />
-          <span style={{ color: colors.text.muted }}>←</span>
-          <Input value={c} onChange={(e) => setRow(i, k, e.target.value)} placeholder="org_id" style={{ width: 220, fontFamily: fonts.mono }} />
+          <Input value={k} onChange={(e) => setRow(i, e.target.value, c)} placeholder={keyPlaceholder} style={{ width: 180, fontFamily: fonts.mono }} />
+          <span style={{ color: colors.text.muted }}>{arrow}</span>
+          <Input value={c} onChange={(e) => setRow(i, k, e.target.value)} placeholder={valuePlaceholder} style={{ width: valueWidth, fontFamily: fonts.mono }} />
           <Button $variant="ghost" $size="sm" onClick={() => onChange(Object.fromEntries(rows.filter((_, j) => j !== i)))}><X size={13} /></Button>
         </RowFlex>
       ))}

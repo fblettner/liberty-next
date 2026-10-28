@@ -122,6 +122,15 @@
   vérifié de nouveau sur l'URL remplie. Un `open_url` seul dans un menu de ligne part de la poignée de la ligne. Une
   entrée de menu `url` ouvre une adresse dans un nouvel onglet (affichée sauf refus du menu). Les éditeurs d'actions la
   proposent.
+- Liberty Next → Administrer → App : les réglages `[app]` en trois groupes — Serveur (nom, hôte, port, niveau de
+  journal, rechargement à chaud, mode Oracle thick, sous-chemin), Affichage (langue et période par défaut, taille de
+  page, cache des tableaux de bord, onglets, explorations) et Adresses externes ; app.toml inchangé. La page range
+  ses sections par ordre alphabétique (de la langue courante), la liste en lecture seule du déploiement en dernier.
+- Adresses externes (`[app] external_urls`, Liberty Next → Administrer → App) : les adresses nommées des systèmes vers
+  lesquels l'installation renvoie — `JDE_WEB = "https://jde:8080/jde"` — employées en `#URL.JDE_WEB#` au début d'un
+  `open_url` / d'une entrée de menu `url`, pour que les écrans livrés ne portent aucune adresse client ; servies aux
+  utilisateurs connectés (`/api/external-urls`), actives dès l'enregistrement. Une adresse non renseignée ne donne
+  aucune URL (refusée, jamais ouverte comme chemin local).
 - Catalogues de modules : le `row_menu` d'un écran (comme dans screens.toml) ; un paramètre `{ÉLÉMENT}` d'un `open_url`
   nomme un élément de données et devient la colonne physique (`{AN8}` → `{ABAN8}`).
 

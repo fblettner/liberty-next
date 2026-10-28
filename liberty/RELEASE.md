@@ -101,6 +101,14 @@
   (default on), the prompt-before-fire of `navigate`. Only http(s) addresses and paths of this server are opened —
   refused at load and checked again on the filled URL. A lone `open_url` in a row menu fires from the row handle. A
   `url` menu item opens an address in a new tab (shown unless the menu denies it). The action editors offer it.
+- Liberty Next → Administer → App: the `[app]` settings in three groups — Server (name, host, port, log level, hot
+  reload, Oracle thick mode, base path), Display (default language and period, page size, dashboard cache, tabs,
+  drill-downs) and External addresses; app.toml unchanged. The page lists its sections in alphabetical order
+  (of the current language), the read-only deployment list last.
+- External addresses (`[app] external_urls`, Liberty Next → Administer → App): named addresses of the systems an
+  install links to — `JDE_WEB = "https://jde:8080/jde"` — used as `#URL.JDE_WEB#` at the start of an `open_url` / a
+  `url` menu item, so shipped screens carry no customer address; served to signed-in users (`/api/external-urls`),
+  live on save. An address the install did not set leaves no URL (refused, never opened as a local path).
 - Module catalogues: a screen's `row_menu` (as in screens.toml); an `open_url`'s `{ITEM}` placeholder names a data item
   and becomes the physical column (`{AN8}` → `{ABAN8}`).
 

@@ -189,6 +189,15 @@ def _app_tree(
     return out
 
 
+@router.get("/external-urls", summary="The install's external addresses")
+async def external_urls(request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
+    """``{urls: {NAME: address}}`` — ``[app] external_urls``, what a ``#URL.NAME#`` placeholder of an
+    ``open_url`` action or a ``url`` menu item becomes in the browser. Signed-in only: an internal
+    address is not for the sign-in page."""
+    del principal
+    return {"urls": dict(request.app.state.settings.app.external_urls)}
+
+
 @router.get(
     "/menus",
     summary="List menus",
