@@ -8,6 +8,8 @@ import { ModalsProvider } from "./common/Modals";
 import { SioProvider } from "./sio/SioContext";
 import { BrandingProvider } from "./branding/BrandingContext";
 import App from "./App";
+import { basePath } from "./api/client";
+import { routerBasename } from "./services/basePath";
 import "./i18n";
 import "./index.css";
 
@@ -25,7 +27,7 @@ window.addEventListener("vite:preloadError", (event) => {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={routerBasename(basePath())}>
       <BrandingProvider>
         <ModalsProvider>
           <AuthProvider>

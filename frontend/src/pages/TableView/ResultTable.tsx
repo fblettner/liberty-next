@@ -22,7 +22,7 @@ import * as XLSX from 'xlsx'
 import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3, Zap, FileSpreadsheet, Trash2, Lock } from 'lucide-react'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { Action, ColumnGroup, PromptField, ScreenDetail } from '../../types/screens'
-import { api, ApiError, authHeaders } from '../../api/client'
+import { api, apiDownload, ApiError } from '../../api/client'
 import { Banner, Checkbox, ErrorDetails, SearchSelect } from '../../common'
 import { DataTable } from '../../common/DataTable'
 import type { SharedGridView } from '../../services/gridViews'
@@ -89,14 +89,17 @@ const filterPropsFor = (
   options?: { value: string; label: string; mono?: string; cells?: string[] }[],
   align?: FilterMeta['align'],
   cellColumns?: { label: string; filterable?: boolean }[],
+  wrap?: boolean,
 ) =>
   // enum / lookup compare a trimmed code against the (possibly CHAR-padded) raw value → trim-tolerant
-  // ``selectFilterFn``. Boolean keeps the built-in strict ``equals``.
+  // ``selectFilterFn``; an enum (a short list) picks several values and takes typed codes outside
+  // the list, a lookup (often thousands of rows, a virtualized table) stays single. Boolean keeps
+  // the built-in strict ``equals``.
   kind === 'enum' || kind === 'lookup'
-    ? { filterFn: selectFilterFn, meta: { filter: { kind, options, cellColumns }, align } as FilterMeta }
+    ? { filterFn: selectFilterFn, meta: { filter: { kind, options, cellColumns, multi: kind === 'enum', custom: kind === 'enum' }, align, wrap } as FilterMeta }
     : kind === 'boolean'
       ? { filterFn: 'equals' as const, meta: { filter: { kind, options }, align } as FilterMeta }
-      : { filterFn: genericFilterFn, meta: { filter: { kind }, align } as FilterMeta }
+      : { filterFn: genericFilterFn, meta: { filter: { kind }, align, wrap } as FilterMeta }
 
 // (``withUpper`` / ``originalKeys`` — the UPPERCASE-key duplication + the pre-edit
 // ``<NAME>_ORIGINAL`` WHERE binds — now live in ``saveScreenRow`` / ``dialogHelpers``, the single
@@ -691,29 +694,9 @@ export function ResultTable({
     if (!screen) return
     setExportBusy(true); setActionStatus(null)
     try {
-      const resp = await fetch(
-        `/api/screens/${encodeURIComponent(screen.app)}/${encodeURIComponent(screen.id)}/export`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders() },
-          body: JSON.stringify({}),
-        },
-      )
-      if (!resp.ok) {
-        const detail = await resp.text().catch(() => '')
-        throw new Error(`HTTP ${resp.status} ${resp.statusText} — ${detail.slice(0, 200)}`)
-      }
-      // Pull the filename out of the Content-Disposition (the backend names it ``screen.xlsx``
-      // / ``screen.zip`` / a per-group ``screen_<value>.xlsx``); fall back to a sensible default.
-      const dispo = resp.headers.get('Content-Disposition') || ''
-      const m = /filename="([^"]+)"/.exec(dispo)
-      const filename = m?.[1] || `${screen.id}.xlsx`
-      const blob = await resp.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url; a.download = filename
-      document.body.appendChild(a); a.click()
-      document.body.removeChild(a); URL.revokeObjectURL(url)
+      // The backend names the file (``screen.xlsx`` / ``screen.zip`` / a per-group
+      // ``screen_<value>.xlsx``) in its Content-Disposition; this is the fallback.
+      await apiDownload(`/api/screens/${encodeURIComponent(screen.app)}/${encodeURIComponent(screen.id)}/export`, `${screen.id}.xlsx`, { json: {} })
     } catch (e) {
       setActionStatus({ message: (e as Error).message, tone: 'error' })
     } finally {
@@ -1588,7 +1571,7 @@ export function ResultTable({
           id: `${c.name}__lookup`,
           header: colHeader(c),
           accessorFn: (row) => { const v = row[c.name]; return v === null || v === undefined ? '' : (resolveLabel(row as DataRow, v) ?? String(v)) },
-          ...filterPropsFor(uni ? 'enum' : 'lookup', uni ? uni.byLabel : lookupOptsByLabel, undefined, uni ? undefined : lookupCellColumns(r)),
+          ...filterPropsFor(uni ? 'enum' : 'lookup', uni ? uni.byLabel : lookupOptsByLabel, undefined, uni ? undefined : lookupCellColumns(r), c.wrap),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
             // derived from the "(ID)" column — read-only; reflects the *current* (possibly edited) code
@@ -1637,7 +1620,7 @@ export function ResultTable({
             if (aw && aw.rule?.kind === 'enum') return aw.rule.values.find((x) => x.value === String(v))?.label || String(v)
             return emap?.get(String(v)) ?? String(v)
           },
-          ...filterPropsFor('enum', uni ? uni.byLabel : optsByLabel),
+          ...filterPropsFor('enum', uni ? uni.byLabel : optsByLabel, undefined, undefined, c.wrap),
           cell: (info) => {
             const g = grouped(info, align); if (g) return g
             // Derived from the "(ID)" column — read-only; reflects the current (possibly edited) code.
@@ -1656,7 +1639,7 @@ export function ResultTable({
       const kind = filterKindOf(c)
       // A rules_when column filters on the UNION of its branch options (mixed boolean/enum/lookup) via
       // a plain select over codes; otherwise the base rule's filter kind.
-      const fp = filterPropsFor(uni ? 'enum' : kind, uni ? uni.byCode : undefined, align)
+      const fp = filterPropsFor(uni ? 'enum' : kind, uni ? uni.byCode : undefined, align, undefined, c.wrap)
       out.push({
         id: c.name,
         header: colHeader(c),
@@ -1851,6 +1834,7 @@ export function ResultTable({
         // screen (an ad-hoc query run).
         tableId={embedded ? undefined : (tableIdOverride ?? (screen ? `screen:${screen.app}:${screen.id}` : `sql:${connector}:${query}`))}
         sharedViews={embedded ? undefined : sharedViews}
+        initialPageSize={screen?.page_size ?? undefined}
         renderDetail={effectiveRenderDetail}
         chromeless={embedded}
         getSubRows={getSubRows}

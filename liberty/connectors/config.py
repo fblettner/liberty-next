@@ -399,6 +399,7 @@ class ColumnHint(BaseModel):
         json_schema_extra={"x_group": "Display", "x_enum_ref": "COLUMN_ALIGN"},
     )
     width: int | None = Field(default=None, json_schema_extra={"x_group": "Display"}, description="Fixed column width in pixels (blank = auto-size).")
+    wrap: bool = Field(default=False, json_schema_extra={"x_group": "Display"}, description="Wrap long text over several lines in the grid (default: one line, cut with an ellipsis).")
     drill: str | None = Field(
         default=None,
         json_schema_extra={"x_group": "Display", "x_enum_ref": "ROW_MENU_ACTIONS"},

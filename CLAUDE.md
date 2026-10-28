@@ -250,7 +250,9 @@ main.tsx / App.tsx     providers (Branding → Modals → Auth → Sio → Works
                        <TabRoute> markers; screens render inside components/TabHost (every open tab
                        stays mounted, each inside an ErrorBoundary + Suspense)
 api/client.ts          fetch wrapper: X-Liberty-Lang / X-Liberty-Pool headers, single-flight 401
-                       refresh, streamSSE (AI) and streamNDJSON (SQL rows)
+                       refresh, streamSSE (AI) and streamNDJSON (SQL rows); apiFetch / apiDownload /
+                       apiUpload for files; every path through resolveApiPath (the <base href> the
+                       server writes from [app] base_path — never a raw fetch to an absolute path)
 auth/ workspace/ tabs/ sio/ branding/   the contexts (AuthContext, WorkspaceContext = connectors +
                        menus + screens + license + current app / pool, TabsContext, SioContext)
 common/                shared primitives: Button Card Input SearchSelect Checkbox FileInput Tag Banner Spinner

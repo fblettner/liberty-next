@@ -2,7 +2,8 @@
 // panel look, portaled, flips above near the viewport edge). The trigger shows the picks as chips
 // (+N past a few); a pick toggles and keeps the panel open; "Select shown" adds every filtered
 // option, Clear empties the selection; ``group`` headers and ``sort`` as in SearchSelect; Escape
-// closes. Not virtualized: for lists of a few hundred.
+// closes; ``allowCustom`` adds the typed text as a value (Enter, or the row under the list) when it
+// matches no option. Not virtualized: for lists of a few hundred.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
@@ -54,9 +55,16 @@ const Item = styled.button<{ $on: boolean }>`
   & .mono { font-family: ${fonts.mono}; color: ${colors.text.primary}; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   & .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 `
+const CreateRow = styled.button`
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px ${PAD_X}; border: none;
+  border-top: 1px solid ${colors.border}; background: transparent; cursor: pointer; text-align: left;
+  color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  & .mono { font-family: ${fonts.mono}; color: ${colors.text.primary}; }
+  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+`
 const Empty = styled.div`padding: 10px ${PAD_X}; color: ${colors.text.muted}; font-size: ${fontSize.sm};`
 
-export function SearchSelectMulti({ value, onChange, options: given, placeholder, sort, size, disabled, maxChips = 3 }: {
+export function SearchSelectMulti({ value, onChange, options: given, placeholder, sort, size, disabled, allowCustom, maxChips = 3 }: {
   value: string[]
   onChange: (v: string[]) => void
   options: SearchSelectOption[]
@@ -64,6 +72,8 @@ export function SearchSelectMulti({ value, onChange, options: given, placeholder
   sort?: boolean
   size?: 'sm' | 'md'
   disabled?: boolean
+  /** The typed text can be added as a value that is not in the options. */
+  allowCustom?: boolean
   /** Chips shown on the trigger before "+N". */
   maxChips?: number
 }) {
@@ -108,14 +118,20 @@ export function SearchSelectMulti({ value, onChange, options: given, placeholder
     return n ? options.filter((o) => `${o.label} ${o.value} ${o.mono ?? ''}`.toLowerCase().includes(n)) : options
   }, [q, options])
   const toggle = (v: string) => onChange(picked.has(v) ? value.filter((x) => x !== v) : [...value, v])
-  const onKey = (e: React.KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+  const custom = q.trim()
+  const showCreateRow = !!allowCustom && custom !== '' && !picked.has(custom) && !options.some((o) => o.value === custom)
+  const addCustom = () => { if (showCreateRow) { onChange([...value, custom]); setQ('') } }
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') setOpen(false)
+    else if (e.key === 'Enter' && allowCustom) { e.preventDefault(); addCustom() }
+  }
 
   const labelOf = (v: string) => options.find((o) => o.value === v)?.label ?? v
   let lastGroup: string | undefined
   const panel = open && pos ? (
     <Panel ref={panelRef} style={{ top: pos.top, left: pos.left, minWidth: Math.max(260, pos.width), maxHeight: pos.maxHeight }}>
       <SearchRow>
-        <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} placeholder={t('table.search')} />
+        <input ref={searchRef} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} placeholder={allowCustom ? t('common.searchOrType') : t('table.search')} />
         <button type="button" onClick={() => onChange([...value, ...filtered.map((o) => o.value).filter((v) => !picked.has(v))])}>{t('common.selectShown')}</button>
         {value.length > 0 && <button type="button" onClick={() => onChange([])}>{t('common.clear')}</button>}
       </SearchRow>
@@ -132,8 +148,13 @@ export function SearchSelectMulti({ value, onChange, options: given, placeholder
             </Item>
           )]
         })}
-        {filtered.length === 0 && <Empty>{t('table.noMatches')}</Empty>}
+        {filtered.length === 0 && !showCreateRow && <Empty>{t('table.noMatches')}</Empty>}
       </List>
+      {showCreateRow && (
+        <CreateRow type="button" onClick={addCustom}>
+          {t('common.useCustom')} <span className="mono">{custom}</span>
+        </CreateRow>
+      )}
     </Panel>
   ) : null
 

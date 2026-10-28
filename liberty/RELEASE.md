@@ -33,6 +33,21 @@
 - A placeholder picker beside templated fields: the { } button lists the tokens and inserts the
   one picked at the caret — a notification rule's subject, body and link (the job or screen
   event's fields), a notify step's subject and body.
+- Grid column filters: a coded column (an enum) picks several values at once and takes a code
+  typed beyond its list; a lookup column keeps its single picker. A saved view holding one value
+  still opens.
+- Grids: `wrap = true` on a screen column wraps long text over several lines instead of cutting
+  it; a screen's `page_size` sets its grid's rows per page (else `[app] default_page_size`); the
+  rows-per-page picker is the themed dropdown.
+- Views menu: "Reset to shipped" brings the grid back to the screen's default shared view, else its
+  base layout.
+- Serving under a sub-path behind a reverse proxy: `[app] base_path = "/liberty"` (restart) — the
+  page, its assets, the API, downloads, the live socket and the links resolve under it, whether
+  the proxy strips the prefix or not; the URLs the server builds (the single sign-on callback)
+  carry it. Every download and upload now goes through the API client (the session refresh
+  applies).
+- Fix: nomaflow → Jobs → Export downloads the job's package again (it called a wrong address
+  without the session and did nothing).
 
 ## 7.0.62 — unreleased
 

@@ -165,6 +165,8 @@ export interface Column {
    *  type-neutral value (blank / 0) and its DD default/rule is suppressed. Blank → always written. */
   write_when?: { field: string; value: string | string[] } | { field: string; value: string | string[] }[]
   width?: number
+  /** Wrap long text over several lines in the grid (`ColumnHint.wrap`). */
+  wrap?: boolean
   align?: 'left' | 'right' | 'center' | string
   format?: string
   /** The row-menu action a click on the value fires (`ColumnHint.drill`): the cell renders as a link. */

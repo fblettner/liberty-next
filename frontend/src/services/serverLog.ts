@@ -1,6 +1,6 @@
 // The Server log page's calls and plain helpers (no React): the search, the export / download,
 // the levels per module.
-import { api, authHeaders } from '../api/client'
+import { api, apiDownload } from '../api/client'
 
 export interface LogEntry { ts: string; level: string; logger: string; msg: string; request_id?: string; exc?: string }
 export interface LogSearch {
@@ -26,13 +26,8 @@ export const getLevels = () => api.get<LogLevels>('/admin/logs/levels')
 export const setLevels = (levels: Record<string, string>, persist: boolean) => api.post<LogLevels>('/admin/logs/levels', { levels, persist })
 
 /** A file from *url* saved under the name the server gives (Content-Disposition), else *fallback*. */
-export async function download(url: string, fallback: string): Promise<void> {
-  const res = await fetch(url, { headers: { ...authHeaders() } })
-  if (!res.ok) throw new Error(`download failed: ${res.status}`)
-  const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? fallback
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(await res.blob()); a.download = name; a.click()
-  URL.revokeObjectURL(a.href)
+export function download(url: string, fallback: string): Promise<void> {
+  return apiDownload(url, fallback)
 }
 
 /** 1536 → "1.5 KB", 3_200_000 → "3.1 MB". */

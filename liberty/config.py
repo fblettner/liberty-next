@@ -15,7 +15,7 @@ from pathlib import Path
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 DEFAULT_APP_CONFIG = Path("config/app.toml")
 
@@ -132,6 +132,17 @@ class AppSettings(BaseModel):
     log_levels: dict[str, str] = Field(default_factory=dict)
     # Built frontend (Vite `dist/`) served as static; empty or missing dir → not mounted.
     static_dir: str = "frontend/dist"
+    # The URL prefix the app is served under behind a reverse proxy that strips it (``/liberty``
+    # for https://host/liberty/); blank = the site root. Written into index.html's <base href>
+    # (the SPA resolves its assets, API calls, socket and routes against it) and used as the
+    # app's root_path (the URLs the server builds, e.g. the OIDC callback). Restart to apply.
+    base_path: str = ""
+
+    @field_validator("base_path")
+    @classmethod
+    def _norm_base_path(cls, v: str) -> str:
+        v = (v or "").strip().strip("/")
+        return f"/{v}" if v else ""
     # When true, the server watches the config TOML files (menus / screens / dictionary /
     # charts / dashboards / jobs / the [connectors.*] half of connectors.toml) and reloads
     # the matching subsystem on change. Off by default — operators get the explicit

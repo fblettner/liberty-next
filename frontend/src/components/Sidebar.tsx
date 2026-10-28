@@ -10,6 +10,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { SlidersHorizontal, Activity, ChevronLeft, ChevronRight, Wand2, PanelLeftDashed } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
+import { resolveApiPath } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
 import SidebarMenu from './SidebarMenu'
@@ -252,7 +253,7 @@ export default function Sidebar() {
     <Nav ref={navRef} $collapsed={collapsed} $floating={floating} onClickCapture={onPick}
       onMouseEnter={floating ? () => hoverTo(true) : undefined} onMouseLeave={floating ? () => hoverTo(false) : undefined}>
       <Brand $collapsed={collapsed}>
-        <BrandMark><img src="/favicon.svg" alt={t('app.title')} /></BrandMark>
+        <BrandMark><img src={resolveApiPath("/favicon.svg")} alt={t('app.title')} /></BrandMark>
         {!collapsed && <BrandName>{t('app.title')}</BrandName>}
       </Brand>
 

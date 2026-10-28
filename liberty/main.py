@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.staticfiles import StaticFiles
@@ -66,15 +66,50 @@ class SPAStaticFiles(StaticFiles):
     """Serve a Vite build, falling back to ``index.html`` for client-side routes
     (so a hard refresh on ``/connectors`` doesn't 404). Mounted at ``/`` *after*
     the API routers, so it never shadows ``/api``, ``/auth``, ``/ai``, ``/admin``,
-    ``/health``, ``/info`` or ``/docs``."""
+    ``/health``, ``/info`` or ``/docs``. With a *base_path* (``[app] base_path``),
+    index.html goes out with its ``<base href>`` set to it."""
+
+    def __init__(self, *args: Any, base_path: str = "", **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.base_path = base_path
+        self._index: str | None = None
+
+    def _index_response(self) -> Response:
+        if self._index is None:
+            html = (Path(str(self.directory)) / "index.html").read_text(encoding="utf-8")
+            self._index = html.replace('<base href="/"', f'<base href="{self.base_path}/"', 1)
+        return HTMLResponse(self._index, headers={"Cache-Control": "no-cache"})
 
     async def get_response(self, path, scope):
+        if self.base_path and path in ("", ".", "index.html"):
+            return self._index_response()
         try:
             return await super().get_response(path, scope)
         except StarletteHTTPException as exc:
             if exc.status_code == 404:
+                if self.base_path:
+                    return self._index_response()
                 return await super().get_response("index.html", scope)
             raise
+
+
+class RootPathMiddleware:
+    """Serve under ``[app] base_path``: set the ASGI ``root_path`` on every HTTP / WebSocket
+    request that doesn't carry one from the server already, and drop the prefix from the path
+    when the proxy kept it — so the routes (and the Socket.IO wrapper, which matches the raw
+    path) see the same path whether the proxy strips the prefix or not."""
+
+    def __init__(self, app: Any, root_path: str) -> None:
+        self.app = app
+        self.root_path = root_path
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] in ("http", "websocket") and not scope.get("root_path"):
+            path = scope["path"]
+            if path == self.root_path or path.startswith(self.root_path + "/"):
+                path = path[len(self.root_path):] or "/"
+            scope = {**scope, "root_path": self.root_path, "path": path, "raw_path": path.encode()}
+        await self.app(scope, receive, send)
 
 
 def _build_token_service(cfg: AuthSettings) -> TokenService:
@@ -642,6 +677,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Outermost: every response carries X-Request-ID (the caller's, or a fresh one) and every log
     # line emitted while handling the request carries the same id.
     app.add_middleware(RequestIdMiddleware)
+    if settings.app.base_path:
+        # Behind a proxy serving the app under a sub-path: the URLs the server builds (url_for —
+        # the OIDC callback, the docs' openapi.json) carry the prefix, and a proxy that keeps the
+        # prefix reaches the same routes. (FastAPI's own ``root_path`` argument is deprecated in
+        # favour of the server's; this sets it in the scope whichever way uvicorn is started.)
+        app.add_middleware(RootPathMiddleware, root_path=settings.app.base_path)
     # Finish wiring the Socket.IO layer now that the FastAPI app exists. This
     # runs at create_app time (before the lifespan), so `LibertySio.__init__`
     # registers the event handlers on a real ``AsyncServer`` that's about to be
@@ -776,7 +817,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         dist = Path(settings.app.static_dir)
         if (dist / "index.html").is_file():
             app.state.frontend_dir = str(dist)
-            app.mount("/", SPAStaticFiles(directory=dist, html=True), name="spa")
+            app.mount("/", SPAStaticFiles(directory=dist, html=True, base_path=settings.app.base_path), name="spa")
 
     # ── Socket.IO ASGI wrapping ─────────────────────────────────────────────
     # Wrap the FastAPI app with python-socketio's ASGI shim — every request whose
@@ -790,6 +831,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # working unchanged — they hit the FastAPI surface directly (no SIO).
     from liberty.sio import make_asgi_app
     app.asgi_app = make_asgi_app(sio_layer.sio, app)   # type: ignore[attr-defined]
+    if settings.app.base_path:
+        # Outermost too, so a prefix the proxy kept is gone before the Socket.IO wrapper looks.
+        app.asgi_app = RootPathMiddleware(app.asgi_app, settings.app.base_path)   # type: ignore[attr-defined]
 
     return app
 

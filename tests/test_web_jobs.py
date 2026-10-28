@@ -1405,4 +1405,4 @@ def test_web_manifest_is_public_and_named_after_the_instance(env) -> None:
         r = client.get("/manifest.webmanifest")
         assert r.status_code == 200 and r.headers["content-type"].startswith("application/manifest+json")
         m = r.json()
-        assert m["name"] == "Liberty Next" and m["start_url"] == "/" and m["icons"][0]["src"] == "/favicon.svg"
+        assert m["name"] == "Liberty Next" and m["start_url"] == "./" and m["icons"][0]["src"] == "favicon.svg"

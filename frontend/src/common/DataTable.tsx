@@ -48,6 +48,7 @@ import {
 } from 'lucide-react'
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
 import { ColumnFilterControl, type FilterMeta } from './DataTableFilter'
+import { SearchSelect } from './SearchSelect'
 import {
   listGridViews, saveGridView, deleteGridView, sharedToGridView,
   loadLastView, saveLastView,
@@ -332,7 +333,13 @@ const Tr = styled.tr`
   &.dt-row-deleted td { background: ${colors.red.bg}; box-shadow: inset 3px 0 0 ${colors.red.main}; text-decoration: line-through; }
 `
 const GroupTr = styled.tr` td { background: ${colors.bg.card}; font-family: ${fonts.sans}; }`
-const Td = styled.td`padding: 5px 12px; color: ${colors.text.secondary}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`
+const Td = styled.td<{ $wrap?: boolean }>`
+  padding: 5px 12px; color: ${colors.text.secondary}; overflow: hidden;
+  ${({ $wrap }) => ($wrap ? 'white-space: pre-wrap; overflow-wrap: anywhere;' : 'white-space: nowrap; text-overflow: ellipsis;')}
+`
+// A wrapping column with no width of its own is held to this, so its text wraps instead of
+// widening the column to the longest line.
+const WRAP_MAX_W = 360
 const GroupCellBtn = styled.button`
   display: inline-flex; align-items: center; gap: 6px; border: none; background: none; cursor: pointer;
   color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; font-weight: 600;
@@ -359,11 +366,7 @@ const GroupCount = styled.span`color: ${colors.text.muted}; font-weight: 400;`
 const Empty = styled.div`padding: 36px; text-align: center; color: ${colors.text.muted}; font-size: ${fontSize.base}; font-family: ${fonts.sans};`
 const PaginationRow = styled.div`display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px 0; flex-wrap: wrap;`
 const PagLeft = styled.div`display: flex; align-items: center; gap: 10px; color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};`
-const PageSizeSelect = styled.select`
-  background: transparent; border: 1px solid ${colors.border}; border-radius: ${radius.sm};
-  color: ${colors.text.secondary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; padding: 2px 6px; cursor: pointer;
-  option { background: ${colors.bg.dropdown}; color: ${colors.text.secondary}; }
-`
+const PageSizeBox = styled.div`display: flex; width: 104px;`
 const PagRight = styled.div`display: flex; align-items: center; gap: 3px;`
 const PagBtn = styled.button<{ $active?: boolean }>`
   display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; padding: 0 6px;
@@ -711,6 +714,7 @@ export function DataTable<T extends object>({
 
   const isInternal = (c: { columnDef: { meta?: unknown } }) => !!(c.columnDef.meta as FilterMeta | undefined)?.internal
   const colAlign = (c: { columnDef: { meta?: unknown } }) => (c.columnDef.meta as FilterMeta | undefined)?.align
+  const colWrap = (c: { columnDef: { meta?: unknown } }) => !!(c.columnDef.meta as FilterMeta | undefined)?.wrap
   const exportRows = (allColumns = false) => {
     // ``allColumns`` exports every data column incl. the ones hidden by default — no need to unhide
     // them in the Columns picker, export, then re-hide. Internal columns (select / status) stay out.
@@ -895,8 +899,10 @@ export function DataTable<T extends object>({
         {cells.map((cell) => (
           <Td
             key={cell.id}
+            $wrap={!cell.getIsGrouped() && colWrap(cell.column)}
             style={{
-              ...(cell.column.columnDef.size != null ? { width: cell.column.getSize(), minWidth: cell.column.columnDef.minSize } : null),
+              ...(cell.column.columnDef.size != null ? { width: cell.column.getSize(), minWidth: cell.column.columnDef.minSize }
+                : !cell.getIsGrouped() && colWrap(cell.column) ? { maxWidth: WRAP_MAX_W } : null),
               paddingLeft: cell.getIsGrouped() ? `${12 + row.depth * 16}px`
                 : (getSubRows && row.depth > 0 && cell.id === firstCellId) ? `${12 + row.depth * 16}px` : undefined,
               textAlign: colAlign(cell.column),
@@ -971,6 +977,13 @@ export function DataTable<T extends object>({
                       {t('table.saveAs')}
                     </MiniLink>
                   )}
+                  <MiniLink type="button" title={t('table.resetToShippedHint')} onClick={() => {
+                    setViewOpen(false)
+                    const def = sharedList.find((sv) => sv.default)
+                    selectView(def ? { scope: 'shared', name: def.name } : null)
+                  }}>
+                    {t('table.resetToShipped')}
+                  </MiniLink>
                 </MenuHead>
                 {/* The base screen layout isn't offered as a pickable view — it's just the implicit
                     fallback when no shared default / saved view applies (the Columns-menu "Reset"
@@ -1226,14 +1239,17 @@ export function DataTable<T extends object>({
       <PaginationRow>
         <PagLeft>
           <span>{t('table.rowsPerPage')}</span>
-          <PageSizeSelect value={pageSize} onChange={(e) => { table.setPageSize(+e.target.value); table.setPageIndex(0) }}>
-            {PAGE_SIZE_OPTIONS.map((n) => (
+          <PageSizeBox>
+            <SearchSelect size="sm" value={String(pageSize)}
+              onChange={(v) => { if (v) { table.setPageSize(+v); table.setPageIndex(0) } }}
               // ``PAGE_SIZE_ALL`` is the sentinel for "no pagination — show every loaded row".
               // The virtualizer keeps the DOM small even at this size; the operator gets a
-              // single scrollable list instead of paging through 50-row chunks.
-              <option key={n} value={n}>{n === PAGE_SIZE_ALL ? t('table.showAll') : n}</option>
-            ))}
-          </PageSizeSelect>
+              // single scrollable list instead of paging through 50-row chunks. A screen's own
+              // page size (``page_size``) joins the list when it isn't one of the steps.
+              options={(PAGE_SIZE_OPTIONS.includes(pageSize) ? PAGE_SIZE_OPTIONS : [...PAGE_SIZE_OPTIONS, pageSize].sort((a, b) => a - b))
+                .map((n) => ({ value: String(n), label: n === PAGE_SIZE_ALL ? t('table.showAll') : String(n) }))}
+            />
+          </PageSizeBox>
           <span>
             {t('table.showing', { from, to, total: totalRows })}
             {grouping.length > 0 ? ` · ${t('table.rowsTotal', { count: filteredLeafCount })}` : ''}

@@ -1181,6 +1181,10 @@ class Screen(BaseModel):
         default=None,
         description="Cap how many rows this screen's read query returns. Blank = use the connector's / pool's default.",
     )
+    page_size: int | None = Field(
+        default=None, ge=1,
+        description="Rows per page in this screen's grid. Blank = the app's default ([app] default_page_size); a saved view's own page size still wins.",
+    )
     key_columns: list[str] = Field(
         default_factory=list,
         description=(

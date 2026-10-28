@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { FileText, Play, RefreshCw, Download } from 'lucide-react'
-import { api, ApiError, authHeaders } from '../../api/client'
+import { api, apiDownload, ApiError } from '../../api/client'
 import {
   PageLayout,
   Button,
@@ -195,40 +195,8 @@ function RunReportDialog({ report, onClose }: { report: ReportDef; onClose: () =
 
     const path = `/api/reports/${encodeURIComponent(report.scope)}/${encodeURIComponent(report.id)}/run`
     try {
-      const res = await fetch(path, {
-        method: 'POST',
-        headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ params, format }),
-      })
-      if (!res.ok) {
-        // Backend errors come back as { detail: "..." } in JSON
-        let detail = `HTTP ${res.status}`
-        try {
-          const body = await res.json()
-          if (typeof body?.detail === 'string') detail = body.detail
-          else if (Array.isArray(body?.detail)) {
-            detail = body.detail.map((d: { msg?: string }) => d?.msg ?? JSON.stringify(d)).join('; ')
-          }
-        } catch { /* non-JSON body */ }
-        setError(detail)
-        setRunning(false)
-        return
-      }
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      // Prefer the server-supplied filename from Content-Disposition; fall back
-      // to a sensible default (the report id + format extension).
-      const cd = res.headers.get('Content-Disposition') ?? ''
-      const m = /filename\*?=(?:UTF-8'')?["']?([^;"'\n]+)/i.exec(cd)
-      const ext = format === 'pdf' ? 'pdf' : 'md'
-      const filename = (m?.[1] ?? `${report.id}.${ext}`).replace(/^.*[\\/]/, '')
-      const a = document.createElement('a')
-      a.href = url
-      a.download = decodeURIComponent(filename)
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
+      // The server names the file in its Content-Disposition; the report id + format otherwise.
+      await apiDownload(path, `${report.id}.${format === 'pdf' ? 'pdf' : 'md'}`, { json: { params, format } })
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

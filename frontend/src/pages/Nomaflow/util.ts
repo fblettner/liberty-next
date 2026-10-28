@@ -1,5 +1,5 @@
 // Shared bits for the nomaflow feature-area pages (JobsList + Schedule).
-import { authHeaders } from '../../api/client'
+import { apiDownload, apiUpload } from '../../api/client'
 import type { RunState } from './types'
 
 /** Run-state → Tag tone — the colour of a last-run / step-state badge. */
@@ -26,33 +26,16 @@ export function relative(iso: string | null): string {
 
 /** Send a file to the job's work area (`POST /admin/jobs/{id}/upload`) and get back the path a
  *  `file_load` step reads on this fire. Multipart, so it goes through fetch, not the JSON client. */
-export async function uploadJobFile(jobId: string, file: File): Promise<{ name: string; path: string; size: number }> {
-  const form = new FormData()
-  form.append('file', file)
-  const res = await fetch(`/admin/jobs/${encodeURIComponent(jobId)}/upload`, { method: 'POST', headers: { ...authHeaders() }, body: form })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({} as Record<string, unknown>))
-    throw new Error(body && typeof body === 'object' && 'detail' in body ? String((body as { detail: unknown }).detail) : `upload failed: ${res.status}`)
-  }
-  return res.json() as Promise<{ name: string; path: string; size: number }>
+export function uploadJobFile(jobId: string, file: File): Promise<{ name: string; path: string; size: number }> {
+  return apiUpload(`/admin/jobs/${encodeURIComponent(jobId)}/upload`, file)
 }
 
 /** Download a file a step left for a run (the file_load rejects report) through the authenticated API. */
 /** The file uploaded for a run's file_load *step*, saved as *name* (admin route). */
-export async function downloadRunInput(runId: string, step: string, name: string): Promise<void> {
-  const res = await fetch(`/admin/jobs/runs/${encodeURIComponent(runId)}/inputs/${encodeURIComponent(step)}`, { headers: { ...authHeaders() } })
-  if (!res.ok) throw new Error(`download failed: ${res.status}`)
-  const url = URL.createObjectURL(await res.blob())
-  const a = document.createElement('a')
-  a.href = url; a.download = name; a.click()
-  URL.revokeObjectURL(url)
+export function downloadRunInput(runId: string, step: string, name: string): Promise<void> {
+  return apiDownload(`/admin/jobs/runs/${encodeURIComponent(runId)}/inputs/${encodeURIComponent(step)}`, name)
 }
 
-export async function downloadRunFile(runId: string, name: string): Promise<void> {
-  const res = await fetch(`/admin/jobs/runs/${encodeURIComponent(runId)}/files/${encodeURIComponent(name)}`, { headers: { ...authHeaders() } })
-  if (!res.ok) throw new Error(`download failed: ${res.status}`)
-  const url = URL.createObjectURL(await res.blob())
-  const a = document.createElement('a')
-  a.href = url; a.download = name; a.click()
-  URL.revokeObjectURL(url)
+export function downloadRunFile(runId: string, name: string): Promise<void> {
+  return apiDownload(`/admin/jobs/runs/${encodeURIComponent(runId)}/files/${encodeURIComponent(name)}`, name)
 }

@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { RotateCcw, Download, GitCompare, FileText, LayoutGrid, ChevronRight, ChevronDown, Trash2, ArrowUpCircle } from 'lucide-react'
-import { api, authHeaders } from '../../api/client'
+import { api, apiError, apiFetch, saveBlob } from '../../api/client'
 import { Button, Banner, SpinnerRing, ConfirmModal, Card } from '../../common'
 import { Markdown } from '../../common/Markdown'
 import { useIsLight } from '../../common/useIsLight'
@@ -214,21 +214,20 @@ export default function ConfigVersions() {
     }
   }, [openId, fileDiffs, contents])
 
-  const download = useCallback(async (v: Version) => {
-    const res = await fetch(`/admin/config/versions/${v.id}/download`, { headers: authHeaders() })
-    const blob = await res.blob()
-    const url = URL.createObjectURL(blob)
+  // Saved under a name of our own (the version number in it), not the server's.
+  const saveAs = useCallback(async (path: string, name: string) => {
+    try {
+      const res = await apiFetch(path)
+      if (!res.ok) throw await apiError(res)
+      saveBlob(await res.blob(), name)
+    } catch (e) { setMsg({ tone: 'err', text: e instanceof Error ? e.message : String(e) }) }
+  }, [])
+  const download = useCallback((v: Version) => {
     const stem = v.file.replace(/\.[^.]+$/, ''); const ext = v.file.slice(stem.length)
-    Object.assign(document.createElement('a'), { href: url, download: `${stem}.v${v.version}${ext}` }).click()
-    URL.revokeObjectURL(url)
-  }, [])
-  const downloadBundle = useCallback(async (b: Bundle, v: Version) => {
-    const res = await fetch(`/admin/config/screen-versions/${v.id}/download`, { headers: authHeaders() })
-    const blob = await res.blob()
-    const url = URL.createObjectURL(blob)
-    Object.assign(document.createElement('a'), { href: url, download: `${b.app}_${b.screen}.v${v.version}.zip` }).click()
-    URL.revokeObjectURL(url)
-  }, [])
+    return saveAs(`/admin/config/versions/${v.id}/download`, `${stem}.v${v.version}${ext}`)
+  }, [saveAs])
+  const downloadBundle = useCallback((b: Bundle, v: Version) =>
+    saveAs(`/admin/config/screen-versions/${v.id}/download`, `${b.app}_${b.screen}.v${v.version}.zip`), [saveAs])
 
   const restore = useCallback(async (v: Version) => {
     setConfirmV(null); setBusy(true); setMsg(null)

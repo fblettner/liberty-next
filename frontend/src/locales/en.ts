@@ -305,6 +305,8 @@ const en = {
     viewDefaultTag: 'default',
     saveView: 'Save',
     saveAs: 'Save as…',
+    resetToShipped: 'Reset to shipped',
+    resetToShippedHint: 'Back to the layout the screen ships with (its default shared view, else the base layout)',
     deleteView: 'Delete view',
     myView: 'My view',
     saveViewTitle: 'Save view',

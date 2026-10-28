@@ -374,6 +374,8 @@ export interface ScreenListItem {
   audit_table?: string | null
   /** Phase 3 — per-screen SELECT row cap. */
   max_rows?: number | null
+  /** Rows per page in the grid (blank = the app's default_page_size). */
+  page_size?: number | null
   /** Phase 3 — result columns that identify a row (used by Excel import match-by-key). */
   key_columns?: string[]
   editable: boolean

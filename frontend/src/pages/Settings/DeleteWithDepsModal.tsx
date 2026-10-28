@@ -9,7 +9,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Trash2, AlertCircle, ShieldAlert } from 'lucide-react'
-import { api, ApiError, authHeaders } from '../../api/client'
+import { api, ApiError } from '../../api/client'
 import { Banner, Button, Checkbox, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, SpinnerRing, Mono } from '../../common'
 import { colors, fontSize, fonts } from '../../theme'
 
@@ -61,18 +61,7 @@ export function DeleteWithDepsModal({ kind, name, scope, onDeleted, onClose }: D
   async function submit() {
     setBusy(true); setError(null)
     try {
-      const res = await fetch('/admin/delete-with-deps', {
-        method: 'POST',
-        headers: { ...authHeaders({ 'Content-Type': 'application/json' }) },
-        body: JSON.stringify({
-          kind, name, scope,
-          options: { delete_queries: alsoDeleteQueries },
-        }),
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({} as Record<string, unknown>))
-        throw new Error((body && typeof body === 'object' && 'detail' in body) ? String((body as { detail: unknown }).detail) : `delete failed: ${res.status}`)
-      }
+      await api.post('/admin/delete-with-deps', { kind, name, scope, options: { delete_queries: alsoDeleteQueries } })
       onDeleted()
       onClose()
     } catch (e) {

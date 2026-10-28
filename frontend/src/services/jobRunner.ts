@@ -1,7 +1,7 @@
 // The user side of a nomaflow job (a ``job`` menu item): the shapes ``/api/jobs/{id}`` returns and
 // the calls the job page makes. No React here. The permission is ``job:<id>``; the page runs the
 // job (one file per ``file_load`` step), follows the run's log and downloads the run's files.
-import { api, authHeaders } from '../api/client'
+import { api, apiDownload, apiUpload } from '../api/client'
 import type { RunState } from '../pages/Nomaflow/types'
 
 export interface JobUpload { step: string; sheet: string | number | null }
@@ -29,15 +29,8 @@ export function getRun(jobId: string, runId: string): Promise<JobRunDetail> {
 }
 
 /** Multipart, so it goes through fetch rather than the JSON client. */
-export async function uploadFile(jobId: string, file: File): Promise<{ name: string; path: string; size: number }> {
-  const form = new FormData()
-  form.append('file', file)
-  const res = await fetch(`/api/jobs/${enc(jobId)}/upload`, { method: 'POST', headers: { ...authHeaders() }, body: form })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({} as Record<string, unknown>))
-    throw new Error(body && typeof body === 'object' && 'detail' in body ? String((body as { detail: unknown }).detail) : `upload failed: ${res.status}`)
-  }
-  return res.json() as Promise<{ name: string; path: string; size: number }>
+export function uploadFile(jobId: string, file: File): Promise<{ name: string; path: string; size: number }> {
+  return apiUpload(`/api/jobs/${enc(jobId)}/upload`, file)
 }
 
 /** ``preset`` — one of the job's presets the menu item pins (its params / step toggles apply). */
@@ -52,21 +45,12 @@ export function runFileUrl(jobId: string, runId: string, name: string): string {
 }
 
 /** The file a user uploaded for a run's file_load *step*, saved as *name*. */
-export async function downloadRunInput(jobId: string, runId: string, step: string, name: string): Promise<void> {
-  const res = await fetch(`/api/jobs/${enc(jobId)}/runs/${enc(runId)}/inputs/${enc(step)}`, { headers: { ...authHeaders() } })
-  if (!res.ok) throw new Error(`download failed: ${res.status}`)
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(await res.blob()); a.download = name; a.click()
-  URL.revokeObjectURL(a.href)
+export function downloadRunInput(jobId: string, runId: string, step: string, name: string): Promise<void> {
+  return apiDownload(`/api/jobs/${enc(jobId)}/runs/${enc(runId)}/inputs/${enc(step)}`, name)
 }
 
-export async function downloadRunFile(jobId: string, runId: string, name: string): Promise<void> {
-  const res = await fetch(runFileUrl(jobId, runId, name), { headers: { ...authHeaders() } })
-  if (!res.ok) throw new Error(`download failed: ${res.status}`)
-  const blob = await res.blob()
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob); a.download = name; a.click()
-  URL.revokeObjectURL(a.href)
+export function downloadRunFile(jobId: string, runId: string, name: string): Promise<void> {
+  return apiDownload(runFileUrl(jobId, runId, name), name)
 }
 
 /** The run files a log mentions: every ``<run id>-<something>.<ext>`` token. */

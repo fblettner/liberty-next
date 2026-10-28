@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Search, Download, Upload, Package, FileText, Menu as MenuIcon, LayoutDashboard, AlertCircle, CheckCircle2 } from 'lucide-react'
-import { api, ApiError, authHeaders } from '../../api/client'
+import { api, apiDownload, apiUpload, ApiError } from '../../api/client'
 import type { ScreensDoc, MenusDoc, DashboardsDoc } from '../../types/config'
 import { Banner, Button, Card, Centered, Checkbox, SpinnerRing, Mono } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -299,21 +299,10 @@ function BuildPanel() {
     try {
       const includeList = manifest.deps.filter((d) => included.has(depKey(d)))
         .map((d) => ({ kind: d.kind, scope: d.scope, name: d.name }))
-      const res = await fetch('/admin/build-package', {
-        method: 'POST',
-        headers: { ...authHeaders({ 'Content-Type': 'application/json' }) },
-        body: JSON.stringify({
-          seeds: [...selected.values()].map((s) => ({ kind: s.kind, name: s.name, scope: s.scope })),
-          include: includeList,
-        }),
-      })
-      if (!res.ok) throw new Error(`build-package failed: ${res.status}`)
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url; a.download = 'liberty-package.zip'
-      document.body.appendChild(a); a.click(); a.remove()
-      URL.revokeObjectURL(url)
+      await apiDownload('/admin/build-package', 'liberty-package.zip', { json: {
+        seeds: [...selected.values()].map((s) => ({ kind: s.kind, name: s.name, scope: s.scope })),
+        include: includeList,
+      } })
     } catch (e) {
       setDepError(e instanceof Error ? e.message : String(e))
     } finally { setDownloading(false) }
@@ -515,19 +504,7 @@ function ImportPanel() {
     if (!file) return
     setBusy(true); setError(null); setReport(null)
     try {
-      const form = new FormData()
-      form.append('package', file)
-      const res = await fetch(`/admin/import-package?strategy=${strategy}`, {
-        method: 'POST',
-        headers: { ...authHeaders() },   // multipart — fetch sets the Content-Type itself
-        body: form,
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({} as Record<string, unknown>))
-        const message = (body && typeof body === 'object' && 'detail' in body) ? String((body as { detail: unknown }).detail) : `import failed: ${res.status}`
-        throw new Error(message)
-      }
-      const data = await res.json() as { report: ImportReport }
+      const data = await apiUpload<{ report: ImportReport }>(`/admin/import-package?strategy=${strategy}`, file, 'package')
       setReport(data.report)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

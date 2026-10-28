@@ -72,7 +72,8 @@ async def web_manifest(request: Request):
     name = resolved.get("app_name") or request.app.state.settings.app.name
     accent = resolved.get("vars", {}).get("blue-main") or "#007AFF"
     return JSONResponse({
-        "name": name, "short_name": name[:12], "start_url": "/", "scope": "/", "display": "standalone",
+        # Relative to the manifest's own URL, so they hold under a sub-path ([app] base_path) too.
+        "name": name, "short_name": name[:12], "start_url": "./", "scope": "./", "display": "standalone",
         "background_color": "#07060e", "theme_color": accent if str(accent).startswith("#") else "#007AFF",
-        "icons": [{"src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}],
+        "icons": [{"src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}],
     }, media_type="application/manifest+json")

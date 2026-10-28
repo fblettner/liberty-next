@@ -1,5 +1,8 @@
 // The bordered "context bar" header + scrolling content area every page uses.
-// (See nomaubl's common/PageLayout.tsx.)
+// (See nomaubl's common/PageLayout.tsx.) Two modes for a page hosted by another page:
+// ``embedded`` drops the header and the outer padding (just the content surface, filling its
+// parent); ``bare`` keeps the header and renders the children straight under it, each bringing
+// its own surface (a host page whose tabs are pages).
 import { type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { colors, radius, fontSize, glass } from '../theme'
@@ -56,7 +59,7 @@ const ContextDesc = styled.div`
   margin-top: 2px;
 `
 
-const PageContent = styled.div`
+const PageContent = styled.div<{ $embedded?: boolean }>`
   flex: 1;
   min-height: 0;
   /* A flex column so a child can use 'flex: 1; min-height: 0' to claim the remaining space
@@ -69,8 +72,8 @@ const PageContent = styled.div`
   overflow-y: auto;
   padding: 18px;
   border: 1px solid ${colors.border};
-  border-top: none;
-  border-radius: 0 0 ${radius.lg} ${radius.lg};
+  border-top: ${({ $embedded }) => ($embedded ? `1px solid ${colors.border}` : 'none')};
+  border-radius: ${({ $embedded }) => ($embedded ? radius.lg : `0 0 ${radius.lg} ${radius.lg}`)};
   background: var(--ghost-bg, ${colors.bg.card});
 `
 
@@ -80,13 +83,20 @@ export function PageLayout({
   description,
   headerRight,
   children,
+  embedded,
+  bare,
 }: {
   icon?: ReactNode
-  title: ReactNode
+  title?: ReactNode
   description?: ReactNode
   headerRight?: ReactNode
   children: ReactNode
+  /** Rendered inside another page: no header, no outer padding, the usual content surface. */
+  embedded?: boolean
+  /** Header only: the children go straight under it, each with its own content surface. */
+  bare?: boolean
 }) {
+  if (embedded) return <PageContent $embedded>{children}</PageContent>
   return (
     <PageWrap>
       <ContextBar>
@@ -97,7 +107,7 @@ export function PageLayout({
         </ContextText>
         {headerRight}
       </ContextBar>
-      <PageContent>{children}</PageContent>
+      {bare ? children : <PageContent>{children}</PageContent>}
     </PageWrap>
   )
 }

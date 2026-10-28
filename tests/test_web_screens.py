@@ -73,6 +73,7 @@ def _screens_toml() -> str:
         read_query = "users_get"
         update_query = "users_get"
         audit_table = "AUD_USERS"
+        page_size = 30
 
         [screens.app1.users.dialog]
         title = "User"
@@ -176,6 +177,7 @@ def test_list_screens_admin_sees_everything(app) -> None:
         assert users["label"] == "Users" and users["description"] == "User accounts"
         assert users["read_query"] == "users_get" and users["update_query"] == "users_get"
         assert users["audit"] is True and users["has_dialog"] is True
+        assert users["page_size"] == 30 and next(s for s in app1 if s["id"] == "things")["page_size"] is None
         # Slice 6 follow-up — the catalog also flags row_menu / actions presence so the
         # TableView fetches the full body even on screens without a dialog.
         assert users["has_row_menu"] is False and users["has_actions"] is False

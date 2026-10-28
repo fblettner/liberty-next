@@ -1,7 +1,9 @@
 // Thin fetch wrapper: attaches the Bearer token + the UI language, parses JSON, and
 // surfaces a typed error. On 401 it calls the registered onUnauthorized hook
-// (auth/AuthContext wires it to "log out"). SSE is exposed separately via `streamSSE`.
+// (auth/AuthContext wires it to "log out"). SSE is exposed separately via `streamSSE`. Every
+// absolute path goes through ``resolveApiPath`` (a deployment under a sub-path, ``[app] base_path``).
 import i18n from "../i18n";
+import { basePathOf, joinBase } from "../services/basePath";
 
 let accessToken: string | null = null;
 let onUnauthorized: (() => void) | null = null;
@@ -42,6 +44,19 @@ function refreshOnce(): Promise<string | null> {
 // Don't try to refresh the refresh/login calls themselves (would recurse / is meaningless).
 function canRefresh(path: string): boolean {
   return !!tokenRefresher && !path.startsWith("/auth/refresh") && !path.startsWith("/auth/login");
+}
+
+// Read once: the server writes the prefix into index.html's <base href>; no <base> (tests) = the root.
+const BASE = typeof document !== "undefined" && document.querySelector("base") ? basePathOf(document.baseURI) : "/";
+
+/** The prefix the app is served under (``/`` or ``/liberty/``). */
+export function basePath(): string {
+  return BASE;
+}
+
+/** ``/api/foo`` → the same path under the deployment's prefix. Relative / full URLs pass through. */
+export function resolveApiPath(path: string): string {
+  return joinBase(BASE, path);
 }
 
 export class ApiError extends Error {
@@ -98,9 +113,9 @@ async function request<T>(method: string, path: string, body?: unknown, asText =
     }
     return init;
   };
-  let res = await fetch(path, build());
+  let res = await fetch(resolveApiPath(path), build());
   if (res.status === 401 && canRefresh(path) && (await refreshOnce())) {
-    res = await fetch(path, build());   // one silent retry with the refreshed token
+    res = await fetch(resolveApiPath(path), build());   // one silent retry with the refreshed token
   }
   if (res.status === 401) {
     onUnauthorized?.();
@@ -121,6 +136,76 @@ export const api = {
 };
 
 /**
+ * A raw request for what the JSON helpers don't fit (multipart uploads, file answers): the auth
+ * headers merged under *init*'s, the prefix applied, one silent refresh + retry on a 401. Returns
+ * the Response — the caller checks ``ok`` (``apiError`` turns a failed one into an ApiError).
+ */
+export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const build = () => fetch(resolveApiPath(path), { ...init, headers: authHeaders(init.headers as Record<string, string> | undefined) });
+  let res = await build();
+  if (res.status === 401 && canRefresh(path) && (await refreshOnce())) res = await build();
+  if (res.status === 401) onUnauthorized?.();
+  return res;
+}
+
+/** A failed Response as an ApiError (the server's ``detail`` as the message). */
+export function apiError(res: Response): Promise<ApiError> {
+  return parseError(res);
+}
+
+/** Hand *blob* to the browser as a download named *name*. */
+export function saveBlob(blob: Blob, name: string): void {
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Deferred so the browser has started the download before the URL goes.
+  setTimeout(() => URL.revokeObjectURL(href), 1000);
+}
+
+/**
+ * Fetch a file answer and save it: GET by default, or *init* (a POST with a JSON body: pass
+ * ``json``). The name comes from Content-Disposition, else *fallback*. Throws an ApiError on a
+ * failed answer.
+ */
+export async function apiDownload(
+  path: string,
+  fallback: string,
+  init: RequestInit & { json?: unknown } = {},
+): Promise<void> {
+  const { json, ...rest } = init;
+  const req: RequestInit = json === undefined ? rest : {
+    method: "POST", ...rest, body: JSON.stringify(json),
+    headers: { "Content-Type": "application/json", ...(rest.headers as Record<string, string> | undefined) },
+  };
+  const res = await apiFetch(path, req);
+  if (!res.ok) throw await parseError(res);
+  saveBlob(await res.blob(), fileNameOf(res) ?? fallback);
+}
+
+/** POST *file* as multipart (form field *field*) and return the JSON answer; an ApiError when it fails. */
+export async function apiUpload<T>(path: string, file: File, field = "file"): Promise<T> {
+  const form = new FormData();
+  form.append(field, file);
+  const res = await apiFetch(path, { method: "POST", body: form });
+  if (!res.ok) throw await parseError(res);
+  return (await res.json()) as T;
+}
+
+/** The file name a Content-Disposition header carries (``filename*=UTF-8''…`` or ``filename="…"``). */
+function fileNameOf(res: Response): string | null {
+  const cd = res.headers.get("content-disposition") ?? "";
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  if (star) {
+    try { return decodeURIComponent(star[1]); } catch { /* fall through */ }
+  }
+  return /filename="?([^";]+)"?/i.exec(cd)?.[1] ?? null;
+}
+
+/**
  * POST `path` with a JSON body and consume the Server-Sent-Events response,
  * invoking `onEvent` for each parsed `data:` JSON object. Returns when the
  * stream ends. Throws ApiError on a non-OK response (e.g. 401/403).
@@ -131,7 +216,7 @@ export async function streamSSE(
   onEvent: (data: unknown) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const build = () => fetch(path, {
+  const build = () => fetch(resolveApiPath(path), {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json", Accept: "text/event-stream" }),
     body: JSON.stringify(body),
@@ -191,7 +276,7 @@ export async function streamNDJSON(
   onEvent: (data: unknown) => void,
 ): Promise<void> {
   const method = init.method ?? "GET";
-  const build = () => fetch(path, {
+  const build = () => fetch(resolveApiPath(path), {
     method,
     headers: authHeaders({
       Accept: "application/x-ndjson",

@@ -13,6 +13,7 @@ import {
   type ReactNode,
 } from "react"
 import { io, type Socket } from "socket.io-client"
+import { resolveApiPath } from "../api/client"
 import { useAuth } from "../auth/AuthContext"
 import type {
   DashboardSnapshot, HeldLock, LockPayload, LogEntry,
@@ -101,7 +102,7 @@ export function SioProvider({ children }: { children: ReactNode }) {
     // based on ``window.location`` automatically; passing ``undefined`` for the
     // URL means "connect back to the page's origin".
     const socket = io({
-      path: "/socket.io",
+      path: resolveApiPath("/socket.io"),
       auth: { token, client_id: window.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2) },
       // Reconnect with exponential backoff up to 30s. Socket.IO handles this
       // itself — the previous raw-WS implementation had to reinvent it badly.

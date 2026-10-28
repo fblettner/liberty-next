@@ -39,6 +39,21 @@
 - Un sélecteur de variables à côté des champs à modèle : le bouton { } liste les variables et
   insère celle choisie au curseur — sujet, corps et lien d'une règle de notification (les champs
   de l'événement de tâche ou d'écran), sujet et corps d'une étape de notification.
+- Filtres de colonne des grilles : une colonne codée (une énumération) choisit plusieurs valeurs à
+  la fois et accepte un code saisi hors de sa liste ; une colonne à liste de valeurs garde son
+  sélecteur simple. Une vue enregistrée avec une seule valeur s'ouvre toujours.
+- Grilles : `wrap = true` sur une colonne d'écran renvoie le texte long à la ligne au lieu de le
+  couper ; le `page_size` d'un écran fixe les lignes par page de sa grille (sinon
+  `[app] default_page_size`) ; le choix des lignes par page est la liste déroulante du thème.
+- Menu Vues : « Rétablir la version livrée » ramène la grille à la vue partagée par défaut de l'écran,
+  sinon à sa mise en page de base.
+- Service sous un sous-chemin derrière un proxy inverse : `[app] base_path = "/liberty"`
+  (redémarrage) — la page, ses ressources, l'API, les téléchargements, la connexion temps réel et
+  les liens se résolvent sous ce préfixe, que le proxy le retire ou non ; les adresses construites
+  par le serveur (le retour d'authentification unique) le portent. Tous les téléchargements et
+  envois passent désormais par le client d'API (le rafraîchissement de session s'applique).
+- Correction : nomaflow → Tâches → Exporter télécharge de nouveau le paquet de la tâche (l'appel
+  visait une mauvaise adresse, sans la session, et ne faisait rien).
 
 ## 7.0.62 — non publiée
 

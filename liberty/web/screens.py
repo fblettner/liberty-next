@@ -345,6 +345,7 @@ def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, A
         "audit": bool(screen.audit_table),
         "audit_table": screen.audit_table,
         "max_rows": screen.max_rows,
+        "page_size": screen.page_size,
         # ``effective_key_columns`` folds the per-column ``key`` flags (Visual Designer Columns
         # tab) into the explicit ``key_columns`` list — operators set it either way and the
         # frontend reads the same result. The Pydantic field stays for explicit overrides.

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { api, setAccessToken, setTokenRefresher, setUnauthorizedHandler } from "../api/client";
+import { api, resolveApiPath, setAccessToken, setTokenRefresher, setUnauthorizedHandler } from "../api/client";
 import type { Principal, TokenPair } from "../types/auth";
 
 const STORAGE_KEY = "liberty.tokens";
@@ -38,7 +38,7 @@ function save(t: StoredTokens | null): void {
 // Raw fetch (NOT the api client) so a 401 here can't recurse into the refresh-and-retry path.
 async function postRefresh(refreshToken: string): Promise<TokenPair | null> {
   try {
-    const res = await fetch("/auth/refresh", {
+    const res = await fetch(resolveApiPath("/auth/refresh"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refresh_token: refreshToken }),
@@ -155,7 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const oidcLogin = useCallback(() => {
-    window.location.href = "/auth/oidc/login";
+    window.location.href = resolveApiPath("/auth/oidc/login");
   }, []);
 
   const value = useMemo<AuthState>(

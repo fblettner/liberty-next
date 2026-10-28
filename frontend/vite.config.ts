@@ -7,6 +7,9 @@ const backend = "http://127.0.0.1:8000";
 const proxied = ["/api", "/auth", "/ai", "/admin", "/health", "/info", "/docs", "/openapi.json", "/manifest.webmanifest"];
 
 export default defineConfig({
+  // Relative asset URLs: they resolve against index.html's <base href>, which the server sets from
+  // [app] base_path — the same build runs at the site root or under a reverse-proxy sub-path.
+  base: "./",
   plugins: [react()],
   server: {
     port: 5173,

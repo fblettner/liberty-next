@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { GitMerge, ArrowUpRight, AlertCircle, Download } from 'lucide-react'
-import { api, ApiError, authHeaders } from '../../api/client'
+import { api, apiDownload, ApiError } from '../../api/client'
 import { Banner, Button, Checkbox, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, SpinnerRing, Mono } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { deepLinkToUrl } from './FindUsagesModal'
@@ -188,24 +188,10 @@ export function FindDependenciesModal({
       const includeList = manifest.deps
         .filter((d) => included.has(depKey(d)))
         .map((d) => ({ kind: d.kind, scope: d.scope, name: d.name }))
-      const res = await fetch('/admin/build-package', {
-        method: 'POST',
-        headers: { ...authHeaders({ 'Content-Type': 'application/json' }) },
-        body: JSON.stringify({
-          seeds: seeds.map((s) => ({ kind: s.kind, name: s.name, scope: s.scope })),
-          include: includeList,
-        }),
-      })
-      if (!res.ok) throw new Error(`build-package failed: ${res.status}`)
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'liberty-package.zip'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
+      await apiDownload('/admin/build-package', 'liberty-package.zip', { json: {
+        seeds: seeds.map((s) => ({ kind: s.kind, name: s.name, scope: s.scope })),
+        include: includeList,
+      } })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {

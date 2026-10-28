@@ -14,7 +14,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Copy, AlertCircle } from 'lucide-react'
-import { api, authHeaders } from '../../api/client'
+import { api } from '../../api/client'
 import { Banner, Button, Checkbox, Field, Input, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, SpinnerRing, Mono } from '../../common'
 import { validateId, suggestCloneId } from '../../services/idValidator'
 import { colors, fontSize, fonts } from '../../theme'
@@ -106,16 +106,7 @@ export function CloneWithDepsModal({ kind, name, scope, existingNames, onCloned,
     try {
       const body = { kind, name, scope, new_name: newName, suffix,
         options: { clone_queries: cloneQueries, mark_override: markOverride } }
-      const res = await fetch('/admin/clone-with-deps', {
-        method: 'POST',
-        headers: { ...authHeaders({ 'Content-Type': 'application/json' }) },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({} as Record<string, unknown>))
-        throw new Error((body && typeof body === 'object' && 'detail' in body) ? String((body as { detail: unknown }).detail) : `clone failed: ${res.status}`)
-      }
-      const data = await res.json() as CloneResponse
+      const data = await api.post<CloneResponse>('/admin/clone-with-deps', body)
       onCloned(newName)
       if (data.warnings.length > 0) {
         // Non-fatal — the clone succeeded but the backend flagged something the

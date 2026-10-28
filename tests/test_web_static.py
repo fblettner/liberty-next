@@ -70,3 +70,42 @@ def test_connector_error_surfaces_as_503(tmp_path) -> None:
         r = client.post("/auth/login", json={"username": "x", "password": "y"})
         assert r.status_code == 503
         assert "empty url" in r.json()["detail"]
+
+
+BASED_HTML = '<!doctype html><html><head><base href="/" /></head><body><div id="root"></div></body></html>'
+
+
+def _based_app(tmp_path, base_path: str):
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text(BASED_HTML)
+    (dist / "assets" / "app.js").write_text("console.log('hi')")
+    return create_app(Settings(app=AppSettings(static_dir=str(dist), base_path=base_path),
+                               connectors=ConnectorSettings(config_path=tmp_path / "no-connectors.toml")))
+
+
+def test_base_path_is_normalized() -> None:
+    assert AppSettings(base_path="liberty/").base_path == "/liberty"
+    assert AppSettings(base_path=" /a/b/ ").base_path == "/a/b"
+    assert AppSettings(base_path="/").base_path == ""
+    assert AppSettings().base_path == ""
+
+
+def test_base_path_rewrites_the_index_base_href(tmp_path) -> None:
+    # A proxy serving https://host/liberty/ strips the prefix: the app sees the bare paths.
+    with TestClient(_based_app(tmp_path, "/liberty")) as client:
+        for path in ("/", "/index.html", "/screen/app/x"):
+            r = client.get(path)
+            assert r.status_code == 200 and '<base href="/liberty/"' in r.text, path
+        assert "console.log" in client.get("/assets/app.js").text
+        assert client.get("/health").json()["status"] == "ok"
+        assert client.get("/api/connectors").status_code == 401  # routed, not the index
+        # A proxy that keeps the prefix reaches the same routes (root_path).
+        assert client.get("/liberty/health").json()["status"] == "ok"
+        # The URLs the server builds carry the prefix (the docs point at the prefixed schema).
+        assert "/liberty/openapi.json" in client.get("/docs").text
+
+
+def test_no_base_path_serves_the_index_as_built(tmp_path) -> None:
+    with TestClient(_based_app(tmp_path, "")) as client:
+        assert '<base href="/"' in client.get("/screen/app/x").text

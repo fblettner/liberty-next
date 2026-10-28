@@ -170,6 +170,7 @@ export interface ColumnHint {
    *  Backend-enforced neutralization (blank / 0) + DD-default suppression when it doesn't hold. */
   write_when?: { field: string; value: string | string[] } | { field: string; value: string | string[] }[] | null
   width?: number | null
+  wrap?: boolean
   align?: 'left' | 'right' | 'center' | null
   format?: string | null
   /** Per-column rule override (v1's col_rules). When set, replaces the dictionary entry's rule
@@ -202,6 +203,7 @@ export interface Screen {
   audit_table?: string | null
   /** Phase 3 — per-screen SELECT row cap (was ``QueryDef.max_rows`` pre-Phase-3). */
   max_rows?: number | null
+  page_size?: number | null
   /** Phase 3 — result columns that identify a row (was ``QueryDef.key_columns`` pre-Phase-3).
    *  Used by the Excel-import update-vs-insert match. */
   key_columns?: string[]

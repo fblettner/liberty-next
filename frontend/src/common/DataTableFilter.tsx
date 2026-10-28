@@ -10,6 +10,7 @@ import { Check } from 'lucide-react'
 import type { Column, FilterFn } from '@tanstack/react-table'
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
 import { SearchSelect } from './SearchSelect'
+import { SearchSelectMulti } from './SearchSelectMulti'
 
 export type FilterKind = 'text' | 'number' | 'date' | 'boolean' | 'enum' | 'lookup'
 
@@ -23,7 +24,13 @@ export interface FilterMeta {
     kind: FilterKind
     options?: { value: string; label: string; mono?: string; cells?: string[] }[]
     cellColumns?: { label: string; filterable?: boolean }[]
+    /** pick several values (the filter value is then a ``string[]``, matching any of them) */
+    multi?: boolean
+    /** codes typed in the picker beyond the option list are accepted */
+    custom?: boolean
   }
+  /** cell text wraps over several lines instead of one line cut with an ellipsis */
+  wrap?: boolean
   /** header + cell text alignment (numbers → right, booleans → center, …); default left */
   align?: 'left' | 'right' | 'center'
   /** an internal helper column (the edit-mode select / status columns) — excluded from search, the Columns menu, etc. */
@@ -130,14 +137,16 @@ export const genericFilterFn: FilterFn<any> = (row, columnId, value) => {
 /** Trim- and case-tolerant equality for enum / lookup select filters. The dropdown's option value
  *  is a trimmed code (e.g. ``"F"``), but the row's raw value is CHAR-padded (``"F   "``) on JDE — a
  *  strict built-in ``equals`` would never match it, so the filter returned no rows. A no-op for
- *  already-trimmed values (e.g. Postgres), where the bug never showed. */
+ *  already-trimmed values (e.g. Postgres), where the bug never showed. A ``string[]`` value (a
+ *  ``multi`` filter) matches any of its codes. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const selectFilterFn: FilterFn<any> = (row, columnId, value) => {
-  if (value == null || value === '') return true
+  const wanted = (Array.isArray(value) ? value : [value]).filter((x) => x != null && x !== '').map((x) => String(x).trim().toLowerCase())
+  if (wanted.length === 0) return true
   const v = row.getValue(columnId)
-  return String(value).trim().toLowerCase() === (isEmpty(v) ? '' : String(v).trim().toLowerCase())
+  return wanted.includes(isEmpty(v) ? '' : String(v).trim().toLowerCase())
 }
-selectFilterFn.autoRemove = (value) => value == null || value === ''
+selectFilterFn.autoRemove = (value) => value == null || value === '' || (Array.isArray(value) && value.length === 0)
 
 // Only drop the filter when there's no operator at all — *not* when the operand is still
 // empty: that lets you pick an operator first and type the value afterwards (an empty operand
@@ -229,7 +238,7 @@ export function ColumnFilterControl({ column }: { column: Column<any, unknown> }
   const kind: FilterKind = meta?.kind ?? 'text'
 
   if (kind === 'boolean' || kind === 'enum' || kind === 'lookup') {
-    const cur = (column.getFilterValue() as string | undefined) ?? ''
+    const raw = column.getFilterValue() as string | string[] | undefined
     const opts =
       kind === 'boolean'
         ? [{ value: 'true', label: t('common.true') }, { value: 'false', label: t('common.false') }]
@@ -237,15 +246,27 @@ export function ColumnFilterControl({ column }: { column: Column<any, unknown> }
     // Themed SearchSelect (not a native <select>) so the dropdown portals out of the header
     // and matches the rest of the app — operators dealing with hundreds of UDC values need
     // type-ahead, which the native control can't do.
+    // A saved view may still hold a single code from before the column went multi (and back).
+    const many = Array.isArray(raw) ? raw : raw ? [raw] : []
     return (
       <div onClick={(e) => e.stopPropagation()} style={{ width: '100%' }}>
-        <SearchSelect
-          value={cur}
-          options={opts}
-          cellColumns={meta?.cellColumns}
-          onChange={(v) => column.setFilterValue(v || undefined)}
-          anyLabel={t('table.filterAny')}
-        />
+        {meta?.multi ? (
+          <SearchSelectMulti size="sm" maxChips={1}
+            value={many}
+            options={opts}
+            allowCustom={meta.custom}
+            onChange={(v) => column.setFilterValue(v.length === 0 ? undefined : v)}
+            placeholder={t('table.filterAny')}
+          />
+        ) : (
+          <SearchSelect
+            value={many[0] ?? ''}
+            options={opts}
+            cellColumns={meta?.cellColumns}
+            onChange={(v) => column.setFilterValue(v || undefined)}
+            anyLabel={t('table.filterAny')}
+          />
+        )}
       </div>
     )
   }

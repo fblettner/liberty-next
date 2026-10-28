@@ -307,6 +307,8 @@ const fr: Resources = {
     viewDefaultTag: 'défaut',
     saveView: 'Enregistrer',
     saveAs: 'Enregistrer sous…',
+    resetToShipped: 'Rétablir la version livrée',
+    resetToShippedHint: "Revenir à la mise en page livrée avec l'écran (sa vue partagée par défaut, sinon la mise en page de base)",
     deleteView: 'Supprimer la vue',
     myView: 'Ma vue',
     saveViewTitle: 'Enregistrer la vue',
