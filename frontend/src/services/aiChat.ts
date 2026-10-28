@@ -19,18 +19,21 @@ export function pickStarters(starters: Record<string, string[]> | undefined, app
   return []
 }
 
-/** The starter groups for the page: the most specific key that has GROUPS wins; without any,
- *  the flat starters of the most specific key become one unnamed group. */
+/** The starter groups for the page: the most specific key wins, whatever form it has — its
+ *  groups when it carries some, else its flat starters as one unnamed group. A screen's flat
+ *  list therefore shows on that screen even when the app has themed groups. */
 export function pickStarterGroups(
   groups: Record<string, StarterGroup[]> | undefined, starters: Record<string, string[]> | undefined, app?: string | null, screen?: string | null,
 ): StarterGroup[] {
   const keys = [app && screen ? `${app}/${screen}` : null, app || null, '*']
   for (const k of keys) {
-    const list = k && groups ? groups[k] : undefined
+    if (!k) continue
+    const list = groups?.[k]
     if (list && list.length > 0) return list.filter((g) => g.starters.length > 0)
+    const flat = starters?.[k]
+    if (flat && flat.length > 0) return [{ label: null, starters: flat }]
   }
-  const flat = pickStarters(starters, app, screen)
-  return flat.length ? [{ label: null, starters: flat }] : []
+  return []
 }
 
 export function loadHistory(): ChatMessage[] {

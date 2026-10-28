@@ -49,3 +49,14 @@ describe('pickStarterGroups', () => {
     expect(pickStarterGroups(undefined, undefined, 'x', null)).toEqual([])
   })
 })
+
+
+describe('pickStarterGroups — the page wins over the app', () => {
+  it("shows a screen's flat starters even when the app has themed groups", () => {
+    const groups = { nomajde: [{ label: 'Users', starters: ['a', 'b'] }] }
+    const starters = { 'nomajde/explorer': ['Create an analysis'], nomajde: ['x'] }
+    expect(pickStarterGroups(groups, starters, 'nomajde', 'explorer')).toEqual([{ label: null, starters: ['Create an analysis'] }])
+    expect(pickStarterGroups(groups, starters, 'nomajde', 'f0092')).toEqual([{ label: 'Users', starters: ['a', 'b'] }])
+    expect(pickStarterGroups(groups, starters, 'other', null)).toEqual([])
+  })
+})
