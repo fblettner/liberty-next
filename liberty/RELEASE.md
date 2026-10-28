@@ -15,6 +15,11 @@
   imported one by one — importing a package no longer replaces a whole connector (its other
   queries were lost), and a screen's queries ship even when its connector isn't selected.
   `connectors.toml` and `jobs.toml` keep their comments through an import.
+- Settings → Package: Import previews the package as soon as it is picked (and again when the
+  strategy changes): counts per state, the warnings, then each file's entities — what changes
+  first, identical ones on demand — and a changed entity opens on its fields, here now / after the
+  import; "Apply N change(s)" then writes it and shows the result. Build offers the new kinds:
+  Explorer models, nomaflow jobs, notification rules, shared actions, the assistant per application.
 
 ## 7.0.63 — unreleased
 

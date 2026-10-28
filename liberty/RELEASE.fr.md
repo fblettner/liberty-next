@@ -18,6 +18,12 @@
   remplace plus un connecteur entier (ses autres requêtes étaient perdues), et les requêtes d'un
   écran partent même quand son connecteur n'est pas sélectionné. `connectors.toml` et `jobs.toml`
   gardent leurs commentaires à l'import.
+- Paramètres → Paquet : Importer prévisualise le paquet dès qu'il est choisi (et à nouveau quand la
+  stratégie change) : le nombre par état, les avertissements, puis les éléments de chaque fichier —
+  ce qui change d'abord, les identiques sur demande — et un élément modifié s'ouvre sur ses champs,
+  ici maintenant / après l'import ; « Appliquer N changement(s) » l'écrit ensuite et affiche le
+  résultat. Construire propose les nouveaux types : modèles de l'Explorateur, tâches nomaflow,
+  règles de notification, actions partagées, l'assistant par application.
 
 ## 7.0.63 — non publiée
 

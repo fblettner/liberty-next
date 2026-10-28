@@ -299,6 +299,35 @@ def test_package_is_built_from_the_files_and_previews_identical(env) -> None:
         assert (tmp / "connectors.toml").read_text() == before
 
 
+def test_a_job_is_a_seed_with_its_queries_and_called_jobs(env) -> None:
+    import tomllib
+    app, tmp = env
+    _write(tmp / "jobs.toml", """
+        [[jobs]]
+        id = "nightly"
+        schedule = "0 2 * * *"
+        [[jobs.steps]]
+        name = "load"
+        type = "sql_query"
+        connector = "foo"
+        query = "users_get"
+        [[jobs.steps]]
+        name = "next"
+        type = "call_job"
+        target_job_id = "ghost"
+    """)
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        seeds = [{"kind": "job", "name": "nightly"}]
+        m = client.post("/admin/find-dependencies", json={"seeds": seeds}, headers=h).json()
+        assert {(d["kind"], d["name"]) for d in m["deps"]} >= {("job", "nightly"), ("query", "users_get"), ("connector", "foo")}
+        assert [x["name"] for x in m["missing"]] == ["ghost"]
+        r = client.post("/admin/build-package", json={"seeds": seeds}, headers=h)
+        zf = zipfile.ZipFile(io.BytesIO(r.content))
+        jobs = tomllib.loads(zf.read("jobs.toml").decode())["jobs"]
+        assert [j["id"] for j in jobs] == ["nightly"] and jobs[0]["schedule"] == "0 2 * * *"
+
+
 # ── clone / delete with dependencies ───────────────────────────────────────────────
 
 

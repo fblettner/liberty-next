@@ -39,7 +39,7 @@ interface ManifestResponse {
   counts: Record<string, number>
 }
 
-const KIND_TITLES: Record<string, string> = {
+export const KIND_TITLES: Record<string, string> = {
   connector: 'Connectors',
   pool: 'Pools',
   query: 'Queries',
@@ -52,10 +52,16 @@ const KIND_TITLES: Record<string, string> = {
   lookup: 'Lookups',
   sequence: 'Sequences',
   enum: 'Enums',
+  action: 'Shared actions',
+  explorer_model: 'Explorer models',
+  job: 'nomaflow jobs',
+  notification_rule: 'Notification rules',
+  ai: 'Assistant',
 }
 
-const KIND_ORDER = [
+export const KIND_ORDER = [
   'screen', 'menu_item', 'dashboard', 'chart',
+  'explorer_model', 'job', 'notification_rule', 'action', 'ai',
   'connector', 'pool', 'query', 'api_endpoint',
   'dictionary_entry', 'lookup', 'sequence', 'enum',
 ]

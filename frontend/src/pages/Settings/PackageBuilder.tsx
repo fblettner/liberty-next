@@ -6,14 +6,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Search, Download, Upload, Package, FileText, Menu as MenuIcon, LayoutDashboard, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { type LucideIcon, Search, Download, Upload, Package, FileText, Menu as MenuIcon, LayoutDashboard, AlertCircle, CheckCircle2, Compass, Workflow, Bell, Zap, Sparkles } from 'lucide-react'
 import { api, apiDownload, apiUpload, ApiError } from '../../api/client'
-import type { ScreensDoc, MenusDoc, DashboardsDoc } from '../../types/config'
+import type { ScreensDoc, MenusDoc, DashboardsDoc, ExplorerDoc, AiDoc } from '../../types/config'
 import { Banner, Button, Card, Centered, Checkbox, SpinnerRing, Mono, ViewCards } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
-import { DEFAULT_EXCLUDED_KINDS, depKey } from './FindDependenciesModal'
+import { DEFAULT_EXCLUDED_KINDS, KIND_ORDER, KIND_TITLES, depKey } from './FindDependenciesModal'
+import { PackagePlanView } from './PackagePlanView'
+import { pendingChanges } from '../../services/packagePlan'
+import type { PackagePlan } from '../../types/packagePlan'
 
-type SeedKind = 'screen' | 'menu_item' | 'dashboard'
+type SeedKind = 'screen' | 'menu_item' | 'dashboard' | 'explorer_model' | 'job' | 'notification_rule' | 'action' | 'ai'
 
 interface Seed {
   kind: SeedKind
@@ -38,30 +41,18 @@ interface ManifestResponse {
   counts: Record<string, number>
 }
 
-interface ImportReport {
-  files: Array<{
-    file: string; strategy: string;
-    added: string[]; replaced: string[]; skipped: string[];
-    preserved_overrides: string[]
-    errors: string[]
-  }>
-  warnings: string[]
-  reloaded: boolean
-}
-
 const seedKey = (s: Seed) => `${s.kind}:${s.scope ?? ''}:${s.name}`
 
-const KIND_TITLES: Record<string, string> = {
-  connector: 'Connectors', pool: 'Pools', query: 'Queries', api_endpoint: 'API endpoints',
-  screen: 'Screens', menu_item: 'Menu items', dashboard: 'Dashboards', chart: 'Charts',
-  dictionary_entry: 'Dictionary entries', lookup: 'Lookups', sequence: 'Sequences', enum: 'Enums',
-}
+interface SeedSection { key: SeedKind; title: string; Icon: LucideIcon; groups: Array<{ app: string; seeds: Seed[] }> }
 
-const KIND_ORDER = [
-  'screen', 'menu_item', 'dashboard', 'chart',
-  'connector', 'pool', 'query', 'api_endpoint',
-  'dictionary_entry', 'lookup', 'sequence', 'enum',
-]
+interface ExtraSources {
+  explorer: ExplorerDoc['explorer']
+  jobs: { id: string; description?: string | null }[]
+  notifications: Record<string, { label?: string | null }>
+  actions: Record<string, { label?: string | null }>
+  ai: AiDoc['ai']
+}
+const EMPTY_EXTRA: ExtraSources = { explorer: {}, jobs: [], notifications: {}, actions: {}, ai: {} }
 
 type Strategy = 'merge' | 'overwrite' | 'replace_all'
 
@@ -121,18 +112,6 @@ const FileDrop = styled.label<{ $hasFile?: boolean }>`
   & input { display: none; }
   & .label { color: ${({ $hasFile }) => ($hasFile ? colors.green.main : colors.text.muted)}; }
 `
-const ReportTable = styled.div`
-  display: flex; flex-direction: column; gap: 8px;
-  & .row { display: grid; grid-template-columns: 1.2fr 1fr 4fr; gap: 10px; padding: 8px 10px;
-    border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; }
-  & .file { font-family: ${fonts.mono}; color: ${colors.text.primary}; }
-  & .counts { font-family: ${fonts.mono}; font-size: ${fontSize.sm}; }
-  & .counts .add { color: ${colors.green.main}; margin-right: 8px; }
-  & .counts .repl { color: ${colors.blue.main}; margin-right: 8px; }
-  & .counts .skip { color: ${colors.text.muted}; margin-right: 8px; }
-  & .counts .err { color: ${colors.red.main}; }
-  & .detail { color: ${colors.text.muted}; font-size: ${fontSize.micro}; overflow: hidden; }
-`
 
 export default function PackageBuilder() {
   const { t } = useTranslation()
@@ -156,6 +135,8 @@ function BuildPanel() {
   const [screens, setScreens] = useState<ScreensDoc | null>(null)
   const [menus, setMenus] = useState<MenusDoc | null>(null)
   const [dashboards, setDashboards] = useState<DashboardsDoc | null>(null)
+  // The kinds that aren't reached from a screen: picked on their own (C11).
+  const [extra, setExtra] = useState<ExtraSources>(EMPTY_EXTRA)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [selected, setSelected] = useState<Map<string, Seed>>(new Map())
@@ -175,6 +156,14 @@ function BuildPanel() {
     ])
       .then(([s, m, d]) => { setScreens(s); setMenus(m); setDashboards(d) })
       .catch((e) => setLoadError(e instanceof ApiError ? e.message : String(e)))
+    // Optional sources: a section with nothing (or a failing route — nomaflow off) just stays empty.
+    Promise.all([
+      api.get<ExplorerDoc>('/admin/config/explorer/parsed').then((r) => r.explorer).catch(() => ({})),
+      api.get<{ jobs: { id: string; description?: string | null }[] }>('/admin/jobs').then((r) => r.jobs).catch(() => []),
+      api.get<{ notifications: Record<string, { label?: string | null }> }>('/admin/config/notifications/parsed').then((r) => r.notifications).catch(() => ({})),
+      api.get<{ actions: Record<string, { label?: string | null }> }>('/admin/config/actions/parsed').then((r) => r.actions).catch(() => ({})),
+      api.get<AiDoc>('/admin/config/ai/parsed').then((r) => r.ai).catch(() => ({})),
+    ]).then(([explorer, jobs, notifications, actions, ai]) => setExtra({ explorer, jobs, notifications, actions, ai }))
   }, [])
 
   useEffect(() => {
@@ -247,37 +236,29 @@ function BuildPanel() {
   const needle = q.trim().toLowerCase()
   const matches = (s: Seed) => !needle || `${s.scope ?? ''} ${s.name} ${s.label ?? ''}`.toLowerCase().includes(needle)
 
-  const screenSeeds = useMemo<Array<{ app: string; seeds: Seed[] }>>(() => {
-    if (!screens) return []
-    return Object.entries(screens.screens || {})
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([app, byId]) => ({
-        app,
-        seeds: Object.entries(byId).sort(([a], [b]) => a.localeCompare(b))
-          .map(([id, s]) => ({ kind: 'screen' as const, name: id, scope: app, label: s.label || undefined })),
-      }))
-  }, [screens])
-  const menuSeeds = useMemo<Array<{ app: string; seeds: Seed[] }>>(() => {
-    if (!menus) return []
-    return Object.entries(menus.menus || {})
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([app, am]) => ({
-        app,
-        seeds: (am.items || []).map((it) => ({
-          kind: 'menu_item' as const, name: it.id, scope: app, label: it.label || undefined,
-        })),
-      }))
-  }, [menus])
-  const dashboardSeeds = useMemo<Array<{ app: string; seeds: Seed[] }>>(() => {
-    if (!dashboards) return []
-    return Object.entries(dashboards.dashboards || {})
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([scope, byId]) => ({
+  // Every seed source as one section: screens / menu items / dashboards (with their closure), then
+  // the kinds picked on their own. A section with no entries isn't shown.
+  const sections = useMemo<SeedSection[]>(() => {
+    const byScope = <T,>(m: Record<string, Record<string, T>> | undefined, kind: SeedKind, label: (v: T) => string | null | undefined, scoped = true) =>
+      Object.entries(m ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([scope, byId]) => ({
         app: scope,
-        seeds: Object.entries(byId).sort(([a], [b]) => a.localeCompare(b))
-          .map(([id, d]) => ({ kind: 'dashboard' as const, name: id, label: (d as { label?: string }).label || undefined })),
+        seeds: Object.entries(byId ?? {}).sort(([a], [b]) => a.localeCompare(b))
+          .map(([id, v]) => ({ kind, name: id, scope: scoped ? scope : undefined, label: label(v) || undefined })),
       }))
-  }, [dashboards])
+    const flat = (kind: SeedKind, entries: Array<[string, string | null | undefined]>) =>
+      entries.length ? [{ app: '', seeds: entries.sort(([a], [b]) => a.localeCompare(b)).map(([id, label]) => ({ kind, name: id, label: label || undefined })) }] : []
+    return [
+      { key: 'screen', title: t('settings.package.screens'), Icon: FileText, groups: byScope(screens?.screens, 'screen', (v) => v.label) },
+      { key: 'menu_item', title: t('settings.package.menus'), Icon: MenuIcon, groups: Object.entries(menus?.menus ?? {}).sort(([a], [b]) => a.localeCompare(b))
+          .map(([app, am]) => ({ app, seeds: (am.items || []).map((it) => ({ kind: 'menu_item' as const, name: it.id, scope: app, label: it.label || undefined })) })) },
+      { key: 'dashboard', title: t('settings.package.dashboards'), Icon: LayoutDashboard, groups: byScope(dashboards?.dashboards as Record<string, Record<string, { label?: string }>> | undefined, 'dashboard', (v) => v.label, false) },
+      { key: 'explorer_model', title: t('settings.package.explorer'), Icon: Compass, groups: byScope(extra.explorer as Record<string, Record<string, { label?: string | null }>>, 'explorer_model', (v) => v.label) },
+      { key: 'job', title: t('settings.package.jobs'), Icon: Workflow, groups: flat('job', extra.jobs.map((j) => [j.id, j.description])) },
+      { key: 'notification_rule', title: t('settings.package.notifications'), Icon: Bell, groups: flat('notification_rule', Object.entries(extra.notifications).map(([id, r]) => [id, r.label])) },
+      { key: 'action', title: t('settings.package.actions'), Icon: Zap, groups: flat('action', Object.entries(extra.actions).map(([id, a]) => [id, a.label])) },
+      { key: 'ai', title: t('settings.package.ai'), Icon: Sparkles, groups: flat('ai', Object.keys(extra.ai).map((app) => [app, null])) },
+    ]
+  }, [screens, menus, dashboards, extra, t])
 
   async function download() {
     if (!manifest || selected.size === 0) return
@@ -300,18 +281,12 @@ function BuildPanel() {
   const totalDeps = manifest?.deps.length ?? 0
   const totalIncluded = included.size
 
-  // Flatten + filter the seed pools to the currently-shown set. The "select all" toggles
-  // honour the search filter — picking "screens" + "select all" while filtering by "audit"
-  // selects only matching screens, not every screen in the install. Same UX the Connectors
-  // editor's filter+select pattern uses elsewhere.
-  const visibleScreens = screenSeeds.flatMap((g) => g.seeds).filter(matches)
-  const visibleMenus = menuSeeds.flatMap((g) => g.seeds).filter(matches)
-  const visibleDashboards = dashboardSeeds.flatMap((g) => g.seeds).filter(matches)
-  const visibleAll = [...visibleScreens, ...visibleMenus, ...visibleDashboards]
+  // The seeds each section shows under the current search. The "select all" toggles honour the
+  // filter — picking "screens" + "select all" while filtering by "audit" selects only matching
+  // screens, not every screen in the install.
+  const visibleBy = new Map(sections.map((sec) => [sec.key, sec.groups.flatMap((g) => g.seeds).filter(matches)]))
+  const visibleAll = [...visibleBy.values()].flat()
   const isVisible = (s: Seed) => selected.has(seedKey(s))
-  const screenPicked = visibleScreens.filter(isVisible).length
-  const menuPicked = visibleMenus.filter(isVisible).length
-  const dashPicked = visibleDashboards.filter(isVisible).length
   const allPicked = visibleAll.filter(isVisible).length
   const allOn = visibleAll.length > 0 && allPicked === visibleAll.length
 
@@ -345,18 +320,15 @@ function BuildPanel() {
             )}
           </PanelHeader>
           <PanelBody>
-            <SeedGroup title={t('settings.package.screens')} Icon={FileText} groups={screenSeeds} selected={selected}
-              toggle={toggleSeed} toggleBulk={(on) => toggleSeedBulk(visibleScreens, on)}
-              picked={screenPicked} totalVisible={visibleScreens.length} matches={matches}
-              selectAllLabel={t('settings.package.selectAll')} deselectAllLabel={t('settings.package.deselectAll')} />
-            <SeedGroup title={t('settings.package.menus')} Icon={MenuIcon} groups={menuSeeds} selected={selected}
-              toggle={toggleSeed} toggleBulk={(on) => toggleSeedBulk(visibleMenus, on)}
-              picked={menuPicked} totalVisible={visibleMenus.length} matches={matches}
-              selectAllLabel={t('settings.package.selectAll')} deselectAllLabel={t('settings.package.deselectAll')} />
-            <SeedGroup title={t('settings.package.dashboards')} Icon={LayoutDashboard} groups={dashboardSeeds} selected={selected}
-              toggle={toggleSeed} toggleBulk={(on) => toggleSeedBulk(visibleDashboards, on)}
-              picked={dashPicked} totalVisible={visibleDashboards.length} matches={matches}
-              selectAllLabel={t('settings.package.selectAll')} deselectAllLabel={t('settings.package.deselectAll')} />
+            {sections.map((sec) => {
+              const visible = visibleBy.get(sec.key) ?? []
+              return (
+                <SeedGroup key={sec.key} title={sec.title} Icon={sec.Icon} groups={sec.groups} selected={selected}
+                  toggle={toggleSeed} toggleBulk={(on) => toggleSeedBulk(visible, on)}
+                  picked={visible.filter(isVisible).length} totalVisible={visible.length} matches={matches}
+                  selectAllLabel={t('settings.package.selectAll')} deselectAllLabel={t('settings.package.deselectAll')} />
+              )
+            })}
           </PanelBody>
         </Panel>
         <Panel>
@@ -431,7 +403,7 @@ function SeedGroup({
   selectAllLabel, deselectAllLabel,
 }: {
   title: string
-  Icon: typeof FileText
+  Icon: LucideIcon
   groups: Array<{ app: string; seeds: Seed[] }>
   selected: Map<string, Seed>
   toggle: (s: Seed, on: boolean) => void
@@ -460,7 +432,7 @@ function SeedGroup({
         if (shown.length === 0) return null
         return (
           <Group key={app}>
-            <GroupTitle style={{ paddingLeft: 14 }}>{app}</GroupTitle>
+            {app && <GroupTitle style={{ paddingLeft: 14 }}>{app}</GroupTitle>}
             {shown.map((s) => (
               <ItemRow key={seedKey(s)} style={{ paddingLeft: 22 }}>
                 <Checkbox checked={selected.has(seedKey(s))} onChange={(on) => toggle(s, on)} />
@@ -481,24 +453,39 @@ function ImportPanel() {
   const { t } = useTranslation()
   const [file, setFile] = useState<File | null>(null)
   const [strategy, setStrategy] = useState<Strategy>('overwrite')
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<'preview' | 'apply' | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [report, setReport] = useState<ImportReport | null>(null)
+  // The preview (a dry run) of the picked file under the picked strategy, then the applied result.
+  const [plan, setPlan] = useState<PackagePlan | null>(null)
+  const [result, setResult] = useState<PackagePlan | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Picking a file or a strategy previews at once: what the import would do, nothing written.
+  useEffect(() => {
+    if (!file) { setPlan(null); return }
+    let cancelled = false
+    setBusy('preview'); setError(null); setResult(null)
+    apiUpload<{ report: PackagePlan }>(`/admin/import-package?strategy=${strategy}&dry_run=true`, file, 'package')
+      .then((r) => { if (!cancelled) setPlan(r.report) })
+      .catch((e) => { if (!cancelled) { setPlan(null); setError(e instanceof Error ? e.message : String(e)) } })
+      .finally(() => { if (!cancelled) setBusy(null) })
+    return () => { cancelled = true }
+  }, [file, strategy])
 
   async function apply() {
     if (!file) return
-    setBusy(true); setError(null); setReport(null)
+    setBusy('apply'); setError(null)
     try {
-      const data = await apiUpload<{ report: ImportReport }>(`/admin/import-package?strategy=${strategy}`, file, 'package')
-      setReport(data.report)
+      const data = await apiUpload<{ report: PackagePlan }>(`/admin/import-package?strategy=${strategy}`, file, 'package')
+      setResult(data.report); setPlan(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setBusy(false)
+      setBusy(null)
     }
   }
 
+  const pending = plan ? pendingChanges(plan) : 0
   return (
     <ImportShell>
       <Banner $tone="info">
@@ -525,7 +512,7 @@ function ImportPanel() {
 
       <FileDrop $hasFile={!!file} onClick={() => inputRef.current?.click()}>
         <input ref={inputRef} type="file" accept=".zip,application/zip"
-          onChange={(e) => { setFile(e.target.files?.[0] ?? null); setReport(null); setError(null) }} />
+          onChange={(e) => { setFile(e.target.files?.[0] ?? null); setResult(null); setError(null) }} />
         <span className="label">
           {file ? (
             <><CheckCircle2 size={16} style={{ verticalAlign: -3, marginRight: 6 }} />{file.name} · {(file.size / 1024).toFixed(1)} KB</>
@@ -535,61 +522,35 @@ function ImportPanel() {
         </span>
       </FileDrop>
 
-      <Toolbar>
-        <Button $variant="primary" $size="sm" onClick={() => void apply()} disabled={!file || busy}>
-          {busy ? <SpinnerRing size={13} thickness={2} /> : <Upload size={13} />}
-          {t('settings.package.apply')}
-        </Button>
-        {report?.reloaded && (
-          <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>
-            <CheckCircle2 size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
-            {t('settings.package.reloaded')}
-          </span>
-        )}
-      </Toolbar>
-
       {error && <Banner $tone="error">{error}</Banner>}
 
-      {report && (
-        <ReportTable>
-          {report.files.map((f) => {
-            const overridesCount = (f.preserved_overrides ?? []).length
-            return (
-              <div className="row" key={f.file}>
-                <span className="file">{f.file}</span>
-                <span className="counts">
-                  <span className="add">+{f.added.length} added</span>
-                  <span className="repl">~{f.replaced.length} replaced</span>
-                  <span className="skip">⊘{f.skipped.length} skipped</span>
-                  {overridesCount > 0 && (
-                    <span style={{ color: 'var(--text-warning, #d97706)', marginRight: 8 }}>
-                      ⚑{overridesCount} override-preserved
-                    </span>
-                  )}
-                  {f.errors.length > 0 && <span className="err">✗{f.errors.length} errors</span>}
-                </span>
-                <span className="detail">
-                  {(f.added.length + f.replaced.length + f.skipped.length + overridesCount) === 0
-                    ? '(no entities)'
-                    : [
-                        ...f.added.slice(0, 3),
-                        ...f.replaced.slice(0, 3),
-                        ...f.skipped.slice(0, 3),
-                        ...(f.preserved_overrides ?? []).slice(0, 3).map((s) => `[override] ${s}`),
-                      ].join(', ')}
-                  {f.errors.length > 0 && ` — ERR: ${f.errors.join('; ')}`}
-                </span>
-              </div>
-            )
-          })}
-          {report.warnings.length > 0 && (
-            <Banner $tone="info">
-              <ul style={{ margin: 0, paddingLeft: 18 }}>
-                {report.warnings.map((w, i) => <li key={i}>{w}</li>)}
-              </ul>
-            </Banner>
+      {busy === 'preview' && <Toolbar><SpinnerRing size={13} thickness={2} /> {t('settings.package.previewing')}</Toolbar>}
+
+      {plan && busy !== 'preview' && (
+        <>
+          <Toolbar>
+            <Button $variant="primary" $size="sm" onClick={() => void apply()} disabled={pending === 0 || busy === 'apply'}>
+              {busy === 'apply' ? <SpinnerRing size={13} thickness={2} /> : <Upload size={13} />}
+              {t('settings.package.applyN', { count: pending })}
+            </Button>
+            <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>
+              {pending === 0 ? t('settings.package.nothingToApply') : t('settings.package.previewHint')}
+            </span>
+          </Toolbar>
+          <PackagePlanView plan={plan} />
+        </>
+      )}
+
+      {result && (
+        <>
+          {result.reloaded && (
+            <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>
+              <CheckCircle2 size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
+              {t('settings.package.reloaded')}
+            </span>
           )}
-        </ReportTable>
+          <PackagePlanView plan={result} />
+        </>
       )}
     </ImportShell>
   )
