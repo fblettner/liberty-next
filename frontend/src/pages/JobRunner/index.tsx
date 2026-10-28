@@ -7,7 +7,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Play, Download, FileSpreadsheet } from 'lucide-react'
 import { ApiError } from '../../api/client'
-import { Banner, Button, Centered, FileInput, PageLayout, SpinnerRing, Tag } from '../../common'
+import { Banner, Button, Centered, FileInput, Input, PageLayout, SearchSelect, SpinnerRing, Tag } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { findMenuLabel } from '../../services/menuLabels'
 import { downloadRunFile, durationOf, filesInLog, getJob, getRun, isActive, runJob, uploadFile, type JobRunDetail, type JobRunRow, type UserJob } from '../../services/jobRunner'
@@ -43,6 +43,7 @@ export default function JobRunner({ jobId }: { jobId: string }) {
   const [runs, setRuns] = useState<JobRunRow[]>([])
   const [error, setError] = useState<string | null>(null)
   const [files, setFiles] = useState<Record<string, File | null>>({})
+  const [params, setParams] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState<'upload' | 'run' | null>(null)
   const [picked, setPicked] = useState<string | null>(null)      // the run whose log is shown
   const [detail, setDetail] = useState<JobRunDetail | null>(null)
@@ -54,6 +55,7 @@ export default function JobRunner({ jobId }: { jobId: string }) {
     try {
       const r = await getJob(jobId)
       setJob(r.job); setRuns(r.runs); setError(null)
+      setParams((cur) => Object.fromEntries(r.job.params.map((p) => [p.name, cur[p.name] ?? p.default ?? ''])))
       setPicked((cur) => cur ?? r.runs[0]?.id ?? null)
     } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) }
   }, [jobId])
@@ -82,6 +84,8 @@ export default function JobRunner({ jobId }: { jobId: string }) {
     if (!job) return
     const missing = job.uploads.filter((u) => !files[u.step])
     if (missing.length) { setError(t('jobrun.fileRequired')); return }
+    const blank = job.params.find((p) => p.required && !(params[p.name] ?? '').trim())
+    if (blank) { setError(t('jobrun.paramRequired', { name: blank.label })); return }
     setError(null)
     try {
       const paths: Record<string, string> = {}
@@ -91,7 +95,7 @@ export default function JobRunner({ jobId }: { jobId: string }) {
         if (f) paths[u.step] = (await uploadFile(jobId, f)).path
       }
       setBusy('run')
-      const r = await runJob(jobId, paths)
+      const r = await runJob(jobId, paths, params)
       setFiles({})
       setPicked(r.run_id)
       await loadJob()
@@ -108,6 +112,14 @@ export default function JobRunner({ jobId }: { jobId: string }) {
         {error && <Banner $tone="error">{error}</Banner>}
         <Card>
           <Row>
+            {job.params.map((p) => (
+              <Field key={p.name}>
+                <span>{p.label}{p.required ? ' *' : ''}</span>
+                {p.choices.length > 0
+                  ? <SearchSelect sort value={params[p.name] ?? ''} onChange={(v) => setParams((c) => ({ ...c, [p.name]: v }))} options={p.choices} anyLabel={p.required ? undefined : t('jobrun.anyChoice')} disabled={busy != null || inFlight} />
+                  : <Input value={params[p.name] ?? ''} onChange={(e) => setParams((c) => ({ ...c, [p.name]: e.target.value }))} disabled={busy != null || inFlight} />}
+              </Field>
+            ))}
             {job.uploads.map((u) => (
               <Field key={u.step}>
                 <span><FileSpreadsheet size={12} style={{ verticalAlign: '-2px' }} /> {t('jobrun.fileFor', { step: u.step })}{u.sheet != null && u.sheet !== '' ? ` · ${t('jobrun.sheet', { sheet: String(u.sheet) })}` : ''}</span>

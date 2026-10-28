@@ -5,7 +5,8 @@ import { api, authHeaders } from '../api/client'
 import type { RunState } from '../pages/Nomaflow/types'
 
 export interface JobUpload { step: string; sheet: string | number | null; path: string | null; watch_dir: string | null }
-export interface UserJob { id: string; description: string | null; tags: string[]; uploads: JobUpload[]; in_flight: boolean }
+export interface JobParam { name: string; label: string; step: string; default: string | null; required: boolean; choices: { value: string; label: string }[] }
+export interface UserJob { id: string; description: string | null; tags: string[]; uploads: JobUpload[]; params: JobParam[]; in_flight: boolean }
 export interface JobRunRow {
   id: string; job_id: string; state: RunState; trigger_kind: string; triggered_by: string | null
   started_at: string | null; finished_at: string | null; rows_affected: number | null; error_message: string | null
@@ -38,8 +39,8 @@ export async function uploadFile(jobId: string, file: File): Promise<{ name: str
   return res.json() as Promise<{ name: string; path: string; size: number }>
 }
 
-export function runJob(jobId: string, files: Record<string, string>): Promise<{ run_id: string }> {
-  return api.post(`/api/jobs/${enc(jobId)}/run`, { files })
+export function runJob(jobId: string, files: Record<string, string>, params: Record<string, string> = {}): Promise<{ run_id: string }> {
+  return api.post(`/api/jobs/${enc(jobId)}/run`, { files, params })
 }
 
 /** The files a run left (today the file_load rejects report) are named ``<run id>-…``: the log

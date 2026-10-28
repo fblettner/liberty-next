@@ -47,6 +47,18 @@
 - Le tableau de bord Vue d'ensemble de nomaflow prend une période (7 derniers jours par
   défaut) : les chiffres, les exécutions par jour, ce qui demande attention, les exécutions et
   durées par tâche et les exécutions récentes la suivent ; « En cours » reste en direct.
+- Le rafraîchissement du dictionnaire des modèles de l'Explorateur est aussi une tâche :
+  `liberty.jobs.dictionary:refresh_model_dictionary` (`app`, `models` facultatif) analyse chaque
+  table des modèles de l'application, écrit les entrées manquantes et reconstruit les connecteurs,
+  les tables et entrées dans le journal de l'exécution. Les étapes Python reçoivent le runtime
+  sous `app_state` quand elles le déclarent. nomajde la livre sous `nomajde-dictionary-refresh`
+  dans son menu Tâches.
+- Une tâche déclare ce qu'un utilisateur peut régler en la lançant depuis sa page :
+  `[[jobs.user_params]]` (`name`, `label` + `l`, `step`, `default`, `required`, `choices` fixes
+  ou `choices_from = "explorer_models:<app>"`). La page affiche une liste ou un champ texte par
+  paramètre ; la valeur atteint les paramètres de l'étape, tout le reste est refusé. Le
+  rafraîchissement du dictionnaire de nomajde prend le modèle Explorateur à rafraîchir (vide =
+  tous les modèles).
 
 ## 7.0.59 — non publiée
 

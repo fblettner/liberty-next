@@ -30,6 +30,10 @@ from liberty.connectors.base import ConnectorError
 from liberty.connectors.dictionary import load_dictionary
 from liberty.connectors.introspect import introspect_pool, resolve_schema_token
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/admin", tags=["dictionary"])
 
 Superuser = Annotated[Principal, Depends(require_superuser)]
@@ -197,14 +201,14 @@ async def _fetch_jde_dd_filters(
 
 @router.post("/dictionary/scan", summary="Scan dictionary")
 async def scan_dictionary(body: ScanBody, request: Request, _: Superuser) -> dict[str, Any]:
-    return await propose_entries(body, request)
+    return await propose_entries(body, registry=request.app.state.connectors, settings=request.app.state.settings)
 
 
-async def propose_entries(body: ScanBody, request: Request) -> dict[str, Any]:
+async def propose_entries(body: ScanBody, *, registry: Any, settings: Any) -> dict[str, Any]:
     """The scan itself — ``{scope, dialect, jde, items: [{column, dd_id, exists, label, format,
-    rules, …}]}`` — shared by the route, the explorer's "apply a preset" and the model page's
-    "create the dictionary entries" (:func:`create_entries`)."""
-    registry = request.app.state.connectors
+    rules, …}]}`` — shared by the route, the explorer's "apply a preset", the model page's
+    "create the dictionary entries" and the dictionary-refresh job (:func:`create_entries`).
+    Raises :class:`HTTPException` on a bad source (the job turns it into a skipped table)."""
     if bool(body.table) == bool(body.query):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Provide exactly one of `table` or `query`.")
     try:
@@ -248,7 +252,7 @@ async def propose_entries(body: ScanBody, request: Request) -> dict[str, Any]:
 
     # Existing dictionary ids in scope (scoped + shared), case-insensitive.
     scope = body.scope or body.connector
-    dcfg = load_dictionary(_dictionary_path(request.app.state.settings))
+    dcfg = load_dictionary(_dictionary_path(settings))
     existing = {k.upper() for k in dcfg.entries}
     sc = dcfg.connectors.get(scope)
     if sc is not None:
@@ -335,14 +339,16 @@ def entry_from_proposal(item: dict[str, Any]) -> dict[str, Any]:
 
 
 async def create_entries(
-    request: Request, principal: Principal, *, scope: str, sources: list[dict[str, Any]],
+    *, registry: Any, settings: Any, scope: str, sources: list[dict[str, Any]], versions: Any = None,
 ) -> dict[str, Any]:
     """Scan every source (``{connector, table, schema}`` or ``{connector, query}``) and write the
     entries the dictionary lacks under *scope* (an app, as the assistant files them; ``shared``
-    for the top level), then rebuild the connectors so the new labels reach every query. The
-    Screen Assistant's Dictionary step, without the review: a JDE source gets its data
-    dictionary descriptions, another source the format inferred from the column type (the
-    label left for the operator). Returns ``{created: [ids], scanned: n, skipped: [reasons]}``."""
+    for the top level). The Screen Assistant's Dictionary step, without the review: a JDE source
+    gets its data dictionary descriptions, another source the format inferred from the column
+    type (the label left for the operator). *versions* (the config history store) snapshots
+    the file before the write. Returns ``{created: [ids], scanned: n, skipped: [reasons]}``;
+    the caller rebuilds the connectors so the new labels reach every query
+    (:func:`create_entries_and_reload` for a request, the job through its ``app_state``)."""
     proposals: dict[str, dict[str, Any]] = {}
     scanned = 0
     skipped: list[str] = []
@@ -352,7 +358,7 @@ async def create_entries(
                 connector=str(src["connector"]), table=src.get("table"), query=src.get("query"),
                 db_schema=src.get("schema"), scope=scope,
             )
-            r = await propose_entries(body, request)
+            r = await propose_entries(body, registry=registry, settings=settings)
         except HTTPException as exc:
             skipped.append(f"{src.get('table') or src.get('query')}: {exc.detail}")
             continue
@@ -362,16 +368,30 @@ async def create_entries(
                 continue
             proposals[it["dd_id"]] = entry_from_proposal(it)
     if proposals:
-        from liberty.runtime import rebuild_runtime
-        from liberty.web.admin import DictionaryBody, put_dictionary_parsed
-        ddict = load_dictionary(_dictionary_path(request.app.state.settings)).model_dump(exclude_defaults=True)
+        from liberty.connectors.dictionary import write_dictionary
+        path = _dictionary_path(settings)
+        ddict = load_dictionary(path).model_dump(exclude_defaults=True)
         section = ddict if scope == "shared" else ddict.setdefault("connectors", {}).setdefault(scope, {})
         entries = section.setdefault("entries", {})
         for k, v in proposals.items():
             entries[k] = v
-        await put_dictionary_parsed(DictionaryBody(dictionary=ddict), request, principal)
-        await rebuild_runtime(request.app, sections={"connectors"})
+        if versions is not None:
+            try:
+                versions.snapshot(path, source="manual")
+            except Exception:  # noqa: BLE001 — never fail a save over versioning
+                _log.warning("config snapshot failed for %s", path, exc_info=True)
+        write_dictionary(path, ddict)
     return {"created": sorted(proposals), "scanned": scanned, "skipped": skipped}
+
+
+async def create_entries_and_reload(request: Request, *, scope: str, sources: list[dict[str, Any]]) -> dict[str, Any]:
+    """:func:`create_entries` for a request, then the connectors rebuilt when anything was written."""
+    state = request.app.state
+    out = await create_entries(registry=state.connectors, settings=state.settings, scope=scope, sources=sources, versions=getattr(state, "config_versions", None))
+    if out["created"]:
+        from liberty.runtime import rebuild_runtime
+        await rebuild_runtime(request.app, sections={"connectors"})
+    return out
 
 
 def model_sources(model: Any, presets_dir: Path | str | None) -> list[dict[str, Any]]:
@@ -408,4 +428,4 @@ async def explorer_model_dictionary(app: str, model: str, request: Request, prin
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no explorer model {app}/{model}")
     cache = getattr(request.app.state, "explorer_cache", None)
     sources = model_sources(m, getattr(cache, "presets_dir", None))
-    return await create_entries(request, principal, scope=app, sources=sources)
+    return await create_entries_and_reload(request, scope=app, sources=sources)

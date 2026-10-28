@@ -25,6 +25,8 @@ const fr: Resources = {
     sheet: 'feuille « {{sheet}} »',
     uploading: 'Envoi du fichier…',
     fileRequired: 'Choisissez d’abord le ou les fichiers.',
+    paramRequired: '« {{name}} » est obligatoire.',
+    anyChoice: '(tous)',
     history: 'Exécutions précédentes',
     noRuns: 'Cette tâche n’a pas encore été lancée.',
     log: 'Journal',

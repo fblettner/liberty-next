@@ -606,3 +606,17 @@ def load_dictionary(path: Path | str) -> DictionaryFile:
         return DictionaryFile()
     with path.open("rb") as fh:
         return parse_dictionary(tomllib.load(fh))
+
+
+def write_dictionary(path: Path | str, data: dict[str, Any]) -> str:
+    """Validate *data* as a :class:`DictionaryFile` and rewrite *path* from scratch through
+    ``tomli-w`` (the big-file rule: never ``tomlkit`` here — see ``put_dictionary_parsed``).
+    Re-parsed before the write as a belt-and-braces guard. Returns the text written."""
+    import tomli_w
+    validated = DictionaryFile.model_validate(data)
+    text = tomli_w.dumps(validated.model_dump(exclude_defaults=True))
+    parse_dictionary(tomllib.loads(text))
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8")
+    return text

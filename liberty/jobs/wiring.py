@@ -123,7 +123,7 @@ def build_executors(
     out: dict[StepType, StepExecutor] = {
         StepType.SQL_QUERY: SqlQueryExecutor(connectors),
         StepType.SQL_COPY: SqlCopyExecutor(connectors),
-        StepType.PYTHON: PythonStepExecutor(connectors, settings=settings, changesets=changesets),
+        StepType.PYTHON: PythonStepExecutor(connectors, settings=settings, changesets=changesets, state=state),
         StepType.LDAP_SYNC: LdapSyncExecutor(connectors),
         StepType.HTTP: HttpStepExecutor(),
         StepType.FILE_LOAD: FileLoadExecutor(connectors, settings=settings),

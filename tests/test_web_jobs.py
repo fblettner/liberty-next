@@ -121,6 +121,15 @@ sheet = "Items"
 type = "python"
 name = "after"
 callable = "tests.test_web_jobs:_record_kwargs"
+[[jobs.user_params]]
+name = "mode"
+label = "Mode"
+step = "after"
+default = "full"
+choices = ["full", "delta"]
+[[jobs.user_params]]
+name = "note"
+step = "after"
 
 [[jobs]]
 id = "shared-params"
@@ -159,7 +168,7 @@ def _record_kwargs(**kw) -> int:
     (filled when ``ctx`` is injected) — multi-step jobs use this one so each
     step's kwargs are captured separately."""
     ctx = kw.get("ctx")
-    filtered = {k: v for k, v in kw.items() if k not in ("connectors", "ctx", "settings", "changesets")}
+    filtered = {k: v for k, v in kw.items() if k not in ("connectors", "ctx", "settings", "changesets", "app_state")}
     RECORDED_KWARGS.clear()
     RECORDED_KWARGS.update(filtered)
     if ctx is not None:
@@ -1069,6 +1078,11 @@ def test_user_job_routes(env) -> None:
         body = r.json()
         assert body["job"]["id"] == "load-file" and body["job"]["uploads"] == [{"step": "load", "sheet": "Items", "path": None, "watch_dir": None}]
         assert body["runs"] == [] and body["job"]["in_flight"] is False
+        assert body["job"]["params"] == [
+            {"name": "mode", "label": "Mode", "step": "after", "default": "full", "required": False, "choices": [{"value": "full", "label": "full"}, {"value": "delta", "label": "delta"}]},
+            {"name": "note", "label": "note", "step": "after", "default": None, "required": False, "choices": []},
+        ]
+        assert client.post("/api/jobs/load-file/run", json={"params": {"mode": "nope"}}, headers=h).status_code == 422
         # the file must be uploaded through this job (a path elsewhere is refused)
         assert client.post("/api/jobs/load-file/run", json={"files": {"load": "/etc/passwd"}}, headers=h).status_code == 422
         assert client.post("/api/jobs/load-file/run", json={"files": {"nope": "x"}}, headers=h).status_code == 422
@@ -1076,7 +1090,7 @@ def test_user_job_routes(env) -> None:
         assert up.status_code == 200, up.text
         assert up.json()["name"].endswith("-items.csv")
         assert client.post("/api/jobs/load-file/upload", files={"file": ("x.exe", b"MZ", "application/octet-stream")}, headers=h).status_code == 400
-        r = client.post("/api/jobs/load-file/run", json={"files": {"load": up.json()["path"]}}, headers=h)
+        r = client.post("/api/jobs/load-file/run", json={"files": {"load": up.json()["path"]}, "params": {"mode": "delta", "note": " hello "}}, headers=h)
         assert r.status_code == 200, r.text
         run_id = r.json()["run_id"]
         d: dict = {}
@@ -1087,6 +1101,9 @@ def test_user_job_routes(env) -> None:
             time.sleep(0.05)
         assert d["run"]["id"] == run_id and d["run"]["triggered_by"] == "loader" and "overrides" not in d and isinstance(d["logs"], str)
         assert [s["step_name"] for s in d["steps"]][:1] == ["load"]
+        # the user's parameters reached the step (recorded by the callable, when the load let it run)
+        if d["run"]["state"] == "SUCCEEDED":
+            assert RECORDED_KWARGS.get("mode") == "delta" and RECORDED_KWARGS.get("note") == "hello"
         # the history lists it; another job's run is not reachable through this job
         runs = client.get("/api/jobs/load-file", headers=h).json()["runs"]
         assert [x["id"] for x in runs] == [run_id]

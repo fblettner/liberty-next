@@ -23,6 +23,8 @@ const en = {
     sheet: 'sheet “{{sheet}}”',
     uploading: 'Uploading…',
     fileRequired: 'Pick the file(s) first.',
+    paramRequired: '“{{name}}” is required.',
+    anyChoice: '(all)',
     history: 'Previous runs',
     noRuns: 'This job has not run yet.',
     log: 'Log',

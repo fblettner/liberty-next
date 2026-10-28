@@ -56,9 +56,13 @@ class PythonStepExecutor:
     number of steps concurrently; each resolves its own callable."""
 
     def __init__(
-        self, connectors: ConnectorRegistry, *, settings: Settings | None = None, changesets: Any = None,
+        self, connectors: ConnectorRegistry, *, settings: Settings | None = None, changesets: Any = None, state: Any = None,
     ) -> None:
         self._connectors = connectors
+        # ``() -> app.state`` (what build_nomaflow hands every executor) — injected as ``app_state``
+        # for callables that need the live runtime (a config-writing step that rebuilds the
+        # connectors afterwards, like the dictionary refresh). None in a bare test wiring.
+        self._state = state
         # *settings* is optional so existing tests (which built the executor with just a
         # registry) keep working; when present, callables that declare a ``settings``
         # kwarg get the live Settings object injected — needed by python steps that
@@ -96,6 +100,7 @@ class PythonStepExecutor:
                     # it; bare-registry tests leave it None — and the invoker skips None injections).
                     ("settings", self._settings),
                     ("changesets", self._changesets),
+                    ("app_state", (self._state() if callable(self._state) else self._state) if self._state is not None else None),
                 ),
             )
         except PluginInvocationError as exc:

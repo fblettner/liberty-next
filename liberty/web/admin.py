@@ -1263,8 +1263,8 @@ async def explorer_from_preset(body: FromPresetBody, request: Request, _: Superu
     )
     out: dict[str, Any] = {"model": _explorer_model_dump(filled), "warnings": warnings}
     if body.dictionary:
-        from liberty.web.dictgen import create_entries, model_sources
-        out["dictionary"] = await create_entries(request, _, scope=body.app, sources=model_sources(filled, None))
+        from liberty.web.dictgen import create_entries_and_reload, model_sources
+        out["dictionary"] = await create_entries_and_reload(request, scope=body.app, sources=model_sources(filled, None))
     return out
 
 

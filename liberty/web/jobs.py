@@ -688,6 +688,23 @@ def _upload_steps(job) -> list[dict[str, Any]]:
     return out
 
 
+def _user_params(request: Request, job, language: str | None) -> list[dict[str, Any]]:
+    """The job's ``user_params`` with their choices resolved: fixed ``choices``, or
+    ``choices_from = "explorer_models:<app>"`` → the app's Explorer models (id → label)."""
+    out: list[dict[str, Any]] = []
+    for p in job.user_params:
+        choices: list[dict[str, str]] = [{"value": c, "label": c} for c in p.choices]
+        if p.choices_from:
+            kind, _, arg = p.choices_from.partition(":")
+            if kind == "explorer_models":
+                explorer = getattr(request.app.state, "explorer", None)
+                for app, mid, m in (explorer.items() if explorer is not None else []):
+                    if app == arg:
+                        choices.append({"value": mid, "label": m.label or mid})
+        out.append({"name": p.name, "label": p.label_for(language), "step": p.step, "default": p.default, "required": p.required, "choices": choices})
+    return out
+
+
 async def _runs_of_job(db, job_id: str, limit: int = 20) -> list[dict[str, Any]]:
     from sqlalchemy import desc, select
     from liberty.jobs.models import JobRun
@@ -704,7 +721,10 @@ async def user_get_job(job_id: str, request: Request, principal: CurrentPrincipa
     runs = await _runs_of_job(comps.db, job_id)
     in_flight = job_id in comps.scheduler.in_flight_job_ids or any(r["state"] in ("RUNNING", "QUEUED") for r in runs)
     return {
-        "job": {"id": job.id, "description": job.description, "tags": list(job.tags), "uploads": _upload_steps(job), "in_flight": in_flight},
+        "job": {
+            "id": job.id, "description": job.description, "tags": list(job.tags), "uploads": _upload_steps(job), "in_flight": in_flight,
+            "params": _user_params(request, job, request.headers.get("x-liberty-lang")),
+        },
         "runs": runs,
     }
 
@@ -717,15 +737,31 @@ async def user_upload(job_id: str, request: Request, principal: CurrentPrincipal
 
 @user_router.post("/{job_id}/run", summary="Run the job")
 async def user_run(job_id: str, request: Request, principal: CurrentPrincipal, body: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
-    """Fire the job for the user: ``{files: {<step>: <uploaded path>}}`` hands each
-    ``file_load`` step its file (a path this job's upload returned — nothing else is
-    accepted). No other per-fire override exists on this side."""
+    """Fire the job for the user: ``{files: {<step>: <uploaded path>}, params: {<name>: <value>}}``
+    hands each ``file_load`` step its file (a path this job's upload returned — nothing else is
+    accepted) and the declared ``user_params`` their values (a value outside a param's choices
+    is refused; a blank value is "not set"). No other per-fire override exists on this side."""
     from liberty.jobs.files import job_dir
     comps, job = _user_job(request, job_id, principal)
     if job_id in comps.scheduler.in_flight_job_ids:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="the job is already running")
     steps = {u["step"] for u in _upload_steps(job)}
     overrides: dict[str, dict[str, Any]] = {}
+    params = (body or {}).get("params") or {}
+    if not isinstance(params, dict):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="`params` must be an object of `{name: value}`")
+    declared = {p["name"]: p for p in _user_params(request, job, None)}
+    for name, value in params.items():
+        p = declared.get(name)
+        if p is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"{name!r} is not a parameter of this job")
+        v = "" if value is None else str(value).strip()
+        if p["choices"] and v and v not in {c["value"] for c in p["choices"]}:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"{name!r}: {v!r} is not one of the choices")
+        overrides.setdefault(p["step"], {})[name] = v
+    for p in declared.values():
+        if p["required"] and not (params.get(p["name"]) or p["default"]):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"{p['name']!r} is required")
     files = (body or {}).get("files") or {}
     if not isinstance(files, dict):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="`files` must be an object of `{step: path}`")
@@ -736,8 +772,8 @@ async def user_run(job_id: str, request: Request, principal: CurrentPrincipal, b
         p = Path(str(path)).resolve()
         if uploads not in p.parents or not p.is_file():
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"{step!r}: upload the file first")
-        overrides[step] = {"file": str(p)}
-    _log.info("nomaflow.user fire job=%s triggered_by=%s files=%s", job_id, principal.username, sorted(overrides) or None)
+        overrides.setdefault(step, {})["file"] = str(p)
+    _log.info("nomaflow.user fire job=%s triggered_by=%s overrides=%s", job_id, principal.username, {s: sorted(k) for s, k in overrides.items()} or None)
     run_id = await comps.scheduler.fire_now_async(job, triggered_by=principal.username, op_kwargs_overrides=overrides or None)
     return {"job_id": job_id, "run_id": run_id, "triggered_by": principal.username, "status": "queued"}
 

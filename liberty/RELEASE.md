@@ -40,6 +40,16 @@
 - The nomaflow Overview dashboard takes a period (last 7 days by default): the figures, the
   runs per day, what needs attention, the runs and durations per job and the recent runs
   follow it; "In flight" stays live.
+- The dictionary refresh of the Explorer models is also a job: `liberty.jobs.dictionary:
+  refresh_model_dictionary` (`app`, optional `models`) scans every table of the app's models,
+  writes the missing entries and rebuilds the connectors, with the tables and entries in the
+  run's log. Python job steps receive the live runtime as `app_state` when they declare it.
+  nomajde ships it as `nomajde-dictionary-refresh` under its Jobs menu.
+- A job declares what a user may set when running it from its page: `[[jobs.user_params]]`
+  (`name`, `label` + `l`, `step`, `default`, `required`, fixed `choices` or
+  `choices_from = "explorer_models:<app>"`). The page shows a dropdown or a text input per
+  parameter; the value reaches the step's parameters, anything else is refused. The nomajde
+  dictionary refresh takes the Explorer model to refresh (blank = every model).
 
 ## 7.0.59 — unreleased
 

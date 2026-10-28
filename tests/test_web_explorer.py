@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from liberty.auth.db import AuthDatabase
 from liberty.auth.service import AuthService
-from liberty.config import AISettings, AppSettings, AuthSettings, ConnectorSettings, ExplorerSettings, ScreenSettings, Settings
+from liberty.config import AISettings, AppSettings, AuthSettings, ConnectorSettings, ExplorerSettings, JobsSettings, ScreenSettings, Settings
 from liberty.connectors.config import PoolConfig
 from liberty.connectors.db import PoolRegistry
 from liberty.main import create_app
@@ -134,10 +134,14 @@ def _seed(db_url: str) -> None:
         pools = PoolRegistry({"default": PoolConfig(url=db_url)})
         db = AuthDatabase(pools, "default")
         await db.create_schema()
+        from liberty.jobs import JobDatabase
+        await JobDatabase(pools, "default").create_schema()
         async with db.session() as s:
             svc = AuthService(s)
             await svc.get_or_create_role("admin", permissions=["*"])
             await svc.get_or_create_role("analyst", permissions=["explorer:shop:*", "sql:shop:*"])
+            await svc.get_or_create_role("refresher", permissions=["job:dictionary-refresh"])
+            await svc.create_user("refresher", password="refresherpw", roles=["refresher"])
             await svc.create_user("admin", password="adminpw", is_superuser=True, roles=["admin"])
             await svc.create_user("analyst", password="analystpw", roles=["analyst"])
             await svc.create_user("nobody", password="nobodypw")
@@ -154,6 +158,23 @@ def env(tmp_path):
     (tmp_path / "screens.toml").write_text(SCREENS_TOML)
     (tmp_path / "presets").mkdir()
     (tmp_path / "presets" / "shop.toml").write_text(PRESETS_TOML)
+    (tmp_path / "jobs.toml").write_text(textwrap.dedent("""
+        [[jobs]]
+        id = "dictionary-refresh"
+        description = "The dictionary entries of the shop models"
+        [[jobs.steps]]
+        type = "python"
+        name = "refresh"
+        callable = "liberty.jobs.dictionary:refresh_model_dictionary"
+        [jobs.steps.op_kwargs]
+        app = "shop"
+        models = "shop_shipped, sales"
+        [[jobs.user_params]]
+        name = "models"
+        label = "Model"
+        step = "refresh"
+        choices_from = "explorer_models:shop"
+    """))
     _seed(db_url)
     settings = Settings(
         app=AppSettings(static_dir=""),
@@ -162,6 +183,7 @@ def env(tmp_path):
         explorer=ExplorerSettings(config_path=tmp_path / "explorer.toml"),
         auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
         ai=AISettings(enabled=False),
+        jobs=JobsSettings(config_path=tmp_path / "jobs.toml", pool="default"),
     )
     return create_app(settings), tmp_path
 
@@ -411,3 +433,64 @@ def test_preset_shipped_model_and_its_dictionary(env) -> None:
         assert r.json() == {"created": ["COMPANY", "ID", "NAME", "QTY", "REGION", "REVENUE", "SALE_DATE"], "scanned": 2, "skipped": []}
         body = client.get("/api/explorer/shop/shop_shipped/model", headers=h).json()
         assert body["undocumented"] == 0 and body["derived"] is True
+
+
+def test_dictionary_refresh_job(env) -> None:
+    """The dictionary refresh as a nomaflow job: the explorer models' tables scanned, the missing
+    entries written under the app, the connectors rebuilt — the model then shows no undocumented
+    column. ``models`` limits it (a comma-separated string from op_kwargs)."""
+    import time
+    app, tmp_path = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        assert client.get("/api/explorer/shop/shop_shipped/model", headers=h).json()["undocumented"] == 8
+        r = client.post("/admin/jobs/dictionary-refresh/run", headers=h)
+        assert r.status_code == 200, r.text
+        run_id = r.json()["run_id"]
+        d: dict = {}
+        for _ in range(200):
+            d = client.get(f"/admin/jobs/runs/{run_id}", headers=h).json()
+            if d["run"]["state"] not in ("QUEUED", "RUNNING"):
+                break
+            time.sleep(0.05)
+        assert d["run"]["state"] == "SUCCEEDED", d
+        assert d["run"]["rows_affected"] == 7 and "connectors rebuilt" in d["logs"] and "model=shop/sales" in d["logs"]
+        assert "[connectors.shop.entries.REVENUE]" in (tmp_path / "dictionary.toml").read_text()
+        assert client.get("/api/explorer/shop/shop_shipped/model", headers=h).json()["undocumented"] == 0
+        # an unknown model fails the run with a clear message
+        doc = client.get("/admin/jobs", headers=h).json()
+        assert any(j["id"] == "dictionary-refresh" for j in doc["jobs"])
+        r = client.post("/admin/jobs/dictionary-refresh/run", json={"op_kwargs": {"refresh": {"models": " , ghost"}}}, headers=h)
+        run_id = r.json()["run_id"]
+        for _ in range(200):
+            d = client.get(f"/admin/jobs/runs/{run_id}", headers=h).json()
+            if d["run"]["state"] not in ("QUEUED", "RUNNING"):
+                break
+            time.sleep(0.05)
+        assert d["run"]["state"] == "FAILED" and "unknown explorer model" in (d["run"]["error_message"] or d["logs"])
+
+
+def test_dictionary_refresh_job_user_param(env) -> None:
+    """The user page offers the job's ``user_params``: the Explorer models of the app as choices;
+    the chosen one reaches the step, a value outside the choices is refused."""
+    import time
+    app, _ = env
+    with TestClient(app) as client:
+        h = _h(client, "refresher")
+        job = client.get("/api/jobs/dictionary-refresh", headers=h).json()["job"]
+        assert [p["name"] for p in job["params"]] == ["models"]
+        assert {c["value"] for c in job["params"][0]["choices"]} == {"sales", "frompreset", "shop_shipped"}
+        assert job["params"][0]["label"] == "Model" and job["params"][0]["required"] is False
+        assert client.post("/api/jobs/dictionary-refresh/run", json={"params": {"models": "ghost"}}, headers=h).status_code == 422
+        assert client.post("/api/jobs/dictionary-refresh/run", json={"params": {"nope": "x"}}, headers=h).status_code == 422
+        r = client.post("/api/jobs/dictionary-refresh/run", json={"params": {"models": "shop_shipped"}}, headers=h)
+        assert r.status_code == 200, r.text
+        run_id = r.json()["run_id"]
+        d: dict = {}
+        for _ in range(200):
+            d = client.get(f"/api/jobs/dictionary-refresh/runs/{run_id}", headers=h).json()
+            if d["run"]["state"] not in ("QUEUED", "RUNNING"):
+                break
+            time.sleep(0.05)
+        assert d["run"]["state"] == "SUCCEEDED", d
+        assert "model=shop/shop_shipped" in d["logs"] and "model=shop/sales" not in d["logs"]

@@ -405,6 +405,30 @@ class JobPreset(BaseModel):
         return v
 
 
+class UserParam(BaseModel):
+    """A parameter a USER sets when running the job from its menu item (the ``job`` page) —
+    the only per-run override that side has. The value lands in ``op_kwargs[step][name]``.
+    ``choices`` lists fixed values; ``choices_from = "explorer_models:<app>"`` offers the app's
+    Explorer models (value = the model id, label = its label). A blank value means "not set"
+    (the callable's default, e.g. every model)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, description="The op_kwargs key the value is written to.")
+    label: str | None = Field(default=None, description="What the page shows (default: the name).")
+    l: dict[str, str] = Field(default_factory=dict, description="Per-language label overrides.")
+    step: str = Field(..., min_length=1, description="The step receiving the value.")
+    default: str | None = Field(default=None, description="Pre-selected value.")
+    required: bool = False
+    choices: list[str] = Field(default_factory=list, description="Fixed choices (a dropdown).")
+    choices_from: str | None = Field(default=None, description="A dynamic choice list: ``explorer_models:<app>``.")
+
+    def label_for(self, language: str | None) -> str:
+        if language and self.l.get(language):
+            return self.l[language]
+        return self.label or self.name
+
+
 class Job(BaseModel):
     """One scheduled (or manual-only) unit of work."""
 
@@ -429,6 +453,8 @@ class Job(BaseModel):
     # steps consume these (sql_copy / sql_query ignore them — the merge still happens,
     # but those executors look at typed fields, not op_kwargs).
     params: dict[str, Any] = Field(default_factory=dict)
+    # What a USER may set from the job's menu page (see UserParam) — nothing by default.
+    user_params: list[UserParam] = Field(default_factory=list)
     # Per-run logging verbosity. INFO (default) gives operator-level signal —
     # row counts + business progress markers. DEBUG also emits the full SQL of
     # every run_query (useful when troubleshooting a specific job — matches v1's
