@@ -48,14 +48,17 @@ Connectors = Annotated[ConnectorRegistry, Depends(get_connectors)]
 Screens = Annotated[ScreensFile, Depends(get_screens)]
 
 
-def _app_settings(connectors: ConnectorRegistry, app: str) -> tuple[bool, str | None]:
-    """Read the connector's app-level settings — ``(show_in_switcher, home)``. Returns the model
+def _app_settings(connectors: ConnectorRegistry, app: str, roles: tuple[str, ...] = ()) -> tuple[bool, str | None]:
+    """Read the connector's app-level settings — ``(show_in_switcher, home)``; ``home`` is the item
+    of the caller's first role listed in ``home_by_role``, else ``home``. Returns the model
     defaults when the connector is missing (orphan menu) so the menu still surfaces."""
     try:
         cfg = connectors.get(app).config
     except UnknownConnectorError:
         return True, None
-    return bool(getattr(cfg, "show_in_switcher", True)), getattr(cfg, "home", None)
+    by_role = getattr(cfg, "home_by_role", None) or {}
+    home = next((by_role[r] for r in roles if r in by_role), None) or getattr(cfg, "home", None)
+    return bool(getattr(cfg, "show_in_switcher", True)), home
 
 
 def _screen_perm(screens: "ScreensFile | None", app: str, screen_id: str | None) -> str | None:
@@ -160,7 +163,7 @@ def _app_tree(
     items = build_menu_tree(app_menu, app=app, language=language, keep=keep)
     if not items:
         return None  # nothing the caller can see → no menu for this app
-    show_in_switcher, home = _app_settings(connectors, app)
+    show_in_switcher, home = _app_settings(connectors, app, tuple(principal.roles))
     out: dict[str, Any] = {"app": app, "label": app_menu.label or app, "items": items, "show_in_switcher": show_in_switcher}
     home_path = _home_path(app, app_menu, home, keep=keep)
     if home_path:

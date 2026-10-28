@@ -163,9 +163,12 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
           <TabBtn $active={tab === 'profile'} onClick={() => switchTab('profile')}>
             <User size={15} /> {t('profile.tabProfile')}
           </TabBtn>
-          <TabBtn $active={tab === 'security'} onClick={() => switchTab('security')}>
-            <Shield size={15} /> {t('profile.tabSecurity')}
-          </TabBtn>
+          {/* an SSO session has no local password: no Security tab (the profile tab says where it lives) */}
+          {isLocal && (
+            <TabBtn $active={tab === 'security'} onClick={() => switchTab('security')}>
+              <Shield size={15} /> {t('profile.tabSecurity')}
+            </TabBtn>
+          )}
         </Tabs>
 
         <ModalBody>

@@ -7,6 +7,10 @@ const fr: Resources = {
     subtitle: 'framework low-code',
   },
   nav: {
+    openOnHover: 'Ouvrir au survol',
+    openOnHoverHint: 'Replier le menu sur ses icônes et l\'ouvrir quand la souris passe dessus',
+    keepOpen: 'Garder ouvert',
+    keepOpenHint: 'Garder le menu ouvert à côté de la page',
     connectors: 'Connecteurs',
     assistant: 'Assistant',
     monitoring: 'Surveillance',

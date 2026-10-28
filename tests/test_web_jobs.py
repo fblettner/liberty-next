@@ -1397,3 +1397,12 @@ def test_retention_center(env, tmp_path) -> None:
             assert client.post("/admin/retention/change_packages/run", headers=h).status_code == 409   # 0 days = keep
         assert client.post("/admin/retention/nope/run", headers=h).status_code == 404
         assert client.get("/admin/retention", headers=_h(client, "loader")).status_code == 403
+
+
+def test_web_manifest_is_public_and_named_after_the_instance(env) -> None:
+    app, _ = env
+    with TestClient(app) as client:
+        r = client.get("/manifest.webmanifest")
+        assert r.status_code == 200 and r.headers["content-type"].startswith("application/manifest+json")
+        m = r.json()
+        assert m["name"] == "Liberty Next" and m["start_url"] == "/" and m["icons"][0]["src"] == "/favicon.svg"

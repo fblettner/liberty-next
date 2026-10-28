@@ -137,6 +137,7 @@ export default function ConnectorsBuilder() {
   const [cloneBusy, setCloneBusy] = useState(false)
   const [cloneError, setCloneError] = useState<string | null>(null)
   const [pools, setPools] = useState<string[]>([])  // for the new-pool dropdown
+  const [roleNames, setRoleNames] = useState<string[]>([])  // home_by_role keys
   // "+ Connector" modal — one entry point for both connector kinds; the type (sql / api) is
   // picked here (it's fixed once created — it's the discriminator) along with the name.
   const [addConnOpen, setAddConnOpen] = useState(false)
@@ -197,6 +198,7 @@ export default function ConnectorsBuilder() {
         // selected app (when it's a connector here), else the first connector.
         setSel((cur) => (cur && d.connectors[cur] ? cur : (currentApp && d.connectors[currentApp] ? currentApp : Object.keys(d.connectors)[0] ?? null)))
         setPools(Object.keys(p.pools ?? {}))
+        api.get<{ roles: { name: string }[] }>('/admin/access/roles').then((r) => setRoleNames(r.roles.map((x) => x.name))).catch(() => setRoleNames([]))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
   }
@@ -249,11 +251,13 @@ export default function ConnectorsBuilder() {
     }
     if (sel && menus && menus[sel]) walk(menus[sel].items)
     base.MENU_HOME_ITEMS = { label: 'Menu items', values: homeOptions }
+    // ROLE_NAMES — the roles (Settings → Access), the keys of ``home_by_role``.
+    base.ROLE_NAMES = { label: 'Role', values: roleNames.map((r) => ({ value: r, label: r, mono: r })) }
     // POOL_NAMES — every configured pool (Settings → Pools). Drives the connector's ``pool``
     // (default) + ``pools`` (extra) fields so they're picked from a dropdown, not typed.
     base.POOL_NAMES = { label: 'Pools', values: pools.map((p) => ({ value: p, label: p, mono: p })) }
     return base
-  }, [schemas, dictionary, sel, menus, pools])
+  }, [schemas, dictionary, sel, menus, pools, roleNames])
 
   const update = (name: string, v: Record<string, unknown>) => setConns((p) => ({ ...(p ?? {}), [name]: { ...v, type: (p ?? {})[name]?.type } }))
   // Replace one section array (`tables` / `queries` / `sequences` / `lookups`) on a connector.
@@ -1156,8 +1160,8 @@ export default function ConnectorsBuilder() {
               {isSql && mode === 'settings' && selConn && selSchema && (() => {
                 const locked = sel != null && alwaysLicensed.has(sel)
                 const fieldKeys = locked
-                  ? ['pool', 'pools', 'show_in_switcher', 'home', 'max_rows', 'dd_prefix']
-                  : ['pool', 'pools', 'show_in_switcher', 'home', 'licensed', 'max_rows', 'dd_prefix']
+                  ? ['pool', 'pools', 'show_in_switcher', 'home', 'home_by_role', 'max_rows', 'dd_prefix']
+                  : ['pool', 'pools', 'show_in_switcher', 'home', 'home_by_role', 'licensed', 'max_rows', 'dd_prefix']
                 const settingsSchema = pickSchemaProperties(selSchema, fieldKeys)
                 return (
                   <SqlConnectorContext.Provider value={sel ?? undefined}>

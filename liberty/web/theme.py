@@ -57,3 +57,22 @@ async def get_theme(request: Request) -> dict[str, Any]:
         "drill_inline": s.app.drill_inline,
     }
     return resolved
+
+
+# The installable web app's manifest, named after the instance (the theme's app name, else
+# ``[app] name``) — public like the theme, so a browser installs it from the sign-in page.
+manifest_router = APIRouter(tags=["theme"])
+
+
+@manifest_router.get("/manifest.webmanifest", summary="Web app manifest", include_in_schema=False)
+async def web_manifest(request: Request):
+    from fastapi.responses import JSONResponse
+    cfg = load_theme(_theme_path(request)).theme
+    resolved = resolve_theme(cfg)
+    name = resolved.get("app_name") or request.app.state.settings.app.name
+    accent = resolved.get("vars", {}).get("blue-main") or "#007AFF"
+    return JSONResponse({
+        "name": name, "short_name": name[:12], "start_url": "/", "scope": "/", "display": "standalone",
+        "background_color": "#07060e", "theme_color": accent if str(accent).startswith("#") else "#007AFF",
+        "icons": [{"src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}],
+    }, media_type="application/manifest+json")

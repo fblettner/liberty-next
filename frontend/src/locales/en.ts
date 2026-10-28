@@ -5,6 +5,10 @@ const en = {
     subtitle: 'low-code framework',
   },
   nav: {
+    openOnHover: 'Open on hover',
+    openOnHoverHint: 'Fold the menu to its icons and open it while the mouse is over it',
+    keepOpen: 'Keep open',
+    keepOpenHint: 'Keep the menu open beside the page',
     connectors: 'Connectors',
     assistant: 'Assistant',
     monitoring: 'Monitoring',

@@ -52,6 +52,7 @@ from liberty.web import (
     reports_router,
     screens_router,
     theme_router,
+    manifest_router,
     views_router,
     notifications_router,
     logs_router,
@@ -676,6 +677,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(explorer_router)
     app.include_router(license_router)
     app.include_router(theme_router)
+    app.include_router(manifest_router)
     app.include_router(ai_router)
     app.include_router(admin_router)
     app.include_router(access_router)

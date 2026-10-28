@@ -20,6 +20,16 @@
   les journaux d'import plus anciens, contrôlé avec la rétention des notifications toutes les six
   heures ; les brouillons ne sont jamais touchés. Les vues enregistrées sont le travail des
   utilisateurs : affichées, jamais purgées.
+- Barre latérale : « Ouvrir au survol » — le menu se replie sur ses icônes et s'ouvre par-dessus
+  la page quand la souris passe dessus (choisir une page le replie) ; « Garder ouvert » revient au
+  menu fixe ; mémorisé par navigateur.
+- Menus : une page d'accueil par rôle — `home_by_role = { auditor = "<élément de menu>" }` sur le
+  connecteur d'une application : l'utilisateur arrive sur l'élément de son premier rôle listé,
+  sinon sur `home`.
+- Un manifeste d'application web installable (`/manifest.webmanifest`, public) au nom de
+  l'instance (le nom d'application du thème, sinon `[app] name`).
+- Profil : plus d'onglet Sécurité pour une session en authentification unique (pas de mot de
+  passe local).
 
 ## 7.0.62 — non publiée
 

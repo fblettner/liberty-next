@@ -844,6 +844,11 @@ class SqlConnectorConfig(BaseModel):
         description="Landing menu item id when this app is picked.",
         json_schema_extra={"x_enum_ref": "MENU_HOME_ITEMS"},
     )
+    home_by_role: dict[str, str] = Field(
+        default_factory=dict,
+        description="A landing menu item per role ({role: menu item id}): a user lands on the item of their first role listed here, else on `home`.",
+        json_schema_extra={"x_key_enum_ref": "ROLE_NAMES", "x_value_enum_ref": "MENU_HOME_ITEMS"},
+    )
     tables: list[TableDef] = Field(
         default_factory=list,
         json_schema_extra={"x_group": "Tables"},
@@ -949,6 +954,11 @@ class ApiConnectorConfig(BaseModel):
         default=None,
         description="Landing menu item id when this app is picked.",
         json_schema_extra={"x_enum_ref": "MENU_HOME_ITEMS"},
+    )
+    home_by_role: dict[str, str] = Field(
+        default_factory=dict,
+        description="A landing menu item per role ({role: menu item id}): a user lands on the item of their first role listed here, else on `home`.",
+        json_schema_extra={"x_key_enum_ref": "ROLE_NAMES", "x_value_enum_ref": "MENU_HOME_ITEMS"},
     )
     base_url: str = Field(description="Base URL endpoints are relative to, e.g. https://api.example.com. Supports ${ENV} refs. (Leave blank only if every endpoint uses an absolute path.)")
     auth_type: AuthType = Field(

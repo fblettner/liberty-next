@@ -17,6 +17,14 @@
   `[changesets] retention_days` (0 = keep, the default) deletes exported / promoted packages and
   import logs older than that, checked with the notifications retention every six hours; drafts
   are never touched. Saved views are the users' own work: shown, never purged.
+- Sidebar: "Open on hover" — the menu folds to its icons and floats over the page while the mouse
+  is on it (picking a page folds it back); "Keep open" returns to the fixed menu; remembered per
+  browser.
+- Menus: a start page per role — `home_by_role = { auditor = "<menu item>" }` on an app's
+  connector: a user lands on the item of their first role listed there, else on `home`.
+- An installable web app manifest (`/manifest.webmanifest`, public) named after the instance (the
+  theme's app name, else `[app] name`).
+- Profile: no Security tab for a single-sign-on session (no local password).
 
 ## 7.0.62 — unreleased
 

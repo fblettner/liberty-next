@@ -333,3 +333,66 @@ def test_job_leaf_visible_with_its_permission_only(app) -> None:
         assert "import" not in tops("denied")
         leaf = next(it for it in client.get("/api/menus", headers=_h(client, "loader")).json()["menus"]["app1"]["items"] if it["id"] == "import")
         assert leaf["type"] == "job" and leaf["target"] == "load-items" and "connector" not in leaf
+
+
+def test_home_by_role_picks_the_users_first_listed_role(tmp_path) -> None:
+    """A connector's ``home_by_role`` gives a role its own landing item; a user lands on the
+    item of their first role listed there, anyone else on ``home``."""
+    from liberty.config import ChartSettings, DashboardSettings
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
+    (tmp_path / "connectors.toml").write_text(textwrap.dedent(f"""
+        [pools.default]
+        url = "{db_url}"
+
+        [connectors.app1]
+        type = "sql"
+        pool = "default"
+        home = "dash.overview"
+        home_by_role = {{ auditor = "users" }}
+        queries = [{{ name = "users_get", sql = "SELECT 1" }}]
+    """))
+    (tmp_path / "dashboards.toml").write_text('[dashboards.app1.overview]\nlabel = "Overview"\n')
+    (tmp_path / "menus.toml").write_text(textwrap.dedent("""
+        [menus.app1]
+        label = "App One"
+
+        [[menus.app1.items]]
+        id = "dash.overview"
+        label = "Overview"
+        type = "dashboard"
+        target = "app1.overview"
+
+        [[menus.app1.items]]
+        id = "users"
+        label = "Users"
+        type = "query"
+        target = "users_get"
+    """))
+
+    async def go() -> None:
+        pools = PoolRegistry({"default": PoolConfig(url=db_url)})
+        db = AuthDatabase(pools, "default")
+        await db.create_schema()
+        async with db.session() as s:
+            svc = AuthService(s)
+            await svc.get_or_create_role("admin", permissions=["*"])
+            await svc.get_or_create_role("auditor", permissions=["sql:app1:users_get"])
+            await svc.create_user("admin", password="adminpw", is_superuser=True, roles=["admin"])
+            await svc.create_user("aud", password="audpw", roles=["auditor"])
+        await pools.dispose()
+
+    asyncio.run(go())
+    settings = Settings(
+        app=AppSettings(static_dir=""),
+        connectors=ConnectorSettings(config_path=Path(tmp_path / "connectors.toml")),
+        menus=MenuSettings(config_path=Path(tmp_path / "menus.toml")),
+        charts=ChartSettings(config_path=Path(tmp_path / "_no_charts.toml")),
+        dashboards=DashboardSettings(config_path=Path(tmp_path / "dashboards.toml")),
+        auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
+        ai=AISettings(enabled=False),
+    )
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/api/menus/app1", headers=_h(client, "admin")).json()["home_path"] == "/dashboard/app1.overview"
+        r = client.post("/auth/login", json={"username": "aud", "password": "audpw"})
+        h = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        assert client.get("/api/menus/app1", headers=h).json()["home_path"] == "/sql/app1/users_get"

@@ -1,12 +1,14 @@
-// Left navigation rail — collapsible (preference persisted to localStorage),
+// Left navigation rail — open, collapsed to its icons, or open on hover (the icon rail keeps its
+// width in the layout and the menu floats over the page while the mouse is on it — nomaubl's auto
+// collapse); the mode is persisted to localStorage.
 // react-router NavLinks with lucide icons. Adapted from nomaubl's Sidebar.
 // When a workspace app is active it leads with that app's menu tree (SidebarMenu),
 // then a divider, then the framework links (Connectors / Assistant / Settings).
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { SlidersHorizontal, Activity, ChevronLeft, ChevronRight, Wand2 } from 'lucide-react'
+import { SlidersHorizontal, Activity, ChevronLeft, ChevronRight, Wand2, PanelLeftDashed } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { useAuth } from '../auth/AuthContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
@@ -16,10 +18,24 @@ import WorkspaceSelect from './WorkspaceSelect'
 const ScreenAssistantModal = lazy(() => import('../pages/ScreenAssistant'))
 
 const COLLAPSE_KEY = 'liberty.sidebar.collapsed'
+const MODE_KEY = 'liberty.sidebar.mode'
+type Mode = 'open' | 'collapsed' | 'hover'
+/** The saved mode; the older collapsed flag still reads. */
+function readMode(): Mode {
+  try {
+    const m = localStorage.getItem(MODE_KEY)
+    if (m === 'open' || m === 'collapsed' || m === 'hover') return m
+    return localStorage.getItem(COLLAPSE_KEY) === 'true' ? 'collapsed' : 'open'
+  } catch { return 'open' }
+}
 
-const Nav = styled.nav<{ $collapsed: boolean }>`
+// Open on hover: the rail holds the icon width in the layout; the navigation floats above it.
+const Rail = styled.div`position: relative; flex-shrink: 0; width: 64px; z-index: 60;`
+
+const Nav = styled.nav<{ $collapsed: boolean; $floating?: boolean }>`
   width: ${({ $collapsed }) => ($collapsed ? '56px' : '210px')};
   flex-shrink: 0;
+  ${({ $floating, $collapsed }) => ($floating ? `position: absolute; top: 0; bottom: 0; left: 0;${$collapsed ? '' : ` background: ${colors.bg.modal}; box-shadow: 0 12px 40px var(--shadow-strong, rgba(0,0,0,0.35));`}` : '')}
   background: var(--ghost-bg, ${colors.bg.card});
   border: 1px solid ${colors.border};
   border-radius: ${radius.xl};
@@ -203,30 +219,38 @@ export default function Sidebar() {
   const { t } = useTranslation()
   const { user } = useAuth()
   const { currentMenu } = useWorkspace()
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(COLLAPSE_KEY) === 'true'
-    } catch {
-      return false
-    }
-  })
-  const toggle = () => {
-    setCollapsed((c) => {
-      const next = !c
-      try {
-        localStorage.setItem(COLLAPSE_KEY, String(next))
-      } catch {
-        /* ignore */
-      }
-      return next
-    })
+  const [mode, setModeState] = useState<Mode>(readMode)
+  const setMode = (m: Mode) => {
+    setModeState(m)
+    try { localStorage.setItem(MODE_KEY, m) } catch { /* ignore */ }
+  }
+  // open on hover: a short delay each way, so crossing the rail on the way to the page does not
+  // open it; it stays open while something inside has the focus (the app switcher's search)
+  const navRef = useRef<HTMLElement | null>(null)
+  const [hover, setHover] = useState(false)
+  const timer = useRef<number | undefined>(undefined)
+  const hoverTo = (on: boolean) => {
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => {
+      if (!on && navRef.current?.contains(document.activeElement)) return
+      setHover(on)
+    }, on ? 120 : 250)
+  }
+  useEffect(() => () => window.clearTimeout(timer.current), [])
+  const floating = mode === 'hover'
+  const collapsed = floating ? !hover : mode === 'collapsed'
+  const toggle = () => setMode(mode === 'collapsed' ? 'open' : 'collapsed')
+  // a page picked from the floating navigation folds it back at once
+  const onPick = (e: React.MouseEvent) => {
+    if (floating && (e.target as HTMLElement).closest('a')) { window.clearTimeout(timer.current); setHover(false) }
   }
   const iconSize = 16
   const [assistantOpen, setAssistantOpen] = useState(false)
   const openAssistant = () => setAssistantOpen(true)
 
-  return (
-    <Nav $collapsed={collapsed}>
+  const nav = (
+    <Nav ref={navRef} $collapsed={collapsed} $floating={floating} onClickCapture={onPick}
+      onMouseEnter={floating ? () => hoverTo(true) : undefined} onMouseLeave={floating ? () => hoverTo(false) : undefined}>
       <Brand $collapsed={collapsed}>
         <BrandMark><img src="/favicon.svg" alt={t('app.title')} /></BrandMark>
         {!collapsed && <BrandName>{t('app.title')}</BrandName>}
@@ -249,10 +273,19 @@ export default function Sidebar() {
       )}
 
       <Bottom>
-        <CollapseBtn $collapsed={collapsed} onClick={toggle} title={collapsed ? t('common.expand') : undefined}>
-          {collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
-          {!collapsed && t('common.collapse')}
-        </CollapseBtn>
+        {/* open ↔ collapsed; "open on hover" is the second switch (shown while the menu is open) */}
+        {!floating && (
+          <CollapseBtn $collapsed={collapsed} onClick={toggle} title={collapsed ? t('common.expand') : undefined}>
+            {collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
+            {!collapsed && t('common.collapse')}
+          </CollapseBtn>
+        )}
+        {!collapsed && (
+          <CollapseBtn $collapsed={false} onClick={() => setMode(floating ? 'open' : 'hover')} title={t(floating ? 'nav.keepOpenHint' : 'nav.openOnHoverHint')}>
+            <PanelLeftDashed size={15} style={{ color: floating ? colors.blue.main : undefined }} />
+            {t(floating ? 'nav.keepOpen' : 'nav.openOnHover')}
+          </CollapseBtn>
+        )}
       </Bottom>
 
       {/* Superuser-only wizard — a modal so it opens over anything and closes cleanly (X / Esc /
@@ -264,4 +297,5 @@ export default function Sidebar() {
       )}
     </Nav>
   )
+  return floating ? <Rail>{nav}</Rail> : nav
 }

@@ -73,6 +73,8 @@ export interface JsonSchema {
    *  whatever the additionalProperties type produces). e.g. `l: dict[str, str]` for translations
    *  uses `SUPPORTED_LANGUAGES` so the user picks "fr" / "Français" instead of typing a code. */
   x_key_enum_ref?: string
+  /** For a `dict[str, str]`: the VALUE picked from this framework enum (a role → a menu item). */
+  x_value_enum_ref?: string
   /** Per-field placeholder text. Surfaces the convention or expected shape (e.g. ``AUD_<TABLE>`` /
    *  ``e.g. https://api.example.com``) without hard-coding a default value. Without this, the
    *  string-input placeholder falls back to ``default: <value>`` or ``required``. */
@@ -203,6 +205,7 @@ function mergePeel(outer: JsonSchema, branch: JsonSchema): JsonSchema {
     x_enum_ref_when: outer.x_enum_ref_when ?? branch.x_enum_ref_when,
     x_enum_ref_ancestor: outer.x_enum_ref_ancestor ?? branch.x_enum_ref_ancestor,
     x_key_enum_ref: outer.x_key_enum_ref ?? branch.x_key_enum_ref,
+    x_value_enum_ref: outer.x_value_enum_ref ?? branch.x_value_enum_ref,
     anyOf: undefined,
   } as JsonSchema
 }
@@ -301,10 +304,12 @@ const DialectLabel = styled.div`font-size: ${fontSize.micro}; color: ${colors.te
 // picks "fr / Français" from a dropdown instead of typing `fr` blindly. Picks that already exist in
 // the map are filtered out of the per-row option list so the user can't duplicate a language. The
 // VALUE editor stays a free-text Input either way.
-function StringMapEditor({ value, onChange, keyEnum }: {
+function StringMapEditor({ value, onChange, keyEnum, valueEnum }: {
   value: Record<string, string>
   onChange: (v: Record<string, string>) => void
   keyEnum?: FrameworkEnum | null
+  /** The VALUE picked from this enum (still free to type) instead of a plain input. */
+  valueEnum?: FrameworkEnum | null
 }) {
   const entries = Object.entries(value)
   const replaceAt = (i: number, k: string, v: string) =>
@@ -322,12 +327,18 @@ function StringMapEditor({ value, onChange, keyEnum }: {
         <Row key={i}>
           {keyEnum ? (
             <div style={{ flex: '0 0 35%', minWidth: 0, display: 'flex' }}>
-              <SearchSelect value={k} onChange={(nv) => replaceAt(i, nv, v)} options={optionsFor(k)} placeholder="language" />
+              <SearchSelect allowCustom value={k} onChange={(nv) => replaceAt(i, nv, v)} options={optionsFor(k)} placeholder={keyEnum.label ?? 'key'} />
             </div>
           ) : (
             <Input value={k} onChange={(e) => replaceAt(i, e.target.value, v)} placeholder="name" style={{ flex: '0 0 35%', minWidth: 0 }} />
           )}
-          <Input value={v} onChange={(e) => replaceAt(i, k, e.target.value)} placeholder="value" style={{ flex: 1, minWidth: 0 }} />
+          {valueEnum ? (
+            <div style={{ flex: 1, minWidth: 0, display: 'flex' }}>
+              <SearchSelect sort allowCustom value={v} onChange={(nv) => replaceAt(i, k, nv)} options={valueEnum.values.map((o) => ({ value: o.value, label: o.label, mono: o.value }))} placeholder={valueEnum.label ?? 'value'} />
+            </div>
+          ) : (
+            <Input value={v} onChange={(e) => replaceAt(i, k, e.target.value)} placeholder="value" style={{ flex: 1, minWidth: 0 }} />
+          )}
           <SmallX type="button" title="remove" onClick={() => onChange(Object.fromEntries(entries.filter((_, idx) => idx !== i)))}><X size={12} /></SmallX>
         </Row>
       ))}
@@ -857,7 +868,9 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
         } else if (isStringMap(sub)) {
           const map = (cur && typeof cur === 'object' && !Array.isArray(cur) ? cur : {}) as Record<string, unknown>
           const keyEnum = enumFor(sub.x_key_enum_ref ?? null, enums)
+          const valueEnum = enumFor(sub.x_value_enum_ref ?? null, enums)
           control = <StringMapEditor
+            valueEnum={valueEnum}
             value={Object.fromEntries(Object.entries(map).map(([k, v]) => [k, v == null ? '' : String(v)]))}
             onChange={(v) => set(key, Object.keys(v).length ? v : undefined)}
             keyEnum={keyEnum}
