@@ -1,5 +1,13 @@
 # Liberty Next — Release notes
 
+## 7.0.65 — unreleased
+
+- Developer reference (a new page in the sidebar, superuser; documentation, nothing is edited there):
+  every setting of app.toml, read from the running code — sections on the left with what is not in
+  the UI yet, the grid on the right (type, the screen that edits it or why it stays in the file /
+  the environment, the modules that read it, default; filters, export), and a row opens the detail
+  with each line of code that reads it (`/admin/dev/config`).
+
 ## 7.0.64 — unreleased
 
 - Package & Deploy: an import can be previewed (`/admin/import-package?dry_run=true`): the plan

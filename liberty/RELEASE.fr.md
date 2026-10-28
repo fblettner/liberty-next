@@ -1,5 +1,14 @@
 # Liberty Next — Notes de version
 
+## 7.0.65 — non publiée
+
+- Référence développeur (une nouvelle page dans la barre latérale, superutilisateur ; de la
+  documentation, rien ne s'y modifie) : chaque paramètre de app.toml, lu depuis le code en cours
+  d'exécution — les sections à gauche avec ce qui n'est pas encore dans l'interface, la grille à
+  droite (type, l'écran qui le modifie ou pourquoi il reste dans le fichier / l'environnement, les
+  modules qui le lisent, défaut ; filtres, export), et une ligne ouvre le détail avec chaque ligne de
+  code qui le lit (`/admin/dev/config`).
+
 ## 7.0.64 — non publiée
 
 - Paquets et déploiement : un import peut être prévisualisé (`/admin/import-package?dry_run=true`) :

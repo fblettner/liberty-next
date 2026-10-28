@@ -24,6 +24,7 @@ from liberty.web.notifications import router as notifications_router
 from liberty.web.logs import router as logs_router
 from liberty.web.retention import router as retention_router
 from liberty.web.promotion import router as promotion_router
+from liberty.web.developer import router as developer_router
 
 __all__ = [
     "access_router",
@@ -50,4 +51,5 @@ __all__ = [
     "logs_router",
     "retention_router",
     "promotion_router",
+    "developer_router",
 ]

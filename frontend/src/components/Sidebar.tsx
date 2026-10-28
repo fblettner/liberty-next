@@ -8,7 +8,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { SlidersHorizontal, Activity, ChevronLeft, ChevronRight, Wand2, PanelLeftDashed } from 'lucide-react'
+import { SlidersHorizontal, Activity, Code2, ChevronLeft, ChevronRight, Wand2, PanelLeftDashed } from 'lucide-react'
 import { colors, fontSize, fonts, radius, glass } from '../theme'
 import { resolveApiPath } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -204,6 +204,10 @@ function FrameworkLinks({
           <Item to="/monitoring" $collapsed={collapsed} title={collapsed ? t('nav.monitoring') : undefined}>
             <Activity size={iconSize} />
             {!collapsed && t('nav.monitoring')}
+          </Item>
+          <Item to="/developer" $collapsed={collapsed} title={collapsed ? t('nav.developer') : undefined}>
+            <Code2 size={iconSize} />
+            {!collapsed && t('nav.developer')}
           </Item>
           <Item to="/settings" $collapsed={collapsed} title={collapsed ? t('nav.settings') : undefined}>
             <SlidersHorizontal size={iconSize} />

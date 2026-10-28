@@ -32,6 +32,7 @@ const PAGE_COMPONENTS: Record<string, LazyExoticComponent<ComponentType>> = {
   '/reports': lazy(() => import('../pages/Reports')),
   '/notifications': lazy(() => import('../pages/Notifications')),
   '/explorer': lazy(() => import('../pages/Explorer')),
+  '/developer': lazy(() => import('../pages/Developer')),
 }
 const ExplorerPage = lazy(() => import('../pages/Explorer'))
 
