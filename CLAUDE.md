@@ -296,6 +296,15 @@ Python callables, Alembic migrations (nomasx1) and `jobs.toml`; `docs/DEPLOYMENT
 distribution of the wheel is the license gate (`licensed = true` connectors need a key).
 Dev: `export LIBERTY_APPS_DIR=$PWD/../liberty-apps/config`.
 
+**Release notes and version, every time.** liberty-apps keeps its own notes in
+`liberty_apps/RELEASE.md` (EN) + `RELEASE.fr.md` (FR), served at `/admin/release-notes`. Every
+new feature or fix in liberty-apps gets a line under the top `## <version> — unreleased` section
+in BOTH files, in the same commit, and the version in `pyproject.toml` and
+`liberty_apps/__init__.py::__version__` is bumped to that section's number (the three stay
+aligned; the heading's date is set when the wheel is built). The framework has the same rule
+with `liberty/RELEASE.md` / `RELEASE.fr.md` and `pyproject.toml` (the release workflow refuses a
+push to `main` without a real section for the version).
+
 ## Run it
 
 ```bash
