@@ -55,6 +55,7 @@ const en = {
   },
   retentionCenter: {
     tab: 'Retention',
+    tabDesc: 'What each store keeps, its size, a preview and a purge',
     store: { runs: 'Job runs', work_area: 'Job files', notifications: 'Notifications', config_versions: 'Config versions', change_packages: 'Change packages', saved_views: 'Saved views', server_log: 'Server log' },
     goes: {
       runs: 'Finished runs with their steps and logs',
@@ -86,6 +87,8 @@ const en = {
   serverLog: {
     tabLive: 'Live',
     tabLog: 'Server log',
+    tabLiveDesc: 'Connected users, locks, pools and the live log tail',
+    tabLogDesc: 'The log file: search, export, download, levels per module',
     search: 'Search a message, a logger, an error, a request id…',
     anyLevel: 'Any level',
     atLeast: '{{level}} and above',
@@ -2361,6 +2364,8 @@ const en = {
       leaveBlankKeep: 'Leave blank to keep current',
       users: 'Users',
       roles: 'Roles',
+      usersDesc: 'Accounts, their roles and attributes',
+      rolesDesc: 'What each role may open and the data it sees',
       inactive: 'inactive',
       permCount: '{{n}} rule(s)',
       pickRole: 'Pick a role to edit, or add one.',
@@ -2690,6 +2695,8 @@ const en = {
     package: {
       buildTab: 'Build package',
       importTab: 'Import package',
+      buildDesc: 'Pick screens and their dependencies, download a zip',
+      importDesc: 'Apply a package zip to this instance',
       filter: 'Filter seeds',
       clear: 'Clear ({{n}})',
       download: 'Download ZIP ({{n}})',

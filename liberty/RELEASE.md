@@ -48,6 +48,8 @@
   applies).
 - Fix: nomaflow → Jobs → Export downloads the job's package again (it called a wrong address
   without the session and did nothing).
+- Monitoring, Settings → Package and Settings → Access pick their views from a row of cards — an
+  icon, the name and one line on what the view is for — instead of plain tabs.
 
 ## 7.0.62 — unreleased
 

@@ -33,7 +33,8 @@ const Exc = styled.pre`
   grid-column: 1 / -1; margin: 4px 0 2px; padding: 8px; border-radius: ${radius.sm}; background: ${colors.bg.input};
   color: ${colors.red.main}; font-size: ${fontSize.micro}; white-space: pre-wrap; overflow-x: auto;
 `
-const LevelsGrid = styled.div`display: grid; grid-template-columns: minmax(200px, 1fr) 160px; gap: 6px 12px; align-items: center; font-size: ${fontSize.sm};`
+// Module | level | action: every row's level dropdown in the same column, the Add button in its own.
+const LevelsGrid = styled.div`display: grid; grid-template-columns: minmax(200px, 1fr) 160px 72px; gap: 6px 12px; align-items: center; font-size: ${fontSize.sm};`
 
 const tone = (level: string) => (level === 'ERROR' || level === 'CRITICAL' ? 'red' : level === 'WARNING' ? 'orange' : level === 'INFO' ? 'blue' : 'neutral') as 'red' | 'orange' | 'blue' | 'neutral'
 
@@ -127,13 +128,12 @@ export default function ServerLog() {
               <div key={name} style={{ display: 'contents' }}>
                 <span style={{ fontFamily: fonts.mono }}>{name}{levels.configured[name] ? ' ●' : ''}</span>
                 <SearchSelect value={level} onChange={(v) => void changeLevel(name, v || 'NOTSET', true)} options={choiceOpts} />
+                <span />
               </div>
             ))}
             <SearchSelect sort allowCustom value={newLogger} onChange={setNewLogger} options={loggerOpts} placeholder={t('serverLog.pickLogger')} />
-            <div style={{ display: 'flex', gap: 6 }}>
-              <SearchSelect value={newLevel} onChange={(v) => setNewLevel(v || 'DEBUG')} options={choiceOpts} />
-              <Button $size="sm" disabled={!newLogger} onClick={() => { void changeLevel(newLogger, newLevel, true); setNewLogger('') }}>{t('common.add')}</Button>
-            </div>
+            <SearchSelect value={newLevel} onChange={(v) => setNewLevel(v || 'DEBUG')} options={choiceOpts} />
+            <Button disabled={!newLogger} onClick={() => { void changeLevel(newLogger, newLevel, true); setNewLogger('') }}>{t('common.add')}</Button>
           </LevelsGrid>
         )}
       </Card>

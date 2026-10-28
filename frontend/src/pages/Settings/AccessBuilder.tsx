@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Users, Shield, Plus, X } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Centered, Checkbox, Field, Input, Overlay, Modal, ModalBody, ModalFooter, PasswordInput, SearchSelect, SpinnerRing, Tag, type SearchSelectOption } from '../../common'
+import { Banner, Button, Card, Centered, Checkbox, Field, Input, Overlay, Modal, ModalBody, ModalFooter, PasswordInput, SearchSelect, SpinnerRing, Tag, ViewCards, type SearchSelectOption } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import RoleEditor, { type AppRole } from './Access/RoleEditor'
@@ -22,14 +22,6 @@ import type { DictionaryDoc, ScreensDoc } from '../../types/config'
 interface AppUser { username: string; email: string | null; full_name: string | null; is_active: boolean; is_superuser: boolean; roles: string[]; attributes?: Record<string, string | string[]> | null }
 
 const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; height: 100%;`
-const Tabs = styled.div`display: flex; gap: 16px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0;`
-const TabBtn = styled.button<{ $active?: boolean }>`
-  display: inline-flex; align-items: center; gap: 7px; padding: 10px 4px; margin-bottom: -1px;
-  border: none; background: transparent; cursor: pointer; font-size: ${fontSize.md}; font-weight: 600; font-family: ${fonts.sans};
-  color: ${({ $active }) => ($active ? colors.text.primary : colors.text.muted)};
-  border-bottom: 2px solid ${({ $active }) => ($active ? colors.blue.main : 'transparent')};
-  &:hover { color: ${colors.text.primary}; }
-`
 const Bar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0;`
 const List = styled(Card)`flex: 1; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px;`
 const Split = styled.div`display: flex; gap: 12px; flex: 1; min-height: 0;`
@@ -184,10 +176,10 @@ export default function AccessBuilder() {
 
   return (
     <Shell>
-      <Tabs>
-        <TabBtn $active={tab === 'users'} onClick={() => setTab('users')}><Users size={15} /> {t('settings.access.users')}</TabBtn>
-        <TabBtn $active={tab === 'roles'} onClick={() => setTab('roles')}><Shield size={15} /> {t('settings.access.roles')}</TabBtn>
-      </Tabs>
+      <ViewCards compact value={tab} onChange={setTab} items={[
+        { id: 'users', label: t('settings.access.users'), desc: t('settings.access.usersDesc'), icon: <Users size={15} />, color: colors.blue.main },
+        { id: 'roles', label: t('settings.access.roles'), desc: t('settings.access.rolesDesc'), icon: <Shield size={15} />, color: colors.purple.main },
+      ]} />
       {error && <Banner $tone="error">{error}</Banner>}
 
       {tab === 'users' ? (

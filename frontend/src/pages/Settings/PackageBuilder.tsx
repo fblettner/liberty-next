@@ -9,7 +9,7 @@ import styled from '@emotion/styled'
 import { Search, Download, Upload, Package, FileText, Menu as MenuIcon, LayoutDashboard, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { api, apiDownload, apiUpload, ApiError } from '../../api/client'
 import type { ScreensDoc, MenusDoc, DashboardsDoc } from '../../types/config'
-import { Banner, Button, Card, Centered, Checkbox, SpinnerRing, Mono } from '../../common'
+import { Banner, Button, Card, Centered, Checkbox, SpinnerRing, Mono, ViewCards } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { DEFAULT_EXCLUDED_KINDS, depKey } from './FindDependenciesModal'
 
@@ -66,16 +66,6 @@ const KIND_ORDER = [
 type Strategy = 'merge' | 'overwrite' | 'replace_all'
 
 const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0;`
-const Tabs = styled.div`display: flex; gap: 4px; flex-shrink: 0;`
-const TabBtn = styled.button<{ $active?: boolean }>`
-  height: 30px; padding: 0 14px; border-radius: ${radius.md}; cursor: pointer;
-  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : colors.border)};
-  background: ${({ $active }) => ($active ? colors.blue.bg : colors.bg.input)};
-  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
-  font-size: ${fontSize.sm}; font-family: ${fonts.sans};
-  display: inline-flex; align-items: center; gap: 6px;
-  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
-`
 const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-wrap: wrap;`
 const Grid = styled.div`display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; flex: 1; min-height: 0;`
 const Panel = styled(Card)`padding: 0; display: flex; flex-direction: column; overflow: hidden; min-height: 0;`
@@ -150,14 +140,10 @@ export default function PackageBuilder() {
 
   return (
     <Shell>
-      <Tabs>
-        <TabBtn $active={mode === 'build'} onClick={() => setMode('build')}>
-          <Download size={13} /> {t('settings.package.buildTab')}
-        </TabBtn>
-        <TabBtn $active={mode === 'import'} onClick={() => setMode('import')}>
-          <Upload size={13} /> {t('settings.package.importTab')}
-        </TabBtn>
-      </Tabs>
+      <ViewCards compact value={mode} onChange={setMode} items={[
+        { id: 'build', label: t('settings.package.buildTab'), desc: t('settings.package.buildDesc'), icon: <Download size={15} />, color: colors.blue.main },
+        { id: 'import', label: t('settings.package.importTab'), desc: t('settings.package.importDesc'), icon: <Upload size={15} />, color: colors.purple.main },
+      ]} />
       {mode === 'build' ? <BuildPanel /> : <ImportPanel />}
     </Shell>
   )

@@ -57,6 +57,7 @@ const fr: Resources = {
   },
   retentionCenter: {
     tab: 'Rétention',
+    tabDesc: 'Ce que garde chaque stockage, sa taille, un aperçu et une purge',
     store: { runs: 'Exécutions des tâches', work_area: 'Fichiers des tâches', notifications: 'Notifications', config_versions: 'Versions de configuration', change_packages: 'Paquets de modifications', saved_views: 'Vues enregistrées', server_log: 'Journal du serveur' },
     goes: {
       runs: 'Les exécutions terminées avec leurs étapes et journaux',
@@ -88,6 +89,8 @@ const fr: Resources = {
   serverLog: {
     tabLive: 'En direct',
     tabLog: 'Journal du serveur',
+    tabLiveDesc: 'Utilisateurs connectés, verrous, pools et le journal en direct',
+    tabLogDesc: 'Le fichier journal : recherche, export, téléchargement, niveaux par module',
     search: 'Chercher un message, un module, une erreur, un identifiant de requête…',
     anyLevel: 'Tout niveau',
     atLeast: '{{level}} et plus',
@@ -2354,6 +2357,8 @@ const fr: Resources = {
       leaveBlankKeep: 'Laisser vide pour conserver l\'actuel',
       users: 'Utilisateurs',
       roles: 'Rôles',
+      usersDesc: 'Les comptes, leurs rôles et attributs',
+      rolesDesc: 'Ce que chaque rôle peut ouvrir et les données qu’il voit',
       inactive: 'inactif',
       permCount: '{{n}} règle(s)',
       pickRole: 'Choisissez un rôle à modifier, ou ajoutez-en un.',
@@ -2683,6 +2688,8 @@ const fr: Resources = {
     package: {
       buildTab: 'Construire un paquet',
       importTab: 'Importer un paquet',
+      buildDesc: 'Choisir des écrans et leurs dépendances, télécharger un zip',
+      importDesc: 'Appliquer un paquet zip à cette instance',
       filter: 'Filtrer les points de départ',
       clear: 'Effacer ({{n}})',
       download: 'Télécharger le ZIP ({{n}})',

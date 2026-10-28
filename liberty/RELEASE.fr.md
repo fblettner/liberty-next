@@ -54,6 +54,8 @@
   envois passent désormais par le client d'API (le rafraîchissement de session s'applique).
 - Correction : nomaflow → Tâches → Exporter télécharge de nouveau le paquet de la tâche (l'appel
   visait une mauvaise adresse, sans la session, et ne faisait rien).
+- Supervision, Paramètres → Paquet et Paramètres → Accès choisissent leurs vues dans une rangée de
+  cartes — une icône, le nom et une ligne sur l'usage de la vue — au lieu de simples onglets.
 
 ## 7.0.62 — non publiée
 
