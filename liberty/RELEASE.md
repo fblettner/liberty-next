@@ -80,6 +80,9 @@
   loaded, joined columns included); `?replace=1` rewrites the module's own queries, screens and menu items in place.
 - A `read_only` screen with a dialog opens it on a row again (view-only: fields disabled, no Save / Delete, its
   detail tabs read-only) — the grid only opened the dialog when the screen had an update or insert query.
+- Screen Assistant → A module: the module catalogue (search, groups), the preview read on the live tables (per
+  screen, as a tree of its details: table, prefix, columns, data items the table lacks, new / exists / replace; the menu;
+  what blocks it), Replace with its warning, Apply — the sidebar refreshed, then Open the module's first screen.
 
 ## 7.0.64 — unreleased
 

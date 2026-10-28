@@ -95,6 +95,10 @@
 - Un écran `read_only` avec un dialogue l'ouvre de nouveau sur une ligne (en consultation : champs désactivés, ni
   Enregistrer ni Supprimer, ses onglets de détail en lecture seule) — la grille n'ouvrait le dialogue que si l'écran
   avait une requête de modification ou de création.
+- Assistant d'écrans → Un module : le catalogue des modules (recherche, groupes), l'aperçu lu sur les tables réelles
+  (par écran, en arbre de ses détails : table, préfixe, colonnes, éléments de données absents de la table, nouveau /
+  existe / remplacé ; le menu ; ce qui bloque), Remplacer avec son avertissement, Appliquer — la barre latérale
+  rafraîchie, puis Ouvrir le premier écran du module.
 
 ## 7.0.64 — non publiée
 

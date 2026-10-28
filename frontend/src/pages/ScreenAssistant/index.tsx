@@ -25,6 +25,7 @@ import { MENU_ICON_NAMES, iconFor } from '../../components/SidebarMenu'
 import { ScanProposalsTable, summarizeProposals, type ScanProposal } from '../Settings/DictionaryScanTable'
 import { getPoolSchemaTables, type PoolColumn } from '../../services/poolSchema'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
+import ModuleApply from './ModuleApply'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 type ColId = string                                   // "ALIAS.col"
@@ -212,6 +213,8 @@ function resolveJoinRef(tables: JoinTable[], ref: string): string {
 }
 
 export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
+  // one screen built step by step, or a whole module of the catalogue (catalogue v2) applied at once
+  const [mode, setMode] = useState<'screen' | 'module'>('screen')
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { apps, connectors: wsConnectors, refresh } = useWorkspace()
@@ -680,10 +683,13 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
         <ModalHeader>
           <HeadBar>
             <Title><Wand2 size={18} /> {t('assistant.title')}</Title>
-            <Button $size="sm" $variant="ghost" onClick={resetAll} title={t('assistant.reset')}><RotateCcw size={14} /></Button>
+            <Button $size="sm" $variant={mode === 'screen' ? 'primary' : 'ghost'} onClick={() => setMode('screen')}>{t('assistant.module.modeScreen')}</Button>
+            <Button $size="sm" $variant={mode === 'module' ? 'primary' : 'ghost'} onClick={() => setMode('module')}>{t('assistant.module.modeModule')}</Button>
+            {mode === 'screen' && <Button $size="sm" $variant="ghost" onClick={resetAll} title={t('assistant.reset')}><RotateCcw size={14} /></Button>}
             <Button $size="sm" $variant="ghost" onClick={onClose} title={t('common.close')}><X size={16} /></Button>
           </HeadBar>
         </ModalHeader>
+        {mode === 'module' ? <ModuleApply onClose={onClose} /> : <>
         <ModalBody style={{ flex: 1, overflow: 'auto' }}>
           <Train>
             {STEPS.map((k, i) => (
@@ -963,6 +969,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
               : <Button $size="sm" $variant="primary" disabled={!canNext || busy} onClick={() => setStep((s) => Math.min(STEPS.length - 1, s + 1))}>{t('common.next')} <ChevronRight size={14} /></Button>}
           </ModalFooter>
         )}
+        </>}
       </Modal>
     </Overlay>
 
