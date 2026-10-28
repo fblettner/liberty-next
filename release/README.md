@@ -10,7 +10,8 @@ Three ready-to-run layouts + helper scripts. Pick the layout that matches your r
 
 All layouts use the public image at [`ghcr.io/fblettner/liberty-next`](https://github.com/fblettner/liberty-next/pkgs/container/liberty-next).
 
-Helper scripts:
+The operator command is **[`liberty`](liberty)** (see [below](#the-liberty-command)); it wraps
+the historic helper scripts, which still work on their own:
 
 | Script | What it does |
 |---|---|
@@ -81,20 +82,20 @@ recomputes the compose chain**: the layout + TLS overlay + apps overlay live in 
 | `./liberty backup [--keep DAYS]` / `./liberty restore <dir>` | Volume snapshots (= `backup.sh`) and the matching restore (stops the stack, restores every `<volume>.tar.gz` + the apps bind mount, starts again). |
 | `./liberty logs [-f]` | The `liberty-next` service's logs. |
 
-### Which image tag does install.sh pull?
+### Which image tag does the install pull?
 
 | `LIBERTY_IMAGE_TAG` | When to use |
 |---|---|
 | `latest` (default) | Default — always the most recent release. Every merge to main creates a new release, so `:latest` always reflects current main. |
 | `<version>` (e.g. `7.0.2`) | When you want to pin to a specific release and stay there. |
 
-`./install.sh ... --tag X.Y.Z` sets `LIBERTY_IMAGE_TAG=X.Y.Z` in the generated `.env`.
+`./liberty install ... --tag X.Y.Z` sets `LIBERTY_IMAGE_TAG=X.Y.Z` in the generated `.env`.
 Without it, you get `latest`.
 
-**If `.env` already exists**, that flag is ignored — edit `LIBERTY_IMAGE_TAG` in
-`.env` directly, then `docker compose -f docker-compose.<layout>.yml pull && up -d`.
+**If `.env` already exists**, that flag is ignored — move to another version with
+`./liberty upgrade --tag X.Y.Z` (backup first, rollback possible).
 
-`install.sh` is idempotent — re-run it any time. If `.env` already exists it's kept
+The install is idempotent — re-run it any time. If `.env` already exists it's kept
 (delete it first to regenerate secrets); if the stack is already up the script just
 re-applies the compose file. It prints the generated `admin` password on first run.
 
@@ -128,7 +129,7 @@ URL routing (everything on port 80):
 | `/` (catchall) | liberty-next (SPA + API + admin + docs) |
 | `/pgadmin` | pgAdmin (Postgres GUI) |
 | `/portainer` | Portainer (Docker UI) |
-| `/traefik` | Traefik dashboard (basic-auth — `admin` / the random password `install.sh` prints once; `./liberty dashboard-password` regenerates it) |
+| `/traefik` | Traefik dashboard (basic-auth — `admin` / the random password the install prints once; `./liberty dashboard-password` regenerates it) |
 
 Volumes:
 
@@ -142,13 +143,14 @@ Volumes:
 
 ### Wiring TLS
 
-Two modes, both wired by `install.sh --ssl`. Choose at install time or re-run later
-(re-running keeps `.env` secrets but updates the SSL config + `COMPOSE_FILE`).
+Two modes, chosen at install time (`./liberty install full --ssl …`) or switched later
+with `./liberty ssl …` (the `.env` secrets are kept; only the TLS overlay in `COMPOSE_FILE`
+changes).
 
 #### Let's Encrypt (demo / public-internet hosts)
 
 ```bash
-./install.sh full \
+./liberty install full \
     --ssl letsencrypt \
     --domain liberty.example.com \
     --email ops@example.com
@@ -167,7 +169,7 @@ What it does:
 #### Operator-provided certs (corporate / air-gapped hosts)
 
 ```bash
-./install.sh full \
+./liberty install full \
     --ssl provided \
     --domain liberty.internal.example.com \
     --cert-dir  /etc/pki/tls \
@@ -177,7 +179,7 @@ What it does:
 
 Requirements:
 - A directory on the host containing the cert (`.crt` / `.pem`) and the private
-  key file. `install.sh` validates both exist before continuing.
+  key file. The install validates both exist before continuing.
 
 What it does:
 - Adds [`docker-compose.tls-provided.yml`](docker-compose.tls-provided.yml) to `COMPOSE_FILE`.
@@ -191,19 +193,20 @@ What it does:
 `./liberty ssl letsencrypt …` / `./liberty ssl provided …` / `./liberty ssl off` — with the
 same secrets in place. Only the TLS overlay is swapped in `COMPOSE_FILE` (the apps overlay
 stays), `tls.yml` is rewritten or removed, and `docker compose up -d` picks up the new config.
-(`./install.sh full --ssl <mode> …` on an existing `.env` does the same.)
+(`./liberty install full --ssl <mode> …` on an existing `.env` does the same.)
 
 #### No SSL (default)
 
-`./install.sh full` without `--ssl` runs HTTP-only on :80. Fine for local dev /
+`./liberty install full` without `--ssl` runs HTTP-only on :80. Fine for local dev /
 behind another reverse proxy that terminates TLS upstream.
 
 ### Backing up
 
 ```bash
-./backup.sh                    # → ./backups/YYYY-MM-DD_HHMMSS/
-./backup.sh /mnt/nas/liberty   # → /mnt/nas/liberty/YYYY-MM-DD_HHMMSS/
-./backup.sh --keep 30          # delete backups older than 30 days from the destination
+./liberty backup                    # → ./backups/YYYY-MM-DD_HHMMSS/
+./liberty backup /mnt/nas/liberty   # → /mnt/nas/liberty/YYYY-MM-DD_HHMMSS/
+./liberty backup --keep 30          # delete backups older than 30 days from the destination
+./liberty restore ./backups/<dir>   # stop, restore every volume + the apps, start again
 ```
 
 Each run creates one directory with:
@@ -218,7 +221,7 @@ Each run creates one directory with:
 Run weekly from cron:
 
 ```cron
-0 3 * * 0  cd /opt/liberty-next/release && ./backup.sh /mnt/nas/liberty --keep 60
+0 3 * * 0  cd /opt/liberty-next/release && ./liberty backup /mnt/nas/liberty --keep 60
 ```
 
 Backups are safe while the stack is running (Docker handles read consistency). For a
@@ -379,8 +382,7 @@ by a license key (`LIBERTY_LICENSE_KEY`).
 ### Single-command install (fresh host)
 
 ```bash
-./install.sh full \
-    --apps ./liberty_apps-7.0.1-py3-none-any.whl \
+./liberty install full --apps ./liberty_apps-X.Y.Z-py3-none-any.whl
 ```
 
 That's everything — base stack + licensed apps + license key in one go.
@@ -388,11 +390,11 @@ That's everything — base stack + licensed apps + license key in one go.
 ### Or split it: base first, apps later
 
 ```bash
-./install.sh full                                                          # base stack
-./install-apps.sh ./liberty_apps-7.0.1-py3-none-any.whl   # add the apps; paste the license key in Settings → App
+./liberty install full                                 # base stack
+./liberty apps ./liberty_apps-X.Y.Z-py3-none-any.whl   # add the apps; paste the license key in Settings → App
 ```
 
-### What `install-apps.sh` does
+### What `liberty apps` does (`install-apps.sh`)
 
 **Config is merged per entity, never copied over.** Product additions (a screen, a dictionary entry,
 a menu item, a query, a dashboard) are added; what you own is kept — entities flagged
@@ -422,25 +424,23 @@ into the container at `/apps` (read-write: the config builders write there) and 
 ### Common variations
 
 ```bash
-./install-apps.sh ./liberty_apps-X.Y.Z.whl                       # no license → restricted mode
-./install-apps.sh https://license-host/liberty_apps-X.Y.Z.whl    # download from a URL (curl)
-./install-apps.sh ./liberty_apps-X.Y.Z.whl --target /opt/apps    # destination override
-./install-apps.sh ./liberty_apps-X.Y.Z.whl --layout light        # layer onto the light stack
-./install-apps.sh ./liberty_apps-X.Y.Z.whl --force-config        # overwrite operator-edited TOMLs (re-install)
+./liberty apps ./liberty_apps-X.Y.Z.whl                       # no license → restricted mode
+./liberty apps ./liberty_apps-X.Y.Z.whl --dry-run             # print the merge plan only
+./liberty apps https://license-host/liberty_apps-X.Y.Z.whl    # download from a URL (curl)
+./liberty apps ./liberty_apps-X.Y.Z.whl --target /opt/apps    # destination override
+./liberty apps ./liberty_apps-X.Y.Z.whl --force-config        # also refresh vendor entities you changed (never overrides / secrets)
 ```
 
 ### Updating the apps later
 
-Drop in a new wheel and re-run:
+Drop in a new wheel and re-run (or pass it to the framework upgrade:
+`./liberty upgrade --apps <wheel>`):
 
 ```bash
-./install-apps.sh ./liberty_apps-7.0.2-py3-none-any.whl
-docker compose restart liberty-next       # picks up the new TOMLs
+./liberty apps ./liberty_apps-X.Y.Z-py3-none-any.whl   # merge plan, merge, migrations, restart
 ```
 
-Operator-edited TOMLs are preserved by default (the wheel's `liberty-apps install`
-CLI only overwrites when `--force-config` is passed). If `hot_reload = true` in
-`app.toml`, you don't even need the restart — file edits are picked up live.
+The merge is per entity (above): your edits, overrides and secrets are kept.
 
 ### Persistence + restart + backup — what's safe?
 
@@ -450,10 +450,10 @@ CLI only overwrites when `--force-config` is passed). If `hot_reload = true` in
 | Host reboot | safe — `restart: unless-stopped` brings everything back, mount re-attaches | safe |
 | `docker compose down` (no `-v`) | safe — mount source untouched | safe |
 | `docker compose down -v` | safe — bind mount isn't a Docker volume, `-v` doesn't touch it | **WIPED** (named volumes destroyed) |
-| `./install.sh full --reset` | safe — only named volumes are dropped | **WIPED** |
-| `./backup.sh` | **included** — backup.sh reads `APPS_HOST_PATH` from `.env` and tars `./apps/` alongside the named volumes | included (`pg-data.tar.gz` etc.) |
+| `./liberty install full --reset` | safe — only named volumes are dropped | **WIPED** |
+| `./liberty backup` | **included** — the backup reads `APPS_HOST_PATH` from `.env` and tars `./apps/` alongside the named volumes | included (`pg-data.tar.gz` etc.) |
 
-A backup directory after running `./backup.sh` contains:
+A backup directory after running `./liberty backup` contains:
 
 ```
 backups/2026-05-30_170000/
@@ -468,12 +468,12 @@ backups/2026-05-30_170000/
 
 ### COMPOSE_FILE discipline
 
-After `install-apps.sh` runs, `.env` carries:
+After `liberty apps` (`install-apps.sh`) runs, `.env` carries:
 ```
 COMPOSE_FILE=docker-compose.full.yml:docker-compose.apps.yml
 ```
 Every `docker compose <command>` (with NO `-f` flag) reads this and merges both
-files automatically. **Don't pass `-f` manually** after install-apps.sh —
+files automatically. **Don't pass `-f` manually** after `liberty apps` —
 compose would replace the COMPOSE_FILE list and you'd lose the apps mount on
 the next container recreate.
 

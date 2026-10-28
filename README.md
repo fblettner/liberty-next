@@ -37,12 +37,16 @@ and audit mirrors; API connectors over HTTP with five authentication kinds. Secr
 (cascading through lookups), the dialog with its tabs, nested forms and nested tables,
 row actions and toolbar actions (chains of query, confirm, prompt, navigate, notify),
 lifecycle hooks, row-level edit rules, bulk edit, Excel import and workbook export,
-summary, tree and chart views, saved grid views shared or per user, record locks.
+summary, tree and chart views, saved grid views shared or per user, record locks. The grid
+streams large results and draws only the visible rows; its column filters follow the
+column's type (several coded values at once), long text can wrap, and each screen sets its
+page size.
 
 **Dictionary, menus, dashboards.** One dictionary of data items (labels in every
 language, formats, enums, lookups, sequences, rules) shared by every screen. Per-app
-menus. Dashboards of KPIs, charts and tables with a filter bar and a period picker,
-compared with the period before.
+menus with a start page per role, a sidebar that folds to its icons. Dashboards of KPIs,
+charts, tables, links and job status with a filter bar and a period picker, compared with
+the period before.
 
 **Data Explorer.** A model per app (a hub table and its dimensions) explored without SQL:
 rows, measures, filters, a period, pivots, charts, drill to the detail and to the
@@ -52,10 +56,12 @@ private, exported to Excel and PDF. Apps ship analyses as a bundled catalogue.
 **nomaflow.** Jobs made of steps: run a query, copy a table between databases,
 load a spreadsheet or a CSV into a table (replacing the partitions the file carries,
 refusing a closed period, checking a control total, reporting the rejected rows),
-call an API, sync from LDAP, run a Python callable, call another job, render a saved
-analysis or a report to Excel or PDF and send it with the run's files attached. Cron
-schedules with presets and parameters, retries, missed-schedule detection, retention,
-a run history with the step detail and the log.
+call an API, sync from LDAP, run a Python callable, call another job, export a query to
+Excel or CSV, render a saved analysis or a report to Excel or PDF and send it with the
+run's files attached. Cron schedules with presets and parameters (a run per value when a
+parameter holds several), retries, pause and resume, deadline alerts, missed-schedule
+detection, retention of runs and files, the upcoming runs day by day, a run history with
+the step detail, the log and the files (the uploaded spreadsheet included).
 
 **Notifications.** Rules on screen events, job events and actions deliver to the portal
 inbox (live), by e-mail or through a connector; recipients are users, roles or addresses.
@@ -77,8 +83,11 @@ explorer, digest and write. Login throttling, rotating refresh tokens.
 snapshotted before each save (version history with diff and restore), hot-reloaded, and
 packaged with its dependencies for deployment to another install. The apps bundle merges
 into the live configuration without clobbering the operator's changes; upgrades are
-journaled with the release notes of each version. Health, readiness, request ids, a
-technical dashboard with the log tail and the connected users.
+journaled with the release notes of each version. Health, readiness, request ids. A
+Monitoring page: the live view (connected users, locks, pools, the log tail), the server
+log kept on disk (rotated, searched, exported, levels per module changed at run time) and
+a retention center (what every store keeps, its size, a preview and a purge). Runs at the
+site root or under a reverse-proxy sub-path (`[app] base_path`); installable as a web app.
 
 ---
 
@@ -94,13 +103,16 @@ A host needs only the `release/` directory:
 ```bash
 git clone --depth 1 --filter=blob:none --sparse https://github.com/fblettner/liberty-next.git
 cd liberty-next && git sparse-checkout set release && cd release
-./install.sh full                     # light = the server + its database; full = + Traefik, pgAdmin, Portainer
-./install-apps.sh /path/to/liberty_apps-X.Y.Z.whl   # licensed customers: the apps bundle
+./liberty install full                # light = the server + SQLite; full = + Postgres, Traefik, pgAdmin, Portainer
+./liberty apps /path/to/liberty_apps-X.Y.Z.whl   # licensed customers: the apps bundle (merge plan + migrations)
+./liberty ssl letsencrypt --domain liberty.example.com --email ops@example.com   # optional: TLS
 ```
 
-Then `./liberty status | doctor | start | stop | ssl | apps | upgrade | backup | restore | logs`.
-The first boot prints the `admin` password once; the license key is set in
-Settings → App → License (encrypted at rest).
+`./liberty` is the one operator command: `status | doctor | start | stop | restart | logs |
+ssl | apps | upgrade | rollback | backup | restore | migrate`. An upgrade is
+`./liberty upgrade [--tag X.Y.Z]` (doctor → backup → pull → recreate → migrations → report),
+undone by `./liberty rollback`. The install prints the `admin` password once; the license key
+is set in Settings → App → License (encrypted at rest).
 
 ### PyPI
 
@@ -125,7 +137,7 @@ python3.12 -m venv .venv && .venv/bin/pip install -c requirements.txt -e ".[dev]
 ./start.sh init-db                    # first run
 ./start.sh                            # builds the frontend when stale, serves on :8000
 ./start.sh dev                        # backend auto-reload · ./start.sh frontend → Vite on :5173
-.venv/bin/pytest -q                   # 1 470 tests, no live database needed
+.venv/bin/pytest -q                   # 1 500+ tests, no live database needed
 (cd frontend && npm ci && npm run lint && npm test && npm run build)
 ```
 
@@ -181,6 +193,7 @@ Building a new application on the framework is a configuration job, not a projec
 | `/docs`, `/redoc`, `/openapi.json` | The API reference |
 | `/api/*`, `/admin/*` | The API; the operator endpoints (superuser) |
 | `/health`, `/ready`, `/info` | Liveness, readiness (pool ping), public counts and versions |
+| `/monitoring` | Live view, server log, retention (superuser) |
 
 Settings → History holds the per-file version history, the screen bundles and the
 upgrade timeline with each version's release notes; Settings → Release notes the full
@@ -219,7 +232,7 @@ liberty/        the framework: main.py (create_app), runtime.py (the reload path
 frontend/       React 19 + Vite + TypeScript; dist/ is served by the backend
 config/         app.toml and the *.toml.example templates
 release/        Docker Compose layouts, the `liberty` ops command, install / upgrade / backup scripts, Traefik
-docker/         the entrypoint and the vendored Oracle Instant Client
+docker/         the entrypoint; the Oracle Instant Client is fetched at build (pinned checksums)
 tests/          pytest, SQLite fixtures, no live database
 .claude/skills/ Claude Code skills shared with the repository (build-app)
 ```
