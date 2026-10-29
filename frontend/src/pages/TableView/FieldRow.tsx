@@ -9,12 +9,12 @@
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Checkbox, DatePicker, Field, Input, SearchSelect, matchOption } from '../../common'
+import { Checkbox, DatePicker, DateTimePicker, Field, Input, SearchSelect, matchOption } from '../../common'
 import type { Column } from '../../types/connectors'
 import type { ScreenField } from '../../types/screens'
 import { type LookupSpec, lookupKey, lookupOptions, lookupCellColumns, useLookupTables } from '../../services/lookups'
 import { colors, fontSize, fonts, radius } from '../../theme'
-import { cssColor, formatLink } from '../../services/cells'
+import { cssColor, formatLink, isDateTimeColumn, localDateTime } from '../../services/cells'
 import { OpenFormatted } from './FormatValue'
 import { type Row, resolveBindList, applyRulesWhen, activeRulesWhen } from './dialogHelpers'
 
@@ -120,8 +120,10 @@ export function FieldRow({
       </ReadOnlyBox>
     )
   } else if (disabled) {
-    // Read-only echo for the remaining kinds (text / number / date) — value visible + copyable.
-    widget = <ReadOnlyBox aria-readonly>{textValue || <span style={{ color: colors.text.muted }}>—</span>}</ReadOnlyBox>
+    // Read-only echo for the remaining kinds (text / number / date) — value visible + copyable; a zoned
+    // date-time in local time, as the grid shows it.
+    const shown = column && isDateTimeColumn(column) ? (localDateTime(textValue) ?? textValue) : textValue
+    widget = <ReadOnlyBox aria-readonly>{shown || <span style={{ color: colors.text.muted }}>—</span>}</ReadOnlyBox>
   } else if (effectiveRule?.kind === 'boolean') {
     const trueV = effectiveRule.true_value
     // false_value is the value to send on uncheck — explicit per ``DictionaryEntry.false_value``,
@@ -221,7 +223,11 @@ export function FieldRow({
       />
     )
     const swatch = fmt === 'color' ? cssColor(String(dv ?? '')) : null
-    widget = type === 'date' ? (
+    // a date-time (format datetime / timestamp, or a timestamp column) edits its day AND its time
+    const withTime = type === 'date' && (fmt === 'datetime' || fmt === 'timestamp' || (!fmt && /timestamp|datetime/.test(typ)))
+    widget = withTime ? (
+      <DateTimePicker required={required} value={textValue} onChange={(v) => onChange(field.name, v === '' ? null : v)} />
+    ) : type === 'date' ? (
       <DatePicker required={required} value={dv} onChange={(v) => onChange(field.name, v === '' ? null : v)} />
     ) : fmt === 'color' ? (
       <FormatWrap>

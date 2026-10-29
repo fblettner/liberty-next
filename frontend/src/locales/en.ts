@@ -245,6 +245,8 @@ const en = {
     sendMail: 'Write an e-mail',
     pickColor: 'Pick a colour',
     datePlaceholder: 'yyyy-mm-dd',
+    time: 'Time',
+    timePlaceholder: 'hh:mm',
     stop: 'Stop',
     loading: 'Loading…',
     run: 'Run',

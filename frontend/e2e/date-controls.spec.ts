@@ -137,3 +137,24 @@ test('Data Explorer: a date-time field filters with the date picker (no browser 
   await expect(page.getByRole('button', { name: 'Pick a date' })).toHaveCount(2)   // a "between": from / to
   await page.screenshot({ path: test.info().outputPath('explorer-datetime.png') })
 })
+
+test('nomademo Periods: a date-time field shows its day and time in the form, in local time', async ({ context }) => {
+  const rows = await screenRows('nomademo', 'periods', 'nomademo', 'period_status_get')
+  const row = rows.find((r) => (r.STATUS_AT ?? r.status_at) != null)
+  test.skip(!row, 'no period with a status time')
+  const raw = String(row!.STATUS_AT ?? row!.status_at)
+  const d = new Date(raw), p = (n: number) => String(n).padStart(2, '0')
+  const day = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`, time = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+  const page = await openScreen(context, 'nomademo', 'periods')
+  await page.locator('tbody tr').filter({ hasText: String(row!.PERIOD ?? row!.period) }).first().click()
+  // (a read-only form has no Save button, so not through dialog())
+  const f = page.locator('div:has(> label:text-is("Status set at"))').last()
+  // read-only here (a closed period): the local day and time, not the raw UTC value
+  const box = f.locator('[aria-readonly]')
+  if (await box.count()) await expect(box).toHaveText(`${day} ${time}`)
+  else {   // editable: the date picker + the time field
+    await expect(f.locator('input[placeholder="yyyy-mm-dd"]')).toHaveValue(day)
+    await expect(f.getByLabel('Time')).toHaveValue(time)
+  }
+  await page.locator('button', { hasText: /^\s*Cancel\s*$/ }).last().click()
+})

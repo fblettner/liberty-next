@@ -2,6 +2,9 @@
 
 ## 7.0.67 — unreleased
 
+- Record form: a date-time field (format `datetime` / `timestamp`) edits its day and its time — the date picker and a
+  time field (`hh:mm` or `hh:mm:ss`) — instead of the day only, which saved it at midnight (`common/DateTimePicker`).
+  Read-only, a date-time with a time zone shows in local time, like the grid (it showed the raw UTC value).
 - Writes: a `SYSDATE` stamp takes the dictionary's date / time format when the screen shows the column with another
   format — a JDE time displayed as a plain `number` (F00950.FSUPMT, F95921.RLUPMT, F0004.DTUPMJ…) got the raw
   date-time, which Oracle refused for the NUMBER column (ORA-00932). Every "Update or insert" import of F00950 failed

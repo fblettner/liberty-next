@@ -247,6 +247,8 @@ const fr: Resources = {
     sendMail: 'Écrire un e-mail',
     pickColor: 'Choisir une couleur',
     datePlaceholder: 'aaaa-mm-jj',
+    time: 'Heure',
+    timePlaceholder: 'hh:mm',
     stop: 'Arrêter',
     loading: 'Chargement…',
     run: 'Exécuter',

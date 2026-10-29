@@ -2,6 +2,10 @@
 
 ## 7.0.67 — non publiée
 
+- Formulaire : un champ date-heure (format `datetime` / `timestamp`) se modifie avec son jour et son heure — le
+  sélecteur de date et un champ heure (`hh:mm` ou `hh:mm:ss`) — au lieu du seul jour, qui l'enregistrait à minuit
+  (`common/DateTimePicker`). En lecture seule, une date-heure avec fuseau s'affiche à l'heure locale, comme la grille
+  (elle affichait la valeur UTC brute).
 - Écritures : un horodatage `SYSDATE` prend le format date / heure du dictionnaire quand l'écran affiche la colonne
   dans un autre format — une heure JDE affichée en simple `number` (F00950.FSUPMT, F95921.RLUPMT, F0004.DTUPMJ…)
   recevait la date-heure brute, refusée par Oracle pour la colonne NUMBER (ORA-00932). Tout import « Mettre à jour ou
