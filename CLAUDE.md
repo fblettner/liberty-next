@@ -269,7 +269,8 @@ pages/TableView/       the data screen: index (params, streaming run), ResultTab
                        + import + row menu + export; EditCell = the inline-edit control, resultColumns.ts = the pure
                        column helpers, tested; useRowMenu = the row context menu: state, runner, popup; useBatchEdit = the Bulk edit
                        state + its Save and row hooks; useImport = file / dialog / paste import into it), ScreenDialog (the form, nested tabs; useRecordLock = its row lock), useActionPrompt
-                       (the prompt_fields dialog, shared by the grid and the form), FilterPanel (a date column = a
+                       (the prompt_fields dialog, shared by the grid and the form), FormatValue (url / email /
+                       color: link, mailto, swatch — safe values only, services/cells.formatLink), FilterPanel (a date column = a
                        period, logic in services/serverFilters.ts, tested),
                        actionRunner.ts (chain / if / loop / return runtime), Summary / Tree / Chart views
 pages/Settings/        one *Builder per config section + the Visual Designer (ScreenVisualBuilder,

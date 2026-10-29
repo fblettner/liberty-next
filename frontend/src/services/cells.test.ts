@@ -2,7 +2,7 @@
 // raw value, plus the null / object text fallbacks the grid relies on.
 import { describe, expect, it } from 'vitest'
 import type { Column } from '../types/connectors'
-import { cellText, enumMap, isDateTimeColumn, localDateTime, ruleCell } from './cells'
+import { cellText, cssColor, enumMap, formatLink, isDateTimeColumn, localDateTime, mailtoOf, ruleCell, safeUrl } from './cells'
 
 const col = (rule?: Column['rule']): Column => ({ name: 'X', type: 'text', rule })
 
@@ -72,5 +72,37 @@ describe('zoned date-times in local time', () => {
     expect(isDateTimeColumn({ type: 'timestamp with time zone' })).toBe(true)
     expect(ruleCell('2026-10-28 23:54:08.859444+00:00', dt).text).toBe(local('2026-10-28T23:54:08Z'))
     expect(ruleCell('2026-10-28 23:54:08+00:00', { name: 'note', type: null, format: 'text' } as Column).text).toBe('2026-10-28 23:54:08+00:00')
+  })
+})
+
+describe('url / email / color formats', () => {
+  it('a link only for an http(s) address', () => {
+    expect(safeUrl('https://docs.nomana-it.fr/liberty')).toBe('https://docs.nomana-it.fr/liberty')
+    expect(safeUrl('www.oracle.com')).toBe('https://www.oracle.com/')
+    expect(safeUrl('javascript:alert(1)')).toBeNull()
+    expect(safeUrl('ftp://host/file')).toBeNull()
+    expect(safeUrl('not a url')).toBeNull()
+    expect(safeUrl('')).toBeNull()
+  })
+  it('a mailto only for an address', () => {
+    expect(mailtoOf(' jane.doe@nomana-it.fr ')).toBe('mailto:jane.doe@nomana-it.fr')
+    expect(mailtoOf('jane.doe')).toBeNull()
+    expect(mailtoOf('a@b')).toBeNull()
+    expect(mailtoOf('x@y.fr?bcc=z@w.fr')).toBeNull()
+  })
+  it('a swatch only for a real colour', () => {
+    expect(cssColor('#1a2B3c')).toBe('#1a2B3c')
+    expect(cssColor('1a2b3c')).toBe('#1a2b3c')
+    expect(cssColor('#abc')).toBe('#abc')
+    expect(cssColor('rgb(10, 20, 30)')).toBe('rgb(10, 20, 30)')
+    expect(cssColor('red; background: url(x)')).toBeNull()
+    expect(cssColor('#12')).toBeNull()
+  })
+  it('by the column format; any other format is plain', () => {
+    expect(formatLink({ format: 'url' }, 'www.x.fr')).toEqual({ kind: 'url', href: 'https://www.x.fr/' })
+    expect(formatLink({ format: 'email' }, 'a@b.fr')).toEqual({ kind: 'email', href: 'mailto:a@b.fr' })
+    expect(formatLink({ format: 'color' }, 'ff0000')).toEqual({ kind: 'color', href: '#ff0000' })
+    expect(formatLink({ format: 'text' }, 'https://x.fr')).toBeNull()
+    expect(formatLink({ format: 'url' }, 'nope')).toBeNull()
   })
 })

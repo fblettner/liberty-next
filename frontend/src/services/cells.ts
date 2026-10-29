@@ -37,6 +37,47 @@ export function isDateTimeColumn(c: Pick<Column, 'format' | 'type'>): boolean {
   return f === 'datetime' || f === 'timestamp' || /timestamp|datetime/.test((c.type ?? '').toLowerCase())
 }
 
+// ``url`` / ``email`` / ``color`` columns: the cell shows a link, a ``mailto:`` or a swatch — only for
+// a value that is one (a link is ``http(s)`` only, never ``javascript:``); anything else stays text.
+// The raw value is what the grid sorts, filters and exports.
+
+/** The address a ``url`` value opens (``www.x.fr`` → ``https://www.x.fr``); null when it is no
+ *  http(s) address. */
+export function safeUrl(raw: string): string | null {
+  const v = raw.trim()
+  if (!v || /\s/.test(v)) return null
+  const withScheme = /^https?:\/\//i.test(v) ? v : /^www\./i.test(v) ? `https://${v}` : null
+  if (!withScheme) return null
+  try {
+    const u = new URL(withScheme)
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : null
+  } catch {
+    return null
+  }
+}
+
+/** The ``mailto:`` an ``email`` value opens; null when it does not look like an address. */
+export function mailtoOf(raw: string): string | null {
+  const v = raw.trim()
+  return /^[^\s@<>()"',;:]+@[^\s@<>()"',;:]+\.[^\s@<>()"',;:]+$/.test(v) ? `mailto:${v}` : null
+}
+
+/** The CSS colour a ``color`` value paints (``#1a2b3c``, ``1a2b3c``, ``#abc``, ``rgb(…)``); null
+ *  otherwise — no free CSS reaches a style. */
+export function cssColor(raw: string): string | null {
+  const v = raw.trim()
+  if (/^#?([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v)) return v.startsWith('#') ? v : `#${v}`
+  if (/^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d+)\s*)?\)$/i.test(v)) return v
+  return null
+}
+
+/** The display a column's format gives a value: a link / mailto / swatch, or null (plain text). */
+export function formatLink(c: Pick<Column, 'format'>, raw: string): { kind: 'url' | 'email' | 'color'; href: string } | null {
+  const f = (c.format ?? '').toLowerCase()
+  const href = f === 'url' ? safeUrl(raw) : f === 'email' ? mailtoOf(raw) : f === 'color' ? cssColor(raw) : null
+  return href ? { kind: f as 'url' | 'email' | 'color', href } : null
+}
+
 /** Build a `{value: label}` lookup from an ENUM rule. Memoize the result per column. */
 export function enumMap(rule: Extract<DisplayRule, { kind: 'enum' }>): Map<string, string> {
   return new Map(rule.values.map((v) => [v.value, v.label]))

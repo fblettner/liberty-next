@@ -2,6 +2,11 @@
 
 ## 7.0.67 — non publiée
 
+- Formats `url` / `email` / `color` (entrée du dictionnaire ou colonne) : la grille affiche un lien ouvert dans un
+  nouvel onglet, un `mailto:`, une pastille de couleur à côté du code ; la saisie du formulaire reçoit un bouton
+  d'ouverture, ou une pastille ouvrant le sélecteur de couleur du système. Seules les valeurs sûres : un lien est
+  `http(s)` uniquement (`www.…` reçoit `https://`), un e-mail doit ressembler à une adresse, une couleur est un code
+  hexadécimal ou `rgb()` — le reste reste du texte. Tri, filtre et export gardent la valeur brute.
 - Dates : un sélecteur de date aux couleurs du thème (`common/DatePicker`) remplace le calendrier du navigateur —
   blanc, et différent d'un navigateur à l'autre — dans le formulaire, l'édition en masse de la grille, les filtres de
   colonne de la grille et les filtres du Data Explorer : un champ où une date peut encore être saisie (un jour

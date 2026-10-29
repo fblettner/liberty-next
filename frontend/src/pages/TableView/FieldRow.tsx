@@ -14,6 +14,8 @@ import type { Column } from '../../types/connectors'
 import type { ScreenField } from '../../types/screens'
 import { type LookupSpec, lookupKey, lookupOptions, lookupCellColumns, useLookupTables } from '../../services/lookups'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { cssColor, formatLink } from '../../services/cells'
+import { OpenFormatted } from './FormatValue'
 import { type Row, resolveBindList, applyRulesWhen, activeRulesWhen } from './dialogHelpers'
 
 export const CellWrap = styled.div<{ $span: number }>`
@@ -32,6 +34,13 @@ function isNumericish(fmt: string, typ: string) { return fmt === 'number' || fmt
 // an ISO ``YYYY-MM-DD`` string (``_from_jde_julian``) and Save re-encodes the picked date back to
 // Julian — so it edits as a real date with a calendar, not a number. (Its SQL ``typ`` is integer,
 // which is why matching on ``typ`` alone missed it.)
+// an input with a control inside its right end (the url / email open button, the colour swatch)
+const FormatWrap = styled.div`position: relative; width: 100%;`
+const ColorPick = styled.label`
+  position: absolute; top: 50%; transform: translateY(-50%); right: 6px; width: 20px; height: 20px; cursor: pointer;
+  border-radius: ${radius.sm}; border: 1px solid ${colors.border}; overflow: hidden;
+  & input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: none; padding: 0; }
+`
 function isDateish(fmt: string, typ: string) { return /^(date|datetime|timestamp|jdedate)$/.test(fmt) || /date|timestamp/.test(typ) }
 export function isPassword(c: Column | null): boolean { return (c?.format ?? '').toLowerCase() === 'password' }
 
@@ -197,11 +206,12 @@ export function FieldRow({
     const typ = (column?.type ?? '').toLowerCase()
     const type = isDateish(fmt, typ) ? 'date' : isNumericish(fmt, typ) ? 'number' : 'text'
     const dv = type === 'date' && textValue ? textValue.slice(0, 10) : textValue
-    widget = type === 'date' ? (
-      <DatePicker required={required} value={dv} onChange={(v) => onChange(field.name, v === '' ? null : v)} />
-    ) : (
+    // url / email: an open button once the value is an address; color: a swatch opening the system picker
+    const link = (fmt === 'url' || fmt === 'email') && dv ? formatLink({ format: fmt }, String(dv)) : null
+    const input = (
       <Input
         type={type} required={required} value={dv}
+        style={link || fmt === 'color' ? { paddingRight: 34 } : undefined}
         onChange={(e) => {
           const raw = e.target.value
           if (raw === '') onChange(field.name, null)
@@ -210,6 +220,20 @@ export function FieldRow({
         }}
       />
     )
+    const swatch = fmt === 'color' ? cssColor(String(dv ?? '')) : null
+    widget = type === 'date' ? (
+      <DatePicker required={required} value={dv} onChange={(v) => onChange(field.name, v === '' ? null : v)} />
+    ) : fmt === 'color' ? (
+      <FormatWrap>
+        {input}
+        <ColorPick title={t('common.pickColor')} style={{ background: swatch ?? 'transparent' }}>
+          <input type="color" aria-label={t('common.pickColor')} value={/^#[0-9a-f]{6}$/i.test(swatch ?? '') ? swatch! : '#000000'}
+            onChange={(e) => onChange(field.name, String(dv ?? '').startsWith('#') || !dv ? e.target.value : e.target.value.slice(1))} />
+        </ColorPick>
+      </FormatWrap>
+    ) : link && link.kind !== 'color' ? (
+      <FormatWrap>{input}<OpenFormatted kind={link.kind} href={link.href} title={t(link.kind === 'url' ? 'common.openLink' : 'common.sendMail')} /></FormatWrap>
+    ) : input
   }
 
   return (

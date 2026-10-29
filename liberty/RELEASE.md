@@ -2,6 +2,11 @@
 
 ## 7.0.67 — unreleased
 
+- Formats `url` / `email` / `color` (dictionary entry or column): the grid shows a link opening in a new tab, a
+  `mailto:`, a colour swatch beside the code; the record form's input gets an open button, or a swatch opening the
+  system colour picker. Only safe values: a link is `http(s)` only (`www.…` gets `https://`), an e-mail must look
+  like an address, a colour is a hex code or `rgb()` — anything else stays text. Sort, filter and export keep the raw
+  value.
 - Dates: a themed date picker (`common/DatePicker`) replaces the browser's own calendar — white, and different on
   each browser — in the record form, the grid's bulk edit, the grid's column filters and the Data Explorer's filters:
   a field where a date can still be typed (an impossible day goes back to the value) and the period picker's month

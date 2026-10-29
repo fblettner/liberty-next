@@ -26,7 +26,8 @@ import { Banner, ErrorDetails } from '../../common'
 import { DataTable } from '../../common/DataTable'
 import type { SharedGridView } from '../../services/gridViews'
 import { ValueDiffPanel } from './ValueDiffPanel'
-import { enumMap, ruleCell } from '../../services/cells'
+import { enumMap, formatLink, ruleCell } from '../../services/cells'
+import { FormatValue } from './FormatValue'
 import { lookupKey, useLookupTables, lookupCellColumns, lookupOptions, type LookupData, type LookupSpec } from '../../services/lookups'
 import { useTabs } from '../../tabs/TabsContext'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -886,6 +887,9 @@ export function ResultTable({
             : rk === 'boolean-true' ? t('common.true')
             : rk === 'boolean-false' ? t('common.false')
             : undefined
+          // url / email / color: a link, a mailto, a swatch (the raw value still sorts / filters / exports)
+          const fl = !isNull && rk === 'plain' ? formatLink(cc, text) : null
+          if (fl) return <CellSpan style={align ? { textAlign: align } : undefined}><FormatValue text={text} kind={fl.kind} href={fl.href} /></CellSpan>
           return span(text, isNull ? 'null' : rk, align, titleVal)
         },
       })
