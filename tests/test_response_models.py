@@ -66,3 +66,37 @@ def test_documented_routes_carry_their_schema_in_openapi(client) -> None:
         op = spec["paths"][route][method.lower()]
         ref = op["responses"]["200"]["content"]["application/json"]["schema"]
         assert ref.get("$ref", "").endswith(model.__name__), (route, ref)
+
+
+# ── Explorer and nomaflow (their own fixtures) ───────────────────────────────────────────────────
+
+def test_explorer_routes_match_their_models(tmp_path) -> None:
+    from tests import test_web_explorer as ex
+    app, _ = ex.env.__wrapped__(tmp_path)
+    with TestClient(app) as client:
+        h = ex._h(client, "admin")
+        schemas.ExplorerModels.model_validate(client.get("/api/explorer", headers=h).json())
+        schemas.ExplorerModelView.model_validate(client.get("/api/explorer/shop/sales/model", headers=h).json())
+        body = {"rows": [{"field": "company.NAME"}], "measures": [{"field": "sales.REVENUE"}]}
+        schemas.ExplorerAggregate.model_validate(client.post("/api/explorer/shop/sales/query", json=body, headers=h).json())
+        schemas.ExplorerAggregate.model_validate(client.post("/api/explorer/shop/sales/query", json={**body, "debug": True}, headers=h).json())
+        schemas.ExplorerDetail.model_validate(client.post("/api/explorer/shop/sales/detail", json={"columns": ["sales.ID"]}, headers=h).json())
+        client.put("/api/explorer/shop/sales/saved/analyses", json={"name": "By company", "definition": {"rows": []}}, headers=h)
+        saved = client.get("/api/explorer/shop/sales/saved/analyses", headers=h).json()
+        assert saved["items"]
+        schemas.SavedItems.model_validate(saved)
+
+
+def test_jobs_routes_match_their_models(tmp_path) -> None:
+    from tests import test_web_jobs as wj
+    app, _ = wj.env.__wrapped__(tmp_path)
+    with TestClient(app) as client:
+        h = wj._h(client, "admin")
+        queued = client.post("/admin/jobs/ping/run", headers=h).json()
+        schemas.RunQueued.model_validate(queued)
+        wj._wait_for_terminal(app, queued["run_id"])
+        schemas.JobList.model_validate(client.get("/admin/jobs", headers=h).json())
+        runs = client.get("/admin/jobs/runs", headers=h).json()
+        assert runs["runs"]
+        schemas.RunList.model_validate(runs)
+        schemas.RunDetail.model_validate(client.get(f"/admin/jobs/runs/{queued['run_id']}", headers=h).json())

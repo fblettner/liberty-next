@@ -243,3 +243,195 @@ class ScreensOut(_Closed):
 class AppScreensOut(_Closed):
     app: str
     screens: list[ScreenSummary]
+
+
+# ── Explorer ───────────────────────────────────────────────────────────────────────────────────
+
+class ExplorerModelSummary(_Closed):
+    app: str
+    model: str
+    label: str
+    description: str | None = None
+    hub: str = Field(description="The hub entity (the model's grain).")
+    entities: int
+    preset: str | None = Field(default=None, description="The Screen Assistant preset it derives from.")
+    derived: bool = Field(description="Built from its preset at first use (no model of its own in explorer.toml).")
+    group: str | None = None
+
+
+class ExplorerModels(_Closed):
+    models: list[ExplorerModelSummary]
+
+
+class ExplorerField(_Open):
+    """A field of an entity: a dimension, a measure or a date, its label from the dictionary."""
+    key: str = Field(description="``<entity>.<column>`` — how requests name it.")
+    entity: str
+    name: str
+    label: str
+    type: str = Field(description="text / number / date …")
+    kind: str = Field(description="dimension / measure / date")
+    aggregate: str | None = None
+    format: str | None = None
+    decimals: int | None = None
+    rule: dict[str, Any] | None = None
+    dd: str | None = None
+
+
+class ExplorerEntity(_Open):
+    id: str
+    label: str
+    description: str | None = None
+    connector: str | None = None
+    query: str | None = None
+    screen: str | None = None
+    key: list[str]
+    cardinality: str = Field(description="one (a lookup joined to the hub) / many")
+    default_date: str | None = None
+    fields: list[ExplorerField]
+    error: str | None = Field(default=None, description="Why the entity's fields could not be read (its query failed).")
+
+
+class ExplorerModelView(_Closed):
+    app: str
+    model: str
+    label: str
+    description: str | None = None
+    hub: str
+    preset: str | None = None
+    derived: bool
+    entities: list[ExplorerEntity]
+    relations: list[dict[str, Any]] = Field(description="``{from, to, on: [[left, right], …]}``.")
+    warnings: list[str]
+    undocumented: int = Field(description="Visible columns no dictionary entry documents.")
+
+
+class ExplorerResultColumn(_Open):
+    key: str
+    kind: str = Field(description="dimension / measure (aggregate) or column (detail)")
+    field: str | None = None
+    entity: str | None = None
+    label: str
+    type: str | None = None
+    aggregate: str | None = None
+
+
+class ExplorerAggregate(_Closed):
+    mode: Literal["aggregate"]
+    entity: str = Field(description="The primary entity the rows are counted on.")
+    columns: list[ExplorerResultColumn]
+    rows: list[dict[str, Any]]
+    groups: int = Field(description="Groups found (rows before the limit).")
+    scanned: int
+    truncated: bool
+    scan_truncated: bool
+    sql: str | None = Field(default=None, description="Superuser with ``debug``: the statement.")
+    binds: dict[str, Any] | None = None
+
+
+class ExplorerDetail(_Closed):
+    mode: Literal["detail"]
+    entity: str
+    columns: list[ExplorerResultColumn]
+    rows: list[dict[str, Any]]
+    total: int
+    page: int
+    page_size: int
+    sql: str | None = None
+    binds: dict[str, Any] | None = None
+
+
+class SavedItem(_Closed):
+    id: str
+    name: str
+    description: str | None = None
+    audience: str | None = None
+    owner: str
+    shared: bool
+    bundled: int | None = Field(default=None, description="The catalogue version it was installed from (explorer.toml) while untouched; none once edited or for a user's own.")
+    version: int
+    updated_at: str
+    definition: dict[str, Any]
+
+
+class SavedItems(_Closed):
+    items: list[SavedItem]
+
+
+# ── nomaflow jobs ──────────────────────────────────────────────────────────────────────────────
+
+class LastRun(_Open):
+    run_id: str
+    state: str
+    started_at: str | None = None
+    finished_at: str | None = None
+
+
+class JobSummary(_Open):
+    """A job with its operational state (``user_params`` when it declares any)."""
+    id: str
+    description: str | None = None
+    schedule: str | None = None
+    timezone: str | None = None
+    enabled: bool
+    tags: list[str]
+    step_count: int
+    registered_with_scheduler: bool
+    in_flight: bool
+    last_run: LastRun | None = None
+    next_run: str | None = Field(default=None, description="The soonest fire across the job's schedule and its scheduled presets.")
+    schedule_next_run: str | None = None
+    preset_schedules: list[dict[str, Any]]
+
+
+class JobList(_Closed):
+    jobs: list[JobSummary]
+    active_run_ids: list[str]
+
+
+class RunQueued(_Closed):
+    job_id: str
+    run_id: str
+    triggered_by: str
+    status: Literal["queued"]
+
+
+class RunOut(_Open):
+    id: str
+    job_id: str
+    state: str = Field(description="QUEUED / RUNNING / SUCCEEDED / FAILED / CANCELED / MISSED …")
+    trigger_kind: str | None = None
+    triggered_by: str | None = None
+    scheduled_at: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    rows_affected: int | None = None
+    error_message: str | None = None
+    progress: dict[str, int] | None = Field(default=None, description="A running run: ``{done, total}`` steps.")
+
+
+class RunList(_Closed):
+    runs: list[RunOut]
+    counts: dict[str, int] = Field(description="Runs per state for the current filters.")
+    total: int
+
+
+class StepOut(_Closed):
+    step_index: int
+    step_name: str
+    step_type: str
+    attempt: int
+    state: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    rows_affected: int | None = None
+    error_message: str | None = None
+    extras: dict[str, Any] | None = None
+
+
+class RunDetail(_Closed):
+    run: RunOut
+    steps: list[StepOut]
+    logs: str = Field(description="The run's log lines as text — the live buffer while it runs, the stored log once finished.")
+    overrides: dict[str, Any] = Field(description="What the operator picked in Run with parameters.")
+    inputs: list[dict[str, Any]] = Field(description="The files uploaded for the run: ``{step, name, size}``.")

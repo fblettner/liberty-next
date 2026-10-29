@@ -53,6 +53,7 @@ from liberty.jobs import (
     JobScheduler,
     UnknownJobError,
 )
+from liberty.web.schemas import JobList, RunDetail, RunList, RunQueued
 
 _log = logging.getLogger(__name__)
 
@@ -209,7 +210,8 @@ async def _latest_runs_by_job(db) -> dict[str, dict[str, Any]]:
 # --------------------------------------------------------------------------- #
 
 
-@router.get("", summary="List jobs")
+@router.get("", summary="List jobs",
+             responses={200: {"model": JobList, "description": "Every job with its operational state."}})
 async def list_jobs(request: Request, _: Viewer) -> dict[str, Any]:
     """Return every job in the registry + operational state: scheduler-registered /
     in-flight flags, the last run's status (badge), and the next scheduled fire.
@@ -248,7 +250,8 @@ async def job_definition(job_id: str, request: Request, principal: CurrentPrinci
     return job.model_dump(by_alias=True, exclude_defaults=True, exclude_none=True)
 
 
-@router.post("/{job_id}/run", summary="Run job now")
+@router.post("/{job_id}/run", summary="Run job now",
+             responses={200: {"model": RunQueued, "description": "The run is queued; follow it with GET /admin/jobs/runs/{run_id}."}})
 async def run_job_now(
     job_id: str,
     request: Request,
@@ -595,7 +598,8 @@ async def reload_jobs(request: Request, principal: Editor) -> dict[str, Any]:
     return {"jobs": len(comps.registry.jobs())}
 
 
-@router.get("/runs", summary="List runs")
+@router.get("/runs", summary="List runs",
+             responses={200: {"model": RunList, "description": "A page of runs with the counts per state."}})
 async def list_runs(
     request: Request, _: Viewer,
     job: str | None = None, state: str | None = None, q: str | None = None,
@@ -669,7 +673,8 @@ async def list_runs(
     return {"runs": out, "counts": counts, "total": total}
 
 
-@router.get("/runs/{run_id}", summary="Get run detail")
+@router.get("/runs/{run_id}", summary="Get run detail",
+             responses={200: {"model": RunDetail, "description": "The run, its steps, its log, its overrides and its uploaded files."}})
 async def get_run_detail(run_id: str, request: Request, _: Viewer) -> dict[str, Any]:
     """One run — its summary, its step rows, and its **log** (NOMAFLOW-UI.md
     live-logs increment). Powers the Run detail page.

@@ -41,6 +41,7 @@ from liberty.web.errors import db_error_detail, http_for_connector_error
 
 from liberty.screens import ScreensFile
 from liberty.web.deps import get_connectors, get_screens, request_language, require_permission
+from liberty.web.schemas import ExplorerAggregate, ExplorerDetail, ExplorerModelView, ExplorerModels, SavedItems
 
 _log = logging.getLogger(__name__)
 
@@ -77,7 +78,8 @@ def _saved_key(app: str, model: str) -> str:
     return f"{app}/{model}"
 
 
-@router.get("/explorer", summary="List explorer models")
+@router.get("/explorer", summary="List explorer models",
+             responses={200: {"model": ExplorerModels, "description": "The models the caller may use."}})
 async def list_models(principal: CurrentPrincipal, explorer: Explorer) -> dict[str, Any]:
     """``{models: [{app, model, label, description, hub, entities: n}]}`` — only the models the
     caller holds ``explorer:{app}:{model}`` for."""
@@ -88,7 +90,8 @@ async def list_models(principal: CurrentPrincipal, explorer: Explorer) -> dict[s
     return {"models": out}
 
 
-@router.get("/explorer/{app}/{model}/model", summary="Get an explorer model with its fields")
+@router.get("/explorer/{app}/{model}/model", summary="Get an explorer model with its fields",
+             responses={200: {"model": ExplorerModelView, "description": "The model with its entities and fields."}})
 async def get_model(
     app: str, model: str, request: Request, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors, screens: Screens,
     language: Language, refresh: bool = False,
@@ -121,7 +124,8 @@ async def _run(
         ) from exc
 
 
-@router.post("/explorer/{app}/{model}/query", summary="Run an explorer aggregate")
+@router.post("/explorer/{app}/{model}/query", summary="Run an explorer aggregate",
+             responses={200: {"model": ExplorerAggregate, "description": "The aggregate rows."}})
 async def query_model(
     app: str, model: str, request: Request, body: AggregateRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
     screens: Screens, language: Language,
@@ -130,7 +134,8 @@ async def query_model(
     return await _run(request, app, model, run_aggregate, body, principal, explorer, cache, connectors, screens, language)
 
 
-@router.post("/explorer/{app}/{model}/detail", summary="Run an explorer detail query")
+@router.post("/explorer/{app}/{model}/detail", summary="Run an explorer detail query",
+             responses={200: {"model": ExplorerDetail, "description": "A page of rows."}})
 async def detail_model(
     app: str, model: str, request: Request, body: DetailRequest, principal: CurrentPrincipal, explorer: Explorer, cache: Cache, connectors: Connectors,
     screens: Screens, language: Language,
@@ -180,7 +185,8 @@ class SaveBody(BaseModel):
     definition: dict[str, Any] = Field(default_factory=dict)
 
 
-@router.get("/explorer/{app}/{model}/saved/{kind}", summary="List saved analyses or dashboards")
+@router.get("/explorer/{app}/{model}/saved/{kind}", summary="List saved analyses or dashboards",
+             responses={200: {"model": SavedItems, "description": "The shared objects plus the caller's own."}})
 async def list_saved(app: str, model: str, kind: str, request: Request, principal: CurrentPrincipal, explorer: Explorer) -> dict[str, Any]:
     """The shared objects plus the caller's own: ``{items: [{id, name, description, audience,
     owner, shared, bundled, version, updated_at, definition}]}``."""
