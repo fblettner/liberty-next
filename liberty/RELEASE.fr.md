@@ -25,7 +25,8 @@
   `EditCell.tsx` (tous testés), son menu de ligne dans le hook `useRowMenu.tsx`, son édition en masse (modifications en attente, lignes
   nouvelles / supprimées / cochées, presse-papiers, l'enregistrement et ses actions de ligne) dans le hook
   `useBatchEdit.ts`, son import (fichier, boîte d'import, collage : correspondance des en-têtes, contrôle des
-  règles, report des lookups) dans le hook `useImport.ts`, et les éditeurs partagent leur cadre, leur barre d'outils et leur ligne vide
+  règles, report des lookups) dans le hook `useImport.ts` ; le verrou d'enregistrement du formulaire est le hook
+  `useRecordLock.ts`, et les éditeurs partagent leur cadre, leur barre d'outils et leur ligne vide
   (`common/builderShell.ts`).
 
 ## 7.0.66 — non publiée

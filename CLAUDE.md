@@ -267,7 +267,7 @@ common/                shared primitives: Button Card Input SearchSelect Checkbo
 pages/TableView/       the data screen: index (params, streaming run), ResultTable (grid + bulk edit
                        + import + row menu + export; EditCell = the inline-edit control, resultColumns.ts = the pure
                        column helpers, tested; useRowMenu = the row context menu: state, runner, popup; useBatchEdit = the Bulk edit
-                       state + its Save and row hooks; useImport = file / dialog / paste import into it), ScreenDialog (the form, nested tabs), FilterPanel,
+                       state + its Save and row hooks; useImport = file / dialog / paste import into it), ScreenDialog (the form, nested tabs; useRecordLock = its row lock), FilterPanel,
                        actionRunner.ts (chain / if / loop / return runtime), Summary / Tree / Chart views
 pages/Settings/        one *Builder per config section + the Visual Designer (ScreenVisualBuilder,
                        ScreenEditor, ActionListEditor…), ApiConnectorEditor, wizards, ConfigVersions,

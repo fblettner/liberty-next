@@ -21,7 +21,8 @@
   `services/sqlParse.ts`, the data grid's column helpers `resultColumns.ts` and its inline-edit cell `EditCell.tsx` (all
   with tests), its row context menu the hook `useRowMenu.tsx`, its batch edit (pending edits, new / deleted / selected rows,
   the clipboard, the Save and its row hooks) the hook `useBatchEdit.ts`, its import (file, Import dialog, paste:
-  header mapping, rule validation, lookup return-fill) the hook `useImport.ts`, and the builders share their page frame, toolbar and empty line (`common/builderShell.ts`).
+  header mapping, rule validation, lookup return-fill) the hook `useImport.ts`; the record form's row lock is the
+  hook `useRecordLock.ts`, and the builders share their page frame, toolbar and empty line (`common/builderShell.ts`).
 
 ## 7.0.66 — unreleased
 
