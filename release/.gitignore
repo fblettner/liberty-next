@@ -1,0 +1,4 @@
+# What a host keeps here at run time — never in git, never touched by `git pull`
+# (.env is ignored by the root .gitignore).
+apps/
+backups/

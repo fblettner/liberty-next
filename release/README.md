@@ -24,8 +24,8 @@ the historic helper scripts, which still work on their own:
 ## Quickstart
 
 ```bash
-git clone https://github.com/fblettner/liberty-next.git
-cd liberty-next/release
+git clone --depth 1 --filter=blob:none --sparse https://github.com/fblettner/liberty-next.git
+cd liberty-next && git sparse-checkout set release && cd release   # the release/ folder only, not the history
 ./liberty install                  # interactive — asks light vs full
 # OR
 ./liberty install light            # single container, SQLite
@@ -278,6 +278,7 @@ docker compose -f docker-compose.full.yml up -d
 ### Upgrading (v2 → v2)
 
 ```bash
+git pull                                   # the scripts of the new release (main = releases only)
 ./liberty upgrade                          # doctor → backup → pull → recreate → migrations → status
 ./liberty upgrade --tag 7.0.57             # pin a release (written to .env as LIBERTY_IMAGE_TAG)
 ./liberty upgrade --apps liberty_apps-….whl  # framework + a new apps wheel in one go
