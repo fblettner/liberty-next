@@ -40,8 +40,10 @@ external address — the install's named addresses, so shipped screens carry non
 lifecycle hooks, row-level edit rules, bulk edit, Excel import and workbook export,
 summary, tree and chart views, saved grid views shared or per user, record locks. The grid
 streams large results and draws only the visible rows; its column filters follow the
-column's type (several coded values at once), long text can wrap, and each screen sets its
-page size. Module catalogues describe a whole application module once (its tables, keys,
+column's type (several coded values at once), a date filters by a period (presets and a
+calendar, the default per column), dates and date-times are picked in a themed calendar,
+`url` / `email` / `color` values show as a link, a mail link or a swatch, long text can wrap,
+and each screen sets its page size. Module catalogues describe a whole application module once (its tables, keys,
 grid and dialog, detail tabs, menu); the Screen Assistant previews it against the live
 schema and applies it — queries, read-only screens, menu and dictionary in one go.
 
@@ -148,8 +150,10 @@ python3.12 -m venv .venv && .venv/bin/pip install -c requirements.txt -e ".[dev]
 ./start.sh init-db                    # first run
 ./start.sh                            # builds the frontend when stale, serves on :8000
 ./start.sh dev                        # backend auto-reload · ./start.sh frontend → Vite on :5173
-.venv/bin/pytest -q                   # 1 500+ tests, no live database needed
+.venv/bin/pytest -q                   # 1 600+ tests, no live database needed
 (cd frontend && npm ci && npm run lint && npm test && npm run build)
+# browser regression tests against a running server (test records only; frontend/e2e/README.md)
+(cd frontend && LIBERTY_E2E_USER=… LIBERTY_E2E_PASSWORD=… npm run e2e)
 ```
 
 ---
@@ -240,7 +244,7 @@ liberty/        the framework: main.py (create_app), runtime.py (the reload path
                 connectors/ auth/ screens/ menus/ charts/ dashboards/ actions/ explorer/ ai/
                 jobs/ etl/ reports/ notify/ changesets/ versioning/ userviews/ web/ (the HTTP layer)
                 RELEASE.md · RELEASE.fr.md · the CLIs (cli, admin_cli, ops_cli, migrate_cli, license_cli, crypto_cli)
-frontend/       React 19 + Vite + TypeScript; dist/ is served by the backend
+frontend/       React 19 + Vite + TypeScript; dist/ is served by the backend; e2e/ = Playwright regression tests
 config/         app.toml and the *.toml.example templates
 release/        Docker Compose layouts, the `liberty` ops command, install / upgrade / backup scripts, Traefik
 docker/         the entrypoint; the Oracle Instant Client is fetched at build (pinned checksums)
