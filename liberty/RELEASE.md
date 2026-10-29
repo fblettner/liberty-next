@@ -22,7 +22,7 @@
   with tests), its row context menu the hook `useRowMenu.tsx`, its batch edit (pending edits, new / deleted / selected rows,
   the clipboard, the Save and its row hooks) the hook `useBatchEdit.ts`, its import (file, Import dialog, paste:
   header mapping, rule validation, lookup return-fill) the hook `useImport.ts`; the record form's row lock is the
-  hook `useRecordLock.ts`, and the builders share their page frame, toolbar and empty line (`common/builderShell.ts`).
+  hook `useRecordLock.ts`; the action prompt (`prompt_fields`), copied in both, is one hook `useActionPrompt.tsx`, and the builders share their page frame, toolbar and empty line (`common/builderShell.ts`).
 
 ## 7.0.66 — unreleased
 

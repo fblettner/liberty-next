@@ -4,7 +4,7 @@
 // stops before touching anything if one already exists.
 import { test, expect, type Page } from '@playwright/test'
 import {
-  chooseOption, cleanupWrite, clickTab, confirm, dialog, fill, gridRow, matchesBaseline, normalize,
+  chooseOption, cleanupWrite, clickTab, confirm, dialog, field, fill, gridRow, matchesBaseline, normalize,
   newRows, openScreen, pick, runGrid, saveBulkEdit, saveDialog, select, startBulkEdit,
 } from './support'
 
@@ -15,17 +15,23 @@ async function snapshot() {
   const apps = await select('nomasx1',
     "SELECT * FROM settings_applications WHERE apps_name LIKE 'LYTEST-%' ORDER BY apps_name")
   const names = new Map(apps.map((a) => [a.apps_id, a.apps_name]))
-  const jde = names.size === 0 ? [] : await select('nomasx1',
-    `SELECT * FROM settings_jdedwards WHERE apps_id IN (${[...names.keys()].map(Number).join(',')})`)
+  const ids = [...names.keys()].map(Number).join(',')
+  const jde = names.size === 0 ? [] : await select('nomasx1', `SELECT * FROM settings_jdedwards WHERE apps_id IN (${ids})`)
+  const taskViews = names.size === 0 ? [] : await select('nomasx1',
+    `SELECT * FROM settings_jde_tv WHERE tv_apps_id IN (${ids}) ORDER BY tv_apps_id, tv_task_id`)
   // The ids come from a sequence: the rows are compared by name, not by id.
   return {
     applications: normalize(apps, ['apps_id', 'apps_password', 'apps_audit_date']),
     jdedwards: normalize(jde.map((j) => ({ ...j, apps_id: names.get(j.apps_id) }))
       .sort((a, b) => String(a.apps_id).localeCompare(String(b.apps_id))), ['jde_audit_date']),
+    taskViews: normalize(taskViews.map((v) => ({ ...v, tv_apps_id: names.get(v.tv_apps_id) }))
+      .sort((a, b) => `${a.tv_apps_id}|${a.tv_task_id}`.localeCompare(`${b.tv_apps_id}|${b.tv_task_id}`)), ['tv_audit_date']),
   }
 }
 
 async function cleanup() {
+  await cleanupWrite('nomasx1',
+    "DELETE FROM settings_jde_tv WHERE tv_apps_id IN (SELECT apps_id FROM settings_applications WHERE apps_name LIKE 'LYTEST-%')", {})
   await cleanupWrite('nomasx1',
     "DELETE FROM settings_jdedwards WHERE apps_id IN (SELECT apps_id FROM settings_applications WHERE apps_name LIKE 'LYTEST-%')", {})
   await cleanupWrite('nomasx1', "DELETE FROM settings_applications WHERE apps_name LIKE 'LYTEST-%'", {})
@@ -60,6 +66,22 @@ test('settings_applications: form add / duplicate / delete, bulk add / change / 
       await fill(d, 'OUT Retention Days', '30')
       await saveDialog(page)
       matchesBaseline('sa-1-form-add', await snapshot())
+    })
+
+    await test.step('form: a row in its Task Views sub-table (task 91 "test", Collect checked)', async () => {
+      await runGrid(page)
+      await openRow(page, `${PREFIX}FORM`)
+      await clickTab(dialog(page), 'Task Views')
+      await page.getByRole('button', { name: 'Add row', exact: true }).last().click()
+      const sub = dialog(page)   // the sub-table's own form, over the application's
+      await fill(sub, 'Task ID', '91')
+      await fill(sub, 'Task Name', 'test')
+      await field(sub, 'Collect Security (Y/N)').locator('input[type="checkbox"]').check()
+      await sub.getByRole('button', { name: 'Save', exact: true }).click()
+      await expect(page.locator('tbody tr').filter({ hasText: 'test' }).filter({ hasText: '91' })).toBeVisible()
+      await page.locator('button', { hasText: /^\s*Cancel\s*$/ }).last().click()
+      await expect(page.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0)
+      matchesBaseline('sa-1b-form-subtable', await snapshot())
     })
 
     await test.step('form: duplicate it', async () => {
@@ -120,7 +142,7 @@ test('settings_applications: form add / duplicate / delete, bulk add / change / 
         await expect(page.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0, { timeout: 10_000 })
       }
       const after = await snapshot()
-      expect(after).toEqual({ applications: [], jdedwards: [] })
+      expect(after).toEqual({ applications: [], jdedwards: [], taskViews: [] })
     })
     failed = false
   } finally {

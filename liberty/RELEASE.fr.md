@@ -26,7 +26,8 @@
   nouvelles / supprimées / cochées, presse-papiers, l'enregistrement et ses actions de ligne) dans le hook
   `useBatchEdit.ts`, son import (fichier, boîte d'import, collage : correspondance des en-têtes, contrôle des
   règles, report des lookups) dans le hook `useImport.ts` ; le verrou d'enregistrement du formulaire est le hook
-  `useRecordLock.ts`, et les éditeurs partagent leur cadre, leur barre d'outils et leur ligne vide
+  `useRecordLock.ts` ; la saisie avant action (`prompt_fields`), copiée dans les deux, est un seul hook
+  `useActionPrompt.tsx`, et les éditeurs partagent leur cadre, leur barre d'outils et leur ligne vide
   (`common/builderShell.ts`).
 
 ## 7.0.66 — non publiée

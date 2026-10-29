@@ -20,13 +20,13 @@ import { ApiError } from '../../api/client'
 import { Banner, Button, ConfirmModal, ErrorDetails, Modal, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SpinnerRing } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import type { Column } from '../../types/connectors'
-import type { Action, ColumnGroup, FormTab, PromptField, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
+import type { Action, ColumnGroup, FormTab, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
 import { colors, fontSize, fonts } from '../../theme'
 import { entityKeyOf, evalConditions, matchedDefaultWhen, type Row } from './dialogHelpers'
 import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
-import { ActionPromptDialog } from './ActionPromptDialog'
 import { CellWrap, FieldRow, isPassword } from './FieldRow'
 import { NestedFormView, NestedTableView } from './NestedTab'
+import { useActionPrompt } from './useActionPrompt'
 import { useRecordLock } from './useRecordLock'
 import { resolveAutoFill, runChain } from './actionRunner'
 
@@ -332,38 +332,8 @@ export function ScreenDialog({
     })
   }, [nameToFieldName])
 
-  // Imperative-from-async prompt plumbing. The chain runner pauses on actions with
-  // ``prompt_fields`` and awaits ``requestPrompt`` — which sets ``pendingPrompt`` state +
-  // stows a resolver in the ref. The mounted ActionPromptDialog reads the state; its onSubmit
-  // resolves with the entered values, its onCancel resolves with ``null`` (chain aborts soft —
-  // no error banner). The ref pattern keeps ``requestPrompt`` referentially stable so the
-  // runner's useCallback deps don't churn on every state change.
-  const [pendingPrompt, setPendingPrompt] = useState<
-    | { fields: PromptField[]; title: string; cols: number | null; submitLabel: string | null }
-    | null
-  >(null)
-  const promptResolveRef = useRef<((v: Row | null) => void) | null>(null)
-  const requestPrompt = useCallback((spec: { fields: PromptField[]; title: string | null; cols: number | null; submitLabel: string | null }, fallbackTitle: string): Promise<Row | null> => {
-    return new Promise<Row | null>((resolve) => {
-      promptResolveRef.current = resolve
-      setPendingPrompt({
-        fields: spec.fields,
-        title: spec.title || fallbackTitle,
-        cols: spec.cols,
-        submitLabel: spec.submitLabel,
-      })
-    })
-  }, [])
-  const handlePromptSubmit = useCallback((v: Row) => {
-    const r = promptResolveRef.current; promptResolveRef.current = null
-    setPendingPrompt(null)
-    r?.(v)
-  }, [])
-  const handlePromptCancel = useCallback(() => {
-    const r = promptResolveRef.current; promptResolveRef.current = null
-    setPendingPrompt(null)
-    r?.(null)
-  }, [])
+  // The action prompt (``prompt_fields``): ``requestPrompt`` for the action runner, the dialog it opens.
+  const { requestPrompt, promptDialog } = useActionPrompt()
 
   // Run a list of actions through the recursive runner (:file:`actionRunner.ts`). Slice B
   // (Phase 6 4d) added the chain context — each action lands its prompt values under
@@ -1073,20 +1043,8 @@ export function ScreenDialog({
         onCancel={() => setConfirmDelete(false)}
       />
     )}
-    {/* Prompt-before-fire sub-dialog (v2's port of v1's ly_act_params). Mounted at top level so
-        it sits above the parent dialog's modal but below any further nested confirm. The runner
-        awaits the resolver; Submit returns the values, Cancel returns null → chain aborts soft. */}
-    {pendingPrompt && (
-      <ActionPromptDialog
-        open
-        title={pendingPrompt.title}
-        fields={pendingPrompt.fields}
-        cols={pendingPrompt.cols}
-        submitLabel={pendingPrompt.submitLabel}
-        onSubmit={handlePromptSubmit}
-        onCancel={handlePromptCancel}
-      />
-    )}
+    {/* The action prompt — above the form's modal, below any further nested confirm. */}
+    {promptDialog}
     </NestedSaversContext.Provider>
   )
 }

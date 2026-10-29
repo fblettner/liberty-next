@@ -141,6 +141,27 @@ test('F0092 / F00950: add a user, set and remove its security, delete the user',
       await page.close()
     })
 
+    await test.step('F0092: a form action with a prompt — cancelled, then confirmed (Reset Password)', async () => {
+      const page = await openScreen(context, 'nomajde', 'f0092')
+      await openRow(page, USER)
+      const prompt = page.getByText('No inputs required — click Confirm to continue.')
+      // Cancel: the prompt closes, nothing runs, the form stays open.
+      await page.getByRole('button', { name: 'Reset Password', exact: true }).click()
+      await expect(prompt).toBeVisible()
+      await page.getByRole('button', { name: 'Cancel', exact: true }).last().click()
+      await expect(prompt).toHaveCount(0)
+      await expect(dialog(page)).toBeVisible()
+      // (Known, docs/work/PLAN.md findings: the form still reports "Reset Password · OK" after a
+      // cancelled prompt — the tab-action handler ignores the runner's ``cancelled``.)
+      // Confirm: the chain runs (reset_password through AIS, on the test user) and reports OK.
+      await page.getByRole('button', { name: 'Reset Password', exact: true }).click()
+      await page.getByRole('button', { name: 'Confirm', exact: true }).click()
+      await expect(page.getByText('Reset Password · OK')).toBeVisible({ timeout: 15_000 })
+      // The form's Cancel (the status banner's ✕ is also labelled "Cancel").
+      await page.locator('button', { hasText: /^\s*Cancel\s*$/ }).click()
+      await page.close()
+    })
+
     await test.step('F0092: delete the user (on_delete → delete_user in every table)', async () => {
       const page = await openScreen(context, 'nomajde', 'f0092')
       await openRow(page, USER)

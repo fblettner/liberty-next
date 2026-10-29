@@ -11,7 +11,7 @@
 // (the raw code, editable) + "<label>" (the resolved label, derived & read-only); lookup
 // queries are fetched once via services/lookups.useLookupBatch. Each column also declares its
 // filter kind so DataTable's per-column filter row shows the right control.
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useBranding } from '../../branding/BrandingContext'
 import type { DrillTarget } from '../../services/drill'
 import { useTranslation } from 'react-i18next'
@@ -20,7 +20,7 @@ import type { ColumnDef, VisibilityState } from '@tanstack/react-table'
 import styled from '@emotion/styled'
 import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3, Zap, FileSpreadsheet, Trash2, Lock } from 'lucide-react'
 import type { Column, QueryResult } from '../../types/connectors'
-import type { Action, PromptField, ScreenDetail } from '../../types/screens'
+import type { Action, ScreenDetail } from '../../types/screens'
 import { api, apiDownload, ApiError } from '../../api/client'
 import { Banner, ErrorDetails } from '../../common'
 import { DataTable } from '../../common/DataTable'
@@ -34,8 +34,7 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 import { CellSpan } from './styled'
 import { ScreenDialog, type DialogMode } from './ScreenDialog'
 import { ImportDialog } from './ImportDialog'
-import { ActionPromptDialog } from './ActionPromptDialog'
-import { resolveBindList, forcedDefault, activeRulesWhen, evalConditions, type Row as CtxRow } from './dialogHelpers'
+import { resolveBindList, forcedDefault, activeRulesWhen, evalConditions } from './dialogHelpers'
 import { runChain } from './actionRunner'
 
 import { cellAlign, colHeader, columnVisibleNow, editCtrlOf, filterKindOf, filterPropsFor, type Align, type DataRow, type FilterOpt } from './resultColumns'
@@ -43,6 +42,7 @@ import { EditCell, type LookupOpt } from './EditCell'
 import { useRowMenu } from './useRowMenu'
 import { useBatchEdit } from './useBatchEdit'
 import { useImport } from './useImport'
+import { useActionPrompt } from './useActionPrompt'
 
 // (``withUpper`` / ``originalKeys`` — the UPPERCASE-key duplication + the pre-edit
 // ``<NAME>_ORIGINAL`` WHERE binds — now live in ``saveScreenRow`` / ``dialogHelpers``, the single
@@ -291,36 +291,8 @@ export function ResultTable({
   }, [screen, connector])
   // The app's default for a drill whose action does not say (`[app] drill_inline`).
   const drillInlineDefault = useBranding().ui.drill_inline === true
-  // Prompt-before-fire plumbing — shared by ``runRowAction`` and ``runScreenAction``. Same
-  // imperative-from-async pattern the ScreenDialog uses: the action's ``prompt_fields`` opens a
-  // sub-dialog, the resolver returns the entered values (or null on cancel), and the runner
-  // merges them into the resolution context before the action's ParamBinds run.
-  const [pendingPrompt, setPendingPrompt] = useState<
-    | { fields: PromptField[]; title: string; cols: number | null; submitLabel: string | null }
-    | null
-  >(null)
-  const promptResolveRef = useRef<((v: CtxRow | null) => void) | null>(null)
-  const requestPrompt = useCallback((spec: { fields: PromptField[]; title: string | null; cols: number | null; submitLabel: string | null }, fallbackTitle: string): Promise<CtxRow | null> => {
-    return new Promise<CtxRow | null>((resolve) => {
-      promptResolveRef.current = resolve
-      setPendingPrompt({
-        fields: spec.fields,
-        title: spec.title || fallbackTitle,
-        cols: spec.cols,
-        submitLabel: spec.submitLabel,
-      })
-    })
-  }, [])
-  const handlePromptSubmit = useCallback((v: CtxRow) => {
-    const r = promptResolveRef.current; promptResolveRef.current = null
-    setPendingPrompt(null)
-    r?.(v)
-  }, [])
-  const handlePromptCancel = useCallback(() => {
-    const r = promptResolveRef.current; promptResolveRef.current = null
-    setPendingPrompt(null)
-    r?.(null)
-  }, [])
+  // The action prompt (``prompt_fields``): ``requestPrompt`` for the action runner, the dialog it opens.
+  const { requestPrompt, promptDialog } = useActionPrompt()
 
   // Screen-level actions — v1's NOMAJDE toolbar buttons ("Create Role" / "Reset Password" / etc.)
   // attach here. Fire with **no row context** (the user uses row_menu for row-bound actions);
@@ -1246,20 +1218,8 @@ export function ResultTable({
       {proxyOpen && proxyError && (
         <ErrorDetails message={proxyError} />
       )}
-      {/* Action-prompt sub-dialog (v2's port of v1's ly_act_params). Mounted at the page level so
-          it floats above both the row menu and the toolbar; the runner awaits the resolver, the
-          dialog returns the entered values on Confirm and null on Cancel (soft abort). */}
-      {pendingPrompt && (
-        <ActionPromptDialog
-          open
-          title={pendingPrompt.title}
-          fields={pendingPrompt.fields}
-          cols={pendingPrompt.cols}
-          submitLabel={pendingPrompt.submitLabel}
-          onSubmit={handlePromptSubmit}
-          onCancel={handlePromptCancel}
-        />
-      )}
+      {/* The action prompt — at the page level, above the row menu and the toolbar. */}
+      {promptDialog}
       {rowMenuPopup}
       {importOpen && (
         <ImportDialog
