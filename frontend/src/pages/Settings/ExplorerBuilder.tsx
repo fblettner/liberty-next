@@ -15,11 +15,10 @@ import { ScopeBar, type ScopeOption } from './ScopeBar'
 import { AddScopeModal } from './AddScopeModal'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { BuilderShell as Shell, BuilderToolbar as Toolbar } from '../../common/builderShell'
 
 type Models = Record<string, Record<string, ExplorerModelBody>>   // app → model id → body
 
-const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; height: 100%;`
-const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;`
 const Body = styled.div`flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px;`
 const Head = styled(Card)`display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; padding: 12px 14px;`
 const PresetNote = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans}; padding: 0 2px;`

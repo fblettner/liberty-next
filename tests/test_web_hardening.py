@@ -73,9 +73,9 @@ def _zip(members: dict[str, bytes]) -> bytes:
 
 
 def test_import_package_rejects_an_oversized_upload(sqlite_settings, monkeypatch) -> None:
-    import liberty.web.admin as admin
+    import liberty.web.admin.usages as admin_packages   # the module whose import route reads the cap
 
-    monkeypatch.setattr(admin, "MAX_PACKAGE_BYTES", 64)
+    monkeypatch.setattr(admin_packages, "MAX_PACKAGE_BYTES", 64)
     app = create_app(sqlite_settings)
     with TestClient(app) as client:
         h = _superuser_headers(client, app)

@@ -1884,3 +1884,64 @@ def test_external_urls_setting_and_route(env, tmp_path, monkeypatch) -> None:
         assert client.get("/api/external-urls", headers=h).json() == {"urls": {"JDE_WEB": "https://jde.example.com:8080/jde"}}
         bad = client.put("/admin/config/app/parsed", json={"app": {"external_urls": {"JDE_WEB": "ftp://x"}}}, headers=h)
         assert bad.status_code == 422
+
+
+def test_put_screens_parsed_rewrites_only_the_changed_screen(env) -> None:
+    """A Visual Designer save keeps every untouched screen as it is on disk (keys the model ignores,
+    an explicit ``key_columns``, no defaults written) and writes the edited one without its
+    defaults, in the file's key order; a screen left out is deleted."""
+    app, conn_toml, _ = env
+    screens_toml = conn_toml.parent / "screens.toml"
+    screens_toml.write_text(textwrap.dedent("""
+        [screens.app1.users]
+        label = "Users"
+        read_query = "users_get"
+        key_columns = ["USR_ID"]
+        l = { fr = "Utilisateurs" }
+
+        [[screens.app1.users.columns]]
+        name = "USR_ID"
+
+        [[screens.app1.users.columns]]
+        name = "USR_NAME"
+
+        [screens.app1.roles]
+        label = "Roles"
+        read_query = "roles_get"
+
+        [[screens.app1.roles.row_menu]]
+        id = "go"
+        type = "navigate"
+        to = "users_get"
+
+        [screens.app1.gone]
+        read_query = "gone_get"
+    """).lstrip())
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        loaded = client.get("/admin/config/screens/parsed", headers=h).json()["screens"]
+        # unchanged save → the very same file
+        before = screens_toml.read_text()
+        assert client.put("/admin/config/screens/parsed", json={"screens": loaded}, headers=h).status_code == 200
+        import tomllib
+        assert tomllib.loads(screens_toml.read_text()) == tomllib.loads(before)
+        # edit one screen, drop another
+        loaded["app1"]["roles"]["label"] = "Roles (edited)"
+        del loaded["app1"]["gone"]
+        assert client.put("/admin/config/screens/parsed", json={"screens": loaded}, headers=h).status_code == 200
+        data = tomllib.loads(screens_toml.read_text())["screens"]["app1"]
+        assert set(data) == {"users", "roles"}
+        assert data["users"]["l"] == {"fr": "Utilisateurs"} and data["users"]["key_columns"] == ["USR_ID"]   # untouched
+        assert data["roles"]["label"] == "Roles (edited)"
+        assert data["roles"]["row_menu"][0]["type"] == "navigate"               # discriminator kept
+        assert "editable_when" not in data["roles"] and "auto_load" not in data["roles"]   # no defaults written
+        assert list(data["roles"])[:2] == ["label", "read_query"]               # the file's key order
+
+
+def test_order_like_keeps_the_files_order_at_every_level() -> None:
+    from liberty.web.admin import _order_like
+    old = {"b": 1, "a": {"y": 1, "x": 2}, "l": [{"q": 1, "p": 2}]}
+    new = {"a": {"x": 3, "y": 1, "z": 0}, "b": 1, "c": 5, "l": [{"p": 2, "q": 9}]}
+    out = _order_like(new, old)
+    assert list(out) == ["b", "a", "l", "c"] and list(out["a"]) == ["y", "x", "z"] and list(out["l"][0]) == ["q", "p"]
+    assert out == new

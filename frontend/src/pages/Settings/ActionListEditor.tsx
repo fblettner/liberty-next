@@ -35,6 +35,7 @@ import { NavigateTargetField } from './NavigateTargetField'
 import {
   builtinSourceOptions, mergeCandidates, screenReadColumnOptions, targetParamOptions,
 } from './actionCandidates'
+import { BuilderEmpty as Empty } from '../../common/builderShell'
 
 type Row = Record<string, unknown>
 
@@ -149,7 +150,6 @@ function promptFieldsToOptions(action: Row): SearchSelectOption[] {
 
 // ── styled bits (same look the rest of the Screen builders use) ─────────────────────────────
 const Sub = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; line-height: 1.5; margin-bottom: 10px;`
-const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px; text-align: center;`
 const FieldList = styled.div`display: flex; flex-direction: column; gap: 6px;`
 const FieldHeader = styled.button<{ $open?: boolean }>`
   display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; text-align: left;

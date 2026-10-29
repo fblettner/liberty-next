@@ -185,7 +185,12 @@ export function SioProvider({ children }: { children: ReactNode }) {
         if (ack?.ok && ack.lock) {
           resolve({ ok: true, lock: ack.lock })
         } else {
-          resolve({ ok: false, holder: ack?.holder, reason: ack?.reason })
+          // A lock taken before this socket connected never reached us as a ``lock.acquired``
+          // broadcast — the denial's holder is how this tab learns of it (its ``lock.released``
+          // broadcast clears it again).
+          const holder = ack?.holder
+          if (holder) setLocks((m) => new Map(m).set(canonicalLockKey(payload), holder))
+          resolve({ ok: false, holder, reason: ack?.reason })
         }
       })
     })

@@ -18,10 +18,10 @@ import { PermChip } from './Access/OtherAccess'
 import { buildMenuForest, type MenusCatalog } from './Access/permissions'
 import { attributeFromText, attributeKeys, attributeToText, screenColumnNames } from './Access/scopeRules'
 import type { DictionaryDoc, ScreensDoc } from '../../types/config'
+import { BuilderShell as Shell } from '../../common/builderShell'
 
 interface AppUser { username: string; email: string | null; full_name: string | null; is_active: boolean; is_superuser: boolean; roles: string[]; attributes?: Record<string, string | string[]> | null }
 
-const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; height: 100%;`
 const Bar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0;`
 const List = styled(Card)`flex: 1; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px;`
 const Split = styled.div`display: flex; gap: 12px; flex: 1; min-height: 0;`

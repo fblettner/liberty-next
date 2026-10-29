@@ -20,13 +20,12 @@ import { DeleteWithDepsModal } from './DeleteWithDepsModal'
 import { validateId as validateIdShared } from '../../services/idValidator'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { BuilderEmpty as Empty, BuilderShell as Shell, BuilderToolbar as Toolbar } from '../../common/builderShell'
 
 // scope (connector) -> chart id -> chart body
 type Charts = Record<string, Record<string, Record<string, unknown>>>
 type ChartBody = { label?: string; description?: string; query?: string; spec?: { type?: string; x?: string; y?: string[] } }
 
-const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; height: 100%;`
-const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;`
 const ToolbarLeft = styled.div`display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;`
 const ToolbarRight = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap;`
 const FilterBar = styled.div`
@@ -49,7 +48,6 @@ const Item = styled.div`
   & .actions { flex-shrink: 0; display: flex; gap: 4px; }
   &:hover { border-color: ${colors.blue.border}; background: ${colors.blue.bg}; }
 `
-const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px; text-align: center;`
 
 export default function ChartsBuilder() {
   const { t } = useTranslation()

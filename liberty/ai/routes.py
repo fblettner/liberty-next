@@ -84,6 +84,7 @@ async def tools(
         "model": assistant.settings.model,
         "tools": assistant.tool_catalog(),
         "models": [{"id": m, "label": label_for(m)} for m in _allowed_models(assistant)],
+        # assistant.settings is the AISettings ([ai] in app.toml): the operator's starters win over ai.toml's
         "starters": merged_starters(getattr(request.app.state, "ai_config", None), assistant.settings.starters, request_language(request)),
         "starter_groups": (getattr(request.app.state, "ai_config", None) or AiFile()).starter_groups(request_language(request)),
     }

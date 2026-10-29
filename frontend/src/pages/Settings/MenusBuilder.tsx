@@ -24,6 +24,7 @@ import { FindDependenciesModal, type DependencySeed } from './FindDependenciesMo
 import { ScopeBar as ScopeRow } from './ScopeBar'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { BuilderShell as Shell } from '../../common/builderShell'
 
 type AppsMap = Record<string, AppMenu>
 
@@ -36,10 +37,6 @@ const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; li
 
 // Layout: outer Shell flex-fills the page, top toolbar is fixed, the per-app stack fills the
 // remaining vertical space, and only the inner panels scroll. Same pattern as PoolsBuilder.
-const Shell = styled.div`
-  display: flex; flex-direction: column; gap: 12px;
-  flex: 1; min-height: 0; height: 100%;
-`
 // The split flex-fills the remaining vertical space — expanding/collapsing folders never
 // resizes the column — TreeBox / InspectorInner scroll internally. `align-items: stretch` makes
 // both columns the same height (so the empty space below a short tree stays put instead of being

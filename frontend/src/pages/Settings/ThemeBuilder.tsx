@@ -14,6 +14,7 @@ import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Field, Input, Row, SpinnerRing, Stack } from '../../common'
 import { useBranding, derivePrimaryVars, type PresetChoice } from '../../branding/BrandingContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { BuilderToolbar as Toolbar } from '../../common/builderShell'
 
 interface ThemeDoc { preset: string; app_name?: string | null; primary_color?: string | null; font_family?: string | null; font_scale?: number | null; vars?: Record<string, string> }
 interface FontChoice { id: string; label: string; stack: string }
@@ -27,7 +28,6 @@ const SIZE_STEPS = [
 ] as const
 
 const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0;`
-const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;`
 const ToolbarLeft = styled.div`display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;`
 const ToolbarRight = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap;`
 const Grid = styled.div`display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 14px; align-items: start; flex-shrink: 0;`

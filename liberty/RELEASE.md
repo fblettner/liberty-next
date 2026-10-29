@@ -1,5 +1,23 @@
 # Liberty Next — Release notes
 
+## 7.0.67 — unreleased
+
+- Record lock: a record opened in another tab or by another user now opens read-only with the "locked by" banner even
+  when this tab connected after the lock was taken. The server refused the second lock, but the browser only knew of
+  the locks taken while it was connected, so the form stayed editable.
+- Visual Designer: a save rewrites only the screens that changed. Every other screen keeps its table as it is in
+  `screens.toml` (the keys the model ignores — a screen-level `l` —, an explicit `key_columns`), and the edited one is
+  written without its default values, in the file's key order — editing one label changes one line. The save used to
+  write every default of every screen (the file grew by 15 %: 30 724 → 35 300 lines on the apps' file) and dropped the
+  keys the model ignores.
+- Internal (no change of behaviour): `liberty/web/admin.py` (3 800 lines) is the package `liberty/web/admin/`, one
+  module per section (versions, builders, assistant, module catalogues, theme, jobs, app settings, usages / packages,
+  proposals, clone, delete, rename…) — the routes register in the same order, every name stays importable from
+  `liberty.web.admin`; the SQL connector's pure text helpers (ORDER BY split, aggregate / filter wraps, schema / dblink
+  placeholders) are `liberty/connectors/sqltext.py`. Frontend: the SQL Wizard's parser and generator are
+  `services/sqlParse.ts`, the data grid's column helpers `resultColumns.ts` and its inline-edit cell `EditCell.tsx` (all
+  with tests), and the builders share their page frame, toolbar and empty line (`common/builderShell.ts`).
+
 ## 7.0.66 — unreleased
 
 - Developer reference → Impact: every configuration entity (pools, connectors, queries, API endpoints, dictionary

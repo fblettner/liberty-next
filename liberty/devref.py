@@ -271,10 +271,12 @@ _CATEGORIES: dict[str, str] = {
 
 def _group(file: str, path: str) -> tuple[str, str]:
     """``(group, category)`` of a route: its module (``web/jobs.py`` → jobs, ``auth/routes.py`` → auth),
-    the config builders of ``web/admin.py`` by section (``/admin/config/screens/…`` → settings · screens)."""
+    the config builders of ``web/admin/`` by section (``/admin/config/screens/…`` → settings · screens)."""
     parts = file.split("/")
     stem = parts[-1].removesuffix(".py") if parts else "other"
-    if stem == "routes" and len(parts) > 2:
+    if len(parts) > 2 and parts[-2] == "admin" and parts[-3] == "web":
+        stem = "admin"                          # the admin package (web/admin/<section>.py) groups as before
+    elif stem == "routes" and len(parts) > 2:
         stem = parts[-2]
     elif stem == "main":
         stem = "meta"

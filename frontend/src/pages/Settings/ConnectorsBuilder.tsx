@@ -28,16 +28,12 @@ import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { MoveQueryModal } from './MoveQueryModal'
 import { validateId, suggestCloneId } from '../../services/idValidator'
 import { DictionaryScan } from './DictionaryScan'
+import { BuilderShell as Shell, BuilderToolbar as Toolbar } from '../../common/builderShell'
 
 type Connectors = Record<string, Record<string, unknown>>
 
 // Layout: outer Shell flex-fills, top toolbar is fixed, the Split fills remaining height,
 // only the inner panels scroll. Same pattern as PoolsBuilder.
-const Shell = styled.div`
-  display: flex; flex-direction: column; gap: 12px;
-  flex: 1; min-height: 0; height: 100%;
-`
-const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;`
 const ToolbarLeft = styled.div`display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;`
 const ToolbarRight = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap;`
 const ToolbarDivider = styled.span`

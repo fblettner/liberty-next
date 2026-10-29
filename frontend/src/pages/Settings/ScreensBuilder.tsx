@@ -42,15 +42,12 @@ import { ScopeBar as ScopeRow } from './ScopeBar'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import ScreenEditor from './ScreenEditor'
+import { BuilderEmpty as Empty, BuilderShell as Shell } from '../../common/builderShell'
 
 type AppScreens = Record<string, Record<string, Screen>>
 
 // Layout: outer Shell flex-fills the page, top scope row + Add bar are fixed, the flat list scrolls.
 // Clicking a row opens the visual designer modal (the editor itself — no inline editing here).
-const Shell = styled.div`
-  display: flex; flex-direction: column; gap: 12px;
-  flex: 1; min-height: 0; height: 100%;
-`
 const FilterBar = styled.div`
   display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px;
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; color: ${colors.text.muted};
@@ -71,7 +68,6 @@ const Item = styled.div`
   & .actions { flex-shrink: 0; display: flex; gap: 4px; }
   &:hover { border-color: ${colors.blue.border}; background: ${colors.blue.bg}; }
 `
-const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px; text-align: center;`
 export default function ScreensBuilder() {
   const { t } = useTranslation()
   const modals = useModals()

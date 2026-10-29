@@ -40,6 +40,7 @@ import type { ActionPath } from './actionPath'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { DictionaryDoc } from '../../types/config'
 import { api } from '../../api/client'
+import { BuilderEmpty as Empty } from '../../common/builderShell'
 
 type Row = Record<string, unknown>
 
@@ -120,7 +121,6 @@ const HookSection = styled.div`
   & > .head .count.has { color: ${colors.blue.main}; font-weight: 700; }
   & > .body { padding: 4px 12px 12px; border-top: 1px solid ${colors.border}; }
 `
-const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px; text-align: center;`
 // Section divider for the row-click block in General — visually separates it from the schema-form
 // fields above so the mode picker reads as "a different decision", not "yet another field".
 const RowClickHeader = styled.div`

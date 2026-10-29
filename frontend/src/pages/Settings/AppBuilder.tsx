@@ -19,6 +19,7 @@ import {
 } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { AiStartersEditor, ModelsPicker } from './AiStartersEditor'
+import { BuilderToolbar as Toolbar } from '../../common/builderShell'
 
 interface AppSection {
   name: string
@@ -153,7 +154,6 @@ interface BrandingResponse {
 }
 
 const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0;`
-const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;`
 const ToolbarLeft = styled.div`display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;`
 const ToolbarRight = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap;`
 const Stack = styled.div`display: flex; flex-direction: column; gap: 10px; align-items: stretch;`

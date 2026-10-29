@@ -47,7 +47,7 @@ docs at https://docs.nomana-it.fr/liberty/ (a separate Docusaurus repo).
   **connectors.toml, app.toml, jobs.toml, reports** stay on `tomlkit` (small, hand-edited,
   comments kept). Single source of truth: `_BIG_LABELS` + `_load_doc` / `_dump_doc` in
   `liberty/web/rename.py` (used by `move.py`); every `put_*_parsed` / clone / delete helper in
-  `liberty/web/admin.py` follows it. Don't "fix" config-save speed with threads or caches: a
+  `liberty/web/admin/` follows it (`builders.py` for the parsed GET / PUT). Don't "fix" config-save speed with threads or caches: a
   save is ~100 ms, only tomlkit was ever slow and it's routed around.
 - **Frontend theme discipline.** Styled components take every colour / size / radius /
   shadow from `frontend/src/theme.ts` (CSS vars set in `index.css`, dark + `.theme-light`);
@@ -86,7 +86,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           db.py (PoolRegistry: lazy engines, ENC: passwords, terminal
                           dispose), sql.py (SQLConnector: text() binds, filter / summary wraps,
                           form rules, SEQUENCE, audit mirror, Oracle quirks, NDJSON streaming,
-                          multi-pool), api.py (APIConnector: httpx, 5 auth kinds, templating),
+                          multi-pool; the pure SQL-text helpers — ORDER BY split, aggregate / filter wraps,
+                          #SCHEMA# / #DBLINK# placeholders — in sqltext.py), api.py (APIConnector: httpx, 5 auth kinds, templating),
                           registry.py (ConnectorRegistry + the shared dictionary), dictionary.py
                           (dictionary.toml: labels, enums, lookups, sequences, rules),
                           introspect.py (schema walk), thick.py / thick_engine.py (Oracle OCI)
@@ -180,7 +181,7 @@ tests/                    pytest (asyncio auto mode); SQLite fixtures; no live D
 | `/api/notifications` `/admin/notify/test` | `web/notifications.py` | my inbox (list, unread count, mark read); a superuser's test send through the dispatcher |
 | `/api/explorer` | `web/explorer.py` | the explorer models the caller may use (perm `explorer:{app}:{model}`), `{app}/{model}/model` with the discovered fields (`?refresh=1`), `POST {app}/query` (aggregate: rows / measures / filters bag / period / sort / limit), `POST {app}/detail` (rows, paged, `drill`), `POST {app}/calc/test`, `GET/PUT {app}/saved/{analyses|dashboards}` + `DELETE …/{id}`, `POST {app}/export` (xlsx / pdf) |
 | `/ai` | `ai/routes.py` | `POST /ai/chat` (SSE), `GET /ai/tools` — perm `ai:chat` |
-| `/admin` | `web/admin.py` (3.3k lines — the config builders' backend), `web/dictgen.py` | reload, `GET /admin/config/schema`, `GET/PUT /admin/config/<section>/parsed`, rename / move / clone / delete-with-deps / find-usages / dependencies / integrity, packages (build / import), versions, AI proposal apply, API test, dictionary scan — **superuser** |
+| `/admin` | `web/admin/` (the config builders' backend: one module per section — `bundles` (reload), `versions`, `builders` (parsed GET / PUT, `_merge_screens`), `assistant`, `modules`, `theme`, `jobs`, `app_settings`, `usages` (find usages / dependencies, packages), `proposals`, `clone`, `delete`, `rename`… — imported in route-registration order by `__init__`, which re-exports every name), `web/dictgen.py` | reload, `GET /admin/config/schema`, `GET/PUT /admin/config/<section>/parsed`, rename / move / clone / delete-with-deps / find-usages / dependencies / integrity, packages (build / import), versions, AI proposal apply, API test, dictionary scan — **superuser** |
 | `/admin/promotion` | `web/promotion.py` + `promotion.py` | promote to another instance: targets (`[promotion.targets.*]`, password ENC:), `push` (config package or approved change package → the target's preview / apply), history (`<config>/.promotion/`) — **superuser** |
 | `/admin/access` `/admin/jobs` `/admin/changesets` | `web/access.py`, `web/jobs.py`, `web/changesets.py` | roles / permissions, nomaflow jobs + runs + presets + `{job}/upload` / `runs/{id}/files/{name}` + `retention` / `missed` policies, change packages |
 | `/socket.io` | `sio.py` | JWT on handshake; locks, dashboard, log rooms |
@@ -261,9 +262,11 @@ common/                shared primitives: Button Card Input SearchSelect Checkbo
                        SchemaNavigator SubNav EditorModalShell DateRangeFilter (presets + two-month
                        calendar + date basis; logic in services/period.ts) PortalPanel (fixed popover); NOT barrelled (heavy): DataTable
                        (TanStack grid: virtualized, grouping, filters, edit mode, context menu,
-                       saved views), Markdown, SqlEditor (Monaco, lazy), SqlWizardModal, SqlTestRunner
+                       saved views), Markdown, SqlEditor (Monaco, lazy), SqlWizardModal (its parser / generator in
+                       services/sqlParse.ts, tested), SqlTestRunner; builderShell.ts (the builders' Shell / Toolbar / Empty)
 pages/TableView/       the data screen: index (params, streaming run), ResultTable (grid + bulk edit
-                       + import + row menu + export), ScreenDialog (the form, nested tabs), FilterPanel,
+                       + import + row menu + export; EditCell = the inline-edit control, resultColumns.ts = the pure
+                       column helpers, tested), ScreenDialog (the form, nested tabs), FilterPanel,
                        actionRunner.ts (chain / if / loop / return runtime), Summary / Tree / Chart views
 pages/Settings/        one *Builder per config section + the Visual Designer (ScreenVisualBuilder,
                        ScreenEditor, ActionListEditor…), ApiConnectorEditor, wizards, ConfigVersions,

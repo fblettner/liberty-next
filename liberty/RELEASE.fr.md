@@ -1,5 +1,26 @@
 # Liberty Next — Notes de version
 
+## 7.0.67 — non publiée
+
+- Verrou d'enregistrement : un enregistrement ouvert dans un autre onglet ou par un autre utilisateur s'ouvre désormais
+  en lecture seule avec le bandeau « verrouillé par », même quand cet onglet s'est connecté après la prise du verrou.
+  Le serveur refusait bien le second verrou, mais le navigateur ne connaissait que les verrous pris pendant sa
+  connexion : le formulaire restait modifiable.
+- Visual Designer : un enregistrement ne réécrit que les écrans modifiés. Les autres gardent leur table telle qu'elle
+  est dans `screens.toml` (les clés que le modèle ignore — un `l` au niveau de l'écran —, un `key_columns` explicite),
+  et l'écran modifié est écrit sans ses valeurs par défaut, dans l'ordre des clés du fichier — modifier un libellé
+  change une ligne. L'enregistrement écrivait toutes les valeurs par défaut de tous les écrans (le fichier grossissait
+  de 15 % : 30 724 → 35 300 lignes sur celui des applications) et perdait les clés que le modèle ignore.
+- Interne (aucun changement de comportement) : `liberty/web/admin.py` (3 800 lignes) devient le paquet
+  `liberty/web/admin/`, un module par section (versions, éditeurs, assistant, catalogues de modules, thème, jobs,
+  paramètres de l'application, usages / paquets, propositions, clonage, suppression, renommage…) — les routes
+  s'enregistrent dans le même ordre, chaque nom reste importable depuis `liberty.web.admin` ; les fonctions de texte
+  SQL du connecteur (découpage de l'ORDER BY, enveloppes d'agrégat / de filtre, marqueurs de schéma / dblink) sont dans
+  `liberty/connectors/sqltext.py`. Interface : l'analyseur et le générateur de l'assistant SQL sont dans
+  `services/sqlParse.ts`, les fonctions de colonne de la grille dans `resultColumns.ts` et sa cellule d'édition dans
+  `EditCell.tsx` (tous testés), et les éditeurs partagent leur cadre, leur barre d'outils et leur ligne vide
+  (`common/builderShell.ts`).
+
 ## 7.0.66 — non publiée
 
 - Référence développeur → Impact : chaque entité de la configuration (pools, connecteurs, requêtes, endpoints API,

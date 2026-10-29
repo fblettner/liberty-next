@@ -26,6 +26,7 @@ import { ScopeBar as ScopeRow } from './ScopeBar'
 import { DictionaryScan } from './DictionaryScan'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { flattenConnectorSections, groupQueriesByTable } from './connectorTables'
+import { BuilderShell as Shell } from '../../common/builderShell'
 
 type DictionaryData = DictionaryDoc['dictionary']
 
@@ -33,10 +34,6 @@ const SCOPE_SHARED = '' as const
 
 // Layout: outer Shell flex-fills, top toolbar is fixed, the Split fills remaining height,
 // only the inner panels scroll. Same pattern as PoolsBuilder.
-const Shell = styled.div`
-  display: flex; flex-direction: column; gap: 12px;
-  flex: 1; min-height: 0; height: 100%;
-`
 const SubTabs = styled.div`display: flex; align-items: center; gap: 4px; border-bottom: 1px solid ${colors.border}; padding-bottom: 6px;`
 const SubTab = styled.button<{ $active?: boolean }>`
   height: 30px; padding: 0 14px; border-radius: ${radius.sm}; cursor: pointer; font-size: ${fontSize.sm}; font-family: ${fonts.sans};

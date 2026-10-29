@@ -11,7 +11,7 @@
 // (the raw code, editable) + "<label>" (the resolved label, derived & read-only); lookup
 // queries are fetched once via services/lookups.useLookupBatch. Each column also declares its
 // filter kind so DataTable's per-column filter row shows the right control.
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useBranding } from '../../branding/BrandingContext'
 import type { DrillTarget } from '../../services/drill'
 import { useTranslation } from 'react-i18next'
@@ -23,11 +23,10 @@ import { Check, X, Plus, Copy, ClipboardPaste, Upload, Edit3, Zap, FileSpreadshe
 import type { Column, QueryResult } from '../../types/connectors'
 import type { Action, ColumnGroup, PromptField, ScreenDetail } from '../../types/screens'
 import { api, apiDownload, ApiError } from '../../api/client'
-import { Banner, Checkbox, ErrorDetails, SearchSelect } from '../../common'
+import { Banner, ErrorDetails } from '../../common'
 import { DataTable } from '../../common/DataTable'
 import type { SharedGridView } from '../../services/gridViews'
 import { ValueDiffPanel } from './ValueDiffPanel'
-import { genericFilterFn, selectFilterFn, type FilterKind, type FilterMeta } from '../../common/DataTableFilter'
 import { enumMap, ruleCell } from '../../services/cells'
 import { lookupKey, useLookupTables, lookupCellColumns, lookupOptions, type LookupData, type LookupSpec } from '../../services/lookups'
 import { useTabs } from '../../tabs/TabsContext'
@@ -41,65 +40,8 @@ import { entityKeyOf, resolveBindList, forcedDefault, activeRulesWhen, evalCondi
 import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
 import { runChain } from './actionRunner'
 
-type DataRow = Record<string, unknown>
-type Align = CSSProperties['textAlign']
-type EditCtrl = 'enum' | 'lookup' | 'boolean' | 'date' | 'number' | 'text'
-/** A select-filter option (code value + display label + the mono code shown beside it). */
-type FilterOpt = { value: string; label: string; mono?: string }
-
-function colHeader(c: Column): string { return c.label ?? c.name }
-// Column alignment: an explicit `align` hint wins; otherwise the natural default — booleans
-// (✓/✗) centered, numbers right-aligned (like every spreadsheet), everything else left.
-function cellAlign(c: Column): 'left' | 'right' | 'center' | undefined {
-  if (c.align === 'left' || c.align === 'right' || c.align === 'center') return c.align
-  if (c.rule?.kind === 'boolean') return 'center'
-  if (isNumericish((c.format ?? '').toLowerCase(), (c.type ?? '').toLowerCase())) return 'right'
-  return undefined
-}
-function isNumericish(fmt: string, typ: string) { return fmt === 'number' || fmt === 'integer' || /int|numeric|decimal|float|double|real/.test(typ) }
-// jdedate = JDE Julian date: integer SQL type, but read as ISO YYYY-MM-DD and re-encoded to Julian
-// on Save — so it edits with a calendar, not as a number. ``datetime`` / ``timestamp`` formats also
-// get the date control (the filter compares day-grain, so a TIMESTAMP filters *by date*). Keep in
-// sync with FieldRow.isDateish.
-function isDateish(fmt: string, typ: string) {
-  return /^(date|datetime|timestamp|jdedate)$/.test(fmt) || /date|timestamp/.test(typ)
-}
-function filterKindOf(c: Column): FilterKind {
-  if (c.rule?.kind === 'boolean') return 'boolean'
-  if (c.rule?.kind === 'enum') return 'enum'
-  const fmt = (c.format ?? '').toLowerCase(), typ = (c.type ?? '').toLowerCase()
-  if (isDateish(fmt, typ)) return 'date'
-  if (isNumericish(fmt, typ)) return 'number'
-  return 'text'
-}
-function editCtrlOf(c: Column): EditCtrl {
-  // Rule-driven widgets first — match the dialog's FieldRow conventions so inline-edit
-  // and dialog-edit feel identical (v1 parity: every form-control surface used dropdowns
-  // for ENUM / LOOKUP and a checkbox for BOOLEAN, never a plain text input).
-  if (c.rule?.kind === 'enum') return 'enum'
-  if (c.rule?.kind === 'lookup') return 'lookup'
-  if (c.rule?.kind === 'boolean') return 'boolean'
-  const fmt = (c.format ?? '').toLowerCase(), typ = (c.type ?? '').toLowerCase()
-  if (isDateish(fmt, typ)) return 'date'
-  if (isNumericish(fmt, typ)) return 'number'
-  return 'text'
-}
-const filterPropsFor = (
-  kind: FilterKind,
-  options?: { value: string; label: string; mono?: string; cells?: string[] }[],
-  align?: FilterMeta['align'],
-  cellColumns?: { label: string; filterable?: boolean }[],
-  wrap?: boolean,
-) =>
-  // enum / lookup compare a trimmed code against the (possibly CHAR-padded) raw value → trim-tolerant
-  // ``selectFilterFn``; an enum (a short list) picks several values and takes typed codes outside
-  // the list, a lookup (often thousands of rows, a virtualized table) stays single. Boolean keeps
-  // the built-in strict ``equals``.
-  kind === 'enum' || kind === 'lookup'
-    ? { filterFn: selectFilterFn, meta: { filter: { kind, options, cellColumns, multi: kind === 'enum', custom: kind === 'enum' }, align, wrap } as FilterMeta }
-    : kind === 'boolean'
-      ? { filterFn: 'equals' as const, meta: { filter: { kind, options }, align } as FilterMeta }
-      : { filterFn: genericFilterFn, meta: { filter: { kind }, align, wrap } as FilterMeta }
+import { cellAlign, colHeader, columnVisibleNow, editCtrlOf, filterKindOf, filterPropsFor, type Align, type DataRow, type FilterOpt } from './resultColumns'
+import { EditCell, type LookupOpt } from './EditCell'
 
 // (``withUpper`` / ``originalKeys`` — the UPPERCASE-key duplication + the pre-edit
 // ``<NAME>_ORIGINAL`` WHERE binds — now live in ``saveScreenRow`` / ``dialogHelpers``, the single
@@ -113,13 +55,6 @@ const filterPropsFor = (
 // dotted-path chain-context refs (`<step_id>.first_row.<col>` / `INPUT.<X>` / `loop.<field>`).)
 
 // ── edit-mode controls ──────────────────────────────────────────────────────
-const EditInput = styled.input`
-  width: 100%; box-sizing: border-box; background: ${colors.bg.input};
-  border: 1px solid ${colors.border}; border-radius: ${radius.sm};
-  color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.mono};
-  padding: 2px 6px; outline: none;
-  &:focus { border-color: ${colors.blue.border}; box-shadow: 0 0 0 2px ${colors.blue.bg}; }
-`
 const CheckBox = styled.span<{ $on: boolean }>`
   width: 14px; height: 14px; flex-shrink: 0; border-radius: 3px;
   border: 1.5px solid ${({ $on }) => ($on ? colors.blue.main : colors.border)};
@@ -176,207 +111,13 @@ const RowMenuErr = styled.div`
 
 /** A dropdown option: ``value`` (the code written back), ``label`` (the description), ``mono`` (the
  *  code shown beside the label) and optional ``cells`` (a LOOKUP's display_fields, one per column). */
-type LookupOpt = { value: string; label: string; mono: string; cells?: string[] }
 
-function EditCell({
-  ctrl, column, defaultText, onChange, lookupOptions, lookupRows, onLookupReturnValues, narrowBy, displayFields, cellColumns, prebuiltOptions,
-}: {
-  ctrl: EditCtrl; column: Column; defaultText: string; onChange: (v: unknown) => void
-  /** A LOOKUP column's non-cascading dropdown options, built ONCE per (spec, display_fields) by the
-   *  parent and shared across every row's cell — see ``editOptsCache``. When present (and the cell
-   *  has no active cascade), it's used as-is so we don't rebuild the full option list per cell. */
-  prebuiltOptions?: LookupOpt[]
-  /** The lookup's ``display_fields`` — extra row columns appended (dimmed, " · ") after each
-   *  option's label so similar codes are distinguishable, same as the dialog dropdown. */
-  displayFields?: string[]
-  /** Per-cell-column metadata (label + filterable) for the dropdown's facet-chip filter. */
-  cellColumns?: { label: string; filterable?: boolean }[]
-  /** ``{value: label}`` map for LOOKUP columns — already resolved by the surrounding
-   *  ``lookupMaps`` (one fetch per unique spec; v2 mirrors v1's "fetch the lookup once,
-   *  populate every cell from the same set"). Undefined → not yet loaded → render a
-   *  loading state so the user sees the dropdown is coming. */
-  lookupOptions?: Map<string, string>
-  /** Raw rows from the lookup query — used to resolve ``return_params`` (v1's
-   *  ly_lkp_params lkp_dir='OUT'): after a pick, the matching row's other columns flow
-   *  back through ``onLookupReturnValues``. Same cache as ``lookupOptions``. */
-  lookupRows?: Record<string, unknown>[]
-  /** Hook fired on a LOOKUP pick when the rule has ``return_params`` — receives a
-   *  ``{dd_id: value}`` map of the picked row's matching columns. The parent
-   *  (ResultTable) maps each dd to a sibling grid column and writes them via
-   *  ``editChange`` in the same row. */
-  onLookupReturnValues?: (returnValues: Record<string, unknown>) => void
-  /** Cascading filter for LOOKUP cells (v1's ly_tbl_filters / Column.filter_from). When
-   *  the cell's column declares ``filter_from = [{source: "SY_COL", column: "SY"}, …]``
-   *  and the same row's ``SY_COL`` cell has a value, this carries
-   *  ``[{column: "SY", value: <SY_COL's row value>}, …]`` — the lookup options narrow to
-   *  the rows whose ``SY`` matches. v1 had this for bulk-edit DROPDOWNS too (e.g.
-   *  DRRT depends on DRSY); v2 wires it through here so the per-row dropdowns cascade
-   *  exactly like the form FieldRow's lookup_param_binds do, but client-side over the
-   *  once-fetched rows (no per-row fetches). */
-  narrowBy?: { column: string; value: unknown }[]
-}) {
-  // ENUM and LOOKUP use the same searchable dropdown as the dialog's FieldRow —
-  // ``SearchSelect`` from common. v1's lookups for UDC / role-id-style tables had
-  // hundreds of entries; a native ``<select>`` is unusable at that size (no search,
-  // no keyboard filter beyond first-char jump). SearchSelect portals out of the
-  // grid cell so the panel isn't clipped by the table's overflow. Both branches are
-  // *controlled* — ``value={defaultText}`` reads the current edits-aware value on
-  // every TanStack re-render, so a programmatic edit (paste, copy, fill-down) flows
-  // through. ``mono`` shows the raw code beside the label so codes stay scannable.
-  if (ctrl === 'enum' && column.rule?.kind === 'enum') {
-    const opts = column.rule.values.map((v) => ({ value: v.value, label: v.label, mono: v.value }))
-    return (
-      <SearchSelect
-        value={defaultText}
-        onChange={(v) => onChange(v === '' ? null : v)}
-        options={opts}
-        anyLabel={column.rule.title || '—'}
-        placeholder=""
-      />
-    )
-  }
-  if (ctrl === 'lookup' && column.rule?.kind === 'lookup') {
-    const rule = column.rule
-    const ready = !!lookupOptions
-    // When the cell has active cascading deps (filter_from + same-row sibling values),
-    // build options from the *filtered* lookup rows so the dropdown narrows. Otherwise
-    // use the pre-projected value→label map directly — faster, no per-row scan.
-    const active = (narrowBy ?? []).filter((n) => n.value != null && n.value !== '')
-    const useCascade = ready && active.length > 0 && !!lookupRows
-    type Opt = LookupOpt
-    // ``display_fields`` → code: [cell, cell] map, built from the raw rows; each becomes an extra
-    // table column in the dropdown (same as the dialog picker). Only needed when we build options
-    // HERE (an active cascade, or the no-prebuilt fallback) — ``prebuiltOptions`` already bakes its
-    // cells in, so we skip this O(lookup rows) scan per cell on the common non-cascading path.
-    const cellsByCode = (useCascade || (ready && !prebuiltOptions)) && displayFields?.length && lookupRows
-      ? (() => {
-          const valKey = rule.value
-          const m = new Map<string, string[]>()
-          for (const r of lookupRows) {
-            const v = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
-            if (v == null) continue
-            m.set(String(v), displayFields.map((f) => {
-              const x = r[f] ?? r[f.toLowerCase()] ?? r[f.toUpperCase()]
-              return x == null ? '' : String(x).trim()
-            }))
-          }
-          return m
-        })()
-      : undefined
-    let opts: Opt[]
-    if (useCascade && lookupRows) {
-      // Case-insensitive column lookup on the raw rows: Postgres folds unquoted columns
-      // to lowercase, the dictionary uses uppercase. Compare as strings (lookups are
-      // code-based: "01" matches "01", coercion stays out of the picture).
-      const valKey = rule.value
-      const labKey = rule.label
-      const matches = lookupRows.filter((r) => active.every(({ column: col, value }) => {
-        const rv = r[col] ?? r[col.toLowerCase()] ?? r[col.toUpperCase()]
-        // Trim-tolerant: JDE pads / right-justifies UDC codes, so the dependent column and the
-        // sibling cell value can differ in padding for the same logical code (matches the
-        // filter-panel cascade fix in services/lookups.ts).
-        return rv != null && String(rv).trim() === String(value).trim()
-      }))
-      opts = matches
-        .map((r): Opt | null => {
-          const v = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
-          const l = r[labKey] ?? r[labKey.toLowerCase()] ?? r[labKey.toUpperCase()]
-          return v == null
-            ? null
-            : { value: String(v), label: l == null ? String(v) : String(l), mono: String(v), cells: cellsByCode?.get(String(v)) }
-        })
-        .filter((o): o is Opt => o !== null)
-    } else if (ready && prebuiltOptions) {
-      // Common path: a non-cascading lookup reuses the list the parent built once for this column.
-      opts = prebuiltOptions
-    } else if (ready) {
-      opts = [...lookupOptions!.entries()]
-        .map(([value, label]) => ({ value, label, mono: value, cells: cellsByCode?.get(value) }))
-    } else {
-      opts = []
-    }
-    // Lookup-pick handler — writes the picked value, then applies the column's ``return_binds``:
-    // for each {param, column}, read the picked row's ``param`` column (case-insensitive) and fire
-    // ``onLookupReturnValues`` with a ``{targetColumn: value}`` map. The parent (ResultTable)
-    // writes each to the sibling cell on the same row. Explicit replacement for v1's auto-by-dd.
-    const handlePick = (picked: string) => {
-      onChange(picked === '' ? null : picked)
-      const binds = column.return_binds ?? []
-      if (!picked || binds.length === 0 || !lookupRows || !onLookupReturnValues) return
-      const valueCol = rule.value
-      const row = lookupRows.find((r) => {
-        const rv = r[valueCol] ?? r[valueCol.toLowerCase()] ?? r[valueCol.toUpperCase()]
-        return rv != null && String(rv) === picked
-      })
-      if (!row) return
-      const lcRow = new Map(Object.entries(row).map(([k, v]) => [k.toLowerCase(), v]))
-      const aux: Record<string, unknown> = {}
-      for (const b of binds) {
-        const v = lcRow.get(b.param.toLowerCase())
-        if (v !== undefined) aux[b.column] = v
-      }
-      if (Object.keys(aux).length > 0) onLookupReturnValues(aux)
-    }
-    return (
-      <SearchSelect
-        value={defaultText}
-        onChange={handlePick}
-        options={opts}
-        cellColumns={cellColumns}
-        anyLabel={rule.title || '—'}
-        loading={!ready}
-        placeholder=""
-      />
-    )
-  }
-  if (ctrl === 'boolean' && column.rule?.kind === 'boolean') {
-    // v1 parity: boolean columns render as a checkbox in edit mode. The rule's
-    // ``true_value`` / ``false_value`` (explicit or inferred via DictionaryFile) drive
-    // what we actually send: NOMASX1's CSI_STATUS goes "Y" / "N"; user status goes
-    // "01" / null. Mirrors the dialog's FieldRow boolean branch.
-    const trueV = column.rule.true_value
-    const falseV = column.rule.false_value ?? null
-    const checked = defaultText === trueV
-    return (
-      <Checkbox
-        checked={checked}
-        onChange={(v) => onChange(v ? trueV : falseV)}
-        label={checked ? trueV : (falseV ?? '—')}
-      />
-    )
-  }
-  const type = ctrl === 'date' ? 'date' : ctrl === 'number' ? 'number' : 'text'
-  const dv = ctrl === 'date' && defaultText ? defaultText.slice(0, 10) : defaultText
-  return (
-    <EditInput type={type} defaultValue={dv} onChange={(e) => {
-      const raw = e.target.value
-      if (raw === '') onChange(null)
-      else if (ctrl === 'number') onChange(Number(raw))
-      else onChange(raw)
-    }} />
-  )
-}
 
 // A column with a `visible_when` hint (v1's cdn_*) drops out of the grid when a server-filter is
 // set to a value outside its allowed set. `visible_when` is a list of `{field, value}` conditions,
 // ALL of which must hold; a condition holds when its `field` filter is unset OR its value is the
 // (one allowed) `value` / one of the `value` list — i.e. it only ever *hides* on an explicit
 // mismatch, never on "no filter". (Accepts a bare `{field, value}` too — treated as a one-item list.)
-function columnVisibleNow(c: Column, activeFilters: Record<string, string>): boolean {
-  const vw = c.visible_when
-  if (!vw) return true
-  const conds = Array.isArray(vw) ? vw : [vw]
-  return conds.every(({ field, value }) => {
-    const raw = activeFilters[field]
-    if (raw == null || raw === '') return true
-    // Trim both sides: the active filter value can come from a JDE UDC lookup whose code reads
-    // back space-padded ("1         "), while the visible_when allowed values are clean config
-    // ("1"). Without trimming, a padded filter hides every conditional column (the bug after
-    // moving the security-type lookup to read JDE directly).
-    const v = String(raw).trim()
-    return Array.isArray(value) ? value.some((x) => String(x).trim() === v) : String(value).trim() === v
-  })
-}
 
 // A link-style cell (``ColumnHint.drill``): the value, blue, underlined under the pointer.
 const DrillLink = styled.button`

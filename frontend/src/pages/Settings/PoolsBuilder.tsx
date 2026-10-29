@@ -14,6 +14,7 @@ import { renameKey } from '../../services/keyRename'
 import { validateId } from '../../services/idValidator'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { BuilderShell as Shell, BuilderToolbar as Toolbar } from '../../common/builderShell'
 
 type Pools = Record<string, Record<string, unknown>>
 
@@ -33,13 +34,6 @@ const TEMPLATE_SET = new Set(Object.values(URL_TEMPLATES))
 // Layout: outer Stack flex-fills the page, the toolbar is fixed at top, the Split fills the
 // remaining vertical space, and only the inner panels scroll. No page-level scroll — the
 // operator sees Save / Reload / Add / Delete without chasing them past a long list.
-const Shell = styled.div`
-  display: flex; flex-direction: column; gap: 12px;
-  flex: 1; min-height: 0; height: 100%;
-`
-const Toolbar = styled.div`
-  display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap;
-`
 const ToolbarLeft = styled.div`display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;`
 const ToolbarRight = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap;`
 const ToolbarDivider = styled.span`
