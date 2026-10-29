@@ -260,7 +260,8 @@ auth/ workspace/ tabs/ sio/ branding/   the contexts (AuthContext, WorkspaceCont
 common/                shared primitives: Button Card Input SearchSelect Checkbox FileInput Tag Banner Spinner
                        PageLayout Modal Modals(useModals) ErrorDetails ErrorBoundary SchemaForm
                        SchemaNavigator SubNav EditorModalShell DateRangeFilter (presets + two-month
-                       calendar + date basis; logic in services/period.ts) PortalPanel (fixed popover); NOT barrelled (heavy): DataTable
+                       calendar + date basis; logic in services/period.ts) DatePicker (one date, typed or picked;
+                       both on the shared MonthGrid) PortalPanel (fixed popover); NOT barrelled (heavy): DataTable
                        (TanStack grid: virtualized, grouping, filters, edit mode, context menu,
                        saved views), Markdown, SqlEditor (Monaco, lazy), SqlWizardModal (its parser / generator in
                        services/sqlParse.ts, tested), SqlTestRunner; builderShell.ts (the builders' Shell / Toolbar / Empty)

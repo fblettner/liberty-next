@@ -13,6 +13,30 @@ export function cellText(v: unknown): { text: string; isNull: boolean } {
   return { text: String(v), isNull: false }
 }
 
+// A date-time that carries its zone (``2026-10-28 23:54:08.859444+00:00``, ``…Z``, ``…+02``) — what
+// a PostgreSQL ``timestamptz`` comes back as. Shown in the browser's local time, like the period
+// filter's days: the raw UTC value read as the previous day near midnight.
+const ZONED_DATETIME = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)(\.\d+)?(Z|[+-]\d{2}(?::?\d{2})?)$/
+const pad = (n: number) => String(n).padStart(2, '0')
+
+/** A zoned date-time as local ``yyyy-mm-dd hh:mm:ss`` (no fraction); null when *raw* carries no
+ *  zone (a plain date, an Oracle DATE, a JDE date — shown as they are). */
+export function localDateTime(raw: string): string | null {
+  const m = ZONED_DATETIME.exec(raw.trim())
+  if (!m) return null
+  const zone = m[4] === 'Z' ? 'Z' : m[4].length === 3 ? `${m[4]}:00` : m[4].includes(':') ? m[4] : `${m[4].slice(0, 3)}:${m[4].slice(3)}`
+  const time = m[2].length === 5 ? `${m[2]}:00` : m[2]
+  const d = new Date(`${m[1]}T${time}${(m[3] ?? '').slice(0, 4)}${zone}`)
+  if (Number.isNaN(d.getTime())) return null
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+/** A date-time column — by its format, else its database type. */
+export function isDateTimeColumn(c: Pick<Column, 'format' | 'type'>): boolean {
+  const f = (c.format ?? '').toLowerCase()
+  return f === 'datetime' || f === 'timestamp' || /timestamp|datetime/.test((c.type ?? '').toLowerCase())
+}
+
 /** Build a `{value: label}` lookup from an ENUM rule. Memoize the result per column. */
 export function enumMap(rule: Extract<DisplayRule, { kind: 'enum' }>): Map<string, string> {
   return new Map(rule.values.map((v) => [v.value, v.label]))
@@ -46,7 +70,10 @@ export function ruleCell(
   if (value === null || value === undefined) return { text: '', isNull: true, kind: 'null' }
   const raw = typeof value === 'object' ? JSON.stringify(value) : String(value)
   const rule = column.rule
-  if (!rule) return { text: raw, isNull: false, kind: 'plain' }
+  if (!rule) {
+    const local = isDateTimeColumn(column) ? localDateTime(raw) : null
+    return { text: local ?? raw, isNull: false, kind: 'plain' }
+  }
   if (rule.kind === 'boolean') {
     // Filled bullet for both states — color does the work (green = true, red = false). Reads
     // as a status indicator at a glance instead of needing to parse ✓ vs ✗ glyphs. The caller

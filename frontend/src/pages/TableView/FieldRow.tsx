@@ -9,7 +9,7 @@
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Checkbox, Field, Input, SearchSelect, matchOption } from '../../common'
+import { Checkbox, DatePicker, Field, Input, SearchSelect, matchOption } from '../../common'
 import type { Column } from '../../types/connectors'
 import type { ScreenField } from '../../types/screens'
 import { type LookupSpec, lookupKey, lookupOptions, lookupCellColumns, useLookupTables } from '../../services/lookups'
@@ -197,7 +197,9 @@ export function FieldRow({
     const typ = (column?.type ?? '').toLowerCase()
     const type = isDateish(fmt, typ) ? 'date' : isNumericish(fmt, typ) ? 'number' : 'text'
     const dv = type === 'date' && textValue ? textValue.slice(0, 10) : textValue
-    widget = (
+    widget = type === 'date' ? (
+      <DatePicker required={required} value={dv} onChange={(v) => onChange(field.name, v === '' ? null : v)} />
+    ) : (
       <Input
         type={type} required={required} value={dv}
         onChange={(e) => {

@@ -11,6 +11,8 @@ import type { Column, FilterFn } from '@tanstack/react-table'
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
 import { SearchSelect } from './SearchSelect'
 import { SearchSelectMulti } from './SearchSelectMulti'
+import { DatePicker } from './DatePicker'
+import { localDateTime } from '../services/cells'
 
 export type FilterKind = 'text' | 'number' | 'date' | 'boolean' | 'enum' | 'lookup'
 
@@ -77,7 +79,8 @@ const numOf = (v: unknown) => (isEmpty(v) ? NaN : Number(v))
 // back to Date.parse for other renderings.
 const dayNum = (v: unknown): number => {
   if (isEmpty(v)) return NaN
-  const s = String(v).trim()
+  // a zoned date-time (timestamptz) compares on its local day — the day the grid shows
+  const s = localDateTime(String(v).trim()) ?? String(v).trim()
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s)
   if (m) return Number(m[1]) * 10000 + Number(m[2]) * 100 + Number(m[3])
   const t = Date.parse(s)
@@ -193,6 +196,9 @@ const Inp = styled.input`
   &::placeholder { color: ${colors.text.muted}; }
 `
 
+// a date filter value: the themed picker, sharing the row like the inputs (flex: 1)
+const DateBox = styled.div`flex: 1; min-width: 0;`
+
 function inputType(kind: FilterKind): string {
   return kind === 'date' ? 'date' : kind === 'number' ? 'number' : 'text'
 }
@@ -276,11 +282,13 @@ export function ColumnFilterControl({ column }: { column: Column<any, unknown> }
   return (
     <Box onClick={(e) => e.stopPropagation()}>
       <OpPicker kind={kind} value={f.op} onChange={(op) => set({ op })} />
-      {NEEDS_A(f.op) && (
-        <Inp type={inputType(kind)} value={f.a ?? ''} onChange={(e) => set({ a: e.target.value })} placeholder="…" />
+      {NEEDS_A(f.op) && (kind === 'date'
+        ? <DateBox><DatePicker size="sm" value={f.a ?? ''} onChange={(v) => set({ a: v })} /></DateBox>
+        : <Inp type={inputType(kind)} value={f.a ?? ''} onChange={(e) => set({ a: e.target.value })} placeholder="…" />
       )}
-      {NEEDS_B(f.op) && (
-        <Inp type={inputType(kind)} value={f.b ?? ''} onChange={(e) => set({ b: e.target.value })} placeholder="…" />
+      {NEEDS_B(f.op) && (kind === 'date'
+        ? <DateBox><DatePicker size="sm" value={f.b ?? ''} onChange={(v) => set({ b: v })} /></DateBox>
+        : <Inp type={inputType(kind)} value={f.b ?? ''} onChange={(e) => set({ b: e.target.value })} placeholder="…" />
       )}
     </Box>
   )

@@ -240,6 +240,8 @@ const en = {
     changeFile: 'Change…',
     noFile: 'No file chosen',
     clear: 'Clear',
+    pickDate: 'Pick a date',
+    datePlaceholder: 'yyyy-mm-dd',
     stop: 'Stop',
     loading: 'Loading…',
     run: 'Run',

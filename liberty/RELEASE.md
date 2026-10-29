@@ -2,6 +2,18 @@
 
 ## 7.0.67 — unreleased
 
+- Dates: a themed date picker (`common/DatePicker`) replaces the browser's own calendar — white, and different on
+  each browser — in the record form, the grid's bulk edit, the grid's column filters and the Data Explorer's filters:
+  a field where a date can still be typed (an impossible day goes back to the value) and the period picker's month
+  calendar, with Today and Clear. The value stays an ISO date. The calendar is shared (`common/MonthGrid`); its title
+  opens a month / year chooser (the 12 months, the year by arrows or 12 at a time) — in the period picker too — so a
+  date a year away is three clicks, not twelve. A column filter on a date-time with a time zone compares on the local
+  day, the day the grid shows.
+- Dates: a date-time carrying its time zone (a PostgreSQL `timestamptz`, `…+00:00`) shows in the browser's local time
+  (`2026-10-29 00:54:08`), like the period filter's days — it showed the raw UTC value, a check made at 00:54 in
+  Paris reading as the day before. Values without a zone (Oracle `DATE`, JD Edwards dates) show as they are.
+- The period in the advanced filters fills its field like the other inputs, at their height (it left a gap and sat
+  higher than its neighbours).
 - Screens: a date column in the advanced filters is a period — the dashboards' date picker (presets and a two-month
   calendar), sent as `<COL>_from` / `<COL>_to` — instead of one exact date. A column's new `filter_period` (Filter
   group of the Visual Designer) sets the preset the screen opens on (`last7`…; blank: every row); the first automatic

@@ -1,8 +1,9 @@
 // The data grid's inline-edit cell (batch edit mode): the control a column edits with — text / number / date input,
 // enum or lookup dropdown, boolean checkbox. Moved verbatim from ResultTable.tsx.
+import { useState } from 'react'
 import styled from '@emotion/styled'
 import type { Column } from '../../types/connectors'
-import { Checkbox, SearchSelect } from '../../common'
+import { Checkbox, DatePicker, SearchSelect } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { EditCtrl } from './resultColumns'
 
@@ -15,6 +16,13 @@ const EditInput = styled.input`
 `
 
 export type LookupOpt = { value: string; label: string; mono: string; cells?: string[] }
+
+// The bulk-edit date: it keeps its own value, like the uncontrolled inputs around it — the grid
+// re-renders its cells on every edit and must not reset what was typed or picked.
+function CellDate({ initial, onChange }: { initial: string; onChange: (iso: string) => void }) {
+  const [value, setValue] = useState(initial)
+  return <DatePicker size="sm" value={value} onChange={(v) => { setValue(v); onChange(v) }} />
+}
 
 export function EditCell({
   ctrl, column, defaultText, onChange, lookupOptions, lookupRows, onLookupReturnValues, narrowBy, displayFields, cellColumns, prebuiltOptions,
@@ -185,6 +193,7 @@ export function EditCell({
   }
   const type = ctrl === 'date' ? 'date' : ctrl === 'number' ? 'number' : 'text'
   const dv = ctrl === 'date' && defaultText ? defaultText.slice(0, 10) : defaultText
+  if (ctrl === 'date') return <CellDate initial={dv} onChange={(v) => onChange(v === '' ? null : v)} />
   return (
     <EditInput type={type} defaultValue={dv} onChange={(e) => {
       const raw = e.target.value

@@ -6,7 +6,7 @@ import { useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { X, Plus, Rows3, Sigma, Filter } from 'lucide-react'
-import { Input, SearchSelect, type SearchSelectOption } from '../../common'
+import { DatePicker, Input, SearchSelect, type SearchSelectOption } from '../../common'
 import { useLookupBatch, type LookupSpec } from '../../services/lookups'
 import { BUCKETS, NUMERIC_AGGREGATES, moveItem, opsFor } from '../../services/explorer'
 import type { Aggregate, AnalysisDefinition, Bucket, ExplorerField, FilterOp, FilterRow } from '../../types/explorer'
@@ -166,9 +166,13 @@ function FilterChip({ index, row, field, dragging, onDragStart, onDragEnd, onCha
       <span className="sel"><SearchSelect value={row.op} options={ops} onChange={(v) => onChange({ ...row, op: v as FilterOp, value: '', valueTo: undefined })} /></span>
       {!noValue && row.op === 'between' && (
         <>
-          <Narrow><Input type={inputType} value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit() }} /></Narrow>
+          <Narrow>{type === 'date'
+            ? <DatePicker value={draft} onChange={(v) => { setDraft(v); onChange({ ...row, value: v, valueTo: draftTo || undefined }) }} />
+            : <Input type={inputType} value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit() }} />}</Narrow>
           <span style={{ color: colors.text.muted }}>→</span>
-          <Narrow><Input type={inputType} value={draftTo} onChange={(e) => setDraftTo(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit() }} /></Narrow>
+          <Narrow>{type === 'date'
+            ? <DatePicker value={draftTo} onChange={(v) => { setDraftTo(v); onChange({ ...row, value: draft, valueTo: v || undefined }) }} />
+            : <Input type={inputType} value={draftTo} onChange={(e) => setDraftTo(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit() }} />}</Narrow>
         </>
       )}
       {!noValue && row.op !== 'between' && valueOpts.length > 0 && !pickerIn && (
@@ -176,7 +180,9 @@ function FilterChip({ index, row, field, dragging, onDragStart, onDragEnd, onCha
       )}
       {!noValue && row.op !== 'between' && (valueOpts.length === 0 || pickerIn) && (
         <>
-          <Narrow><Input type={inOp ? 'text' : inputType} value={draft} placeholder={inOp ? t('explorer.inPlaceholder') : ''} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit() }} /></Narrow>
+          <Narrow>{type === 'date' && !inOp
+            ? <DatePicker value={draft} onChange={(v) => { setDraft(v); onChange({ ...row, value: v, valueTo: draftTo || undefined }) }} />
+            : <Input type={inOp ? 'text' : inputType} value={draft} placeholder={inOp ? t('explorer.inPlaceholder') : ''} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit() }} />}</Narrow>
           {pickerIn && (
             <Narrow><SearchSelect value="" options={valueOpts} placeholder={t('explorer.pickValue')} onChange={(v) => { if (!v) return; const next = [...draft.split(',').map((s) => s.trim()).filter(Boolean), v].join(', '); setDraft(next); onChange({ ...row, value: next }) }} /></Narrow>
           )}

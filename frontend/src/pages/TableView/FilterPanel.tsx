@@ -192,6 +192,7 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
                       {isPeriod ? (
                         // A period: a drill's single date (op ``equals``) shows as that one day.
                         <DateRangeFilter
+                          block
                           preset={cur.op === 'period' ? (cur.preset ?? 'custom') : (cur.val ? 'custom' : 'all')}
                           range={{ dateFrom: cur.val, dateTo: cur.op === 'period' ? (cur.to ?? '') : cur.val }}
                           onChange={(preset, r) => handleChange(c.name, { op: 'period', val: r.dateFrom, to: r.dateTo, preset })}

@@ -2,12 +2,13 @@
 // and, when the page passes one, the date basis; it opens a panel with the presets as a list,
 // a two-month calendar for a custom range, and the basis picker in the footer. Dashboards,
 // lists and the explorer share it. Pure date logic lives in services/period.ts.
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Calendar, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Calendar, ChevronDown } from 'lucide-react'
 import { colors, fontSize, fonts, radius } from '../theme'
 import { PortalPanel } from './PortalPanel'
+import { MonthGrid } from './MonthGrid'
 import { DATE_PRESETS, EMPTY_RANGE, formatRange, fromIso, rangeForPreset, toIso, type DatePreset, type DateRange } from '../services/period'
 
 export type { DatePreset, DateRange }
@@ -24,10 +25,13 @@ interface Props {
   onChange: (preset: DatePreset, range: DateRange) => void
   /** Which date the period compares against, chosen in the panel's footer. */
   basis?: DateBasis
+  /** Fill the container's width like an input (a field in a filter form), the chevron at the end. */
+  block?: boolean
 }
 
-const Trigger = styled.button<{ $open: boolean }>`
+const Trigger = styled.button<{ $open: boolean; $block?: boolean }>`
   display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px 0 12px;
+  ${({ $block }) => ($block ? 'width: 100%; min-width: 0; height: 32px; & > svg:last-child { margin-left: auto; }' : '')}   /* an input's size */
   border-radius: ${radius.md}; border: 1px solid ${({ $open }) => ($open ? colors.blue.border : colors.border)};
   background: ${colors.bg.input}; color: ${colors.text.primary}; cursor: pointer;
   font-family: ${fonts.sans}; font-size: ${fontSize.sm}; white-space: nowrap;
@@ -49,29 +53,6 @@ const PresetBtn = styled.button<{ $active?: boolean }>`
   &:hover { background: ${({ $active }) => ($active ? colors.blue.bg : 'var(--hover-subtle)')}; color: ${colors.text.primary}; }
 `
 const Calendars = styled.div`display: flex; gap: 24px; padding: 14px 18px; min-width: 0;`
-const Month = styled.div`width: 238px; display: flex; flex-direction: column; gap: 8px;`
-const MonthHead = styled.div`
-  display: flex; align-items: center; justify-content: space-between; height: 28px;
-  font-family: ${fonts.sans}; font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.primary};
-  text-transform: capitalize;
-`
-const NavBtn = styled.button`
-  width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
-  border: none; border-radius: ${radius.md}; background: transparent; color: ${colors.text.muted}; cursor: pointer;
-  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
-`
-const Grid = styled.div`display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); row-gap: 2px; text-align: center;`
-const Dow = styled.span`font-size: ${fontSize.micro}; color: ${colors.text.muted}; padding-bottom: 4px; font-family: ${fonts.sans};`
-const Day = styled.button<{ $edge?: boolean; $in?: boolean; $today?: boolean }>`
-  height: 32px; border: none; cursor: pointer; font-family: ${fonts.sans}; font-size: ${fontSize.sm};
-  font-variant-numeric: tabular-nums;
-  border-radius: ${({ $edge, $today }) => ($edge || $today ? radius.md : '0')};
-  background: ${({ $edge, $in }) => ($edge ? colors.blue.main : $in ? colors.blue.bg : 'transparent')};
-  color: ${({ $edge, $in }) => ($edge ? colors.text.inverse : $in ? colors.text.primary : colors.text.secondary)};
-  font-weight: ${({ $edge }) => ($edge ? 600 : 400)};
-  box-shadow: ${({ $today, $edge }) => ($today && !$edge ? `inset 0 0 0 1px ${colors.border}` : 'none')};
-  &:hover { background: ${({ $edge }) => ($edge ? colors.blue.main : 'var(--hover-subtle)')}; color: ${({ $edge }) => ($edge ? colors.text.inverse : colors.text.primary)}; }
-`
 const Footer = styled.div`
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
   padding: 10px 14px; border-top: 1px solid ${colors.border};
@@ -95,42 +76,8 @@ const Btn = styled.button<{ $primary?: boolean }>`
 `
 const Hint = styled.span`font-size: ${fontSize.micro}; color: ${colors.text.muted}; font-family: ${fonts.sans};`
 
-function MonthGrid({ year, month, from, to, today, lang, onPick, nav }: {
-  year: number; month: number; from: string; to: string; today: string; lang: string
-  onPick: (iso: string) => void
-  nav?: { prev?: () => void; next?: () => void }
-}) {
-  const first = new Date(year, month, 1)
-  const offset = (first.getDay() + 6) % 7 // weeks start on Monday
-  const days = new Date(year, month + 1, 0).getDate()
-  const dows = useMemo(() => {
-    const f = new Intl.DateTimeFormat(lang, { weekday: 'narrow' })
-    return Array.from({ length: 7 }, (_, i) => f.format(new Date(2024, 0, 1 + i))) // 1 Jan 2024 was a Monday
-  }, [lang])
-  const title = new Intl.DateTimeFormat(lang, { month: 'long', year: 'numeric' }).format(first)
-  const cells: Array<string | null> = [...Array<null>(offset).fill(null)]
-  for (let d = 1; d <= days; d++) cells.push(toIso(new Date(year, month, d)))
-  return (
-    <Month>
-      <MonthHead>
-        {nav?.prev ? <NavBtn type="button" aria-label="Previous month" onClick={nav.prev}><ChevronLeft size={16} /></NavBtn> : <span style={{ width: 28 }} />}
-        <span>{title}</span>
-        {nav?.next ? <NavBtn type="button" aria-label="Next month" onClick={nav.next}><ChevronRight size={16} /></NavBtn> : <span style={{ width: 28 }} />}
-      </MonthHead>
-      <Grid>
-        {dows.map((d, i) => <Dow key={i}>{d}</Dow>)}
-        {cells.map((iso, i) => iso === null ? <span key={i} /> : (
-          <Day key={iso} type="button" onClick={() => onPick(iso)}
-            $edge={iso === from || iso === to} $in={!!from && !!to && iso > from && iso < to} $today={iso === today}>
-            {Number(iso.slice(8))}
-          </Day>
-        ))}
-      </Grid>
-    </Month>
-  )
-}
 
-export function DateRangeFilter({ preset, range, onChange, basis }: Props) {
+export function DateRangeFilter({ preset, range, onChange, basis, block }: Props) {
   const { t, i18n } = useTranslation()
   const lang = i18n.language || 'en'
   const [open, setOpen] = useState(false)
@@ -171,7 +118,7 @@ export function DateRangeFilter({ preset, range, onChange, basis }: Props) {
 
   return (
     <>
-      <Trigger ref={triggerRef} type="button" $open={open} onClick={openPanel} aria-haspopup="dialog" aria-expanded={open}>
+      <Trigger ref={triggerRef} type="button" $open={open} $block={block} onClick={openPanel} aria-haspopup="dialog" aria-expanded={open}>
         <Calendar size={14} />
         <span>{label || t('period.custom')}</span>
         {basisLabel && <span className="muted">{basisLabel}</span>}
@@ -187,8 +134,10 @@ export function DateRangeFilter({ preset, range, onChange, basis }: Props) {
                 ))}
               </Presets>
               <Calendars>
-                <MonthGrid year={left.y} month={left.m} from={pending.dateFrom} to={pending.dateTo} today={today} lang={lang} onPick={pickDay} nav={{ prev: () => shift(-1) }} />
-                <MonthGrid year={view.y} month={view.m} from={pending.dateFrom} to={pending.dateTo} today={today} lang={lang} onPick={pickDay} nav={{ next: () => shift(1) }} />
+                <MonthGrid year={left.y} month={left.m} from={pending.dateFrom} to={pending.dateTo} today={today} lang={lang} onPick={pickDay} nav={{ prev: () => shift(-1) }}
+                  onJump={(y, m) => { const d = new Date(y, m + 1, 1); setView({ y: d.getFullYear(), m: d.getMonth() }) }} />
+                <MonthGrid year={view.y} month={view.m} from={pending.dateFrom} to={pending.dateTo} today={today} lang={lang} onPick={pickDay} nav={{ next: () => shift(1) }}
+                  onJump={(y, m) => setView({ y, m })} />
               </Calendars>
             </Body>
             <Footer>

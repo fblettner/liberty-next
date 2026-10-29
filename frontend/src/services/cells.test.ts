@@ -2,7 +2,7 @@
 // raw value, plus the null / object text fallbacks the grid relies on.
 import { describe, expect, it } from 'vitest'
 import type { Column } from '../types/connectors'
-import { cellText, enumMap, ruleCell } from './cells'
+import { cellText, enumMap, isDateTimeColumn, localDateTime, ruleCell } from './cells'
 
 const col = (rule?: Column['rule']): Column => ({ name: 'X', type: 'text', rule })
 
@@ -46,5 +46,31 @@ describe('ruleCell', () => {
     expect(ruleCell('V', c, undefined, udc).text).toBe('Exact')
     expect(ruleCell('Z', c, undefined, udc)).toEqual({ text: 'Z', isNull: false, kind: 'plain' })
     expect(ruleCell('8', c, undefined, new Map([['7', 'Admins']]))).toEqual({ text: '8', isNull: false, kind: 'plain' })
+  })
+})
+
+describe('zoned date-times in local time', () => {
+  // the expected text built from a Date, so the tests hold in any time zone
+  const local = (iso: string) => {
+    const d = new Date(iso), p = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+  }
+  it('reads the zone forms PostgreSQL and ISO use', () => {
+    expect(localDateTime('2026-10-28 23:54:08.859444+00:00')).toBe(local('2026-10-28T23:54:08Z'))
+    expect(localDateTime('2026-10-28T23:54:08Z')).toBe(local('2026-10-28T23:54:08Z'))
+    expect(localDateTime('2026-10-28 23:54:08+02')).toBe(local('2026-10-28T21:54:08Z'))
+    expect(localDateTime('2026-10-28 23:54+0530')).toBe(local('2026-10-28T18:24:00Z'))
+  })
+  it('leaves a value without a zone alone', () => {
+    expect(localDateTime('2026-06-13 13:06:24')).toBeNull()
+    expect(localDateTime('2026-06-13')).toBeNull()
+    expect(localDateTime('not a date')).toBeNull()
+  })
+  it('applies to date-time columns only', () => {
+    const dt = { name: 'checked_at', type: null, format: 'datetime' } as Column
+    expect(isDateTimeColumn(dt)).toBe(true)
+    expect(isDateTimeColumn({ type: 'timestamp with time zone' })).toBe(true)
+    expect(ruleCell('2026-10-28 23:54:08.859444+00:00', dt).text).toBe(local('2026-10-28T23:54:08Z'))
+    expect(ruleCell('2026-10-28 23:54:08+00:00', { name: 'note', type: null, format: 'text' } as Column).text).toBe('2026-10-28 23:54:08+00:00')
   })
 })

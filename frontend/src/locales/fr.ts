@@ -242,6 +242,8 @@ const fr: Resources = {
     changeFile: 'Changer…',
     noFile: 'Aucun fichier choisi',
     clear: 'Effacer',
+    pickDate: 'Choisir une date',
+    datePlaceholder: 'aaaa-mm-jj',
     stop: 'Arrêter',
     loading: 'Chargement…',
     run: 'Exécuter',

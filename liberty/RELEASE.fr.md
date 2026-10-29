@@ -2,6 +2,20 @@
 
 ## 7.0.67 — non publiée
 
+- Dates : un sélecteur de date aux couleurs du thème (`common/DatePicker`) remplace le calendrier du navigateur —
+  blanc, et différent d'un navigateur à l'autre — dans le formulaire, l'édition en masse de la grille, les filtres de
+  colonne de la grille et les filtres du Data Explorer : un champ où une date peut encore être saisie (un jour
+  impossible revient à la valeur) et le calendrier du sélecteur de période, avec Aujourd'hui et Effacer. La valeur
+  reste une date ISO. Le calendrier est partagé (`common/MonthGrid`) ; son titre ouvre un choix du mois et de l'année
+  (les 12 mois, l'année par flèches ou 12 à la fois) — dans le sélecteur de période aussi — : une date à un an d'ici
+  en trois clics, pas douze. Un filtre de colonne sur une date-heure avec fuseau compare le jour local, celui
+  qu'affiche la grille.
+- Dates : une date-heure portant son fuseau (un `timestamptz` PostgreSQL, `…+00:00`) s'affiche à l'heure locale du
+  navigateur (`2026-10-29 00:54:08`), comme les jours du filtre de période — elle s'affichait en UTC brut, un contrôle
+  fait à 00:54 à Paris se lisant la veille. Les valeurs sans fuseau (`DATE` Oracle, dates JD Edwards) restent telles
+  quelles.
+- La période des filtres avancés remplit son champ comme les autres saisies, à leur hauteur (elle laissait un vide et
+  se plaçait plus haut que ses voisines).
 - Écrans : une colonne date des filtres avancés est une période — le sélecteur de dates des tableaux de bord
   (préréglages et calendrier sur deux mois), envoyée en `<COL>_from` / `<COL>_to` — au lieu d'une date exacte. Le
   nouveau `filter_period` d'une colonne (groupe Filtre du Visual Designer) fixe le préréglage à l'ouverture de l'écran
