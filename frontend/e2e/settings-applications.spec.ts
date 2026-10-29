@@ -76,7 +76,9 @@ test('settings_applications: form add / duplicate / delete, bulk add / change / 
       await page.getByRole('button', { name: 'Add row', exact: true }).click()
       const row = newRows(page).first()
       await expect(row).toBeVisible()
-      await row.locator('input[type="text"]').first().fill(`${PREFIX}BULK`)
+      // Typed key by key: a cell that re-mounted on each edit would lose the focus mid-word and the
+      // saved name would come out cut (the grid keeps its cells stable on purpose).
+      await row.locator('input[type="text"]').first().pressSequentially(`${PREFIX}BULK`)
       await row.locator('button:not([title])').first().click()  // the type dropdown (row buttons have a title)
       await chooseOption(page, 'JDE')
       await saveBulkEdit(page, PREFIX)
@@ -85,7 +87,10 @@ test('settings_applications: form add / duplicate / delete, bulk add / change / 
 
     await test.step('bulk edit: change a row, clone another', async () => {
       await startBulkEdit(page)
-      await page.locator(`tbody input[value="${PREFIX}BULK"]`).fill(`${PREFIX}BULK2`)
+      const name = page.locator(`tbody input[value="${PREFIX}BULK"]`)
+      await name.click()
+      await name.press('End')
+      await page.keyboard.type('2')
       await page.locator('tbody tr').filter({ has: page.locator(`input[value="${PREFIX}DUP"]`) }).getByTitle('Clone row').click()
       const clone = newRows(page).first()
       await expect(clone).toBeVisible()

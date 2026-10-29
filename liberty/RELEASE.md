@@ -19,7 +19,8 @@
   `liberty.web.admin`; the SQL connector's pure text helpers (ORDER BY split, aggregate / filter wraps, schema / dblink
   placeholders) are `liberty/connectors/sqltext.py`. Frontend: the SQL Wizard's parser and generator are
   `services/sqlParse.ts`, the data grid's column helpers `resultColumns.ts` and its inline-edit cell `EditCell.tsx` (all
-  with tests), its row context menu the hook `useRowMenu.tsx`, and the builders share their page frame, toolbar and empty line (`common/builderShell.ts`).
+  with tests), its row context menu the hook `useRowMenu.tsx`, its batch edit (pending edits, new / deleted / selected rows,
+  the clipboard, the Save and its row hooks) the hook `useBatchEdit.ts`, and the builders share their page frame, toolbar and empty line (`common/builderShell.ts`).
 
 ## 7.0.66 — unreleased
 
