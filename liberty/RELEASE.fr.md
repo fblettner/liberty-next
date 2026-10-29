@@ -2,6 +2,10 @@
 
 ## 7.0.67 — non publiée
 
+- Écritures : un horodatage `SYSDATE` prend le format date / heure du dictionnaire quand l'écran affiche la colonne
+  dans un autre format — une heure JDE affichée en simple `number` (F00950.FSUPMT, F95921.RLUPMT, F0004.DTUPMJ…)
+  recevait la date-heure brute, refusée par Oracle pour la colonne NUMBER (ORA-00932). Tout import « Mettre à jour ou
+  insérer » de F00950 échouait ainsi (sa vérification par mise à jour n'envoie pas l'heure) ; depuis juin.
 - Import : le contrôle des règles charge les listes de valeurs dont chaque ligne a besoin — une liste que la grille
   n'avait pas encore chargée (un import ouvert dès l'ouverture de l'écran) ou une liste restreinte par les valeurs de
   la ligne — au lieu de l'ignorer et de déclarer la ligne valide (`ZZ` passait comme langue). Une liste impossible à

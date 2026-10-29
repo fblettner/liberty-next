@@ -329,6 +329,8 @@ _RULES_LOGIN = {"LOGIN"}
 # CURRENT_DATE (alias of SYSDATE) and NN (alias of SEQUENCE) were retired in v2 — the migrator
 # normalises them, so the runtime only recognises the survivors.
 _RULES_NOW = {"SYSDATE"}
+# The formats a SYSDATE stamp can be written in (else the dictionary entry's format is used).
+_STAMP_FORMATS = {"date", "datetime", "timestamp", "jdedate", "jdetime"}
 _RULES_SEQUENCE = {"SEQUENCE"}
 # Statements with a SET/VALUES clause that a DEFAULT can fill — DELETE binds only a WHERE key,
 # so a default there would corrupt the predicate. (SEQUENCE/NN stays INSERT-only — see
@@ -1587,6 +1589,7 @@ class SQLConnector:
                 false_v = entry.false_value or infer_false_value(entry.rules_values or "Y")
             return {
                 "fmt": fmt_override or entry.format,
+                "entry_fmt": entry.format,   # the dictionary's own — what a SYSDATE stamp must take
                 "rule": rule_up,
                 "rules_values": entry.rules_values,
                 "default": entry.default,
@@ -1816,7 +1819,11 @@ class SQLConnector:
                     # HHMMSS time for the hours either side of midnight when the server isn't on UTC.
                     if now is None:
                         now = datetime.now()
-                    out[k] = _coerce_value(now, fmt) if fmt else now
+                    # The stamp takes a date / time format: the column's, else the dictionary's — a
+                    # screen showing a JDE time as a plain ``number`` (F00950.FSUPMT, F95921.RLUPMT)
+                    # would otherwise bind the raw datetime to a NUMBER column (ORA-00932).
+                    stamp_fmt = fmt if (fmt or "").lower() in _STAMP_FORMATS else (m.get("entry_fmt") or fmt)
+                    out[k] = _coerce_value(now, stamp_fmt) if stamp_fmt else now
                     continue
                 if rule in _RULES_PASSWORD:
                     if v in (None, ""):

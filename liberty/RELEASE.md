@@ -2,6 +2,10 @@
 
 ## 7.0.67 — unreleased
 
+- Writes: a `SYSDATE` stamp takes the dictionary's date / time format when the screen shows the column with another
+  format — a JDE time displayed as a plain `number` (F00950.FSUPMT, F95921.RLUPMT, F0004.DTUPMJ…) got the raw
+  date-time, which Oracle refused for the NUMBER column (ORA-00932). Every "Update or insert" import of F00950 failed
+  on it (its update probe does not send the time); since June.
 - Import dialog: the rule check loads the lists of values each row needs — a lookup the grid had not loaded yet (an
   Import opened as the screen opens) or a list narrowed by the row's own values — instead of skipping it and passing
   the row as valid (`ZZ` went through as a language). A list that cannot be loaded makes the row an error.

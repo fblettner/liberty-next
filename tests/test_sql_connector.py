@@ -2485,6 +2485,26 @@ def test_filter_wrap_date_only_end_bound_covers_the_whole_day(pools: PoolRegistr
     assert params["day_from"] == _date(2026, 10, 28) and params["day_to"] == _date(2026, 10, 29)
 
 
+def test_sysdate_stamp_keeps_the_dictionary_time_format_under_a_number_override(pools: PoolRegistry) -> None:
+    """A screen showing a JDE time as ``format = "number"`` (F00950.FSUPMT, dd UPMT = jdetime +
+    SYSDATE): an UPDATE that does not send it stamps the HHMMSS integer — not the raw datetime, which
+    Oracle refused for the NUMBER column (ORA-00932, every "Update or insert" import of F00950)."""
+    from liberty.connectors.dictionary import DictionaryFile
+    dic = DictionaryFile.model_validate({"connectors": {"app": {"entries": {
+        "UPMT": {"format": "jdetime", "rules": "SYSDATE"}, "UPMJ": {"format": "jdedate", "rules": "SYSDATE"}}}}})
+    q = QueryDef(name="put", sql="UPDATE t SET FSUPMT = :FSUPMT, FSUPMJ = :FSUPMJ WHERE K = :K_ORIGINAL", writable=True)
+    conn = SQLConnector("db", SqlConnectorConfig(type="sql", pool="test", queries=[q]), pools, dictionary=dic)
+    hints = [ColumnHint(name="FSUPMT", dd="UPMT", format="number"), ColumnHint(name="FSUPMJ", dd="UPMJ", format="number")]
+    out = conn._apply_form_rules({"FSUPMT": None, "FSUPMJ": None, "K_ORIGINAL": "1"}, q, stmt_type="UPDATE", user="u",
+                                 column_hints=hints, dict_scope="app")
+    assert isinstance(out["FSUPMT"], int) and 0 <= out["FSUPMT"] <= 235959
+    assert isinstance(out["FSUPMJ"], int) and out["FSUPMJ"] > 100000          # CYYDDD
+    # a value passed is kept (no stamp)
+    out = conn._apply_form_rules({"FSUPMT": "101500", "FSUPMJ": None, "K_ORIGINAL": "1"}, q, stmt_type="UPDATE", user="u",
+                                 column_hints=hints, dict_scope="app")
+    assert out["FSUPMT"] in (101500, "101500")
+
+
 def test_binary_values_are_json_safe() -> None:
     """A BLOB's bytes reach JSON: UTF-8 text as that text, binary as ``(binary, N bytes)`` — the
     encoder's UTF-8 decode failed on them (a bare HTTP 500 on F98OWSEC.SCSRVBLOBA)."""
