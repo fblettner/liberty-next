@@ -77,3 +77,34 @@ export interface DataTableRef {
 }
 
 export interface DataModel { tables: DataTableRef[]; total: number }
+
+/** A configuration entity of the Impact view (C12) — ``(kind, scope, name)`` as the dependency walker
+ *  names it; ``missing`` = referenced but not defined; ``link`` = its editor (find-usages' deep link). */
+export interface ImpactNode {
+  kind: string
+  scope: string | null
+  name: string
+  /** Its label (in the request's language when translated) — a screen without one takes its menu item's. */
+  label: string | null
+  description: string | null
+  missing: boolean
+  link: Record<string, unknown>
+}
+
+export interface ImpactEntity extends ImpactNode { uses: number; used_by: number; unused: boolean }
+
+export interface ImpactCatalogue { entities: ImpactEntity[]; total: number; kinds: string[]; broken: ImpactNode[] }
+
+export interface ImpactUse extends ImpactNode { reason: string }
+/** A referrer in the used-by tree: ``parent`` = the index of the node it points at (-1 = the entity). */
+export interface ImpactReferrer extends ImpactNode { depth: number; parent: number; reason: string; fan_in: number }
+
+export interface ImpactDetail {
+  entity: ImpactNode & { uses: number; used_by: number }
+  uses: ImpactUse[]
+  closure: (ImpactNode & { depth: number })[]
+  closure_by_kind: Record<string, number>
+  used_by: ImpactReferrer[]
+  reach_by_kind: Record<string, number>
+  truncated: boolean
+}

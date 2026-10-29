@@ -1,6 +1,6 @@
 // The Developer page's data (C12): fetch + the filters, no React.
 import { api } from '../api/client'
-import type { ApiReference, ApiRoute, ConfigKey, ConfigReference, DataModel, DataTableRef } from '../types/devref'
+import type { ApiReference, ApiRoute, ConfigKey, ConfigReference, DataModel, DataTableRef, ImpactCatalogue, ImpactDetail, ImpactEntity, ImpactNode, ImpactReferrer } from '../types/devref'
 
 export const getConfigReference = () => api.get<ConfigReference>('/admin/dev/config')
 
@@ -187,4 +187,49 @@ export function tableGroups(tables: DataTableRef[]): { owner: string; group: str
   return [...by.values()]
     .map((g) => ({ ...g, tables: [...g.tables].sort((a, b) => a.name.localeCompare(b.name)) }))
     .sort((a, b) => (a.owner === b.owner ? a.group.localeCompare(b.group) : a.owner === 'framework' ? -1 : 1))
+}
+
+// ── Impact ───────────────────────────────────────────────────────────────────────────────────
+
+export const getImpactCatalogue = () => api.get<ImpactCatalogue>('/admin/dev/impact')
+
+export function getImpact(n: Pick<ImpactNode, 'kind' | 'name' | 'scope'>): Promise<ImpactDetail> {
+  const qp = new URLSearchParams({ kind: n.kind, name: n.name })
+  if (n.scope) qp.set('scope', n.scope)
+  return api.get<ImpactDetail>(`/admin/dev/impact/entity?${qp.toString()}`)
+}
+
+/** ``kind:scope:name`` — an entity's identity as one string (selection, React keys). */
+export const entityId = (n: Pick<ImpactNode, 'kind' | 'name' | 'scope'>): string => `${n.kind}:${n.scope ?? ''}:${n.name}`
+
+/** ``scope.name`` (or the name alone) — how an entity is shown. */
+export const entityLabel = (n: Pick<ImpactNode, 'name' | 'scope'>): string => (n.scope ? `${n.scope}.${n.name}` : n.name)
+
+/** The entities matching *q* (``scope.name`` or the label), only the unused ones when asked. */
+export function filterEntities(entities: ImpactEntity[], q: string, unusedOnly: boolean): ImpactEntity[] {
+  const n = q.trim().toLowerCase()
+  return entities.filter((e) => (!unusedOnly || e.unused)
+    && (!n || entityLabel(e).toLowerCase().includes(n) || (e.label ?? '').toLowerCase().includes(n)))
+}
+
+/** *entities* grouped by kind, in *order* (the server's), kinds without an entity left out. */
+export function entityGroups(entities: ImpactEntity[], order: string[]): { kind: string; entities: ImpactEntity[] }[] {
+  const by = new Map<string, ImpactEntity[]>()
+  for (const e of entities) by.set(e.kind, [...(by.get(e.kind) ?? []), e])
+  const kinds = [...order.filter((k) => by.has(k)), ...[...by.keys()].filter((k) => !order.includes(k))]
+  return kinds.map((kind) => ({ kind, entities: by.get(kind) ?? [] }))
+}
+
+export interface ReferrerBranch { node: ImpactReferrer; children: ReferrerBranch[] }
+
+/** The used-by list (each node with its parent's index, -1 = the entity) as a tree. */
+export function referrerTree(nodes: ImpactReferrer[]): ReferrerBranch[] {
+  const branches = nodes.map((node) => ({ node, children: [] as ReferrerBranch[] }))
+  const roots: ReferrerBranch[] = []
+  branches.forEach((b) => {
+    const parent = b.node.parent >= 0 ? branches[b.node.parent] : undefined
+    if (parent) parent.children.push(b)
+    else roots.push(b)
+  })
+  return roots
 }

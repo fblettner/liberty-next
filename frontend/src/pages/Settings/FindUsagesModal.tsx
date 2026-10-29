@@ -155,6 +155,9 @@ export function deepLinkToUrl(link: Record<string, unknown>): string | null {
     if (link.dashboard) qp.set('dashboard', String(link.dashboard))
     return editorUrl('dashboards', qp)
   }
+  // Editors without a selection parameter (the Impact view's other kinds): the page itself.
+  if (editor === 'jobs') return link.job ? `/nomaflow/jobs/${encodeURIComponent(String(link.job))}` : '/nomaflow'
+  if (editor === 'pools' || editor === 'actions' || editor === 'explorer' || editor === 'notifications' || editor === 'ai') return editorUrl(editor, qp)
   return null
 }
 

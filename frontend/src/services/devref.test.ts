@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { apiGroups, CONFIG_LABELS, docBlocks, filterKeys, statusCounts, filterTables, tableGroups, filterRoutes, keyLabel, keyStatus, readerModules, sectionCounts } from './devref'
-import type { ApiRoute, ConfigKey, DataTableRef } from '../types/devref'
+import { apiGroups, CONFIG_LABELS, docBlocks, entityGroups, entityId, entityLabel, filterEntities, filterKeys, statusCounts, filterTables, tableGroups, filterRoutes, keyLabel, keyStatus, readerModules, referrerTree, sectionCounts } from './devref'
+import type { ApiRoute, ConfigKey, DataTableRef, ImpactEntity, ImpactReferrer } from '../types/devref'
 
 const k = (key: string, over: Partial<ConfigKey> = {}): ConfigKey => ({
   key, section: key.split('.')[0], name: key.split('.')[1], type: 'str', default: null, description: null,
@@ -106,5 +106,29 @@ describe('filterTables / tableGroups', () => {
 describe('statusCounts', () => {
   it('counts each status apart (file-only is not editable)', () => {
     expect(statusCounts([k('a.b', { editor: 'x' }), k('a.c', { file_only: 'env' }), k('a.d')])).toEqual({ editor: 1, file: 1, gap: 1 })
+  })
+})
+
+describe('impact helpers', () => {
+  const node = (kind: string, scope: string | null, name: string, extra: Partial<ImpactEntity> = {}): ImpactEntity =>
+    ({ kind, scope, name, label: null, description: null, missing: false, link: {}, uses: 0, used_by: 1, unused: false, ...extra })
+
+  it('filters by label and the unused flag, groups in the server order', () => {
+    const all = [node('screen', 'nomajde', 'jde_health', { label: 'JDE Servers' }), node('query', 'nomajde', 'jde_health_get', { unused: true }), node('pool', null, 'nomajde')]
+    expect(filterEntities(all, 'NOMAJDE.JDE', false).map(entityLabel)).toEqual(['nomajde.jde_health', 'nomajde.jde_health_get'])
+    expect(filterEntities(all, '', true).map((e) => e.name)).toEqual(['jde_health_get'])
+    expect(filterEntities(all, 'servers', false).map((e) => e.name)).toEqual(['jde_health'])
+    expect(entityGroups(all, ['pool', 'query', 'screen']).map((g) => g.kind)).toEqual(['pool', 'query', 'screen'])
+    expect(entityId(all[2])).toBe('pool::nomajde')
+  })
+
+  it('builds the used-by tree from parent indexes', () => {
+    const ref = (name: string, parent: number, depth: number): ImpactReferrer =>
+      ({ kind: 'screen', scope: 'a', name, label: null, description: null, missing: false, link: {}, depth, parent, reason: '', fan_in: 1 })
+    const tree = referrerTree([ref('s1', -1, 1), ref('s2', -1, 1), ref('m1', 0, 2), ref('m2', 2, 3)])
+    expect(tree.map((b) => b.node.name)).toEqual(['s1', 's2'])
+    expect(tree[0].children[0].node.name).toBe('m1')
+    expect(tree[0].children[0].children[0].node.name).toBe('m2')
+    expect(tree[1].children).toEqual([])
   })
 })

@@ -1,5 +1,19 @@
 # Liberty Next — Release notes
 
+## 7.0.66 — unreleased
+
+- Developer reference → Impact: every configuration entity (pools, connectors, queries, API endpoints, dictionary
+  items, screens, menu items, charts, dashboards, shared actions, Explorer models, jobs, notification rules, AI
+  blocks) with what it uses and what uses it, followed through — what a change reaches, counted by kind (a query →
+  its screens → the menu items opening them, the charts → their dashboards, the jobs and actions running it); the
+  used-by tree, the direct uses and everything the entity needs; a node re-centres the view (with Back), "Open in
+  editor" goes to its builder; the entities nothing points at (entry points excepted) and the references to
+  undefined entities are listed (`/admin/dev/impact`). The links are the dependency walk of Package & Deploy.
+- Package & Deploy / promotion: a menu item now carries its target — the walk followed only the v1 item types
+  (table / form / chart), so a `screen`, `query`, `endpoint` or `job` item reached nothing but its connector; a
+  dashboard named `<app>.<id>` (as menus name it) resolves in its app instead of the first app holding that id
+  (`overview` exists in several); a notification rule carries the screen or the jobs its trigger names.
+
 ## 7.0.65 — unreleased
 
 - Developer reference (a new page in the sidebar, superuser; documentation, nothing is edited there):

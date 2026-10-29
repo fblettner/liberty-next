@@ -1,5 +1,22 @@
 # Liberty Next — Notes de version
 
+## 7.0.66 — non publiée
+
+- Référence développeur → Impact : chaque entité de la configuration (pools, connecteurs, requêtes, endpoints API,
+  éléments du dictionnaire, écrans, éléments de menu, graphiques, tableaux de bord, actions partagées, modèles
+  Explorer, jobs, règles de notification, blocs IA) avec ce qu'elle utilise et ce qui l'utilise, de proche en
+  proche — ce qu'atteint une modification, compté par type (une requête → ses écrans → les éléments de menu qui les
+  ouvrent, les graphiques → leurs tableaux de bord, les jobs et actions qui l'exécutent) ; l'arbre « utilisée par »,
+  les utilisations directes et tout ce dont l'entité a besoin ; un nœud recentre la vue (avec Retour), « Ouvrir dans
+  l'éditeur » mène à son éditeur ; les entités que rien ne référence (points d'entrée exceptés) et les références
+  vers des entités non définies sont listées (`/admin/dev/impact`). Les liens sont le parcours des dépendances de
+  Package & Deploy.
+- Package & Deploy / promotion : un élément de menu emporte désormais sa cible — le parcours ne suivait que les
+  types d'élément de la v1 (table / form / chart), un élément `screen`, `query`, `endpoint` ou `job` n'atteignait
+  que son connecteur ; un tableau de bord nommé `<app>.<id>` (comme les menus le nomment) se résout dans son
+  application et non dans la première qui porte cet id (`overview` existe dans plusieurs) ; une règle de
+  notification emporte l'écran ou les jobs que nomme son déclencheur.
+
 ## 7.0.65 — non publiée
 
 - Référence développeur (une nouvelle page dans la barre latérale, superutilisateur ; de la

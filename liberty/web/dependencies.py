@@ -174,7 +174,7 @@ def _resolve(state: Any, seed: Seed) -> tuple[Dependency | None, list[tuple[Seed
     if seed.kind == "job":
         return _resolve_job(state, seed)
     if seed.kind == "notification_rule":
-        return _resolve_raw(state, seed, "notifications.toml", ["notifications"])
+        return _resolve_notification_rule(state, seed)
     if seed.kind == "ai":
         return _resolve_raw(state, seed, "ai.toml", ["ai"])
     return None, []
@@ -379,10 +379,21 @@ def _resolve_menu_item(state: Any, seed: Seed) -> tuple[Dependency | None, list[
         refs.append((Seed("connector", conn), f"menu item {seed.scope}.{seed.name}"))
     target = getattr(item, "target", None)
     type_ = getattr(item, "type", None)
-    if target and type_ in ("table", "form", "chart"):
-        refs.append((Seed("screen", target, seed.scope), f"menu item {seed.scope}.{seed.name} target"))
+    where = f"menu item {seed.scope}.{seed.name} target"
+    # the item types of menus/config.py::ItemType (screen / query / endpoint / dashboard / job; page
+    # and url name no configuration entity)
+    if target and type_ == "screen":
+        refs.append((Seed("screen", target, seed.scope), where))
+    elif target and type_ == "query" and conn:
+        refs.append((Seed("query", target, conn), where))
+    elif target and type_ == "endpoint" and conn:
+        refs.append((Seed("api_endpoint", target, conn), where))
     elif target and type_ == "dashboard":
-        refs.append((Seed("dashboard", target), f"menu item {seed.scope}.{seed.name} target"))
+        # a menu names a dashboard by its public id ``<scope>.<id>`` (DashboardsFile.find)
+        d_scope, _, d_id = target.partition(".")
+        refs.append((Seed("dashboard", d_id, d_scope) if d_id else Seed("dashboard", target), where))
+    elif target and type_ == "job":
+        refs.append((Seed("job", target), where))
     return dep, refs
 
 
@@ -390,17 +401,20 @@ def _resolve_dashboard(state: Any, seed: Seed) -> tuple[Dependency | None, list[
     dashboards = getattr(state, "dashboards", None)
     if dashboards is None:
         return None, []
-    # Dashboards are scoped: find which scope holds this id.
-    dash_scope = None
+    # Dashboards are scoped: the seed's scope (or a qualified ``<scope>.<id>`` name) picks it; a bare
+    # id takes the first scope holding it (the same id can exist under several apps — ``overview``).
+    name, dash_scope = seed.name, seed.scope
+    if not dash_scope and "." in name:
+        dash_scope, _, name = name.partition(".")
     dash = None
     for scope_name, dash_map in (dashboards.dashboards or {}).items():
-        if isinstance(dash_map, dict) and seed.name in dash_map:
+        if isinstance(dash_map, dict) and name in dash_map and (dash_scope is None or scope_name == dash_scope):
             dash_scope = scope_name
-            dash = dash_map[seed.name]
+            dash = dash_map[name]
             break
     if dash is None:
         return None, []
-    dep = Dependency(kind="dashboard", name=seed.name, scope=dash_scope, config=_dump(dash))
+    dep = Dependency(kind="dashboard", name=name, scope=dash_scope, config=_dump(dash))
     refs: list[tuple[Seed, str]] = []
     dash_conn = getattr(dash, "connector", None)
     if dash_conn:
@@ -571,19 +585,29 @@ def _resolve_chart(state: Any, seed: Seed) -> tuple[Dependency | None, list[tupl
 
 # File-read kinds (Explorer models, jobs, notification rules, AI blocks) ---------------------
 
+# Set by a caller walking every entity (liberty.impact): the raw files parsed once for the walk instead
+# of once per job / rule / model. None = no memo (the package build reads them fresh).
+_raw_memo: dict[str, dict[str, Any]] | None = None
+
+
 def raw_config(state: Any, filename: str) -> dict[str, Any]:
     """*filename* (``explorer.toml``, ``jobs.toml``…) of this install as written, ``{}`` when absent."""
     import tomllib
 
     from liberty.web.package_import import package_files
+    if _raw_memo is not None and filename in _raw_memo:
+        return _raw_memo[filename]
     settings = getattr(state, "settings", None)
     path = package_files(settings).get(filename) if settings is not None else None
-    if path is None or not path.exists():
-        return {}
-    try:
-        return tomllib.loads(path.read_text(encoding="utf-8"))
-    except (tomllib.TOMLDecodeError, OSError):
-        return {}
+    data: dict[str, Any] = {}
+    if path is not None and path.exists():
+        try:
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
+        except (tomllib.TOMLDecodeError, OSError):
+            data = {}
+    if _raw_memo is not None:
+        _raw_memo[filename] = data
+    return data
 
 
 def _resolve_raw(state: Any, seed: Seed, filename: str, parents: list[str]) -> tuple[Dependency | None, list[tuple[Seed, str]]]:
@@ -594,6 +618,21 @@ def _resolve_raw(state: Any, seed: Seed, filename: str, parents: list[str]) -> t
     if not isinstance(value, dict):
         return None, []
     return Dependency(kind=seed.kind, name=seed.name, scope=seed.scope, config=value), []
+
+
+def _resolve_notification_rule(state: Any, seed: Seed) -> tuple[Dependency | None, list[tuple[Seed, str]]]:
+    """A notification rule and what its trigger names: the screen it watches, the jobs it listens to."""
+    dep, _ = _resolve_raw(state, seed, "notifications.toml", ["notifications"])
+    if dep is None:
+        return None, []
+    trigger = dep.config.get("trigger") or {}
+    where = f"notification rule {seed.name} trigger"
+    refs: list[tuple[Seed, str]] = []
+    if trigger.get("kind") == "screen" and trigger.get("app") and trigger.get("screen"):
+        refs.append((Seed("screen", trigger["screen"], trigger["app"]), where))
+    if trigger.get("kind") == "job":
+        refs.extend((Seed("job", j), where) for j in trigger.get("jobs") or [] if isinstance(j, str))
+    return dep, refs
 
 
 def _resolve_explorer_model(state: Any, seed: Seed) -> tuple[Dependency | None, list[tuple[Seed, str]]]:

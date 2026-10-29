@@ -37,6 +37,23 @@ async def get_data_model(request: Request, _: Superuser) -> dict[str, Any]:
     return {"tables": tables, "total": len(tables)}
 
 
+@router.get("/impact", summary="Every configuration entity with its references both ways")
+async def get_impact_catalogue(request: Request, _: Superuser) -> dict[str, Any]:
+    from liberty.impact import catalogue
+    from liberty.web.deps import request_language
+    return await asyncio.to_thread(catalogue, request.app.state, request_language(request))
+
+
+@router.get("/impact/entity", summary="What an entity uses and what a change to it reaches")
+async def get_impact(request: Request, _: Superuser, kind: str, name: str, scope: str | None = None) -> dict[str, Any]:
+    from liberty.impact import impact
+    try:
+        from liberty.web.deps import request_language
+        return await asyncio.to_thread(lambda: impact(request.app.state, kind, name, scope or None, lang=request_language(request)))
+    except KeyError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc.args[0])) from exc
+
+
 @router.get("/reports", summary="The documentation reports and their sections")
 async def list_doc_reports(_: Superuser, lang: str = "fr") -> dict[str, Any]:
     from liberty.docreport import catalog
