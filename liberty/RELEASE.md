@@ -2,6 +2,9 @@
 
 ## 7.0.67 — unreleased
 
+- Development: end-to-end regression tests (`frontend/e2e/`, Playwright, `npm run e2e`) drive the data screens on a
+  live server and check what they save in the database — the record form (add on several tabs, duplicate, delete),
+  bulk edit (add, change, clone, delete), the lifecycle actions and the row menu; test records only, never run in CI.
 - Record lock: a record opened in another tab or by another user now opens read-only with the "locked by" banner even
   when this tab connected after the lock was taken. The server refused the second lock, but the browser only knew of
   the locks taken while it was connected, so the form stayed editable.

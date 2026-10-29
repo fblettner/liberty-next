@@ -324,6 +324,8 @@ python3.12 -m venv .venv && .venv/bin/pip install -c requirements.txt -e ".[dev]
 ./start.sh dev                # --reload   ·   ./start.sh frontend → Vite :5173 with API proxy
 .venv/bin/pytest -q           # ~100 s, no live DB needed   ·   .venv/bin/ruff check liberty tests
 (cd frontend && npm ci && npm run lint && npm test && npm run build)   # eslint · vitest · tsc + vite
+(cd frontend && LIBERTY_E2E_USER=… LIBERTY_E2E_PASSWORD=… npm run e2e)  # Playwright on a LIVE server (frontend/e2e/README.md):
+#   the data screens' saves checked in the database — before / after any change to the grid or the record form
 # CLIs: liberty-next · liberty-connectors list|describe|run · liberty-admin init-db|create-user [--attribute k=v]|set-attributes|
 #       create-role [--scope RULE]|set-scope|list-roles|…|migrate [--dry-run]|record-upgrade
 #       liberty-ops status|doctor|start|stop|restart|logs|backup|restore|migrate|upgrade|rollback (Python installs; Docker twin = release/liberty)

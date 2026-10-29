@@ -2,3 +2,6 @@ node_modules/
 dist/
 *.local
 .vite/
+e2e/.results/
+e2e/.baseline/
+playwright-report/

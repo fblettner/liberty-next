@@ -2,6 +2,10 @@
 
 ## 7.0.67 — non publiée
 
+- Développement : des tests de non-régression de bout en bout (`frontend/e2e/`, Playwright, `npm run e2e`) pilotent les
+  écrans de données sur un serveur réel et vérifient ce qu'ils enregistrent en base — le formulaire (ajout sur
+  plusieurs onglets, duplication, suppression), l'édition en masse (ajout, modification, clonage, suppression), les
+  actions du cycle de vie et le menu de ligne ; uniquement des enregistrements de test, jamais lancés en CI.
 - Verrou d'enregistrement : un enregistrement ouvert dans un autre onglet ou par un autre utilisateur s'ouvre désormais
   en lecture seule avec le bandeau « verrouillé par », même quand cet onglet s'est connecté après la prise du verrou.
   Le serveur refusait bien le second verrou, mais le navigateur ne connaissait que les verrous pris pendant sa
