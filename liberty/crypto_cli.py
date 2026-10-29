@@ -1,9 +1,12 @@
-"""``liberty-crypto`` — encrypt/decrypt values with the configured ``MASTER_KEY``
-(the same v1-compatible scheme as :mod:`liberty.crypto`).
+"""``liberty-crypto`` — encrypt values with the configured ``MASTER_KEY`` (the same v1-compatible
+scheme as :mod:`liberty.crypto`).
 
     liberty-crypto encrypt 'my secret'           # → ENC:…   (idempotent on an ENC: value)
-    liberty-crypto decrypt 'ENC:…'               # → my secret
     liberty-crypto is-encrypted 'ENC:…'          # exit 0 if encrypted, 1 if not
+
+There is no ``decrypt`` command on purpose: a secret is never printed back in clear (a terminal, a
+log, the shell history holding ``--master-key``). The server and the jobs decrypt in their own
+process (:func:`liberty.crypto.decrypt`); to change a secret, encrypt the new value.
 
 The key comes from ``[crypto] master_key`` in ``config/app.toml`` / ``LIBERTY_MASTER_KEY``,
 or ``--master-key VALUE``. Reads stdin when no value argument is given.
@@ -15,7 +18,7 @@ import argparse
 import sys
 
 from liberty.config import load_settings
-from liberty.crypto import CryptoError, decrypt, encrypt, is_encrypted
+from liberty.crypto import CryptoError, encrypt, is_encrypted
 
 
 def _value(args: argparse.Namespace) -> str:
@@ -36,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--config", help="path to app.toml (default: config/app.toml)")
     parser = argparse.ArgumentParser(prog="liberty-crypto", description=__doc__, parents=[common])
     sub = parser.add_subparsers(dest="command", required=True)
-    for name, help_ in [("encrypt", "encrypt a value → ENC:…"), ("decrypt", "decrypt an ENC:… value"), ("is-encrypted", "test for the ENC: marker")]:
+    for name, help_ in [("encrypt", "encrypt a value → ENC:…"), ("is-encrypted", "test for the ENC: marker")]:
         p = sub.add_parser(name, help=help_, parents=[common])
         p.add_argument("value", nargs="?", help="the value (read from stdin if omitted)")
     return parser
@@ -49,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "is-encrypted":
         return 0 if is_encrypted(value) else 1
     try:
-        out = encrypt(value, _master_key(args)) if args.command == "encrypt" else decrypt(value, _master_key(args))
+        out = encrypt(value, _master_key(args))
     except CryptoError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

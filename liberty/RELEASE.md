@@ -25,6 +25,10 @@
   reference → API: the Response section). Documentation only: declared beside the error responses, the routes return
   exactly what they did; a test validates each route's JSON against its model so the documentation cannot drift.
 - Developer reference → Command line: the scripts on the left start folded, with Expand all / Collapse all.
+- `liberty-crypto` no longer has a `decrypt` command: a secret is never printed back in clear from the command line
+  (a terminal, a log, the shell history holding `--master-key`). Nothing used it — the server, the pools and the
+  jobs (nomasx1's LDAP and audit-trail steps reading `settings_applications`) decrypt in their own process; `encrypt`
+  and `is-encrypted` stay. To change a secret, encrypt the new value.
 
 ## 7.0.65 — unreleased
 

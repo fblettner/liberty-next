@@ -1,17 +1,25 @@
 from __future__ import annotations
 
-from liberty.crypto import is_encrypted
+import pytest
+
+from liberty.crypto import decrypt, is_encrypted
 from liberty.crypto_cli import main
 
 MK = "cli-test-master-key"
 
 
-def test_encrypt_then_decrypt_round_trip(capsys) -> None:
+def test_encrypt_round_trips_through_the_library(capsys) -> None:
     assert main(["encrypt", "my secret", "--master-key", MK]) == 0
     enc = capsys.readouterr().out.strip()
     assert is_encrypted(enc)
-    assert main(["decrypt", enc, "--master-key", MK]) == 0
-    assert capsys.readouterr().out.strip() == "my secret"
+    assert decrypt(enc, MK) == "my secret"            # the server / the jobs decrypt in process
+
+
+def test_there_is_no_decrypt_command(capsys) -> None:
+    """A secret is never printed back in clear from the command line."""
+    with pytest.raises(SystemExit):
+        main(["decrypt", "ENC:abc", "--master-key", MK])
+    assert "invalid choice" in capsys.readouterr().err
 
 
 def test_encrypt_idempotent(capsys) -> None:
@@ -25,11 +33,6 @@ def test_is_encrypted_exit_codes(capsys) -> None:
     assert main(["is-encrypted", "ENC:abc"]) == 0
     assert main(["is-encrypted", "plain"]) == 1
     capsys.readouterr()  # drain
-
-
-def test_decrypt_plain_value_errors(capsys) -> None:
-    assert main(["decrypt", "not-encrypted", "--master-key", MK]) == 2
-    assert "not encrypted" in capsys.readouterr().err
 
 
 def test_no_master_key_errors(capsys) -> None:

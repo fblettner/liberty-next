@@ -136,6 +136,6 @@ def test_cli_reference_reads_every_installed_script() -> None:
     assert user["default"] == "admin" and user["value"] == "ADMIN_USERNAME" and not user["required"]
     assert init["usage"].startswith("liberty-admin init-db")
     crypto = scripts["liberty-crypto"]                                             # its parser now built by build_parser()
-    assert [c["name"] for c in crypto["commands"]] == ["encrypt", "decrypt", "is-encrypted"]
+    assert [c["name"] for c in crypto["commands"]] == ["encrypt", "is-encrypted"]
     assert any(a["name"] == "--master-key" for a in crypto["options"])
     assert scripts["liberty-next"]["commands"] == [] and "uvicorn" in scripts["liberty-next"]["description"]

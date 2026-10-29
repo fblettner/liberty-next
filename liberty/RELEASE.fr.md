@@ -31,6 +31,10 @@
   contre son modèle pour que la documentation ne puisse pas diverger.
 - Référence développeur → Ligne de commande : les commandes à gauche démarrent repliées, avec Tout déplier / Tout
   replier.
+- `liberty-crypto` n'a plus de commande `decrypt` : un secret n'est jamais réaffiché en clair depuis la ligne de
+  commande (un terminal, un journal, l'historique du shell gardant `--master-key`). Rien ne l'utilisait — le serveur,
+  les pools et les jobs (les étapes LDAP et piste d'audit de nomasx1 qui lisent `settings_applications`) déchiffrent
+  dans leur propre processus ; `encrypt` et `is-encrypted` restent. Pour changer un secret, chiffrer la nouvelle valeur.
 
 ## 7.0.65 — non publiée
 
