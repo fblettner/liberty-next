@@ -26,10 +26,17 @@ const TABLES: { name: string; from: string; where: string }[] = [
 const SECRET = ['scowpwd', 'scsecpwd', 'scsrvbloba']
 const VOLATILE = /(upmj|upmt|jobn|seclst)$/i
 
+// F98OWSEC holds a BLOB (scsrvbloba) a thin connection can't read over a dblink: its columns are
+// listed, without the BLOB and the passwords.
+const COLUMNS: Record<string, string> = {
+  F98OWSEC: 'SCUSER, SCSECFRQ, SCSECUSR, SCSECTPE, SCUGRP, SCSECF1, SCSECF2, SCSECF3, SCSECV1, SCSECV2, SCSECV3, '
+    + 'SCSECV4, SCATTEMPTS, SCEUSER, SCRETRY, SCMUSE, SCPID',
+}
+
 async function snapshot(): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {}
   for (const t of TABLES) {
-    const rows = await select('jdedwards', `SELECT * FROM ${t.from} WHERE ${t.where}`, { U: USER })
+    const rows = await select('jdedwards', `SELECT ${COLUMNS[t.name] ?? '*'} FROM ${t.from} WHERE ${t.where}`, { U: USER })
     const drop = [...SECRET, ...Object.keys(rows[0] ?? {}).filter((k) => VOLATILE.test(k))]
     out[t.name] = normalize(rows, drop)
   }

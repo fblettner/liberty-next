@@ -22,7 +22,7 @@
   SQL du connecteur (découpage de l'ORDER BY, enveloppes d'agrégat / de filtre, marqueurs de schéma / dblink) sont dans
   `liberty/connectors/sqltext.py`. Interface : l'analyseur et le générateur de l'assistant SQL sont dans
   `services/sqlParse.ts`, les fonctions de colonne de la grille dans `resultColumns.ts` et sa cellule d'édition dans
-  `EditCell.tsx` (tous testés), et les éditeurs partagent leur cadre, leur barre d'outils et leur ligne vide
+  `EditCell.tsx` (tous testés), son menu de ligne dans le hook `useRowMenu.tsx`, et les éditeurs partagent leur cadre, leur barre d'outils et leur ligne vide
   (`common/builderShell.ts`).
 
 ## 7.0.66 — non publiée
