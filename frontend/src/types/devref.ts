@@ -108,3 +108,30 @@ export interface ImpactDetail {
   reach_by_kind: Record<string, number>
   truncated: boolean
 }
+
+/** A command-line argument or option, as argparse declares it (C12 command-line view). */
+export interface CliArgument {
+  name: string
+  positional: boolean
+  value: string | null
+  help: string | null
+  default: string | number | boolean | null
+  required: boolean
+  choices: string[]
+  repeat: boolean
+}
+
+export interface CliCommand { name: string; aliases: string[]; help: string | null; description: string | null; usage: string; arguments: CliArgument[] }
+
+export interface CliScript {
+  name: string
+  entry: string
+  file: string
+  line: number | null
+  description: string | null
+  usage: string
+  options: CliArgument[]
+  commands: CliCommand[]
+}
+
+export interface CliReference { scripts: CliScript[]; total: number; commands: number }

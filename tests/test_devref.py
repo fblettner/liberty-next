@@ -122,3 +122,20 @@ def test_default_paths_are_shown_relative_to_the_apps_dir(monkeypatch: pytest.Mo
     assert _portable_path(apps / "screens.toml") == "${LIBERTY_APPS_DIR}/screens.toml"
     assert _portable_path(apps.parent / "plugins" / "nomaflow" / "jobs.toml") == "${LIBERTY_APPS_DIR}/../plugins/nomaflow/jobs.toml"
     assert _portable_path(Path("config/app.toml")) == "config/app.toml"
+
+
+def test_cli_reference_reads_every_installed_script() -> None:
+    """The scripts come from the package's entry points and their parsers — no list kept by hand."""
+    from liberty.devref import cli_reference
+    scripts = {s["name"]: s for s in cli_reference()}
+    assert {"liberty-next", "liberty-admin", "liberty-crypto", "liberty-license", "liberty-ops", "liberty-connectors", "liberty-migrate"} <= set(scripts)
+    admin = scripts["liberty-admin"]
+    assert admin["description"] and not admin["description"].startswith("``")      # the docstring's ``name`` — prefix dropped
+    init = next(c for c in admin["commands"] if c["name"] == "init-db")
+    user = next(a for a in init["arguments"] if a["name"] == "--admin-username")
+    assert user["default"] == "admin" and user["value"] == "ADMIN_USERNAME" and not user["required"]
+    assert init["usage"].startswith("liberty-admin init-db")
+    crypto = scripts["liberty-crypto"]                                             # its parser now built by build_parser()
+    assert [c["name"] for c in crypto["commands"]] == ["encrypt", "decrypt", "is-encrypted"]
+    assert any(a["name"] == "--master-key" for a in crypto["options"])
+    assert scripts["liberty-next"]["commands"] == [] and "uvicorn" in scripts["liberty-next"]["description"]

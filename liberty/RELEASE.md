@@ -13,6 +13,13 @@
   (table / form / chart), so a `screen`, `query`, `endpoint` or `job` item reached nothing but its connector; a
   dashboard named `<app>.<id>` (as menus name it) resolves in its app instead of the first app holding that id
   (`overview` exists in several); a notification rule carries the screen or the jobs its trigger names.
+- Developer reference → Command line: every command the package installs, read from its entry points and its
+  argument parser — what it does, its usage (copy), the options of every command, each sub-command with its arguments
+  (value, default, choices, required, repeatable); left, the commands with a search (`/admin/dev/cli`). The technical
+  report's command-line section is built from it and now lists each command's arguments. `liberty-crypto` and
+  `liberty-license` build their parser in `build_parser()` like the other commands.
+- Developer reference → Impact: the groups on the left start folded, with Expand all / Collapse all; a search or the
+  unused filter opens the groups holding matches.
 
 ## 7.0.65 — unreleased
 

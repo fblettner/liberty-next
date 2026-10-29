@@ -8,7 +8,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import {
-  ArrowLeft, BarChart3, Bell, BookA, ChevronDown, ChevronRight, Compass, Database, ExternalLink, Globe, Hash,
+  ArrowLeft, BarChart3, Bell, BookA, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Compass, Database, ExternalLink, Globe, Hash,
   LayoutDashboard, LayoutGrid, List, ListOrdered, Menu, Plug, Search, Sparkles, Terminal, Workflow, Zap,
   type LucideIcon,
 } from 'lucide-react'
@@ -32,8 +32,6 @@ const KIND_TONE: Record<string, Tone> = {
   sequence: 'yellow', enum: 'yellow', screen: 'green', menu_item: 'neutral', chart: 'orange', dashboard: 'orange',
   action: 'purple', explorer_model: 'purple', job: 'red', notification_rule: 'orange', ai: 'purple',
 }
-// A group longer than this starts folded (the dictionary holds a thousand entries) unless a search is on
-const FOLD_OVER = 40
 
 type Ref = Pick<ImpactNode, 'kind' | 'name' | 'scope'>
 
@@ -146,13 +144,18 @@ export default function ImpactView() {
           <Search size={13} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('developer.impactSearch')} />
         </SideSearch>
-        <Filters>
+        <Filters style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <Checkbox checked={unusedOnly} onChange={setUnusedOnly}
             label={t('developer.impactUnusedOnly', { n: cat.entities.filter((e) => e.unused).length })} />
+          <span style={{ flex: 1 }} />
+          <Button type="button" $variant="ghost" $size="sm" title={t('developer.impactExpandAll')}
+            onClick={() => setOpen(Object.fromEntries(groups.map((g) => [g.kind, true])))}><ChevronsUpDown size={14} /></Button>
+          <Button type="button" $variant="ghost" $size="sm" title={t('developer.impactCollapseAll')}
+            onClick={() => setOpen({})}><ChevronsDownUp size={14} /></Button>
         </Filters>
         <SideList>
           {groups.map((g) => {
-            const folded = !searching && (open[g.kind] ?? g.entities.length <= FOLD_OVER) === false
+            const folded = !searching && !open[g.kind]
             return (
               <div key={g.kind}>
                 <SideCat>

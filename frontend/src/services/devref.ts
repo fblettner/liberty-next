@@ -1,6 +1,6 @@
 // The Developer page's data (C12): fetch + the filters, no React.
 import { api } from '../api/client'
-import type { ApiReference, ApiRoute, ConfigKey, ConfigReference, DataModel, DataTableRef, ImpactCatalogue, ImpactDetail, ImpactEntity, ImpactNode, ImpactReferrer } from '../types/devref'
+import type { ApiReference, ApiRoute, CliCommand, CliReference, CliScript, ConfigKey, ConfigReference, DataModel, DataTableRef, ImpactCatalogue, ImpactDetail, ImpactEntity, ImpactNode, ImpactReferrer } from '../types/devref'
 
 export const getConfigReference = () => api.get<ConfigReference>('/admin/dev/config')
 
@@ -232,4 +232,18 @@ export function referrerTree(nodes: ImpactReferrer[]): ReferrerBranch[] {
     else roots.push(b)
   })
   return roots
+}
+
+// ── Command line ─────────────────────────────────────────────────────────────────────────────
+
+export const getCliReference = () => api.get<CliReference>('/admin/dev/cli')
+
+/** Each script with its commands matching *q* (the script's name, a command's name, alias or help);
+ *  a script whose name matches keeps all its commands, a script with no match is left out. */
+export function filterCommands(scripts: CliScript[], q: string): { script: CliScript; commands: CliCommand[] }[] {
+  const n = q.trim().toLowerCase()
+  const hit = (c: CliCommand) => c.name.toLowerCase().includes(n) || c.aliases.some((a) => a.toLowerCase().includes(n)) || (c.help ?? '').toLowerCase().includes(n)
+  return scripts
+    .map((script) => ({ script, commands: !n || script.name.toLowerCase().includes(n) ? script.commands : script.commands.filter(hit) }))
+    .filter((g) => !n || g.script.name.toLowerCase().includes(n) || g.commands.length > 0)
 }

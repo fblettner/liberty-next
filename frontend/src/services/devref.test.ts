@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { apiGroups, CONFIG_LABELS, docBlocks, entityGroups, entityId, entityLabel, filterEntities, filterKeys, statusCounts, filterTables, tableGroups, filterRoutes, keyLabel, keyStatus, readerModules, referrerTree, sectionCounts } from './devref'
-import type { ApiRoute, ConfigKey, DataTableRef, ImpactEntity, ImpactReferrer } from '../types/devref'
+import { apiGroups, CONFIG_LABELS, docBlocks, entityGroups, filterCommands, entityId, entityLabel, filterEntities, filterKeys, statusCounts, filterTables, tableGroups, filterRoutes, keyLabel, keyStatus, readerModules, referrerTree, sectionCounts } from './devref'
+import type { ApiRoute, CliScript, ConfigKey, DataTableRef, ImpactEntity, ImpactReferrer } from '../types/devref'
 
 const k = (key: string, over: Partial<ConfigKey> = {}): ConfigKey => ({
   key, section: key.split('.')[0], name: key.split('.')[1], type: 'str', default: null, description: null,
@@ -130,5 +130,20 @@ describe('impact helpers', () => {
     expect(tree[0].children[0].node.name).toBe('m1')
     expect(tree[0].children[0].children[0].node.name).toBe('m2')
     expect(tree[1].children).toEqual([])
+  })
+})
+
+describe('filterCommands', () => {
+  const cmd = (name: string, help: string, aliases: string[] = []) => ({ name, aliases, help, description: null, usage: name, arguments: [] })
+  const script = (name: string, commands: ReturnType<typeof cmd>[]): CliScript =>
+    ({ name, entry: '', file: '', line: null, description: null, usage: name, options: [], commands })
+  const all = [script('liberty-admin', [cmd('init-db', 'create the tables'), cmd('create-user', 'add a user', ['adduser'])]), script('liberty-ops', [cmd('backup', 'dump the pools')])]
+
+  it('keeps every command without a search, the matches with one', () => {
+    expect(filterCommands(all, '').map((g) => g.commands.length)).toEqual([2, 1])
+    expect(filterCommands(all, 'user').map((g) => [g.script.name, g.commands.map((c) => c.name)])).toEqual([['liberty-admin', ['create-user']]])
+    expect(filterCommands(all, 'adduser')[0].commands[0].name).toBe('create-user')
+    expect(filterCommands(all, 'liberty-ops')[0].commands.map((c) => c.name)).toEqual(['backup'])
+    expect(filterCommands(all, 'dump')[0].script.name).toBe('liberty-ops')
   })
 })

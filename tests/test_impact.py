@@ -132,3 +132,10 @@ def test_short_reason_keeps_the_text_after_the_referrer() -> None:
     assert short_reason(("dictionary_entry", "nomajde", "MCU"), "entry nomajde.MCU rules=LOOKUP") == "rules=LOOKUP"
     assert short_reason(("job", None, "sync"), "job sync step F0004") == "step F0004"
     assert short_reason(("screen", "a", "s"), "something else") == "something else"
+
+
+def test_cli_route_is_superuser_only(env) -> None:
+    with _client(env) as client:
+        assert client.get("/admin/dev/cli", headers=_h(client, "reader")).status_code == 403
+        body = client.get("/admin/dev/cli", headers=_h(client, "admin")).json()
+        assert body["total"] >= 7 and body["commands"] == sum(len(s["commands"]) for s in body["scripts"])

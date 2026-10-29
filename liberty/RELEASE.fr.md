@@ -16,6 +16,14 @@
   que son connecteur ; un tableau de bord nommé `<app>.<id>` (comme les menus le nomment) se résout dans son
   application et non dans la première qui porte cet id (`overview` existe dans plusieurs) ; une règle de
   notification emporte l'écran ou les jobs que nomme son déclencheur.
+- Référence développeur → Ligne de commande : chaque commande installée avec le paquet, lue depuis ses points
+  d'entrée et son analyseur d'arguments — son rôle, son usage (à copier), les options de toutes les commandes, chaque
+  sous-commande avec ses arguments (valeur, défaut, choix, obligatoire, répétable) ; à gauche, les commandes avec une
+  recherche (`/admin/dev/cli`). La section ligne de commande du rapport technique en est tirée et liste désormais les
+  arguments de chaque commande. `liberty-crypto` et `liberty-license` construisent leur analyseur dans
+  `build_parser()` comme les autres commandes.
+- Référence développeur → Impact : les groupes de gauche démarrent repliés, avec Tout déplier / Tout replier ; une
+  recherche ou le filtre des inutilisées ouvre les groupes qui ont des résultats.
 
 ## 7.0.65 — non publiée
 

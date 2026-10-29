@@ -37,6 +37,13 @@ async def get_data_model(request: Request, _: Superuser) -> dict[str, Any]:
     return {"tables": tables, "total": len(tables)}
 
 
+@router.get("/cli", summary="Every console script: its sub-commands, arguments and options")
+async def get_cli_reference(_: Superuser) -> dict[str, Any]:
+    from liberty.devref import cli_reference
+    scripts = await asyncio.to_thread(cli_reference)
+    return {"scripts": scripts, "total": len(scripts), "commands": sum(len(s["commands"]) for s in scripts)}
+
+
 @router.get("/impact", summary="Every configuration entity with its references both ways")
 async def get_impact_catalogue(request: Request, _: Superuser) -> dict[str, Any]:
     from liberty.impact import catalogue

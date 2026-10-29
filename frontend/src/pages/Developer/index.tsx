@@ -1,6 +1,7 @@
 // Developer reference (C12) — what the running code is made of, as documentation (nothing is edited
 // here): Data model (the framework's and the connectors' tables), Configuration (every app.toml key),
-// API (every route and the access it requires), Impact (what uses what, the blast radius of a change) — read from
+// API (every route and the access it requires), Command line (every console script and its commands), Impact (what uses what, the blast radius
+// of a change) — read from
 // the running code, so they can't drift from it. Modelled on nomaubl's Developer reference page.
 import { lazy, Suspense, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -13,8 +14,9 @@ const ConfigView = lazy(() => import('./ConfigView'))
 const ApiView = lazy(() => import('./ApiView'))
 const DataView = lazy(() => import('./DataView'))
 const ImpactView = lazy(() => import('./ImpactView'))
+const CliView = lazy(() => import('./CliView'))
 const TAB_KEY = 'liberty.developer.tab'
-type Tab = 'config' | 'api' | 'data' | 'impact'
+type Tab = 'config' | 'api' | 'data' | 'impact' | 'cli'
 
 const Tabs = styled.div`display: inline-flex; gap: 2px; padding: 3px; border: 1px solid ${colors.border}; border-radius: ${radius.lg}; background: ${colors.bg.input};`
 const TabBtn = styled.button<{ $on: boolean }>`
@@ -25,20 +27,21 @@ const TabBtn = styled.button<{ $on: boolean }>`
 
 export default function DeveloperPage() {
   const { t } = useTranslation()
-  const [tab, setTab] = useState<Tab>(() => { try { const v = localStorage.getItem(TAB_KEY); return v === 'api' || v === 'data' || v === 'impact' ? v : 'config' } catch { return 'config' } })
+  const [tab, setTab] = useState<Tab>(() => { try { const v = localStorage.getItem(TAB_KEY); return v === 'api' || v === 'data' || v === 'impact' || v === 'cli' ? v : 'config' } catch { return 'config' } })
   const pick = (v: Tab) => { setTab(v); try { localStorage.setItem(TAB_KEY, v) } catch { /* ignore */ } }
   return (
     <PageLayout icon={<Code2 size={18} />} title={t('developer.title')}
-      description={tab === 'api' ? t('developer.apiIntro') : tab === 'data' ? t('developer.dataIntro') : tab === 'impact' ? t('developer.impactIntro') : t('developer.configIntro')}
+      description={tab === 'api' ? t('developer.apiIntro') : tab === 'data' ? t('developer.dataIntro') : tab === 'impact' ? t('developer.impactIntro') : tab === 'cli' ? t('developer.cliIntro') : t('developer.configIntro')}
       headerRight={(
         <Tabs role="tablist">
           <TabBtn type="button" role="tab" aria-selected={tab === 'data'} $on={tab === 'data'} onClick={() => pick('data')}>{t('developer.dataTitle')}</TabBtn>
           <TabBtn type="button" role="tab" aria-selected={tab === 'config'} $on={tab === 'config'} onClick={() => pick('config')}>{t('developer.configTitle')}</TabBtn>
           <TabBtn type="button" role="tab" aria-selected={tab === 'api'} $on={tab === 'api'} onClick={() => pick('api')}>{t('developer.apiTitle')}</TabBtn>
+          <TabBtn type="button" role="tab" aria-selected={tab === 'cli'} $on={tab === 'cli'} onClick={() => pick('cli')}>{t('developer.cliTitle')}</TabBtn>
           <TabBtn type="button" role="tab" aria-selected={tab === 'impact'} $on={tab === 'impact'} onClick={() => pick('impact')}>{t('developer.impactTitle')}</TabBtn>
         </Tabs>
       )}>
-      <Suspense fallback={<Centered />}>{tab === 'api' ? <ApiView /> : tab === 'data' ? <DataView /> : tab === 'impact' ? <ImpactView /> : <ConfigView />}</Suspense>
+      <Suspense fallback={<Centered />}>{tab === 'api' ? <ApiView /> : tab === 'data' ? <DataView /> : tab === 'impact' ? <ImpactView /> : tab === 'cli' ? <CliView /> : <ConfigView />}</Suspense>
     </PageLayout>
   )
 }

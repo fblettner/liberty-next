@@ -882,6 +882,8 @@ def _setup_app_logging(level: str, fmt: str = "text") -> None:
 
 
 def run() -> None:
+    """Serve Liberty Next (uvicorn): the host, port and log level of app.toml's ``[app]`` —
+    ``LIBERTY_APP_CONFIG`` names the file (default ``config/app.toml``). No arguments."""
     import uvicorn
 
     settings = load_settings()

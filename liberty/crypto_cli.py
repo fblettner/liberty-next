@@ -30,7 +30,7 @@ def _master_key(args: argparse.Namespace) -> str:
     return (load_settings(args.config) if args.config else load_settings()).crypto.master_key
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--master-key", help="override [crypto] master_key")
     common.add_argument("--config", help="path to app.toml (default: config/app.toml)")
@@ -39,7 +39,11 @@ def main(argv: list[str] | None = None) -> int:
     for name, help_ in [("encrypt", "encrypt a value → ENC:…"), ("decrypt", "decrypt an ENC:… value"), ("is-encrypted", "test for the ENC: marker")]:
         p = sub.add_parser(name, help=help_, parents=[common])
         p.add_argument("value", nargs="?", help="the value (read from stdin if omitted)")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
 
     value = _value(args)
     if args.command == "is-encrypted":

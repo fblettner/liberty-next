@@ -5,14 +5,13 @@ which come from the install's configuration."""
 
 from __future__ import annotations
 
-import importlib
 import importlib.metadata as md
 from collections import Counter, defaultdict
 from datetime import date
 from pathlib import Path
 from typing import Any
 
-from liberty.devref import api_reference, config_reference, data_model
+from liberty.devref import api_reference, cli_reference, config_reference, data_model
 from liberty.docreport.md import Lang, aside, code, first_sentence, table
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -178,40 +177,31 @@ def api(t: Lang, ctx: dict[str, Any]) -> str:
     return "\n".join(out)
 
 
-_CLI = (("liberty-next", "liberty.main", None), ("liberty-connectors", "liberty.cli", "build_parser"),
-        ("liberty-admin", "liberty.admin_cli", "build_parser"), ("liberty-migrate", "liberty.migrate_cli", "build_parser"),
-        ("liberty-crypto", "liberty.crypto_cli", None), ("liberty-license", "liberty.license_cli", None),
-        ("liberty-ops", "liberty.ops_cli", None))
-
-
-def _subcommands(module: Any, builder: str | None) -> list[tuple[str, str]]:
-    import argparse
-    parser = getattr(module, builder)() if builder and hasattr(module, builder) else None
-    if parser is None:
-        return []
-    out: list[tuple[str, str]] = []
-    for action in parser._actions:  # noqa: SLF001 — argparse keeps its sub-commands there
-        if isinstance(action, argparse._SubParsersAction):  # noqa: SLF001
-            helps = {a.dest: a.help or "" for a in action._choices_actions}  # noqa: SLF001
-            out += [(name, helps.get(name, "")) for name in action.choices]
-    return out
+def _arg_summary(args: list[dict[str, Any]]) -> str:
+    """``--admin-username ADMIN_USERNAME``, ``value`` … — a command's arguments on one line."""
+    parts = []
+    for a in args:
+        name = a["name"].split(", ")[-1] if not a["positional"] else a["name"]
+        txt = f"{name} {a['value']}" if a.get("value") else name
+        parts.append(code(txt if a["required"] else f"[{txt}]"))
+    return " ".join(parts) or "—"
 
 
 def cli(t: Lang, ctx: dict[str, Any]) -> str:
     out = [f"## 6. {t('Ligne de commande', 'Command line')}\n",
-           t("Les commandes installées avec le paquet ; chacune affiche son aide avec --help. Sous Docker, la commande unique ./liberty "
-             "(release/liberty) enveloppe l'installation, la mise à jour, les sauvegardes et la base de données.",
-             "The commands installed with the package; each prints its help with --help. Under Docker, the single ./liberty command "
-             "(release/liberty) wraps install, upgrade, backups and the database.") + "\n"]
-    for n, (name, mod_name, builder) in enumerate(_CLI, 1):
-        try:
-            module = importlib.import_module(mod_name)
-        except Exception:  # noqa: BLE001 — an optional extra missing must not break the report
-            continue
-        out.append(f"### 6.{n} {name}\n\n" + (first_sentence(module.__doc__, 400) or "") + "\n")
-        subs = _subcommands(module, builder)
-        if subs:
-            out.append(table((t("Commande", "Command"), t("Rôle", "Purpose")), [(code(s), h) for s, h in subs]))
+           t("Les commandes installées avec le paquet (ses points d'entrée), lues depuis leur analyseur d'arguments ; chacune "
+             "affiche son aide avec --help. Sous Docker, la commande unique ./liberty (release/liberty) enveloppe l'installation, "
+             "la mise à jour, les sauvegardes et la base de données.",
+             "The commands installed with the package (its entry points), read from their argument parser; each prints its help "
+             "with --help. Under Docker, the single ./liberty command (release/liberty) wraps install, upgrade, backups and the "
+             "database.") + "\n"]
+    for n, script in enumerate(cli_reference(), 1):
+        out.append(f"### 6.{n} {script['name']}\n\n" + (script["description"] or "") + "\n")
+        if script["options"]:
+            out.append(t("Options de toutes les commandes : ", "Options of every command: ") + _arg_summary(script["options"]) + "\n")
+        if script["commands"]:
+            out.append(table((t("Commande", "Command"), t("Rôle", "Purpose"), t("Arguments", "Arguments")),
+                             [(code(c["name"]), c["help"] or "", _arg_summary(c["arguments"])) for c in script["commands"]]))
     return "\n".join(out)
 
 

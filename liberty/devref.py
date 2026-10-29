@@ -604,3 +604,93 @@ def raw_config_explorer(state: Any) -> dict[str, Any]:
 def data_model(state: Any) -> list[dict[str, Any]]:
     """The framework's own tables (SQLAlchemy models) then each connector's declared tables."""
     return _framework_tables() + _connector_tables(state)
+
+
+# ── command line ──────────────────────────────────────────────────────────────────────────────
+
+def _first_paragraph(text: str | None) -> str | None:
+    para = " ".join((text or "").strip().split("\n\n")[0].split())
+    # a module docstring opens with its command's name: ``liberty-admin`` — manage …
+    para = re.sub(r"^``[\w-]+``\s*[—–-]+\s*", "", para)
+    return (para[:1].upper() + para[1:]) or None
+
+
+def _arguments(parser: Any) -> list[dict[str, Any]]:
+    """A parser's arguments and options as argparse holds them (help, value, default, choices)."""
+    import argparse
+    out: list[dict[str, Any]] = []
+    for a in parser._actions:  # noqa: SLF001 — argparse keeps them there
+        if isinstance(a, (argparse._HelpAction, argparse._SubParsersAction)) or a.help == argparse.SUPPRESS:  # noqa: SLF001
+            continue
+        takes_value = a.nargs != 0
+        default = a.default if a.default not in (None, argparse.SUPPRESS) and takes_value else None
+        out.append({
+            "name": ", ".join(a.option_strings) if a.option_strings else (a.metavar or a.dest),
+            "positional": not a.option_strings,
+            "value": (a.metavar or a.dest.upper()) if takes_value and a.option_strings else None,
+            "help": " ".join((a.help or "").split()) or None,
+            "default": default if isinstance(default, (str, int, float, bool)) else (str(default) if default is not None else None),
+            "required": bool(a.required) or (not a.option_strings and a.nargs not in ("?", "*")),
+            "choices": [str(c) for c in a.choices] if a.choices else [],
+            "repeat": a.nargs in ("*", "+") or isinstance(a, argparse._AppendAction),  # noqa: SLF001
+        })
+    return out
+
+
+def _commands(parser: Any, prog: str) -> list[dict[str, Any]]:
+    """The sub-commands of *parser* (nested ones flattened as ``parent child``), each with its usage."""
+    import argparse
+    out: list[dict[str, Any]] = []
+    for a in parser._actions:  # noqa: SLF001
+        if not isinstance(a, argparse._SubParsersAction):  # noqa: SLF001
+            continue
+        helps = {c.dest: c.help for c in a._choices_actions}  # noqa: SLF001
+        seen: dict[int, dict[str, Any]] = {}
+        for name, sp in a.choices.items():
+            if id(sp) in seen:                       # an alias of a command already listed
+                seen[id(sp)]["aliases"].append(name)
+                continue
+            cmd = {"name": name, "aliases": [], "help": " ".join((helps.get(name) or "").split()) or None,
+                   "description": _first_paragraph(sp.description) if sp.description != parser.description else None,
+                   "usage": " ".join(sp.format_usage().replace("usage:", "", 1).split()),
+                   "arguments": _arguments(sp)}
+            seen[id(sp)] = cmd
+            out.append(cmd)
+            for child in _commands(sp, f"{prog} {name}"):
+                out.append({**child, "name": f"{name} {child['name']}"})
+    return out
+
+
+def cli_reference() -> list[dict[str, Any]]:
+    """Every console script the package installs (its entry points, not a list kept by hand): the
+    module, what it does, its global options and each sub-command with its arguments."""
+    import inspect
+    from importlib import import_module, metadata
+    eps = [ep for ep in metadata.entry_points(group="console_scripts")
+           if ep.value.startswith("liberty.") and (ep.dist is None or ep.dist.name.lower().replace("_", "-") == "liberty-next")]
+    out: list[dict[str, Any]] = []
+    for ep in sorted({ep.name: ep for ep in eps}.values(), key=lambda e: e.name):
+        mod_name, _, func_name = ep.value.partition(":")
+        try:
+            module = import_module(mod_name)
+        except Exception:  # noqa: BLE001 — an optional extra missing must not hide the others
+            continue
+        builder = getattr(module, "build_parser", None)
+        parser = builder() if callable(builder) else None
+        func = getattr(module, func_name.strip(), None)
+        doc = _first_paragraph(parser.description if parser is not None else None) \
+            or _first_paragraph(inspect.getdoc(func) if func is not None and mod_name == "liberty.main" else module.__doc__)
+        target = builder if callable(builder) else func
+        try:
+            line = inspect.getsourcelines(target)[1] if target is not None else None
+        except (OSError, TypeError):
+            line = None
+        out.append({
+            "name": ep.name, "entry": ep.value, "file": f"liberty/{Path(module.__file__ or '').name}" if mod_name.count(".") == 1 else mod_name,
+            "line": line, "description": doc,
+            "usage": " ".join(parser.format_usage().replace("usage:", "", 1).split()) if parser is not None else ep.name,
+            "options": _arguments(parser) if parser is not None else [],
+            "commands": _commands(parser, ep.name) if parser is not None else [],
+        })
+    return out
+
