@@ -1048,6 +1048,8 @@ function StepCard({ step, index, count, sqlConnectors, onPatch, onMove, onDuplic
             <FieldLabel>{t('nomaflow.steps.name')}</FieldLabel>
             <Input value={step.name} onChange={(e) => onPatch({ name: e.target.value })} />
           </Field>
+          <Checkbox checked={!!step.continue_on_failure} label={t('nomaflow.steps.continueOnFailure')}
+            onChange={(c) => onPatch({ continue_on_failure: c || undefined })} />
           {step.type === 'sql_copy' && <SqlCopyForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
           {step.type === 'sql_query' && <SqlQueryForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
           {step.type === 'python' && <PythonForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}

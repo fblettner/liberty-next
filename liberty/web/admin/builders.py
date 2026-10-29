@@ -246,6 +246,14 @@ async def put_connectors_parsed(body: ConnectorsParsedBody, request: Request, _:
             body.connectors[name] = _encrypt_secret_fields(
                 raw, _API_CONNECTOR_PASSWORD_FIELDS, master_key, context=f"connector {name!r}",
             )
+            # each environment's server (per-pool targets) carries its own credentials
+            targets = body.connectors[name].get("targets")
+            if isinstance(targets, dict):
+                body.connectors[name]["targets"] = {
+                    pool: _encrypt_secret_fields(t, _API_CONNECTOR_PASSWORD_FIELDS, master_key,
+                                                 context=f"connector {name!r} target {pool!r}") if isinstance(t, dict) else t
+                    for pool, t in targets.items()
+                }
 
     # Build the new doc by tomllib-parsing the existing file (FAST — built-in C parser, O(n)),
     # taking its ``[pools.*]`` subtree verbatim, and pairing it with the validated connectors.

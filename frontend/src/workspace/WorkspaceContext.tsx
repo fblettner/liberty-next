@@ -20,7 +20,7 @@ import {
 } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { api, ApiError, setCurrentPool as setClientPool } from '../api/client'
+import { api, ApiError, setConnectorPools, setCurrentPool as setClientPool } from '../api/client'
 import type { ConnectorMeta } from '../types/connectors'
 import type { AppMenuTree, MenusByApp } from '../types/menus'
 import type { ScreenListItem, ScreensByApp, SharedAction } from '../types/screens'
@@ -281,6 +281,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // Push the resolved pool to the plain (non-React) api client so ``X-Liberty-Pool`` rides on
   // every request. Runs whenever the app or its pick changes.
   useEffect(() => { setClientPool(currentPool) }, [currentPool])
+  // …and every SQL connector's pools, for the environment a message names (``#POOL#``).
+  useEffect(() => {
+    const map: Record<string, { pool?: string | null; pools?: string[] }> = {}
+    for (const c of connectors ?? []) if (c.type === 'sql') map[c.name] = { pool: c.pool, pools: c.pools }
+    setConnectorPools(map)
+  }, [connectors])
 
   const focusApp = isLibertyApp(currentApp) ? lastApp : currentApp
 

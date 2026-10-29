@@ -19,6 +19,7 @@ from typing import Any
 
 from liberty.ai.tools import Tool, tool
 from liberty.connectors import APIConnector, ConnectorRegistry, SQLConnector, flatten_query_metas
+from liberty.connectors.api import current_pool
 from liberty.connectors.base import ConnectorError
 
 
@@ -54,7 +55,7 @@ def build_connector_tools(
             raise ConnectorError(f"{name!r} is not an API connector")
         if not _visible(name):
             raise ConnectorError(f"connector {name!r} is not available to the assistant")
-        return conn
+        return conn.for_pool(current_pool.get())   # the environment of the page the chat runs on
 
     def list_connectors() -> dict[str, Any]:
         """List the connectors available to you, with their queries / endpoints.

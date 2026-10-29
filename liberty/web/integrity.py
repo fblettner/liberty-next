@@ -374,6 +374,31 @@ def _check_homes(state: Any, idx: _Index, out: list[Issue]) -> None:
                              f"connector '{conn}' home → menu item '{home}' does not exist", _connector_deep_link(conn)))
 
 
+def _check_api_targets(state: Any, idx: _Index, out: list[Issue]) -> None:
+    """An API connector with per-pool ``targets`` (AIS per JDE environment): a pool of its
+    environments without a target is refused at call time, a target on an unknown pool never
+    serves. Both are errors — the call they concern won't work."""
+    connectors = getattr(state, "connectors", None)
+    if connectors is None:
+        return
+    pool_names = set(getattr(getattr(connectors, "pools", None), "names", lambda: [])() or [])
+    for name in connectors.names():
+        conn = connectors.get(name)
+        cfg = getattr(conn, "config", None)
+        targets = getattr(cfg, "targets", None)
+        if not targets:
+            continue
+        own = getattr(cfg, "pool", None)
+        for pool in sorted(set(getattr(conn, "governed_pools", ())) - set(targets) - {own}):
+            out.append(Issue("error", "Missing environment target",
+                             f"connector '{name}' has no target for pool '{pool}' — a call for that environment is refused",
+                             _connector_deep_link(name)))
+        if pool_names:
+            for pool in sorted(p for p in [own, *targets] if p and p not in pool_names):
+                out.append(Issue("error", "Missing pool",
+                                 f"connector '{name}' environment '{pool}' is not a defined pool", _connector_deep_link(name)))
+
+
 def _check_unused_connectors(state: Any, idx: _Index, out: list[Issue]) -> None:
     """A connector referenced by nothing AND with no menu of its own is dead weight."""
     referenced: set[str] = set(idx.menu_items_by_app.keys())  # apps with a menu count as "used"
@@ -528,6 +553,7 @@ def check_integrity(state: Any) -> list[Issue]:
     _check_dictionary(state, idx, out)
     _check_dashboards_charts(state, idx, out)
     _check_homes(state, idx, out)
+    _check_api_targets(state, idx, out)
     _check_unused_connectors(state, idx, out)
     _check_orphan_screens(state, idx, out)
     _check_unused_queries(state, idx, out)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fillUrlTemplate, safeUrl } from './urlTemplate'
+import { fillTextTemplate, fillUrlTemplate, safeUrl } from './urlTemplate'
 
 describe('urlTemplate', () => {
   const values: Record<string, unknown> = { AUUSER: 'JDE USER', '#LOGIN_USER#': 'admin', 'step.first_row.ID': 7, BASE: 'https://jde.example.com/jde' }
@@ -23,5 +23,13 @@ describe('urlTemplate', () => {
     expect(safeUrl('https://x.y/z')).toBe('https://x.y/z')
     expect(safeUrl('/screen/a/b')).toBe('/screen/a/b')
     for (const bad of ['javascript:alert(1)', 'data:text/html,x', '//evil.example', 'ftp://x', '']) expect(safeUrl(bad)).toBeNull()
+  })
+})
+
+describe('fillTextTemplate', () => {
+  it('fills a message as it is — nothing encoded, unknown → empty', () => {
+    const r = (n: string) => ({ 'INPUT.user': 'JDE USER', '#POOL#': 'jde_dev' } as Record<string, string>)[n]
+    expect(fillTextTemplate('Reset {INPUT.user} on #POOL#? {nope}', r)).toBe('Reset JDE USER on jde_dev? ')
+    expect(fillTextTemplate('No placeholder here.', r)).toBe('No placeholder here.')
   })
 })

@@ -979,6 +979,7 @@ const fr: Resources = {
       paramsHint: 'Fusionnés dans les op_kwargs de chaque étape python (l\'étape l\'emporte en cas de conflit). Pour les valeurs communes à toutes les étapes — apps_id, source_connector, target_connector, etc.',
     },
     steps: {
+      continueOnFailure: 'Si cette étape échoue, exécuter quand même les suivantes (l\'exécution finit en échec et la nomme)',
       reportWhat: 'Quoi rendre',
       reportKind: 'Source',
       reportAnalysis: 'Une analyse enregistrée (Explorateur)',
@@ -1503,9 +1504,25 @@ const fr: Resources = {
       tab: {
         connection: 'Connexion',
         authentication: 'Authentification',
+        environments: 'Environnements',
         endpoints: 'Points d\'accès',
         webhooks: 'Webhooks',
         test: 'Test',
+      },
+      env: {
+        intro: 'Un serveur par environnement : un appel suit l\'environnement choisi pour l\'écran (ou le pool d\'une étape de job) — personne ne choisit le serveur. Les points d\'accès sont partagés ; un serveur ne remplace que ce qui diffère (vide = la valeur de ce connecteur).',
+        ownSection: 'Le serveur de ce connecteur',
+        pool: 'Environnement (pool)',
+        poolNone: 'Aucun — un seul serveur pour tous les environnements',
+        poolRequired: 'Choisissez l\'environnement du serveur de ce connecteur : les serveurs des autres environnements en ont besoin.',
+        missing: 'Aucun serveur pour {{pools}} : un appel fait pour cet environnement est refusé (jamais envoyé à ce serveur). Ajoutez-le ci-dessous.',
+        targetsSection: 'Autres environnements',
+        empty: 'Aucun autre environnement : chaque appel va au serveur de ce connecteur.',
+        inherited: '(valeur du connecteur)',
+        add: 'Ajouter un environnement',
+        addPick: 'Choisir un pool…',
+        remove: 'Retirer l\'environnement',
+        confirmRemove: 'Retirer le serveur de {{pool}} ? Un appel fait pour cet environnement sera refusé.',
       },
       app: {
         section: 'Application',

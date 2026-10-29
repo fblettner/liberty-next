@@ -30,6 +30,11 @@ class EndpointNotFoundError(ConnectorError):
     """Raised when a named endpoint does not exist on an API connector."""
 
 
+class ApiTargetMissingError(ConnectorError):
+    """Raised when an API connector with per-pool ``targets`` is called for one of its
+    environments' pools that has no target — refused rather than sent to the default server."""
+
+
 class StatementNotAllowedError(ConnectorError):
     """Raised when a query's leading keyword is outside the allow-list."""
 

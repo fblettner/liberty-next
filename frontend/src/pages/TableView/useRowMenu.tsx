@@ -37,13 +37,14 @@ const RowMenuErr = styled.div`
 `
 
 export function useRowMenu({
-  screen, connector, editMode, requestPrompt, sharedActions, drillInlineDefault, navigate, onCurrentRow, onSaved, onDrill,
+  screen, connector, editMode, requestPrompt, confirmStep, sharedActions, drillInlineDefault, navigate, onCurrentRow, onSaved, onDrill,
 }: {
   screen?: ScreenDetail | null
   connector: string
   /** The grid's batch edit: no row menu while it is on. */
   editMode: boolean
   requestPrompt: ActionRunnerDeps['requestPrompt']
+  confirmStep: ActionRunnerDeps['confirm']
   sharedActions: ActionRunnerDeps['sharedActions'] | null
   /** The app's default for a drill whose action does not say (`[app] drill_inline`). */
   drillInlineDefault: boolean
@@ -90,6 +91,7 @@ export function useRowMenu({
     const result = await runChain([a], {}, ctx, {
       defaultConnector: connector,
       requestPrompt,
+      confirm: confirmStep,
       sharedActions: sharedActions ?? undefined,
       navigate: (to, conn, params, screen, inline) => {
         if ((inline ?? drillInlineDefault) && onDrill) {
@@ -123,7 +125,7 @@ export function useRowMenu({
     if (result.warnings.length > 0) {
       console.info('row-menu warnings:', result.warnings)
     }
-  }, [connector, onSaved, closeMenu, navigate, requestPrompt, sharedActions, onDrill, drillInlineDefault])
+  }, [connector, onSaved, closeMenu, navigate, requestPrompt, confirmStep, sharedActions, onDrill, drillInlineDefault])
   // The row's action handle (the grid's leading cell): a single navigate action fires at once —
   // a drill — the handle showing the action's label; several actions open the row menu.
   const rowMenuHandle = useMemo(() => {

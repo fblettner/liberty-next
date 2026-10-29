@@ -21,6 +21,15 @@ export function fillUrlTemplate(template: string, resolve: (name: string) => unk
   return noAddress ? '' : out
 }
 
+/** A message (``confirm`` / ``notify``) filled from the same placeholders — the values as they are,
+ *  nothing encoded; an unknown one is left empty. */
+export function fillTextTemplate(template: string, resolve: (name: string) => unknown): string {
+  return template.replace(PLACEHOLDER, (_m, field: string | undefined, builtin: string | undefined) => {
+    const v = resolve(field ?? `#${builtin}#`)
+    return v === null || v === undefined ? '' : String(v)
+  })
+}
+
 /** The URL when it may be opened — an absolute http(s) address or a path of this server — else
  *  null (``javascript:``, ``data:``, a protocol-relative ``//host`` …). */
 export function safeUrl(url: string): string | null {

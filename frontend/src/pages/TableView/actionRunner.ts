@@ -17,8 +17,8 @@
 //
 // Slice B does *not* tackle: navigate (URL push from the runner), set_field side-effects,
 // confirm modals from inside the runner (the dialog injects its own confirm provider).
-import { api, ApiError } from '../../api/client'
-import { fillUrlTemplate, safeUrl } from '../../services/urlTemplate'
+import { api, ApiError, environmentOf } from '../../api/client'
+import { fillTextTemplate, fillUrlTemplate, safeUrl } from '../../services/urlTemplate'
 import type { Action, Condition, ParamBind, PromptField, SharedAction } from '../../types/screens'
 
 export type Row = Record<string, unknown>
@@ -200,6 +200,11 @@ function resolveBuiltin(key: string): string | undefined {
   if (k === 'LANGUAGE' || k === 'LANG') {
     return authProvider.language ?? undefined
   }
+  // The environment picked in the menu. A confirm / notify message names the environment of the
+  // screen's connector instead (``messageSource``): the pick when that connector has it, else its pool.
+  if (k === 'POOL' || k === 'ENVIRONMENT') {
+    return environmentOf(null) ?? undefined
+  }
   // An install's named address (``[app] external_urls``): ``#URL.JDE_WEB#``.
   if (k.startsWith('URL.')) {
     return authProvider.urls?.[k.slice(4)] ?? undefined
@@ -228,6 +233,15 @@ export function resolveAutoFill(source: string): string | undefined {
   return v == null || v === '' ? undefined : v
 }
 
+/** A confirm / notify message's placeholder: ``#POOL#`` is the environment the screen's connector
+ *  runs on — the menu's pick when it has that pool, else its own (an AIS call follows the same) —,
+ *  the rest as any source. */
+function messageSource(name: string, ctx: ChainCtx, formCtx: Row, connector: string): unknown {
+  const k = name.toUpperCase()
+  if (k === '#POOL#' || k === '#ENVIRONMENT#') return environmentOf(connector) ?? undefined
+  return resolveSource(name, ctx, formCtx)
+}
+
 /** Catalog of built-in source paths surfaced as autocomplete options in the ParamBind editor.
  *  The runtime resolver above is the source of truth — keep them in sync. Labels are i18n-able
  *  *only* at the caller (the editor is the single consumer); the runtime never reads these. */
@@ -235,6 +249,7 @@ export const BUILTIN_SOURCE_PATHS: ReadonlyArray<{ value: string; label: string 
   { value: '#LOGIN_USER#',  label: 'Connected user (username)' },
   { value: '#LOGIN_EMAIL#', label: 'Connected user (email)' },
   { value: '#LANGUAGE#',    label: 'Current language (en / fr / …)' },
+  { value: '#POOL#',        label: 'Current environment (pool)' },
   { value: '#SYSDATE#',     label: 'Today (YYYY-MM-DD)' },
   { value: '#NOW#',         label: 'Now (ISO timestamp)' },
   { value: '#CURRENT_TIME#', label: 'Current time (HH:MM:SS)' },
@@ -587,7 +602,7 @@ async function runOneAction(
         break
       }
       case 'notify': {
-        result.warnings.push(a.message)
+        result.warnings.push(fillTextTemplate(a.message, (name) => messageSource(name, ctx, formCtx, deps.defaultConnector)))
         break
       }
       case 'send_notification': {
@@ -607,7 +622,8 @@ async function runOneAction(
       }
       case 'confirm': {
         if (deps.confirm) {
-          const ok = await deps.confirm(a.message, { confirmLabel: a.confirm_label ?? undefined, cancelLabel: a.cancel_label ?? undefined })
+          // ``{FIELD}`` / ``{INPUT.x}`` / ``#POOL#`` … in the message: "Reset the password of {INPUT.user} on #POOL#?"
+          const ok = await deps.confirm(fillTextTemplate(a.message, (name) => messageSource(name, ctx, formCtx, deps.defaultConnector)), { confirmLabel: a.confirm_label ?? undefined, cancelLabel: a.cancel_label ?? undefined })
           if (!ok) { result.cancelled = true; return { abort: true } }
         } else {
           // No confirm provider configured — treat as a notify warning so the operator notices

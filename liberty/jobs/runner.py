@@ -21,6 +21,7 @@ without Socket.IO and without ``asyncio.sleep``-ing through real backoffs.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import random
@@ -30,6 +31,7 @@ from typing import Any, Awaitable, Callable, Mapping, Protocol, runtime_checkabl
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from liberty.connectors.api import current_pool
 from liberty.jobs.db import JobDatabase
 from liberty.jobs.models import JobRun, RunLog, RunOverrides, RunState, StepRun, StepRunExtras
 from liberty.jobs.runlog import (
@@ -314,6 +316,8 @@ class JobRunner:
         # When a step fails, the last error string lands here for _finalize to
         # write to JobRun.error_message. Empty string stays empty for success.
         failed_step_error: str | None = None
+        # Steps that failed with ``continue_on_failure`` — the run goes on, then ends FAILED.
+        failed_steps: list[str] = []
 
         try:
             for idx, step in enumerate(job.steps):
@@ -356,6 +360,13 @@ class JobRunner:
                 else:
                     effective_step = step
                 step_result = await self._run_step_with_retry(run, idx, effective_step, job.retry, ctx)
+                if isinstance(step_result, str) and step.continue_on_failure:
+                    # Recorded FAILED already; the job goes on and ends FAILED naming it.
+                    _log.warning("nomaflow.runner step=%s FAILED — continuing (continue_on_failure): %s",
+                                 step.name, step_result)
+                    failed_steps.append(f"{step.name}: {step_result}")
+                    ctx.prev_rows_affected = None
+                    continue
                 if isinstance(step_result, str):
                     # Step failed after all retries (string is the last error).
                     # Stash on the run + mark remaining steps SKIPPED.
@@ -395,6 +406,10 @@ class JobRunner:
             for ns, prev_level in saved_log_levels.items():
                 logging.getLogger(ns).setLevel(prev_level)
 
+        if failed_steps and terminal == RunState.SUCCEEDED:
+            terminal = RunState.FAILED
+            failed_step_error = (f"{len(failed_steps)} step(s) failed, the others ran — "
+                                 + "; ".join(failed_steps))
         await self._finalize(run, terminal, total_rows=total_rows, error=failed_step_error)
         _log.info(
             "nomaflow.runner job=%s run=%s steps=%d state=%s",
@@ -590,9 +605,14 @@ class JobRunner:
                 await self._record_step_failure(step_run.id, error=err)
                 return err
 
+            # The step runs in its own task whose context carries the step's environment: an API
+            # connector with per-pool targets (AIS per JDE environment) called from the step — a
+            # python step's plugin, say — reaches that pool's server (no pool → the default one).
+            step_context = contextvars.copy_context()
+            step_context.run(current_pool.set, step.pool)
             try:
                 result = await asyncio.wait_for(
-                    executor.execute(step, ctx),
+                    asyncio.get_running_loop().create_task(executor.execute(step, ctx), context=step_context),
                     timeout=step.timeout_seconds,
                 )
             except asyncio.TimeoutError:

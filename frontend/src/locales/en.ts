@@ -977,6 +977,7 @@ const en = {
       paramsHint: 'Merged under every python step\'s op_kwargs (step wins on conflict). Use for values shared across all steps — apps_id, source_connector, target_connector, etc.',
     },
     steps: {
+      continueOnFailure: 'If this step fails, run the next steps anyway (the run ends failed, naming it)',
       reportWhat: 'What to render',
       reportKind: 'Source',
       reportAnalysis: 'A saved analysis (Explorer)',
@@ -1505,9 +1506,25 @@ const en = {
       tab: {
         connection: 'Connection',
         authentication: 'Authentication',
+        environments: 'Environments',
         endpoints: 'Endpoints',
         webhooks: 'Webhooks',
         test: 'Test',
+      },
+      env: {
+        intro: 'One server per environment: a call follows the environment picked for the screen (or a job step\'s pool) — nobody chooses the server. The endpoints are shared; a server only overrides what differs (blank = this connector\'s value).',
+        ownSection: 'This connector\'s server',
+        pool: 'Environment (pool)',
+        poolNone: 'None — one server for every environment',
+        poolRequired: 'Pick the environment of this connector\'s server: the other environments\' servers need it.',
+        missing: 'No server for {{pools}}: a call made for that environment is refused (never sent to this server). Add it below.',
+        targetsSection: 'Other environments',
+        empty: 'No other environment: every call goes to this connector\'s server.',
+        inherited: '(this connector\'s value)',
+        add: 'Add an environment',
+        addPick: 'Pick a pool…',
+        remove: 'Remove the environment',
+        confirmRemove: 'Remove the server of {{pool}}? A call made for that environment will be refused.',
       },
       app: {
         section: 'App',

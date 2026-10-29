@@ -80,6 +80,9 @@ export interface StepConfig {
    *  conditionally-relevant steps, OR per-fire via the Run-with-parameters
    *  modal's toggle. */
   enabled?: boolean
+  /** A failure of this step (after its retries) doesn't stop the job: the next steps run, the run
+   *  ends FAILED naming it. For jobs chaining independent work. Default false. */
+  continue_on_failure?: boolean
   [field: string]: unknown
 }
 

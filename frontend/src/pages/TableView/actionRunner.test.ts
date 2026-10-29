@@ -112,3 +112,40 @@ describe('open_url', () => {
     expect(opened).toHaveLength(1)
   })
 })
+
+describe('confirm names the environment', () => {
+  it('fills the message: the call_action\'s input, #POOL# = the environment the screen runs on', async () => {
+    const { runChain } = await import('./actionRunner')
+    const { setConnectorPools, setCurrentPool } = await import('../../api/client')
+    const asked: string[] = []
+    const deps = {
+      defaultConnector: 'jde',
+      requestPrompt: async () => ({}),
+      confirm: async (m: string) => { asked.push(m); return false },
+      sharedActions: {
+        reset_password: {
+          params: [{ name: 'user' }],
+          steps: [{ id: 'ask', type: 'confirm', message: 'Reset the password of {INPUT.user} on #POOL#?' }],
+        },
+      },
+    } as unknown as Parameters<typeof runChain>[3]
+    const actions = [{ id: 'reset', type: 'call_action', ref: 'reset_password', param_binds: [{ param: 'user', source: 'ULUSER' }] }] as unknown as Parameters<typeof runChain>[0]
+    try {
+      setConnectorPools({ jde: { pool: 'jde_prod', pools: ['jde_dev', 'jde_prod'] }, other: { pool: 'other', pools: ['other'] } })
+      setCurrentPool('jde_dev')                     // picked in the menu, and the screen's connector has it
+      const r = await runChain(actions, {}, { ULUSER: 'LYTEST01' }, deps)
+      setCurrentPool(null)                          // nothing picked → the connector's own pool
+      await runChain(actions, {}, { ULUSER: 'LYTEST01' }, deps)
+      setCurrentPool('other')                       // a pool the screen's connector doesn't have → its own
+      await runChain(actions, {}, { ULUSER: 'LYTEST01' }, deps)
+      expect(asked).toEqual([
+        'Reset the password of LYTEST01 on jde_dev?',
+        'Reset the password of LYTEST01 on jde_prod?',
+        'Reset the password of LYTEST01 on jde_prod?',
+      ])
+      expect(r.cancelled).toBe(true)
+    } finally {
+      setCurrentPool(null); setConnectorPools({})
+    }
+  })
+})

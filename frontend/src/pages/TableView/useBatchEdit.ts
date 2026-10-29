@@ -13,7 +13,7 @@ import { runChain, type ActionRunnerDeps } from './actionRunner'
 import type { DataRow } from './resultColumns'
 
 export function useBatchEdit({
-  result, screen, connector, updateQuery, insertQuery, deleteQuery, addSeed, requestPrompt, sharedActions, onSaved,
+  result, screen, connector, updateQuery, insertQuery, deleteQuery, addSeed, requestPrompt, confirmStep, sharedActions, onSaved,
 }: {
   result: QueryResult
   screen?: ScreenDetail | null
@@ -24,6 +24,7 @@ export function useBatchEdit({
   /** The values a blank "+ Add row" starts with. */
   addSeed?: Record<string, unknown>
   requestPrompt: ActionRunnerDeps['requestPrompt']
+  confirmStep: ActionRunnerDeps['confirm']
   sharedActions: ActionRunnerDeps['sharedActions'] | null
   onSaved?: () => void
 }) {
@@ -213,6 +214,7 @@ export function useBatchEdit({
       const result = await runChain(actions, {}, ctx, {
         defaultConnector: connector,
         requestPrompt,   // batch-save hooks rarely prompt, but a migrated chain might carry one
+        confirm: confirmStep,
         sharedActions: sharedActions ?? undefined,
         changeContext,
       })
@@ -253,7 +255,7 @@ export function useBatchEdit({
     setSaving(false)
     if (hookErrs.length) setSaveErrors([...new Set(hookErrs)])
     else { resetEdit(); onSaved?.() }
-  }, [connector, dirtyRows, newRows, deleted, updateQuery, insertQuery, deleteQuery, onSaved, resetEdit, t, screen, sharedActions])
+  }, [connector, dirtyRows, newRows, deleted, updateQuery, insertQuery, deleteQuery, onSaved, resetEdit, t, screen, sharedActions, confirmStep])
 
   return {
     editMode, setEditMode, dirtyRows, setDirtyRows, newRows, deleted, selected, setSelected,

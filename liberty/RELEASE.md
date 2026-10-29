@@ -1,5 +1,29 @@
 # Liberty Next — Release notes
 
+## 7.0.68 — unreleased
+
+- nomaflow: a step can let the job go on when it fails — `continue_on_failure = true` (on the step, or for every step
+  with the job's `step_defaults`; a checkbox in the step editor). After its retries the step is recorded failed, the
+  next steps run, and the run ends failed with "N step(s) failed, the others ran — <step>: <error>". For a job that
+  chains independent work, where one part failing must not skip the others. Default unchanged: a failed step stops
+  the job.
+- API connectors: one server per environment. With several JDE environments on one SQL connector (`pools`), its AIS
+  calls go to the AIS of the environment on screen — `pool` names the environment of the connector's own server,
+  `targets` gives the other environments' servers (URL, user, password, token, TLS check; the endpoints stay shared).
+  Nobody picks the server: it follows the environment chosen in the menu, a job step's `pool` (any step type now), and
+  covers actions (`call_api`), plugins (`nomajde/ais.py`), `/api/http` and the assistant. A call for an environment
+  of those connectors with no server is refused ("no target for pool …"), never sent to the default one (often
+  production). Settings → Connectors → Environments edits them (passwords encrypted on save) and flags an environment
+  without a server; so does Settings → Integrity. The apps installer keeps an install's `pool` / `targets` like its
+  pools, and still brings the vendor's new endpoints in.
+- Actions: a `confirm` step asks again. No screen passed the question dialog to the action runner (the form, the row
+  menu, the toolbar, bulk edit), so a `confirm` only logged a warning and the chain went on without asking — nomademo's
+  "Close this period?" / "Reopen this period?" among them.
+- Actions: a `confirm` or `notify` message is filled like an `open_url` template — `{FIELD}`, `{INPUT.x}`, a chain
+  path, the built-ins — and `#POOL#` names the environment the screen runs on: the pool picked in the menu when the
+  screen's connector has it, else that connector's own pool — the one its AIS calls go to. "Reset the password of
+  {ULUSER} on #POOL#?". (`/api/connectors` gives each SQL connector's default pool name along with its pool names.)
+
 ## 7.0.67 — unreleased
 
 - Record form: a date-time field (format `datetime` / `timestamp`) edits its day and its time — the date picker and a

@@ -11,6 +11,7 @@ from fastapi import HTTPException, status
 
 from liberty.auth.scope import ScopeDeniedError
 from liberty.connectors.base import (
+    ApiTargetMissingError,
     ConnectorError,
     EndpointNotFoundError,
     QueryNotFoundError,
@@ -71,6 +72,6 @@ def http_for_connector_error(exc: ConnectorError) -> HTTPException:
         return HTTPException(status.HTTP_403_FORBIDDEN, detail=str(exc))
     if isinstance(exc, _UNPROCESSABLE):
         return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
-    if isinstance(exc, UnknownPoolError):  # pool not defined / empty URL → service misconfigured
+    if isinstance(exc, (UnknownPoolError, ApiTargetMissingError)):  # pool not defined / empty URL / no server for the environment → misconfigured
         return HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
     return HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc))

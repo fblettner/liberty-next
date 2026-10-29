@@ -24,6 +24,7 @@ from liberty.auth.oidc import OIDCClient
 from liberty.auth.principal import Principal
 from liberty.auth.scope import current_scope, current_username
 from liberty.auth.tokens import ACCESS, TokenError, TokenService
+from liberty.connectors.api import current_pool
 
 _bearer = HTTPBearer(auto_error=False, description="Liberty access token")
 _BearerDep = Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)]
@@ -77,7 +78,7 @@ def _principal_from_credentials(
 
 
 async def get_current_principal(
-    creds: _BearerDep, tokens: Annotated[TokenService, Depends(get_token_service)]
+    request: Request, creds: _BearerDep, tokens: Annotated[TokenService, Depends(get_token_service)]
 ) -> Principal:
     principal = _principal_from_credentials(creds, tokens)
     if principal is None:
@@ -88,6 +89,9 @@ async def get_current_principal(
     # scope is passed; a background job has no request and stays unrestricted.
     current_scope.set(principal.data_scope)
     current_username.set(principal.username)
+    # The environment picked for the screen (the app switcher's pool) — an API connector with
+    # per-pool targets (AIS per JDE environment) calls that environment's server.
+    current_pool.set((request.headers.get("x-liberty-pool") or "").strip() or None)
     return principal
 
 

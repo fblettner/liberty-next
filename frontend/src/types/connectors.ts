@@ -61,6 +61,8 @@ export interface SqlConnectorMeta {
    *  config — identifiers only, never URLs/credentials. Length > 1 ⇒ the app switcher offers a
    *  pool picker; a chosen pool rides on `X-Liberty-Pool` for this connector's queries. */
   pools?: string[]
+  /** The default pool (the first of ``pools``' environments when none is picked). */
+  pool?: string
   /** Every runnable query, flat — table CRUD slots (synthesised `<base>_<crud>` names), custom
    *  queries, sequences and lookups. The historical shape; TableView + pickers read this. */
   queries: SqlQueryMeta[]

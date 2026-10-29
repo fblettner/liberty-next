@@ -536,3 +536,7 @@ def test_x_liberty_pool_rebinds_a_multi_pool_connector(env) -> None:
         assert alt.json()["rows"][0]["n"] == 1
         nope = client.get("/api/sql/foo/markers_get", headers={**h, "X-Liberty-Pool": "nope"})
         assert nope.status_code == 200 and nope.json()["rows"][0]["n"] == 0
+        # the connector list names its pools and the default one (the environment a screen on it runs on
+        # when none is picked — what a confirm message's #POOL# names)
+        foo = next(c for c in client.get("/api/connectors", headers=h).json()["connectors"] if c["name"] == "foo")
+        assert "alt" in foo["pools"] and foo["pool"] not in (None, "alt")

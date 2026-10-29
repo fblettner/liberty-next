@@ -226,6 +226,24 @@ def test_connectors_blanked_secret_restored_on_refresh() -> None:
     assert rep.secrets_restored == 2
 
 
+
+def test_api_environment_binding_is_the_installs() -> None:
+    """`pool` + `targets` (one AIS per JDE environment) are set by the install: an upgrade keeps them,
+    still brings the vendor's new endpoints, and --force-config doesn't drop them either."""
+    targets = {"jde_dev": {"base_url": "https://ais-dev/jderest", "auth_password": "ENC:dev"}}
+    live = json.loads(json.dumps(C_LIVE))
+    live["connectors"]["ais"].update(pool="jde", targets=targets)
+    wheel = json.loads(json.dumps(C_WHEEL))
+    wheel["connectors"]["ais"]["timeout"] = 30
+    for force in (False, True):
+        merged, rep = merge_file("connectors.toml", wheel, live, C_PREV, force_vendor=force)
+        ais = merged["connectors"]["ais"]
+        assert "connector: ais" in rep.refreshed and ais["timeout"] == 30           # untouched otherwise → refreshed
+        assert ais["pool"] == "jde" and ais["targets"] == targets
+        assert ais["auth_password"] == "ENC:api"
+    merged, rep = merge_file("connectors.toml", C_WHEEL, live, C_PREV)
+    assert "connector: ais" not in rep.kept_modified and merged["connectors"]["ais"]["targets"] == targets
+
 # ── menus: header + items by id, order kept, new appended ────────────────────────────────────
 M_PREV = _toml("""
 [menus.app]

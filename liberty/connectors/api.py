@@ -12,7 +12,10 @@ by Python's ``json`` module. Features:
 * response extraction by dot-path (``data.0.id`` indexes list element 0) for a
   single ``response_field`` and/or a named ``response_map``;
 * ``multipart/form-data`` bodies via a line-based parts list (``name=value`` for
-  text parts, ``name=@/path;filename=X;contentType=Y`` to stream a file).
+  text parts, ``name=@/path;filename=X;contentType=Y`` to stream a file);
+* one server per environment: ``targets`` keyed by SQL pool name, picked by
+  :meth:`APIConnector.for_pool` from the pool the request (``X-Liberty-Pool``) or the
+  job step runs for — :data:`current_pool`.
 """
 
 from __future__ import annotations
@@ -20,17 +23,24 @@ from __future__ import annotations
 import base64
 import logging
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import httpx
 
-from liberty.connectors.base import EndpointNotFoundError
-from liberty.connectors.config import ApiConnectorConfig, EndpointDef
+from liberty.connectors.base import ApiTargetMissingError, EndpointNotFoundError
+from liberty.connectors.config import ApiConnectorConfig, ApiTargetConfig, EndpointDef
 from liberty.crypto import decrypt_or_keep
 
 _log = logging.getLogger("liberty.connectors")
+
+# The SQL pool (environment) this request / job step runs for: the ``X-Liberty-Pool`` header,
+# set by the auth dependency, or a job step's ``pool``, set by the runner. ConnectorRegistry.api()
+# hands out the matching target of an API connector — so an action, a plugin or a step calling
+# AIS reaches the environment whose data is on screen without naming it.
+current_pool: ContextVar[str | None] = ContextVar("liberty_current_pool", default=None)
 
 
 @dataclass(slots=True)
@@ -122,6 +132,39 @@ class APIConnector:
         self.auth_username = self._maybe_decrypt(config.auth_username or "", master_key, "auth_username")
         self.auth_password = self._maybe_decrypt(config.auth_password or "", master_key, "auth_password")
         self.auth_token = self._maybe_decrypt(config.auth_token or "", master_key, "auth_token")
+        # Per-environment servers: one connector each (its own client and token), same endpoints.
+        # ``governed_pools`` = the pools a call is refused for when they have no target — the
+        # registry widens it to the pools of the SQL connectors running on ``config.pool``.
+        self.target_pool: str | None = config.pool
+        self._targets: dict[str, APIConnector] = {
+            pool: APIConnector._for_target(name, config, pool, target, client=client, master_key=master_key)
+            for pool, target in config.targets.items()
+        }
+        self.governed_pools: frozenset[str] = frozenset([*config.targets, *([config.pool] if config.pool else [])])
+
+    @staticmethod
+    def _for_target(name: str, config: ApiConnectorConfig, pool: str, target: ApiTargetConfig, *,
+                    client: httpx.AsyncClient | None, master_key: str) -> APIConnector:
+        overrides = {k: v for k, v in target.model_dump().items() if v not in (None, "")}
+        return APIConnector(name, config.model_copy(update={**overrides, "pool": pool, "targets": {}}),
+                            client=client, master_key=master_key)
+
+    def for_pool(self, pool: str | None) -> APIConnector:
+        """The connector to call for *pool*: itself without targets, for no pool, for its own
+        pool or a pool outside its environments; the pool's target when it has one. A pool of its
+        environments without a target raises :class:`ApiTargetMissingError` — never the default
+        server, which would be another environment (often production)."""
+        if not self._targets or not pool or pool == self.config.pool:
+            return self
+        target = self._targets.get(pool)
+        if target is not None:
+            return target
+        if pool in self.governed_pools:
+            raise ApiTargetMissingError(
+                f"API connector {self.name!r} has no target for pool {pool!r} — add one under "
+                f"[connectors.{self.name}.targets.{pool}] (its server is not {self.config.pool!r}'s)."
+            )
+        return self
 
     def _maybe_decrypt(self, value: str, master_key: str, field_name: str) -> str:
         plain, err = decrypt_or_keep(value, master_key)
@@ -130,6 +173,8 @@ class APIConnector:
         return plain
 
     async def aclose(self) -> None:
+        for target in self._targets.values():
+            await target.aclose()
         if self._owns_client:
             await self._client.aclose()
 

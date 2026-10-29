@@ -4,6 +4,8 @@
 //   * **Connection** — base URL, timeout, SSL verify, default headers.
 //   * **Authentication** — method picker + only the fields that method actually uses (OAuth2's
 //     token endpoint section appears only when method is OAuth2 / JWT, etc.).
+//   * **Environments** — the pool this server serves + one server per other pool (AIS per JDE
+//     environment; ApiEnvironmentsTab).
 //   * **Endpoints** — collapsible list, one editor per endpoint (method / path / headers /
 //     body / query params / response field / response mappings / parameters table).
 //   * **Webhooks** — placeholder for the inbound-webhook slice (Phase 9 follow-up).
@@ -28,6 +30,9 @@ import {
   Banner, Button, Checkbox, FrameworkEnumsContext, Input, Row, SearchSelect, Stack, useModals,
 } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { EndpointBody, EndpointCard, EndpointHead, FieldRow, Hint, SectionHead } from './apiEditorAtoms'
+import ApiEnvironmentsTab from './ApiEnvironmentsTab'
+import type { ApiTarget, SqlPools } from '../../services/apiTargets'
 
 // ── shape of a parsed [connectors.<name>] dict for type=api ────────────────────────────────
 //
@@ -72,6 +77,9 @@ export type ApiConnector = {
   auth_token_headers?: Record<string, string>
   auth_token_ttl?: number                                   // seconds (Pydantic side)
   endpoints?: Endpoint[]
+  /** The pool (environment) this server serves; ``targets`` = one server per other pool. */
+  pool?: string | null
+  targets?: Record<string, ApiTarget>
 }
 
 interface ApiConnectorEditorProps {
@@ -82,6 +90,8 @@ interface ApiConnectorEditorProps {
    *  the workspace can't render anything when it's picked, so the runtime filters it out. The
    *  editor uses this to flag the misleading "enabled but invisible" state. */
   hasMenu?: boolean
+  /** Every SQL connector's pools — the Environments tab lists the environments without a server. */
+  sqlConnectors?: SqlPools[]
   onChange: (next: ApiConnector) => void
 }
 
@@ -98,18 +108,6 @@ const TabBtn = styled.button<{ $active?: boolean }>`
   margin-bottom: -1px;
   &:hover { color: ${colors.blue.main}; }
 `
-const SectionHead = styled.div`
-  color: ${colors.text.muted}; font-size: ${fontSize.micro}; letter-spacing: 0.5px;
-  text-transform: uppercase; padding: 14px 0 8px; border-bottom: 1px solid ${colors.border};
-  margin-bottom: 12px;
-`
-const Hint = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.micro}; padding: 4px 2px;`
-// One field row: label on the left (fixed width), control on the right.
-const FieldRow = styled.div`
-  display: grid; grid-template-columns: 160px 1fr; align-items: center; gap: 12px;
-  padding: 6px 0;
-  & > label { color: ${colors.text.primary}; font-size: ${fontSize.sm}; }
-`
 // A wider control area used for textareas — drops the label-aligned center for top-align.
 const FieldRowTop = styled(FieldRow)`align-items: start; & > label { padding-top: 8px; }`
 const Textarea = styled.textarea`
@@ -118,25 +116,6 @@ const Textarea = styled.textarea`
   font-family: ${fonts.mono}; font-size: ${fontSize.sm}; resize: vertical;
   &:focus { outline: none; border-color: ${colors.blue.border}; }
 `
-// Endpoint card — collapsible. Header carries METHOD pill + name; click toggles body.
-const EndpointCard = styled.div`
-  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
-  margin-bottom: 10px;
-`
-const EndpointHead = styled.button<{ $open?: boolean }>`
-  display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 14px;
-  text-align: left; cursor: pointer; background: transparent; border: none;
-  color: ${colors.text.primary}; font-family: ${fonts.mono}; font-size: ${fontSize.sm};
-  border-bottom: 1px solid ${({ $open }) => ($open ? colors.border : 'transparent')};
-  & .method {
-    display: inline-block; padding: 2px 8px; border-radius: ${radius.sm};
-    background: ${colors.blue.bg}; color: ${colors.blue.main};
-    font-size: ${fontSize.micro}; font-weight: 600; min-width: 44px; text-align: center;
-  }
-  & .name { font-family: ${fonts.mono}; }
-  & .grow { flex: 1; }
-`
-const EndpointBody = styled.div`padding: 14px;`
 const MethodPill = styled.span<{ $tone: string }>`
   display: inline-block; padding: 2px 8px; border-radius: ${radius.sm};
   background: ${colors.bg.card}; color: ${colors.blue.main};
@@ -200,9 +179,9 @@ const queryFromString = (s: string): Record<string, string> => {
 }
 
 // ── main component ─────────────────────────────────────────────────────────────────────────
-type TabKey = 'connection' | 'auth' | 'endpoints' | 'webhooks' | 'test'
+type TabKey = 'connection' | 'auth' | 'environments' | 'endpoints' | 'webhooks' | 'test'
 
-export default function ApiConnectorEditor({ name, value, hasMenu, onChange }: ApiConnectorEditorProps) {
+export default function ApiConnectorEditor({ name, value, hasMenu, sqlConnectors, onChange }: ApiConnectorEditorProps) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<TabKey>('connection')
   // Reset to the Connection tab when the operator switches connectors — otherwise they may
@@ -230,6 +209,9 @@ export default function ApiConnectorEditor({ name, value, hasMenu, onChange }: A
         <TabBtn type="button" $active={tab === 'auth'} onClick={() => setTab('auth')}>
           {t('settings.api.tab.authentication')}
         </TabBtn>
+        <TabBtn type="button" $active={tab === 'environments'} onClick={() => setTab('environments')}>
+          {t('settings.api.tab.environments')}
+        </TabBtn>
         <TabBtn type="button" $active={tab === 'endpoints'} onClick={() => setTab('endpoints')}>
           {t('settings.api.tab.endpoints')}
         </TabBtn>
@@ -242,6 +224,7 @@ export default function ApiConnectorEditor({ name, value, hasMenu, onChange }: A
       </TabsBar>
       {tab === 'connection' && <ConnectionTab value={value} patch={patch} hasMenu={hasMenu} />}
       {tab === 'auth' && <AuthTab value={value} patch={patch} />}
+      {tab === 'environments' && <ApiEnvironmentsTab value={value} patch={patch} sqlConnectors={sqlConnectors ?? []} />}
       {tab === 'endpoints' && <EndpointsTab value={value} patch={patch} />}
       {tab === 'webhooks' && <WebhooksTab />}
       {tab === 'test' && <TestTab connectorName={name} value={value} />}

@@ -109,7 +109,8 @@ def test_list_connectors_filtered_by_permission(app) -> None:
         db = next(c for c in admin if c["name"] == "db")
         assert {q["name"] for q in db["queries"]} == {"answer", "items", "add_item", "upd_item", "bad"}
         assert all("sql" not in q for q in db["queries"])  # SQL text never leaves
-        assert "pool" not in db
+        # pool NAMES only (the default one too, for the environment a screen runs on) — never an address
+        assert db["pool"] in db["pools"] and not {"url", "password", "dsn"} & set(db)
 
         reader = client.get("/api/connectors", headers=_h(client, "reader")).json()["connectors"]
         db = next(c for c in reader if c["name"] == "db")

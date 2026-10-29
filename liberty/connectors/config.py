@@ -41,7 +41,7 @@ import tomllib
 from pathlib import Path
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from liberty.config import substitute_env
 
@@ -945,6 +945,19 @@ class EndpointDef(BaseModel):
     description: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Longer description of what this endpoint does.")
 
 
+class ApiTargetConfig(BaseModel):
+    """The server an API connector calls for one SQL pool (one JDE environment): what differs
+    from the connector's own server. The endpoints stay the connector's, shared."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    base_url: str | None = Field(default=None, description="This environment's base URL. Blank = the connector's. Supports ${ENV} refs.")
+    auth_username: str | None = Field(default=None, description="Username on this environment's server. Blank = the connector's.")
+    auth_password: str | None = Field(default=None, description="Password on this environment's server. Blank = the connector's. May be an ``ENC:`` value.", json_schema_extra={"format": "password"})
+    auth_token: str | None = Field(default=None, description="Bearer token / API key on this environment's server. Blank = the connector's. May be an ``ENC:`` value.", json_schema_extra={"format": "password"})
+    verify_ssl: bool | None = Field(default=None, description="Verify this server's TLS certificate. Blank = the connector's setting.")
+
+
 class ApiConnectorConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1027,6 +1040,33 @@ class ApiConnectorConfig(BaseModel):
     timeout: float = Field(default=30.0, json_schema_extra={"x_group": "Transport"}, description="Per-request timeout in seconds.")
     verify_ssl: bool = Field(default=True, json_schema_extra={"x_group": "Transport"}, description="Verify the server's TLS certificate (disable only for dev / self-signed).")
     endpoints: list[EndpointDef] = Field(default_factory=list, json_schema_extra={"x_group": "Endpoints"}, description="The named HTTP endpoints this connector exposes.")
+    pool: str | None = Field(
+        default=None,
+        description=(
+            "The SQL pool (the environment) whose server ``base_url`` is — set it when the connector has "
+            "``targets``. A call follows the pool picked for the screen (``X-Liberty-Pool``) or a job step's "
+            "``pool``: this pool or none → this server, a pool in ``targets`` → that server."
+        ),
+        json_schema_extra={"x_group": "Environments", "x_enum_ref": "POOL_NAMES"},
+    )
+    targets: dict[str, ApiTargetConfig] = Field(
+        default_factory=dict,
+        description=(
+            "One server per other SQL pool (environment), keyed by the pool's name: what differs from this "
+            "server (URL, credentials, TLS check); the endpoints stay shared. A call made for a pool of the "
+            "same environments (``pool`` and the pools of the SQL connectors that run on it) with no target "
+            "here is refused — never sent to this server by default."
+        ),
+        json_schema_extra={"x_group": "Environments", "x_key_enum_ref": "POOL_NAMES"},
+    )
+
+    @model_validator(mode="after")
+    def _targets_need_pool(self) -> ApiConnectorConfig:
+        if self.targets and not self.pool:
+            raise ValueError("targets need `pool`: the pool whose server base_url is")
+        if self.pool and self.pool in self.targets:
+            raise ValueError(f"`pool` {self.pool!r} is the connector's own server — it can't also be a target")
+        return self
 
 
 ConnectorConfig = Annotated[

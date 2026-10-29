@@ -236,9 +236,20 @@ def restore_blanked(node: Any, live: Any) -> int:
     return n
 
 
+# An API connector's environment binding — the pool its own server serves and one server per other
+# pool (AIS per JDE environment) — belongs to the install, like the pools: the live one is kept
+# whatever the wheel ships, and it never makes a vendor connector look changed.
+_API_INSTALL_KEYS = ("pool", "targets")
+
+
 def _with_live_secrets(value: Any, live: Any) -> tuple[Any, int]:
-    """A copy of *value* with the blanks filled from *live* + how many were filled."""
+    """A copy of *value* with the blanks filled from *live* + how many were filled (and, on an API
+    connector, *live*'s environment binding)."""
     copy = json.loads(json.dumps(value, default=str))
+    if isinstance(copy, dict) and isinstance(live, dict) and copy.get("type") == "api":
+        for k in _API_INSTALL_KEYS:
+            if k in live:
+                copy[k] = live[k]
     return copy, restore_blanked(copy, live)
 
 

@@ -273,6 +273,8 @@ def test_config_connectors_parsed_put_encrypts_api_auth_secrets(env) -> None:
                 "remote_basic": {
                     "type": "api", "base_url": "https://api.example.com",
                     "auth_type": "basic", "auth_username": "alice", "auth_password": "raw-basic-pw",
+                    # one server per other environment: its own credentials, encrypted the same way
+                    "pool": "default", "targets": {"dev": {"base_url": "https://dev.example.com", "auth_password": "raw-dev-pw"}},
                 },
             },
         }
@@ -282,6 +284,7 @@ def test_config_connectors_parsed_put_encrypts_api_auth_secrets(env) -> None:
         # Plaintexts must be gone; the ENC: ciphertexts present.
         assert "raw-bearer-token" not in txt
         assert "raw-basic-pw" not in txt
+        assert "raw-dev-pw" not in txt and txt.count('auth_password = "ENC:') == 2
         assert 'auth_token = "ENC:' in txt
         assert 'auth_password = "ENC:' in txt
         # And the sql connector's body wasn't accidentally encrypted (its SQL doesn't have any

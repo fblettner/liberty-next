@@ -142,11 +142,12 @@ test('F0092 / F00950: add a user, set and remove its security, delete the user',
       await page.close()
     })
 
-    await test.step('F0092: a form action with a prompt — cancelled, then confirmed (Reset Password)', async () => {
+    await test.step('F0092: a form action that asks first — cancelled, then confirmed (Reset Password)', async () => {
       const page = await openScreen(context, 'nomajde', 'f0092')
       await openRow(page, USER)
-      const prompt = page.getByText('No inputs required — click Confirm to continue.')
-      // Cancel: the prompt closes, nothing runs, the form stays open.
+      // the question names the user and the environment the screen runs on
+      const prompt = page.getByText(new RegExp(`^Reset the password of ${USER} on [A-Za-z0-9_]+\\?$`))
+      // Cancel: the question closes, nothing runs, the form stays open.
       await page.getByRole('button', { name: 'Reset Password', exact: true }).click()
       await expect(prompt).toBeVisible()
       await page.getByRole('button', { name: 'Cancel', exact: true }).last().click()

@@ -1,5 +1,32 @@
 # Liberty Next — Notes de version
 
+## 7.0.68 — non publiée
+
+- nomaflow : une étape peut laisser le job continuer quand elle échoue — `continue_on_failure = true` (sur l'étape, ou
+  pour toutes les étapes avec les `step_defaults` du job ; une case à cocher dans l'éditeur d'étape). Après ses
+  tentatives, l'étape est enregistrée en échec, les suivantes s'exécutent et l'exécution finit en échec avec « N
+  step(s) failed, the others ran — <étape> : <erreur> ». Pour un job qui enchaîne des traitements indépendants, où
+  l'échec d'une partie ne doit pas sauter les autres. Par défaut, rien ne change : une étape en échec arrête le job.
+- Connecteurs API : un serveur par environnement. Avec plusieurs environnements JDE sur un même connecteur SQL
+  (`pools`), ses appels AIS vont à l'AIS de l'environnement à l'écran — `pool` nomme l'environnement du serveur du
+  connecteur, `targets` donne les serveurs des autres environnements (URL, utilisateur, mot de passe, jeton,
+  vérification TLS ; les points d'accès restent partagés). Personne ne choisit le serveur : il suit l'environnement
+  choisi dans le menu, le `pool` d'une étape de job (tout type d'étape désormais), et couvre les actions (`call_api`),
+  les plugins (`nomajde/ais.py`), `/api/http` et l'assistant. Un appel pour un environnement de ces connecteurs sans
+  serveur est refusé (« no target for pool … »), jamais envoyé au serveur par défaut (souvent la production).
+  Paramètres → Connecteurs → Environnements les édite (mots de passe chiffrés à l'enregistrement) et signale un
+  environnement sans serveur ; Paramètres → Intégrité aussi. L'installateur des applications conserve le `pool` /
+  les `targets` d'une installation comme ses pools, et apporte quand même les nouveaux points d'accès de l'éditeur.
+- Actions : une étape `confirm` pose de nouveau sa question. Aucun écran ne transmettait la boîte de dialogue au
+  moteur d'actions (le formulaire, le menu de ligne, la barre d'outils, l'édition en masse) : un `confirm` ne faisait
+  qu'ajouter un avertissement et la chaîne continuait sans demander — dont « Close this period? » / « Reopen this
+  period? » de nomademo.
+- Actions : le message d'un `confirm` ou d'un `notify` se remplit comme un modèle `open_url` — `{CHAMP}`,
+  `{INPUT.x}`, un chemin de la chaîne, les variables intégrées — et `#POOL#` nomme l'environnement de l'écran : le
+  pool choisi dans le menu quand le connecteur de l'écran l'a, sinon le pool de ce connecteur — celui où vont ses
+  appels AIS. « Reset the password of {ULUSER} on #POOL#? ». (`/api/connectors` donne le nom du pool par défaut de
+  chaque connecteur SQL avec ses noms de pools.)
+
 ## 7.0.67 — non publiée
 
 - Formulaire : un champ date-heure (format `datetime` / `timestamp`) se modifie avec son jour et son heure — le

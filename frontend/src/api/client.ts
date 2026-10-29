@@ -34,6 +34,20 @@ export function setCurrentPool(pool: string | null): void {
   currentPool = pool && pool.trim() ? pool : null;
 }
 
+// The environment a screen runs on, for messages (``#POOL#`` in a confirm) — display only, the
+// header above is what the server follows. Per connector: the picked pool when the connector has
+// it, else the connector's own pool (the server applies the header the same way).
+let connectorPools: Record<string, { pool?: string | null; pools?: string[] }> = {};
+export function setConnectorPools(map: Record<string, { pool?: string | null; pools?: string[] }>): void {
+  connectorPools = map;
+}
+export function environmentOf(connector: string | null | undefined): string | null {
+  const c = connector ? connectorPools[connector] : undefined;
+  if (!c) return currentPool;
+  if (currentPool && (c.pools ?? []).includes(currentPool)) return currentPool;
+  return c.pool ?? null;
+}
+
 // Single-flight: concurrent 401s share ONE refresh attempt instead of stampeding /auth/refresh.
 function refreshOnce(): Promise<string | null> {
   if (!tokenRefresher) return Promise.resolve(null);

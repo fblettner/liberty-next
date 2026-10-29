@@ -293,7 +293,7 @@ export function ResultTable({
   // The app's default for a drill whose action does not say (`[app] drill_inline`).
   const drillInlineDefault = useBranding().ui.drill_inline === true
   // The action prompt (``prompt_fields``): ``requestPrompt`` for the action runner, the dialog it opens.
-  const { requestPrompt, promptDialog } = useActionPrompt()
+  const { requestPrompt, confirmStep, promptDialog } = useActionPrompt()
 
   // Screen-level actions — v1's NOMAJDE toolbar buttons ("Create Role" / "Reset Password" / etc.)
   // attach here. Fire with **no row context** (the user uses row_menu for row-bound actions);
@@ -330,6 +330,7 @@ export function ResultTable({
     const result = await runChain([a], {}, {}, {
       defaultConnector: connector,
       requestPrompt,
+      confirm: confirmStep,
       sharedActions: sharedActions ?? undefined,
       navigate: (to, conn, params, screen, inline) => {
         if ((inline ?? drillInlineDefault) && onDrill) { onDrill({ connector: conn, query: to, screen: screen ?? null, params }); return }
@@ -354,7 +355,7 @@ export function ResultTable({
     const msg = result.warnings.length > 0 ? result.warnings.join(' · ') : `${a.label || a.id} · ${t('common.done')}`
     setActionStatus({ message: msg, tone: 'ok' })
     onSaved?.()
-  }, [connector, onSaved, navigate, requestPrompt, sharedActions, onDrill, drillInlineDefault])
+  }, [connector, onSaved, navigate, requestPrompt, confirmStep, sharedActions, onDrill, drillInlineDefault])
 
   // the columns to actually show: drop any whose `visible_when` filter doesn't match right now
   // (TableView passes a memoized `activeFilters`, so this stays referentially stable across
@@ -375,11 +376,11 @@ export function ResultTable({
   const {
     editMode, setEditMode, dirtyRows, setDirtyRows, newRows, deleted, selected, setSelected, clipboard, saving, saveErrors, setSaveErrors, editsRef, resetEdit, dirtyCount, valuesOf, newRowsRef, editChange, prependNewRows, addRow, duplicateRow, toggleDelete, toggleSelected, deleteSelected, copySelected, pasteRows, save,
   } = useBatchEdit({
-    result, screen, connector, updateQuery, insertQuery, deleteQuery, addSeed, requestPrompt, sharedActions, onSaved,
+    result, screen, connector, updateQuery, insertQuery, deleteQuery, addSeed, requestPrompt, confirmStep, sharedActions, onSaved,
   })
   // The row context menu (right-click / the row's handle) — its state, runner and popup.
   const { rowMenu, openRowMenu, runRowAction, rowMenuHandle, rowMenuPopup } = useRowMenu({
-    screen, connector, editMode, requestPrompt, sharedActions, drillInlineDefault, navigate, onCurrentRow, onSaved, onDrill,
+    screen, connector, editMode, requestPrompt, confirmStep, sharedActions, drillInlineDefault, navigate, onCurrentRow, onSaved, onDrill,
   })
 
 

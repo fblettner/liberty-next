@@ -342,7 +342,7 @@ export function ScreenDialog({
   }, [nameToFieldName])
 
   // The action prompt (``prompt_fields``): ``requestPrompt`` for the action runner, the dialog it opens.
-  const { requestPrompt, promptDialog } = useActionPrompt()
+  const { requestPrompt, confirmStep, promptDialog } = useActionPrompt()
 
   // Run a list of actions through the recursive runner (:file:`actionRunner.ts`). Slice B
   // (Phase 6 4d) added the chain context — each action lands its prompt values under
@@ -376,6 +376,7 @@ export function ScreenDialog({
     const result = await runChain(actions, baseCtx, baseCtx, {
       defaultConnector: connector,
       requestPrompt,
+      confirm: confirmStep,
       sharedActions: sharedActions ?? undefined,
       changeContext,
     })
@@ -402,7 +403,7 @@ export function ScreenDialog({
       error: result.error,
       cancelled: result.cancelled,
     }
-  }, [connector, requestPrompt, sharedActions, screen.change_tracked, screen.app, screen.id])
+  }, [connector, requestPrompt, confirmStep, sharedActions, screen.change_tracked, screen.app, screen.id])
 
   // ``screen.actions`` was previously mirrored as in-dialog buttons in the footer. Removed —
   // the v1 model attaches actions either to *events* (``ly_evt_cpt`` → ``dialog.on_save``,

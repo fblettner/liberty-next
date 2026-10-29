@@ -626,3 +626,78 @@ query = "q1"
     runner = JobRunner(jobs_db, {StepType.SQL_QUERY: RecordingExecutor([StepFailed("nope")])}, sleep=_noop_sleep, on_finished=hook)
     run = await runner.run(job, ManualTrigger(triggered_by="alice"))
     assert run.state == RunState.FAILED.value and seen[-1][2] == "FAILED" and "nope" in (seen[-1][3] or "")
+
+
+# --------------------------------------------------------------------------- #
+# continue_on_failure: independent steps in one job
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_continue_on_failure_runs_the_next_steps_and_fails_the_run(jobs_db, tmp_path) -> None:
+    """nomasx1-collect-all chains independent collections: one failing (a database step) must
+    not skip the others — they run, the failed one is recorded, the run ends FAILED naming it."""
+    job = _make_job(tmp_path, """
+[[jobs]]
+id = "collect"
+
+[jobs.step_defaults]
+continue_on_failure = true
+
+[[jobs.steps]]
+type = "sql_query"
+name = "security"
+connector = "c"
+query = "q"
+
+[[jobs.steps]]
+type = "sql_query"
+name = "database"
+connector = "c"
+query = "q"
+
+[[jobs.steps]]
+type = "sql_query"
+name = "refresh"
+connector = "c"
+query = "q"
+""")
+    executor = RecordingExecutor([
+        StepResult(rows_affected=3),
+        StepFailed("ORA-00942: table or view does not exist"),
+        StepResult(rows_affected=1),
+    ])
+    run = await JobRunner(jobs_db, {StepType.SQL_QUERY: executor}, sleep=_noop_sleep).run(job, ManualTrigger(triggered_by="t"))
+    assert executor.calls == [("security", 1), ("database", 1), ("refresh", 1)]   # nothing skipped
+    assert run.state == RunState.FAILED.value
+    assert run.error_message == "1 step(s) failed, the others ran — database: ORA-00942: table or view does not exist"
+    assert run.rows_affected == 4
+    async with jobs_db.session() as s:
+        rows = (await s.execute(select(StepRun).order_by(StepRun.step_index))).scalars().all()
+    assert [(r.step_name, r.state) for r in rows] == [
+        ("security", RunState.SUCCEEDED.value), ("database", RunState.FAILED.value), ("refresh", RunState.SUCCEEDED.value),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_without_continue_on_failure_a_failed_step_still_stops_the_job(jobs_db, tmp_path) -> None:
+    job = _make_job(tmp_path, """
+[[jobs]]
+id = "chain"
+
+[[jobs.steps]]
+type = "sql_query"
+name = "first"
+connector = "c"
+query = "q"
+
+[[jobs.steps]]
+type = "sql_query"
+name = "second"
+connector = "c"
+query = "q"
+""")
+    executor = RecordingExecutor([StepFailed("boom")])
+    run = await JobRunner(jobs_db, {StepType.SQL_QUERY: executor}, sleep=_noop_sleep).run(job, ManualTrigger(triggered_by="t"))
+    assert executor.calls == [("first", 1)]
+    assert run.state == RunState.FAILED.value and run.error_message == "boom"

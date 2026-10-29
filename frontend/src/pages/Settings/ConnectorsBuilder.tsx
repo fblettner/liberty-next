@@ -17,6 +17,7 @@ import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, SearchSelect, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Input, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc } from '../../types/config'
 import ApiConnectorEditor, { type ApiConnector as ApiConnectorEditorValue } from './ApiConnectorEditor'
+import type { SqlPools } from '../../services/apiTargets'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import ConnectorsTableEditor from './ConnectorsTableEditor'
@@ -766,6 +767,8 @@ export default function ConnectorsBuilder() {
   const shownAppNames = shownNames.filter((n) => appSet.has(n))
   const shownDataNames = shownNames.filter((n) => !appSet.has(n))
   const selConn = sel && conns[sel] ? conns[sel] : null
+  // every SQL connector's pools — the API editor's Environments tab flags an environment without a server
+  const sqlPools = Object.values(conns).filter((c) => c?.type === 'sql') as SqlPools[]
   const selSchema = selConn ? schemaFor(selConn) : null
   const isSql = selConn?.type !== 'api'
 
@@ -1008,7 +1011,7 @@ export default function ConnectorsBuilder() {
                 // (no need to save first). SchemaNavigator was the previous render path; it
                 // surfaced 20+ flat fields including OAuth2 ones that didn't apply to a basic
                 // connector and vice versa, which made the editor noisy and hard to scan.
-                <ApiConnectorEditor name={sel!} value={selConn as ApiConnectorEditorValue} hasMenu={appSet.has(sel!)} onChange={(v) => update(sel!, v as unknown as Record<string, unknown>)} />
+                <ApiConnectorEditor name={sel!} value={selConn as ApiConnectorEditorValue} hasMenu={appSet.has(sel!)} sqlConnectors={sqlPools} onChange={(v) => update(sel!, v as unknown as Record<string, unknown>)} />
               )}
               {/* Tables view = CRUD-grouped tables ONLY. Custom (non-CRUD) queries live in their
                   own tab now, so this list isn't mixed with them anymore. */}

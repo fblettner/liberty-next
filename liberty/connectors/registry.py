@@ -13,7 +13,7 @@ from pathlib import Path
 
 import httpx
 
-from liberty.connectors.api import APIConnector
+from liberty.connectors.api import APIConnector, current_pool
 from liberty.connectors.base import UnknownConnectorError
 from liberty.connectors.config import (
     ApiConnectorConfig,
@@ -63,6 +63,26 @@ class ConnectorRegistry:
                 self._connectors[name] = APIConnector(name, conn_cfg, client=http_client, master_key=master_key)
             else:  # pragma: no cover - guarded by the discriminated union
                 raise TypeError(f"Unsupported connector config: {type(conn_cfg)!r}")
+        self._govern_api_targets(set(config.pools))
+
+    def _govern_api_targets(self, pool_names: set[str]) -> None:
+        """An API connector with ``targets`` governs the environments of its ``pool``: that pool,
+        its targets and every pool of a SQL connector that runs on it (``[pool] + pools``). A call
+        for one of those without a target is refused — a JDE environment added to the SQL side
+        but not here must not reach the default server."""
+        sql = [c for c in self._connectors.values() if isinstance(c, SQLConnector)]
+        for api in self._connectors.values():
+            if not isinstance(api, APIConnector) or not api.config.targets:
+                continue
+            family = set(api.governed_pools)
+            for conn in sql:
+                if api.config.pool in conn.allowed_pools:
+                    family |= conn.allowed_pools
+            api.governed_pools = frozenset(family)
+            unknown = sorted(p for p in [api.config.pool, *api.config.targets] if p and p not in pool_names)
+            if unknown:
+                _log.warning("API connector %s: pool(s) %s in pool / targets are not defined in [pools]",
+                             api.name, ", ".join(unknown))
 
     # -- lookup ------------------------------------------------------------ #
 
@@ -89,11 +109,14 @@ class ConnectorRegistry:
             raise UnknownConnectorError(f"Connector {name!r} is not a SQL connector.")
         return conn
 
-    def api(self, name: str) -> APIConnector:
+    def api(self, name: str, *, pool: str | None = None) -> APIConnector:
+        """The API connector *name* — for a connector with per-pool ``targets``, the server of
+        *pool* or, by default, of the pool this request / job step runs for (:data:`current_pool`).
+        Raises :class:`ApiTargetMissingError` for a pool of its environments without a target."""
         conn = self.get(name)
         if not isinstance(conn, APIConnector):
             raise UnknownConnectorError(f"Connector {name!r} is not an API connector.")
-        return conn
+        return conn.for_pool(pool or current_pool.get())
 
     def describe(self) -> list[dict]:
         return [conn.describe() for conn in self._connectors.values()]

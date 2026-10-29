@@ -124,6 +124,8 @@ def public_connector(desc: dict, principal: Principal) -> dict | None:
             # Pool NAMES this connector may run against (multi-environment picker). Never the
             # pool URL/credentials — just identifiers. Absent/1-element ⇒ single-pool connector.
             "pools": desc.get("pools", []),
+            # ...and the default one — the environment a screen on it runs on when none is picked
+            "pool": desc.get("pool"),
         }
     if desc["type"] == "api":
         endpoints = [

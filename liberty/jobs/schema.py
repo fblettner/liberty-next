@@ -159,6 +159,11 @@ class Step(BaseModel):
     # the Run-with-parameters modal (``step_enabled`` override) when only some
     # phases need re-running after an upstream failure.
     enabled: bool = True
+    # A failure of this step (after its retries) doesn't stop the job: the step is recorded FAILED,
+    # the next steps run, and the run ends FAILED naming every failed step. For jobs chaining
+    # independent work (nomasx1-collect-all: one collection failing must not skip the others —
+    # what separate jobs gave). Default: a failed step stops the job.
+    continue_on_failure: bool = False
 
     # sql_copy / sql_query — shared SQL endpoints
     source: SqlEndpoint | None = None
@@ -167,6 +172,8 @@ class Step(BaseModel):
     query: str | None = None
     # sql_query: optional pool override for ``connector`` (run against a different DB/JDE
     # instance in the connector's allowed set). None ⇒ the connector's default pool.
+    # Every step type: the environment an API connector with per-pool ``targets`` calls from
+    # this step (AIS per JDE environment) — that pool's server; None ⇒ the connector's own.
     pool: str | None = None
     # sql_query: bound parameters passed through to SQLConnector.execute(params=...)
     params: dict[str, Any] = Field(default_factory=dict)
