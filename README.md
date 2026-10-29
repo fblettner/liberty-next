@@ -92,8 +92,10 @@ journaled with the release notes of each version. Health, readiness, request ids
 Monitoring page: the live view (connected users, locks, pools, the log tail), the server
 log kept on disk (rotated, searched, exported, levels per module changed at run time) and
 a retention center (what every store keeps, its size, a preview and a purge). A developer
-reference read from the running code (every setting, every API route with its access, the
-data model) and documentation reports of the release and of the install. Runs at the
+reference read from the running code (every setting, every API route with its access and
+its documented response, the data model, every command, and the impact of a change across
+the configuration) and documentation reports of the release and of the install, each copy
+kept on the server. Runs at the
 site root or under a reverse-proxy sub-path (`[app] base_path`); installable as a web app.
 
 ---

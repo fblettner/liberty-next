@@ -5,14 +5,17 @@ code that reads it. ``GET /api`` — every route: method, path, group, the acces
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from liberty.auth.dependencies import require_superuser
 from liberty.auth.principal import Principal
 from liberty.devref import api_reference, config_reference, data_model
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin/dev", tags=["admin"])
 Superuser = Annotated[Principal, Depends(require_superuser)]
@@ -67,6 +70,30 @@ async def list_doc_reports(_: Superuser, lang: str = "fr") -> dict[str, Any]:
     return {"reports": catalog(lang)}
 
 
+@router.get("/report-copies", summary="The kept copies of the documentation reports")
+async def list_report_copies(request: Request, _: Superuser) -> dict[str, Any]:
+    from liberty.docreport import archive
+    items = await asyncio.to_thread(archive.entries, request.app.state.settings)
+    return {"items": items, "total": len(items), "bytes": sum(i["size"] for i in items)}
+
+
+@router.get("/report-copies/{name}", summary="Download a kept copy of a documentation report")
+async def get_report_copy(name: str, request: Request, _: Superuser) -> FileResponse:
+    from liberty.docreport import archive
+    path = archive.path_of(request.app.state.settings, name)
+    if path is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no kept report {name!r}")
+    return FileResponse(path, filename=name, media_type="application/pdf" if path.suffix == ".pdf" else "text/markdown")
+
+
+@router.delete("/report-copies/{name}", summary="Delete a kept copy of a documentation report")
+async def delete_report_copy(name: str, request: Request, _: Superuser) -> dict[str, Any]:
+    from liberty.docreport import archive
+    if not await asyncio.to_thread(archive.delete, request.app.state.settings, name):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no kept report {name!r}")
+    return {"deleted": name}
+
+
 @router.get("/reports/{kind}", summary="Download the implementation or the technical report (Markdown or PDF)")
 async def get_doc_report(
     kind: str, request: Request, principal: Superuser, lang: str = "fr", format: str = "pdf",
@@ -91,5 +118,12 @@ async def get_doc_report(
         )
     except ReportsUnavailableError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    # a copy is kept (Documentation reports → Kept copies); failing to write it never blocks the download
+    from liberty.docreport import archive
+    try:
+        await asyncio.to_thread(archive.save, settings, kind=kind, lang=lang, fmt=format, body=body, title=content.title,
+                                author=principal.username, sections=wanted or [], date_label=date or None)
+    except OSError as exc:
+        _log.warning("documentation report %s: the copy could not be kept: %s", kind, exc)
     return StreamingResponse(iter([body]), media_type=content_type,
                              headers={"Content-Disposition": f'attachment; filename="{filename}"'})

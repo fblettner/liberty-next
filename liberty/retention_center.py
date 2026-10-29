@@ -33,7 +33,7 @@ from typing import Any
 
 _log = logging.getLogger(__name__)
 
-STORES = ("runs", "work_area", "notifications", "config_versions", "change_packages", "saved_views", "server_log")
+STORES = ("runs", "work_area", "notifications", "config_versions", "change_packages", "saved_views", "doc_reports", "server_log")
 CONFIG_PURGE_CALLABLE = "liberty.jobs.maintenance:purge_config_versions"
 
 
@@ -127,6 +127,9 @@ async def status(st: Any) -> list[dict[str, Any]]:
         async with views.session() as s:
             by_kind = {k: int(v) for k, v in (await s.execute(select(UserView.kind, func.count()).group_by(UserView.kind))).all()}
         out.append({"id": "saved_views", "policy": {}, "where": "", "size": {"views": sum(by_kind.values()), "by_kind": by_kind}, "can_run": False})
+    # documentation reports: the kept copies (deleted from Liberty Next → Documentation reports)
+    from liberty.docreport.archive import archive_dir, usage
+    out.append({"id": "doc_reports", "policy": {}, "where": str(archive_dir(settings)), "size": usage(settings), "can_run": False})
     # server log
     path = log_path(settings)
     files = log_files(path) if path is not None else []

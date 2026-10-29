@@ -20,3 +20,17 @@ export interface DocReportRequest {
   date?: string
   options?: Record<string, boolean>
 }
+
+/** A kept copy of a generated report (``<config dir>/.reports/``). */
+export interface ReportCopy {
+  name: string
+  kind: DocReportKind | null
+  lang: string | null
+  format: 'pdf' | 'markdown'
+  size: number
+  created_at: string | null
+  title: string | null
+  author: string | null
+  sections: string[]
+  date_label: string | null
+}

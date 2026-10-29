@@ -31,6 +31,12 @@
   (a terminal, a log, the shell history holding `--master-key`). Nothing used it — the server, the pools and the
   jobs (nomasx1's LDAP and audit-trail steps reading `settings_applications`) decrypt in their own process; `encrypt`
   and `is-encrypted` stay. To change a secret, encrypt the new value.
+- Documentation reports: every report built is kept on the server (`<config dir>/.reports/`, next to `.versions/`, so a
+  backup carries it) with who built it, the language and the sections; the report's page lists its kept copies to
+  download again or delete (`/admin/dev/report-copies`), the Retention page shows their number and size. A copy
+  that cannot be written never blocks the download.
+- Developer reference → API: a route's request / response example is no longer squeezed to one line in its detail
+  (the block shrank when the detail scrolled); the same for the error list of the grid's Excel import.
 
 ## 7.0.65 — unreleased
 

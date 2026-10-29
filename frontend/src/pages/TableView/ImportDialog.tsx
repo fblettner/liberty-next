@@ -56,7 +56,7 @@ const Pill = styled.span<{ $tone: 'ok' | 'bad' }>`
   color: ${(p) => (p.$tone === 'ok' ? colors.green.main : colors.red.main)};
   background: ${(p) => (p.$tone === 'ok' ? colors.green.bg : colors.red.bg)};
 `
-const ErrList = styled.div`max-height: 38vh; overflow: auto; display: flex; flex-direction: column; gap: 8px;`
+const ErrList = styled.div`max-height: 38vh; overflow: auto; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;`
 const ErrItem = styled.div`border: 1px solid ${colors.red.border}; border-radius: 8px; padding: 8px 10px; background: ${colors.red.bg};`
 const ErrHead = styled.div`
   display: flex; gap: 10px; align-items: baseline; justify-content: space-between; margin-bottom: 4px;

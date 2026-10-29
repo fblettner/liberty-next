@@ -3,7 +3,7 @@ import { api } from '../api/client'
 import { formatBytes } from './serverLog'
 
 export interface StoreStatus {
-  id: 'runs' | 'work_area' | 'notifications' | 'config_versions' | 'change_packages' | 'saved_views' | 'server_log'
+  id: 'runs' | 'work_area' | 'notifications' | 'config_versions' | 'change_packages' | 'saved_views' | 'doc_reports' | 'server_log'
   policy: Record<string, unknown>
   where: string
   size: Record<string, unknown>
@@ -27,6 +27,7 @@ export function policyText(s: StoreStatus, t: T): string {
     case 'config_versions': return t('retentionCenter.policy.versions', { max: n(p.max_versions), days: n(p.max_age_days) })
     case 'change_packages': return n(p.days) > 0 ? t('retentionCenter.policy.packages', { days: n(p.days) }) : t('retentionCenter.keepAll')
     case 'saved_views': return t('retentionCenter.policy.views')
+    case 'doc_reports': return t('retentionCenter.policy.docReports')
     case 'server_log': return p.enabled === false ? t('retentionCenter.off') : t('retentionCenter.policy.log', { mb: n(p.max_mb), backups: n(p.backups) })
   }
 }

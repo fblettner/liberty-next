@@ -1,6 +1,6 @@
 // The documentation reports' catalogue and the download path of one (no React here).
 import { api } from '../api/client'
-import type { DocReport, DocReportKind, DocReportRequest } from '../types/docReports'
+import type { DocReport, DocReportKind, DocReportRequest, ReportCopy } from '../types/docReports'
 
 export const getDocReports = (lang: string) =>
   api.get<{ reports: DocReport[] }>(`/admin/dev/reports?lang=${encodeURIComponent(lang)}`).then((r) => r.reports)
@@ -21,3 +21,12 @@ export function docReportPath(kind: DocReportKind, report: DocReport | undefined
   }
   return `/admin/dev/reports/${kind}?${q.toString()}`
 }
+
+// ── kept copies ───────────────────────────────────────────────────────────────────────────────
+
+export const getReportCopies = () => api.get<{ items: ReportCopy[]; total: number; bytes: number }>('/admin/dev/report-copies')
+export const deleteReportCopy = (name: string) => api.del<{ deleted: string }>(`/admin/dev/report-copies/${encodeURIComponent(name)}`)
+export const reportCopyPath = (name: string) => `/admin/dev/report-copies/${encodeURIComponent(name)}`
+
+/** The copies of *kind*, newest first (the server's order). */
+export const copiesOf = (items: ReportCopy[], kind: DocReportKind): ReportCopy[] => items.filter((c) => c.kind === kind)

@@ -181,7 +181,7 @@ const fr: Resources = {
   retentionCenter: {
     tab: 'Rétention',
     tabDesc: 'Ce que garde chaque stockage, sa taille, un aperçu et une purge',
-    store: { runs: 'Exécutions des tâches', work_area: 'Fichiers des tâches', notifications: 'Notifications', config_versions: 'Versions de configuration', change_packages: 'Paquets de modifications', saved_views: 'Vues enregistrées', server_log: 'Journal du serveur' },
+    store: { runs: 'Exécutions des tâches', work_area: 'Fichiers des tâches', notifications: 'Notifications', config_versions: 'Versions de configuration', change_packages: 'Paquets de modifications', saved_views: 'Vues enregistrées', doc_reports: 'Rapports de documentation', server_log: 'Journal du serveur' },
     goes: {
       runs: 'Les exécutions terminées avec leurs étapes et journaux',
       work_area: 'Fichiers téléversés, rejets, rapports, exports, archives des dossiers surveillés',
@@ -189,9 +189,11 @@ const fr: Resources = {
       config_versions: 'Instantanés de configuration (le plus récent de chaque fichier est gardé)',
       change_packages: 'Paquets exportés / promus et journaux d\'import',
       saved_views: 'Les vues et analyses des utilisateurs — jamais purgées',
+      doc_reports: 'Les rapports d’implémentation et techniques générés, conservés tels que téléchargés',
       server_log: 'Rotation par taille',
     },
     policy: {
+      docReports: 'Conservés jusqu’à suppression (page Rapports de documentation)',
       runs: 'Plus de {{days}} jours, ou au-delà de {{cap}} par tâche',
       days: 'Plus de {{days}} jours',
       readDays: 'Lues, plus de {{days}} jours',
@@ -738,6 +740,14 @@ const fr: Resources = {
     document: 'Documenter',
   },
   docReports: {
+    copies: 'Copies conservées',
+    copiesNote: 'Chaque rapport généré est conservé sur le serveur (.reports à côté de la configuration)',
+    noCopies: 'Pas encore de copie de ce rapport.',
+    sectionsN_one: '{{count}} section',
+    sectionsN_other: '{{count}} sections',
+    downloadCopy: 'Télécharger',
+    deleteCopy: 'Supprimer la copie',
+    deleteCopyConfirm: 'Supprimer {{name}} ? Le fichier est retiré du serveur.',
     title: 'Rapports de documentation',
     intro: 'Le framework documenté en PDF ou en Markdown : le rapport d\'implémentation décrit cette installation, le rapport technique la version.',
     settings: 'Réglages',

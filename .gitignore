@@ -47,6 +47,9 @@ config/dashboards.toml
 config_backups/
 # Server-managed config snapshot history (liberty.versioning) — lives next to the TOMLs
 config/.versions/
+# The kept documentation reports (liberty.docreport.archive) and the promotion history, same place
+config/.reports/
+config/.promotion/
 
 # Local working documents (review, plan, ledgers) — never committed to the public repo
 docs/work/

@@ -51,3 +51,41 @@ def test_reports_render_as_markdown_superuser_only(env) -> None:  # noqa: F811
         full = client.get("/admin/dev/reports/implementation?format=markdown", headers=_h(client, "admin"))
         assert full.status_code == 200 and "## 4. Écrans" in full.text
         assert client.get("/admin/dev/reports/nope", headers=_h(client, "admin")).status_code == 404
+
+
+def test_a_generated_report_is_kept_listed_downloaded_and_deleted(env) -> None:  # noqa: F811
+    app, base = env
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        assert client.get("/admin/dev/report-copies", headers=_h(client, "reader")).status_code == 403
+        assert client.get("/admin/dev/report-copies", headers=h).json() == {"items": [], "total": 0, "bytes": 0}
+        body = client.get("/admin/dev/reports/technical?format=markdown&lang=en&sections=cli", headers=h).content
+        listed = client.get("/admin/dev/report-copies", headers=h).json()
+        assert listed["total"] == 1
+        copy = listed["items"][0]
+        assert copy["kind"] == "technical" and copy["lang"] == "en" and copy["format"] == "markdown"
+        assert copy["author"] == "admin" and copy["sections"] == ["cli"] and copy["size"] == len(body)
+        assert (base / ".reports" / copy["name"]).is_file()                         # next to the configuration
+        got = client.get(f"/admin/dev/report-copies/{copy['name']}", headers=h)
+        assert got.status_code == 200 and got.content == body
+        # the retention page counts them
+        stores = {s["id"]: s for s in client.get("/admin/retention", headers=h).json()["stores"]}
+        assert stores["doc_reports"]["size"] == {"files": 1, "bytes": len(body)} and stores["doc_reports"]["can_run"] is False
+        # only report names are served / deleted
+        (base / ".reports" / "secret.txt").write_text("x")
+        assert client.get("/admin/dev/report-copies/secret.txt", headers=h).status_code == 404
+        assert client.delete("/admin/dev/report-copies/..%2Fconnectors.toml", headers=h).status_code == 404
+        assert client.delete(f"/admin/dev/report-copies/{copy['name']}", headers=h).json() == {"deleted": copy["name"]}
+        assert client.get("/admin/dev/report-copies", headers=h).json()["total"] == 0
+        assert not (base / ".reports" / f"{copy['name']}.json").exists()
+
+
+def test_two_builds_in_the_same_second_keep_both(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    from liberty.docreport import archive
+    settings = SimpleNamespace(connectors=SimpleNamespace(config_path=tmp_path / "connectors.toml"))
+    a = archive.save(settings, kind="implementation", lang="fr", fmt="pdf", body=b"1")
+    b = archive.save(settings, kind="implementation", lang="fr", fmt="pdf", body=b"22")
+    assert a["name"] != b["name"] and len(archive.entries(settings)) == 2
+    assert archive.usage(settings) == {"files": 2, "bytes": 3}

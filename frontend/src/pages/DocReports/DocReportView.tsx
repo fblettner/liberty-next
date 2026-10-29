@@ -5,12 +5,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Download, FileText } from 'lucide-react'
+import { Download, FileText, History, Trash2 } from 'lucide-react'
 import { apiDownload, ApiError } from '../../api/client'
-import { Banner, Button, Card, Centered, Checkbox, Input } from '../../common'
+import { Banner, Button, Card, Centered, Checkbox, Input, Tag, useModals } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
-import { defaultSections, docReportPath } from '../../services/docReports'
-import type { DocReport, DocReportKind } from '../../types/docReports'
+import { copiesOf, defaultSections, deleteReportCopy, docReportPath, getReportCopies, reportCopyPath } from '../../services/docReports'
+import { formatBytes } from '../../services/serverLog'
+import type { DocReport, DocReportKind, ReportCopy } from '../../types/docReports'
 
 const Grid = styled.div`display: grid; grid-template-columns: minmax(260px, 420px) minmax(0, 1fr); gap: 16px; align-items: start;
   @media (max-width: 900px) { grid-template-columns: 1fr; }`
@@ -31,6 +32,11 @@ const Tile = styled.div<{ $on: boolean }>`display: flex; flex-direction: column;
   & .title { font-weight: 600; color: ${colors.text.primary}; font-size: ${fontSize.sm}; }`
 const Bar = styled(Card)`display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px;`
 const Done = styled.span`color: ${colors.green.main}; font-size: ${fontSize.sm};`
+const Copies = styled(Card)`display: flex; flex-direction: column; gap: 6px; margin-top: 16px;`
+const CopyRow = styled.div`display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid ${colors.border}; font-size: ${fontSize.sm};
+  & .when { font-family: ${fonts.mono}; color: ${colors.text.primary}; }
+  & .who { color: ${colors.text.secondary}; }
+  & .size { color: ${colors.text.muted}; margin-left: auto; }`
 
 export default function DocReportView({ kind, report }: { kind: DocReportKind; report: DocReport | undefined }) {
   const { t, i18n } = useTranslation()
@@ -41,6 +47,10 @@ export default function DocReportView({ kind, report }: { kind: DocReportKind; r
   const [busy, setBusy] = useState<'pdf' | 'markdown' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
+  const [copies, setCopies] = useState<ReportCopy[] | null>(null)
+  const modals = useModals()
+  const loadCopies = () => { getReportCopies().then((r) => setCopies(r.items)).catch(() => setCopies([])) }
+  useEffect(loadCopies, [])
 
   useEffect(() => { if (report) { setPicked(defaultSections(report)); setOptions({}); setDone(false); setError(null) } }, [report])
   const optionsOf = useMemo(() => {
@@ -56,6 +66,7 @@ export default function DocReportView({ kind, report }: { kind: DocReportKind; r
     try {
       await apiDownload(docReportPath(kind, report, { lang, format, sections: picked, date, options }), `liberty-${kind}.${format === 'pdf' ? 'pdf' : 'md'}`)
       setDone(true)
+      loadCopies()
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
     } finally {
@@ -115,6 +126,30 @@ export default function DocReportView({ kind, report }: { kind: DocReportKind; r
         {done && <Done>{t('docReports.done')}</Done>}
       </Bar>
       {error && <Banner $tone="error" style={{ marginTop: 12 }}>{error}</Banner>}
+      <Copies>
+        <BoxTitle><History size={15} /> {t('docReports.copies')}<span className="count">{t('docReports.copiesNote')}</span></BoxTitle>
+        {copies === null ? <Centered /> : copiesOf(copies, kind).length === 0 ? <Muted>{t('docReports.noCopies')}</Muted>
+          : copiesOf(copies, kind).map((c) => (
+            <CopyRow key={c.name}>
+              <span className="when">{c.created_at ? new Date(c.created_at).toLocaleString() : c.name}</span>
+              <Tag>{c.format === 'pdf' ? 'PDF' : 'Markdown'}</Tag>
+              <Tag>{(c.lang ?? '').toUpperCase()}</Tag>
+              <span className="who">{[c.author, c.date_label, t('docReports.sectionsN', { count: c.sections.length })].filter(Boolean).join(' · ')}</span>
+              <span className="size">{formatBytes(c.size)}</span>
+              <Button type="button" $variant="ghost" $size="sm" title={t('docReports.downloadCopy')}
+                onClick={() => { void apiDownload(reportCopyPath(c.name), c.name).catch((e) => setError(e instanceof ApiError ? e.message : String(e))) }}>
+                <Download size={14} />
+              </Button>
+              <Button type="button" $variant="ghost" $size="sm" title={t('docReports.deleteCopy')}
+                onClick={async () => {
+                  if (!(await modals.confirm({ title: t('docReports.deleteCopy'), message: t('docReports.deleteCopyConfirm', { name: c.name }), variant: 'danger' }))) return
+                  try { await deleteReportCopy(c.name); loadCopies() } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) }
+                }}>
+                <Trash2 size={14} />
+              </Button>
+            </CopyRow>
+          ))}
+      </Copies>
     </>
   )
 }

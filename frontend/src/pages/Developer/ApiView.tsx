@@ -152,6 +152,7 @@ function RouteDetail({ r, onClose }: { r: ApiRoute; onClose: () => void }) {
 const Pre = styled.pre`
   margin: 6px 0 0; padding: 10px 12px; border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
   font-family: ${fonts.mono}; font-size: ${fontSize.micro}; color: ${colors.text.primary}; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto;
+  flex-shrink: 0;   /* a flex child of the modal body: without it the block collapses to a line when the body scrolls */
 `
 const Rows = styled.div`
   display: grid; grid-template-columns: minmax(140px, auto) minmax(120px, auto) minmax(0, 1fr); gap: 4px 14px; font-size: ${fontSize.sm};

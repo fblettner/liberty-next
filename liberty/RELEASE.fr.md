@@ -37,6 +37,13 @@
   commande (un terminal, un journal, l'historique du shell gardant `--master-key`). Rien ne l'utilisait — le serveur,
   les pools et les jobs (les étapes LDAP et piste d'audit de nomasx1 qui lisent `settings_applications`) déchiffrent
   dans leur propre processus ; `encrypt` et `is-encrypted` restent. Pour changer un secret, chiffrer la nouvelle valeur.
+- Rapports de documentation : chaque rapport généré est conservé sur le serveur (`<dossier de config>/.reports/`, à
+  côté de `.versions/`, donc dans une sauvegarde) avec qui l'a produit, la langue et les sections ; la page du rapport
+  liste ses copies pour les télécharger à nouveau ou les supprimer (`/admin/dev/report-copies`), la page Rétention
+  montre leur nombre et leur taille. Une copie qui ne peut pas être écrite ne bloque jamais le téléchargement.
+- Référence développeur → API : l'exemple de requête / de réponse d'une route n'est plus écrasé sur une ligne dans son
+  détail (le bloc rétrécissait quand le détail défilait) ; de même pour la liste d'erreurs de l'import Excel de la
+  grille.
 
 ## 7.0.65 — non publiée
 

@@ -179,7 +179,7 @@ const en = {
   retentionCenter: {
     tab: 'Retention',
     tabDesc: 'What each store keeps, its size, a preview and a purge',
-    store: { runs: 'Job runs', work_area: 'Job files', notifications: 'Notifications', config_versions: 'Config versions', change_packages: 'Change packages', saved_views: 'Saved views', server_log: 'Server log' },
+    store: { runs: 'Job runs', work_area: 'Job files', notifications: 'Notifications', config_versions: 'Config versions', change_packages: 'Change packages', saved_views: 'Saved views', doc_reports: 'Documentation reports', server_log: 'Server log' },
     goes: {
       runs: 'Finished runs with their steps and logs',
       work_area: 'Uploads, rejects, reports, exports, watched-folder archives',
@@ -187,9 +187,11 @@ const en = {
       config_versions: 'Config snapshots (the newest of each file is kept)',
       change_packages: 'Exported / promoted packages and import logs',
       saved_views: "The users' own views and analyses — never purged",
+      doc_reports: 'The implementation and technical reports generated, kept as downloaded',
       server_log: 'Rotated by size',
     },
     policy: {
+      docReports: 'Kept until deleted (Documentation reports page)',
       runs: 'Older than {{days}} days, or beyond {{cap}} per job',
       days: 'Older than {{days}} days',
       readDays: 'Read, older than {{days}} days',
@@ -736,6 +738,14 @@ const en = {
     document: 'Document',
   },
   docReports: {
+    copies: 'Kept copies',
+    copiesNote: 'Every report built is kept on the server (.reports next to the configuration)',
+    noCopies: 'No copy of this report yet.',
+    sectionsN_one: '{{count}} section',
+    sectionsN_other: '{{count}} sections',
+    downloadCopy: 'Download',
+    deleteCopy: 'Delete the copy',
+    deleteCopyConfirm: 'Delete {{name}}? The file is removed from the server.',
     title: 'Documentation reports',
     intro: 'The framework documented as PDF or Markdown: the implementation report describes this install, the technical report the release.',
     settings: 'Settings',
