@@ -35,12 +35,15 @@ and audit mirrors; API connectors over HTTP with five authentication kinds. Secr
 
 **Screens.** A screen is the business object: the columns and their rules, the filters
 (cascading through lookups), the dialog with its tabs, nested forms and nested tables,
-row actions and toolbar actions (chains of query, confirm, prompt, navigate, notify),
+row actions and toolbar actions (chains of query, confirm, prompt, navigate, notify, open an
+external address — the install's named addresses, so shipped screens carry none),
 lifecycle hooks, row-level edit rules, bulk edit, Excel import and workbook export,
 summary, tree and chart views, saved grid views shared or per user, record locks. The grid
 streams large results and draws only the visible rows; its column filters follow the
 column's type (several coded values at once), long text can wrap, and each screen sets its
-page size.
+page size. Module catalogues describe a whole application module once (its tables, keys,
+grid and dialog, detail tabs, menu); the Screen Assistant previews it against the live
+schema and applies it — queries, read-only screens, menu and dictionary in one go.
 
 **Dictionary, menus, dashboards.** One dictionary of data items (labels in every
 language, formats, enums, lookups, sequences, rules) shared by every screen. Per-app
@@ -79,14 +82,18 @@ permissions, superusers, and **row-level data scope**: a role's rules on a dicti
 item or a column, with values from a user attribute, narrow every query, export,
 explorer, digest and write. Login throttling, rotating refresh tokens.
 
-**Operations.** Every configuration file is edited by a Settings builder, validated,
+**Operations.** The Liberty Next workspace (superusers) groups the framework's pages by
+purpose — Build, Administer, Operate, Deploy, Document. Every configuration file is edited
+by its own page there, validated,
 snapshotted before each save (version history with diff and restore), hot-reloaded, and
 packaged with its dependencies for deployment to another install. The apps bundle merges
 into the live configuration without clobbering the operator's changes; upgrades are
 journaled with the release notes of each version. Health, readiness, request ids. A
 Monitoring page: the live view (connected users, locks, pools, the log tail), the server
 log kept on disk (rotated, searched, exported, levels per module changed at run time) and
-a retention center (what every store keeps, its size, a preview and a purge). Runs at the
+a retention center (what every store keeps, its size, a preview and a purge). A developer
+reference read from the running code (every setting, every API route with its access, the
+data model) and documentation reports of the release and of the install. Runs at the
 site root or under a reverse-proxy sub-path (`[app] base_path`); installable as a web app.
 
 ---
