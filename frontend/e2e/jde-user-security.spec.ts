@@ -3,9 +3,10 @@
 // application security record, delete that record, delete the user (its on_delete action cleans
 // every table). The run stops before touching anything if LYTEST01 already exists somewhere.
 import { test, expect, type Page } from '@playwright/test'
+import * as XLSX from 'xlsx'
 import {
   cleanupWrite, confirm, dialog, fill, gridRow, matchesBaseline, normalize, openScreen, pick,
-  runGrid, saveDialog, select,
+  runGrid, saveBulkEdit, saveDialog, select, startBulkEdit,
 } from './support'
 
 const USER = 'LYTEST01'
@@ -51,6 +52,15 @@ async function cleanup() {
   }
 }
 
+/** An .xlsx file with *rows* (headers = the column names), written to the test's output folder. */
+function sheet(name: string, rows: Record<string, unknown>[]): string {
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Sheet1')
+  const file = test.info().outputPath(`${name}.xlsx`)
+  XLSX.writeFile(wb, file)
+  return file
+}
+
 async function openRow(page: Page, text: string) {
   await gridRow(page, text).first().click()
   await expect(dialog(page)).toBeVisible()
@@ -92,6 +102,42 @@ test('F0092 / F00950: add a user, set and remove its security, delete the user',
       await openRow(page, USER)
       await deleteOpenRecord(page)
       matchesBaseline('jde-3-security-delete', await snapshot())
+      await page.close()
+    })
+
+    await test.step('F00950: import a record, then the same record changed (bulk edit quick import)', async () => {
+      const page = await openScreen(context, 'nomajde', 'f00950')
+      await page.locator('input[placeholder^="filter"]').first().fill(OBJECT)
+      // A new record without its product code (FSSY): the object's lookup return-fill supplies it.
+      await startBulkEdit(page)
+      await page.locator('input[type="file"]').first().setInputFiles(sheet('f00950-new', [{ FSSETY: '3', FSUSER: USER, FSOBNM: OBJECT, FSRUN: 'N' }]))
+      await expect(page.locator('tbody tr').filter({ has: page.locator('[title="new row"]') })).toHaveCount(1)
+      await saveBulkEdit(page, USER)
+      matchesBaseline('jde-4-import-new', await snapshot())
+
+      // The same key with Run = Y: matched on the key, an edit of the existing row (not a new one).
+      await startBulkEdit(page)
+      await page.locator('input[type="file"]').first().setInputFiles(sheet('f00950-change', [{ FSSETY: '3', FSUSER: USER, FSOBNM: OBJECT, FSRUN: 'Y' }]))
+      await expect(page.locator('tbody tr').filter({ has: page.locator('[title="edited"]') })).toHaveCount(1)
+      await saveBulkEdit(page, USER)
+      matchesBaseline('jde-5-import-change', await snapshot())
+      await page.close()
+    })
+
+    await test.step('F0092: the Import dialog checks two rows (one breaks a screen rule), then Cancel — nothing saved', async () => {
+      const others = async () => (await select('jdedwards',
+        `SELECT COUNT(*) N FROM #SCHEMA.SY#.F0092#DBLINK.SY# WHERE TRIM(ULUSER) IN ('LYTEST02', 'LYTEST03')`))[0].n
+      expect(await others(), 'LYTEST02 / LYTEST03 already exist').toBe(0)
+      const page = await openScreen(context, 'nomajde', 'f0092')
+      await page.getByRole('button', { name: 'Import', exact: true }).click()
+      await page.locator('input[type="file"]').last().setInputFiles(
+        sheet('f0092-check', [{ ULUSER: 'LYTEST02' }, { ULUSER: 'LYTEST03', ULLNGP: 'ZZ' }]))
+      await page.getByRole('button', { name: 'Check', exact: true }).click()
+      await expect(page.getByText('✓ 1 valid')).toBeVisible({ timeout: 10_000 })
+      await expect(page.getByText('✕ 1 invalid')).toBeVisible()
+      await expect(page.getByText('“ZZ” is not a valid value')).toBeVisible()
+      await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+      expect(await others()).toBe(0)
       await page.close()
     })
 

@@ -194,8 +194,9 @@ export function newRows(page: Page): Locator {
  *  its inputs (a test row). Anything else → Cancel and fail: an existing row is never saved. */
 export async function saveBulkEdit(page: Page, marker: string): Promise<void> {
   const touched = page.locator('tbody tr').filter({ has: page.locator('[title="edited"], [title="marked for deletion"]') })
+  // A row's values: its inputs' values and its cells' text (a dropdown cell shows its code as text).
   const values = await touched.evaluateAll((rows) => rows.map((r) =>
-    [...r.querySelectorAll('input')].map((i) => (i as HTMLInputElement).value).join(' | ')))
+    [...r.querySelectorAll('input')].map((i) => (i as HTMLInputElement).value).join(' | ') + ' | ' + (r.textContent ?? '')))
   const foreign = values.filter((v) => !v.includes(marker))
   if (foreign.length) {
     await page.getByRole('button', { name: 'Cancel', exact: true }).first().click()

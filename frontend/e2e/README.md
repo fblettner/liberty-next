@@ -22,13 +22,13 @@ LIBERTY_E2E_USER=… LIBERTY_E2E_PASSWORD=… npx playwright test settings-appli
 | File | Screens | What it does |
 |---|---|---|
 | `settings-applications.spec.ts` | nomasx1 Settings → Applications | form: add (4 tabs, the JD Edwards tab saved to `SETTINGS_JDEDWARDS`), Duplicate, Delete; bulk edit: add, change, clone, delete |
-| `jde-user-security.spec.ts` | nomajde F0092, F00950 | add user `LYTEST01` (`on_insert` → the `reset_password` AIS call), give it application security on P0092, delete that record, delete the user (`on_delete` → `delete_user` in every table) |
+| `jde-user-security.spec.ts` | nomajde F0092, F00950 | add user `LYTEST01` (`on_insert` → the `reset_password` AIS call), give it application security on P0092, delete that record; import it from an .xlsx in bulk edit, re-import it changed (an edit, not a new row); the Import dialog's check of two rows on F0092 (one breaks a screen rule), cancelled; delete the user (`on_delete` → `delete_user` in every table) |
 | `row-menu.spec.ts` | nomasx1 Security → Users | right-click user JDE → Display Roles: the assignments screen opens filtered on the user (read-only, compared live with the query) |
 
 ## Safety
 
 - Only test records are created: applications named `LYTEST-…` (plus id 9901 for the bulk clone),
-  JDE user `LYTEST01`. A scenario stops **before touching anything** if one already exists.
+  JDE user `LYTEST01` (`LYTEST02` / `LYTEST03` only in a cancelled import check). A scenario stops **before touching anything** if one already exists.
 - An existing record is never changed: before a bulk-edit Save, every edited or deleted row must
   hold a test value, otherwise the edit is cancelled and the test fails.
 - If a scenario fails half way, it deletes what it created (by the test keys only).
