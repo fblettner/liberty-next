@@ -144,7 +144,8 @@ export async function chooseOption(page: Page, option: string): Promise<void> {
   await list.getByPlaceholder('Search…', { exact: true }).fill(option)
   // An option shows its code and its description in two elements: match the code exactly (P0092
   // must not pick P00921), else an option whose whole text is *option*.
-  await list.locator('button').filter({ has: page.getByText(option, { exact: true }) }).first().click()
+  // A lookup over a remote database (JDE objects…) can take a few seconds to load its options.
+  await list.locator('button').filter({ has: page.getByText(option, { exact: true }) }).first().click({ timeout: 20_000 })
 }
 
 export async function clickTab(scope: Locator, label: string): Promise<void> {

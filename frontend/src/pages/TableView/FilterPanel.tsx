@@ -2,20 +2,23 @@
 // query config (v1's col_filter). Each field has an operator picker (contains / equals / … —
 // like the grid's per-column filter) and an input; the value + operator are sent to the query
 // as `:<col>` + `:<col>_op` binds on Run, so the SQL pre-filters server-side *before* the grid
-// loads (the in-grid TanStack filters then refine the loaded page). Collapsible — open by default
-// when the query doesn't auto-load (you set filters first), collapsed when it does.
+// loads (the in-grid TanStack filters then refine the loaded page). A date column filters by a
+// period instead — the shared DateRangeFilter (presets + calendar), sent as `<col>_from` / `<col>_to`
+// like a dashboard's period (services/serverFilters). Collapsible — open by default when the query
+// doesn't auto-load (you set filters first), collapsed when it does.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, Check, Filter, FilterX } from 'lucide-react'
 import type { Column } from '../../types/connectors'
-import { Input, SearchSelect, Field, Row, type SearchSelectOption } from '../../common'
+import { DateRangeFilter, Input, SearchSelect, Field, Row, type SearchSelectOption } from '../../common'
 import { lookupKey, useLookupTables, lookupOptions, lookupCellColumns, type LookupSpec } from '../../services/lookups'
 import { colors, radius, fontSize, fonts, shadow } from '../../theme'
+import { isActiveFilter, isDateColumn, type ServerFilter } from '../../services/serverFilters'
 
 type LookupRule = Extract<NonNullable<Column['rule']>, { kind: 'lookup' }>
 
-export interface ServerFilter { op: string; val: string }
+export type { ServerFilter }
 
 // the operators the migrated `SELECT * FROM (…) _flt WHERE …` wrapper understands (the `:<col>_op`
 // values it switches on) — a subset of the grid's, minus the numeric-range ones (those run client-side).
@@ -23,11 +26,9 @@ const OPS = ['contains', 'equals', 'notEquals', 'startsWith', 'endsWith'] as con
 const OP_GLYPH: Record<string, string> = { contains: '~', equals: '=', notEquals: '≠', startsWith: '^', endsWith: '$' }
 
 const NUM_FORMATS = new Set(['number', 'integer', 'int', 'decimal', 'numeric', 'float', 'double', 'real', 'money', 'currency'])
-const DATE_FORMATS = new Set(['date', 'datetime', 'timestamp'])
-function inputTypeFor(c: Column): 'text' | 'number' | 'date' {
+function inputTypeFor(c: Column): 'text' | 'number' {
   const f = (c.format ?? '').toLowerCase()
   const t = (c.type ?? '').toLowerCase()
-  if (DATE_FORMATS.has(f) || /\bdate\b|timestamp/.test(t)) return 'date'
   if (NUM_FORMATS.has(f) || /int|numeric|decimal|float|double|real/.test(t)) return 'number'
   return 'text'
 }
@@ -146,7 +147,7 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
 
   if (cols.length === 0) return null
 
-  const activeCount = cols.filter((c) => (values[c.name]?.val ?? '') !== '').length
+  const activeCount = cols.filter((c) => isActiveFilter(values[c.name])).length
   // lookup options: the SHARED ``lookupOptions`` builder — same {value, label(code), mono(code),
   // cells(display_fields)} shape every other picker uses, so the dropdown renders the identical
   // table. If the column has a cascading dep (filter_from) whose source filter is set, narrow to
@@ -179,6 +180,7 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
               const isEnum = c.rule?.kind === 'enum'
               const isLookup = c.rule?.kind === 'lookup'
               const isChoice = isEnum || isLookup  // a value-list dropdown (op is implicitly "equals")
+              const isPeriod = !isChoice && isDateColumn(c)
               const cur = values[c.name] ?? { op: isChoice ? 'equals' : 'contains', val: '' }
               const opts = isEnum && c.rule?.kind === 'enum' ? c.rule.values.map((v) => ({ value: v.value, label: v.label, mono: v.value }))
                 : isLookup ? lookupOptionsFor(c) : undefined
@@ -186,8 +188,15 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
                 <div key={c.name} style={{ minWidth: 210 }}>
                   <Field label={c.label ?? c.name}>
                     <FieldRow>
-                      {!isChoice && <OpPicker value={cur.op} onChange={(op) => onChange(c.name, { ...cur, op })} />}
-                      {isChoice ? (
+                      {!isChoice && !isPeriod && <OpPicker value={cur.op} onChange={(op) => onChange(c.name, { ...cur, op })} />}
+                      {isPeriod ? (
+                        // A period: a drill's single date (op ``equals``) shows as that one day.
+                        <DateRangeFilter
+                          preset={cur.op === 'period' ? (cur.preset ?? 'custom') : (cur.val ? 'custom' : 'all')}
+                          range={{ dateFrom: cur.val, dateTo: cur.op === 'period' ? (cur.to ?? '') : cur.val }}
+                          onChange={(preset, r) => handleChange(c.name, { op: 'period', val: r.dateFrom, to: r.dateTo, preset })}
+                        />
+                      ) : isChoice ? (
                         <SearchSelect
                           value={cur.val}
                           onChange={(val) => handleChange(c.name, { op: 'equals', val })}

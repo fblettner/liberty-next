@@ -25,7 +25,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, AsyncIterator
 
@@ -419,6 +419,7 @@ _TOKEN_RE = re.compile(r"""\{\{\s*([A-Za-z_]\w*)\s*\}\}""")
 # present — but that killed indexes (universal CAST AS VARCHAR(4000)) and made every
 # stored SELECT unreadable in a wizard.
 _FILTER_OPS_TEXT = ("contains", "equals", "notEquals", "startsWith", "endsWith")
+_DATE_ONLY = re.compile(r"\d{4}-\d{2}-\d{2}")
 # The binds a dashboard period hands every widget query (liberty/dashboards/config.py).
 _PERIOD_BINDS = ("PERIOD_FROM", "PERIOD_TO", "PREV_FROM", "PREV_TO")
 _ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -822,6 +823,8 @@ class Column:
     disabled: bool = False
     disabled_when: list[dict[str, Any]] = field(default_factory=list)
     filter: bool = False
+    # A date filter's period opens on this preset (``last7``…); None = no period (every row).
+    filter_period: str | None = None
     filter_from: list[dict[str, str]] = field(default_factory=list)
     visible_when: list[dict[str, Any]] = field(default_factory=list)
     # LOOKUP return → target-column fills (``ColumnHint.return_binds``). Each is ``{param, column}``:
@@ -874,6 +877,8 @@ class Column:
             d["disabled_when"] = self.disabled_when
         if self.filter:
             d["filter"] = True
+        if self.filter_period:
+            d["filter_period"] = self.filter_period
         if self.filter_from:
             d["filter_from"] = self.filter_from
         if self.visible_when:
@@ -1448,7 +1453,15 @@ class SQLConnector:
                     if entry is not None:
                         rfmt, rdec = rfmt or entry.format, entry.decimals
                 coerced = rv if (rfmt or "").lower() in _TEXT_FORMATS or not rfmt else _coerce_value(rv, rfmt, rdec)
-                ranges.append((col.name, f"{col.name}{suffix}", rfmt, op, coerced))
+                rop = op
+                # A date-only end bound covers that whole day: ``< next day``. ``<= 2026-10-28`` means
+                # up to 00:00 and drops the 28th's rows on a date-time column — and on a ``date`` one
+                # that carries a time (Oracle DATE, a timestamp declared as a date); on a pure date the
+                # two are the same.
+                if (suffix == "_to" and (rfmt or "").lower() in ("date", "datetime", "timestamp")
+                        and isinstance(coerced, date) and _DATE_ONLY.fullmatch(str(rv).strip())):
+                    rop, coerced = "lt", coerced + timedelta(days=1)
+                ranges.append((col.name, f"{col.name}{suffix}", rfmt, rop, coerced))
             if not col.filter:
                 continue
             v = (params or {}).get(col.name)
@@ -2975,7 +2988,7 @@ def _resolve_hint(
     elif entry is not None:
         rule = dictionary.resolve_rule(entry, connector=connector, language=language)
     return Column(
-        name=name or h.name, type=type_, label=label, hidden=h.hidden, key=h.key, filter=h.filter,
+        name=name or h.name, type=type_, label=label, hidden=h.hidden, key=h.key, filter=h.filter, filter_period=h.filter_period,
         disable_on_add=h.disable_on_add, disable_on_edit=h.disable_on_edit,
         disabled=h.disabled, disabled_when=[w.as_dict() for w in h.disabled_when],
         filter_from=[{"source": d.source, "column": d.column} for d in h.filter_from],

@@ -21,6 +21,7 @@ import type { ScreenDetail } from '../../types/screens'
 import { Meta } from './styled'
 import { ResultTable } from './ResultTable'
 import { FilterPanel, type ServerFilter } from './FilterPanel'
+import { defaultPeriods, filterBinds, seededFilter } from '../../services/serverFilters'
 // ChartView pulls in Recharts (~75 kB gz) — split into its own chunk so the table view's
 // initial load stays tight. The chunk only fetches when the operator toggles to Chart mode.
 const ChartView = lazy(() => import('./ChartView').then((m) => ({ default: m.ChartView })))
@@ -183,6 +184,10 @@ export default function TableView({ connector, query, screenApp, screenId, embed
       .then((s) => {
         if (cancelled) return
         setScreen(s)
+        // The periods the date filters open on (a column's ``filter_period``) — set with the screen,
+        // so the first (auto-load) run already applies them; a filter already set keeps its value.
+        const periods = defaultPeriods((s.columns ?? []).filter((c) => c.filter))
+        if (Object.keys(periods).length) setFilters((cur) => ({ ...periods, ...cur }))
         // Drill-down filter seeding moved to the ``applyDrill`` effect below — it reads the screen
         // + URL reactively so it doesn't depend on this fetch winning a race or being captured at
         // the right moment.
@@ -203,7 +208,7 @@ export default function TableView({ connector, query, screenApp, screenId, embed
   )
   const filterBindNames = useMemo(() => {
     const s = new Set<string>()
-    for (const c of filterCols) { s.add(c.name); s.add(`${c.name}_op`) }
+    for (const c of filterCols) { s.add(c.name); s.add(`${c.name}_op`); s.add(`${c.name}_from`); s.add(`${c.name}_to`) }
     return s
   }, [filterCols])
 
@@ -218,7 +223,7 @@ export default function TableView({ connector, query, screenApp, screenId, embed
   const summaryParams = useMemo<Record<string, string>>(() => {
     const sent: Record<string, string> = {}
     for (const [k, v] of Object.entries(params)) if (v !== '') sent[k] = v
-    for (const [name, f] of Object.entries(filters)) if (f.val !== '') { sent[name] = f.val; sent[`${name}_op`] = f.op }
+    Object.assign(sent, filterBinds(filters))   // a value → <col> + <col>_op, a period → <col>_from / <col>_to
     return sent
   }, [params, filters])
 
@@ -268,7 +273,7 @@ export default function TableView({ connector, query, screenApp, screenId, embed
     setStreamCount(null)
     const sent: Record<string, string> = {}
     for (const [k, v] of Object.entries(params)) if (v !== '') sent[k] = v
-    for (const [name, f] of Object.entries(filters)) if (f.val !== '') { sent[name] = f.val; sent[`${name}_op`] = f.op }
+    Object.assign(sent, filterBinds(filters))   // a value → <col> + <col>_op, a period → <col>_from / <col>_to
     const limit = maxRows.trim()  // `_limit=N` overrides the connector/pool/query row cap for this run
     try {
       if (meta.statement_type === 'SELECT') {
@@ -388,6 +393,7 @@ export default function TableView({ connector, query, screenApp, screenId, embed
   useEffect(() => { autoRan.current = false }, [connector, query])
   useEffect(() => {
     if (!autoLoad || meta?.statement_type !== 'SELECT' || autoRan.current || result || busy) return
+    if (!screenReady) return   // the screen's filters (its default periods) apply to the first run
     // Hold the first auto-run until any drill-down binds in the URL have been *applied* to the
     // filter/param state (``applyDrill`` below marks them once meta + screen are ready). Without
     // this the auto-run could fire before the binds land → the row-menu "Display Roles" shows ALL
@@ -395,7 +401,7 @@ export default function TableView({ connector, query, screenApp, screenId, embed
     if (onThisTab && drillKey && drillKey !== lastDrillKey.current) return
     autoRan.current = true
     run()
-  }, [autoLoad, meta, result, busy, run, onThisTab, drillKey])
+  }, [autoLoad, meta, result, busy, run, onThisTab, drillKey, screenReady])
 
   // applyDrill — seed the param form + filter panel from the URL drill binds, *reactively*. Fires
   // whenever this tab is the active route and the URL binds differ from what's been applied, so it
@@ -408,12 +414,13 @@ export default function TableView({ connector, query, screenApp, screenId, embed
     if (drillKey === '') { lastDrillKey.current = drillKey; return }  // no binds → nothing to seed
     if (!meta || !screenReady) return                                // wait for declared params + screen filter cols
     const declared = new Set([...meta.params.map((p) => p.name), ...meta.bind_params])
-    const filterCols = new Set((screen?.columns ?? []).filter((c) => c.filter).map((c) => c.name))
+    const filterCols = new Map((screen?.columns ?? []).filter((c) => c.filter).map((c) => [c.name, c]))
     const nextParams: Record<string, string> = {}
     const nextFilters: Record<string, ServerFilter> = {}
     searchParams.forEach((v, k) => {
       if (declared.has(k)) nextParams[k] = v
-      if (filterCols.has(k)) nextFilters[k] = { val: v, op: 'equals' }   // SQL wrap expects `equals`
+      // an exact match (the SQL wrap's ``equals``) — a date on a date column as that one day's period
+      if (filterCols.has(k)) nextFilters[k] = seededFilter(filterCols.get(k), v)
     })
     lastDrillKey.current = drillKey                                  // applied (meta + screen ready)
     if (Object.keys(nextParams).length === 0 && Object.keys(nextFilters).length === 0) return

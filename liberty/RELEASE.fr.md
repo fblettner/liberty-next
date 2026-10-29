@@ -2,6 +2,14 @@
 
 ## 7.0.67 — non publiée
 
+- Écrans : une colonne date des filtres avancés est une période — le sélecteur de dates des tableaux de bord
+  (préréglages et calendrier sur deux mois), envoyée en `<COL>_from` / `<COL>_to` — au lieu d'une date exacte. Le
+  nouveau `filter_period` d'une colonne (groupe Filtre du Visual Designer) fixe le préréglage à l'ouverture de l'écran
+  (`last7`… ; vide : toutes les lignes) ; le premier chargement automatique l'applique déjà. Un lien ou un rebond
+  passant une date sur une colonne date ouvre ce jour-là.
+- Périodes sur une colonne date : une période finissant un jour couvre tout ce jour (`< le lendemain`) — colonne
+  date-heure, ou colonne date portant une heure (`DATE` Oracle, horodatage déclaré en date). Elle s'arrêtait à 00:00 — une période finissant aujourd'hui, ou un seul jour, perdait les lignes de ce jour — sur les
+  écrans comme sur les tableaux de bord.
 - Développement : des tests de non-régression de bout en bout (`frontend/e2e/`, Playwright, `npm run e2e`) pilotent les
   écrans de données sur un serveur réel et vérifient ce qu'ils enregistrent en base — le formulaire (ajout sur
   plusieurs onglets, duplication, suppression), l'édition en masse (ajout, modification, clonage, suppression), les

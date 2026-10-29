@@ -133,7 +133,7 @@ test('F0092 / F00950: add a user, set and remove its security, delete the user',
       await page.locator('input[type="file"]').last().setInputFiles(
         sheet('f0092-check', [{ ULUSER: 'LYTEST02' }, { ULUSER: 'LYTEST03', ULLNGP: 'ZZ' }]))
       await page.getByRole('button', { name: 'Check', exact: true }).click()
-      await expect(page.getByText('✓ 1 valid')).toBeVisible({ timeout: 10_000 })
+      await expect(page.getByText('✓ 1 valid')).toBeVisible({ timeout: 30_000 })   // the check queries JDE
       await expect(page.getByText('✕ 1 invalid')).toBeVisible()
       await expect(page.getByText('“ZZ” is not a valid value')).toBeVisible()
       await page.getByRole('button', { name: 'Cancel', exact: true }).click()

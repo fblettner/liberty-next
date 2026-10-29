@@ -2,6 +2,12 @@
 
 ## 7.0.67 — unreleased
 
+- Screens: a date column in the advanced filters is a period — the dashboards' date picker (presets and a two-month
+  calendar), sent as `<COL>_from` / `<COL>_to` — instead of one exact date. A column's new `filter_period` (Filter
+  group of the Visual Designer) sets the preset the screen opens on (`last7`…; blank: every row); the first automatic
+  run already applies it. A drill or link passing a date on a date column opens that one day.
+- Periods on a date column: a period ending on a day covers that whole day (`< the next day`) — a date-time column,
+  or a date column holding a time (Oracle `DATE`, a timestamp declared as a date). It used to stop at 00:00 — a period ending today, or a single day, dropped that day's rows — on the screens and on the dashboards.
 - Development: end-to-end regression tests (`frontend/e2e/`, Playwright, `npm run e2e`) drive the data screens on a
   live server and check what they save in the database — the record form (add on several tabs, duplicate, delete),
   bulk edit (add, change, clone, delete), the lifecycle actions and the row menu; test records only, never run in CI.

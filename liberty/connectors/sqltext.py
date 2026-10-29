@@ -185,7 +185,7 @@ def _filter_sql_type(fmt: str | None, dialect: str) -> str:
 
 def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str, *, trim_text: bool = False, bind: str | None = None) -> str:
     """One filter predicate against ``lib_flt.<name>`` for *op* using a bind named ``:<name>``
-    (or *bind* — the range ops ``gte`` / ``lte`` bind ``<name>_from`` / ``<name>_to``).
+    (or *bind* — the range ops ``gte`` / ``lte`` / ``lt`` bind ``<name>_from`` / ``<name>_to``).
 
     Text columns get the operator-aware ``LOWER(col) LIKE LOWER(...)`` family for
     contains/startsWith/endsWith plus ``=`` / ``<>`` for equals/notEquals. Crucially, we
@@ -211,11 +211,12 @@ def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str, *
     text_format = (fmt or "").lower() in _TEXT_FORMATS or fmt is None or fmt == ""
     col_ref = f"TRIM(lib_flt.{name})" if (text_format and trim_text) else f"lib_flt.{name}"
     b = bind or name
-    if op in ("gte", "lte"):
-        # A range bound (a dashboard period on a date column): typed like the column; a text
-        # date column (ISO strings) compares as text, which orders correctly.
+    if op in ("gte", "lte", "lt"):
+        # A range bound (a dashboard / filter-panel period on a date column): typed like the
+        # column; a text date column (ISO strings) compares as text, which orders correctly.
+        # ``lt`` is a date-only end bound on a date-time column (the next day, exclusive).
         rhs = f"CAST(:{b} AS {_filter_sql_type(None, dialect)})" if text_format else f":{b}"
-        return f"{col_ref} {'>=' if op == 'gte' else '<='} {rhs}"
+        return f"{col_ref} {({'gte': '>=', 'lte': '<=', 'lt': '<'})[op]} {rhs}"
     if text_format:
         # The bind side still casts to a wide VARCHAR — asyncpg can't infer the type of a
         # bind otherwise (Postgres needs the cast to know whether to compare as text vs

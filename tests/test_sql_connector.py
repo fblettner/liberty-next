@@ -2467,6 +2467,36 @@ async def test_filter_wrap_range_bounds_on_a_hinted_column(pools: PoolRegistry) 
     assert "lib_flt.id >= :id_from" in sql and "lib_flt.id <= :id_to" in sql and params == {"id_from": 2, "id_to": 3}
 
 
+def test_filter_wrap_date_only_end_bound_covers_the_whole_day(pools: PoolRegistry) -> None:
+    """A period ending on a date: ``< next day`` — ``<= 2026-10-28`` would stop at 00:00 and drop the
+    28th's rows (a date-time column, or a ``date`` one holding a time). A full timestamp, a start bound: as is."""
+    from datetime import datetime as _dt
+    q = QueryDef(name="h", sql="SELECT checked_at, day FROM health")
+    conn = _connector(pools, q)
+    hints = [ColumnHint(name="checked_at", format="datetime"), ColumnHint(name="day", format="date")]
+    sql, params = conn._apply_filter_wrap(q.sql, q, {"checked_at_from": "2026-10-22", "checked_at_to": "2026-10-28"}, stmt_type="SELECT", column_hints=hints)
+    assert "lib_flt.checked_at >= :checked_at_from" in sql and "lib_flt.checked_at < :checked_at_to" in sql
+    assert params["checked_at_from"] == _dt(2026, 10, 22) and params["checked_at_to"] == _dt(2026, 10, 29)
+    sql, params = conn._apply_filter_wrap(q.sql, q, {"checked_at_to": "2026-10-28T12:00:00"}, stmt_type="SELECT", column_hints=hints)
+    assert "lib_flt.checked_at <= :checked_at_to" in sql and params["checked_at_to"] == _dt(2026, 10, 28, 12)
+    from datetime import date as _date
+    sql, params = conn._apply_filter_wrap(q.sql, q, {"day_from": "2026-10-28", "day_to": "2026-10-28"}, stmt_type="SELECT", column_hints=hints)
+    assert "lib_flt.day >= :day_from" in sql and "lib_flt.day < :day_to" in sql
+    assert params["day_from"] == _date(2026, 10, 28) and params["day_to"] == _date(2026, 10, 29)
+
+
+def test_filter_period_reaches_the_column() -> None:
+    """``filter_period`` (the preset a date filter's period opens on) is carried to the column the
+    screen API serves, and left out when unset."""
+    from liberty.connectors.dictionary import DictionaryFile
+    from liberty.connectors.sql import _hint_to_dict
+    d = _hint_to_dict(ColumnHint(name="check_date", format="date", filter=True, filter_period="last7"), DictionaryFile(), None)
+    assert d["filter"] is True and d["filter_period"] == "last7"
+    assert "filter_period" not in _hint_to_dict(ColumnHint(name="x", filter=True), DictionaryFile(), None)
+    with pytest.raises(Exception):
+        ColumnHint(name="x", filter_period="nextweek")
+
+
 @pytest.mark.asyncio
 async def test_period_binds_are_bound_as_dates(pools: PoolRegistry) -> None:
     """``:PERIOD_FROM`` & co. arrive as ISO text from the browser and bind as ``date`` objects

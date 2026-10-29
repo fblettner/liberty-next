@@ -416,6 +416,9 @@ class ColumnHint(BaseModel):
     )
     # ── Filter — grid filter panel + conditional column visibility ────────────────────────
     filter: bool = Field(default=False, json_schema_extra={"x_group": "Filter"}, description="Show this column in the table's filter panel.")
+    filter_period: Literal["all", "today", "yesterday", "last7", "last30", "thisMonth", "lastMonth", "thisQuarter", "thisYear", "lastYear", "last12"] | None = Field(
+        default=None, json_schema_extra={"x_group": "Filter"},
+        description="A date filter shows a period (from / to); the preset it opens on. Blank: no period, every row.")
     filter_from: list[FilterDep] = Field(default_factory=list, json_schema_extra={"x_group": "Filter"}, description="Cascading filters — narrow this column's options based on other filters.")
     visible_when: VisibleWhen | list[VisibleWhen] | None = Field(default=None, json_schema_extra={"x_group": "Filter"}, description="Show this column only when a filter has a specific value. Multiple rules are AND-ed.")
     # ── Rules — the column's widget + conditional rules + lookup config ───────────────────

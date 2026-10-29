@@ -1,4 +1,5 @@
 // Connector / query / endpoint shapes returned by liberty/web (the `/api/*` routes).
+import type { DatePreset } from '../services/period'
 
 export interface ParamDef {
   name: string
@@ -133,6 +134,8 @@ export interface Column {
   hidden?: boolean
   /** surface this column in the TableView filter panel (v1's col_filter). */
   filter?: boolean
+  /** a date filter's period opens on this preset (``last7``…); unset = no period, every row. */
+  filter_period?: Exclude<DatePreset, 'custom'>
   /** cascading-filter deps (v1's ly_tbl_filters): when the `source` filter has a value, this
    *  column's LOOKUP options are narrowed to the rows whose `column` matches it. */
   filter_from?: { source: string; column: string }[]
