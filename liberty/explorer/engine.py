@@ -49,6 +49,7 @@ MAX_PAGE = 5_000
 _IDENT = re.compile(r"^[A-Za-z0-9_]+$")
 _TEXT_OPS = {"contains", "equals", "notEquals", "startsWith", "endsWith", "in", "empty", "notEmpty"}
 _ORDER_OPS = {"equals", "notEquals", "lt", "le", "gt", "ge", "in", "empty", "notEmpty"}
+_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")   # a whole day, as a filter value on a date / date-time
 
 
 class ExplorerError(ValueError):
@@ -529,6 +530,21 @@ class _Builder:
 
     def predicate(self, fld: ExplorerField, op: str, value: Any, *, owner: str | None = None) -> str:
         col = self.ref(fld, owner=owner)
+        # A day (yyyy-mm-dd) on a date / date-time column is that whole day: ``<= day`` would stop at
+        # 00:00 and ``= day`` match only midnight — a date-time, or a "date" holding a time (Oracle
+        # DATE). So ≤ → < next day, > → ≥ next day, = / ≠ → in / out of [day, next day). A JDE date
+        # (a Julian day number) has no time.
+        if (op in ("le", "gt", "equals", "notEquals") and fld.type in ("date", "datetime")
+                and (fld.format or "").lower() != "jdedate" and isinstance(value, str) and _DAY.fullmatch(value.strip())):
+            day = date.fromisoformat(value.strip())
+            lo, hi = (day, day + timedelta(days=1)) if fld.type == "date" else (
+                datetime.combine(day, datetime.min.time()), datetime.combine(day + timedelta(days=1), datetime.min.time()))
+            b_lo, b_hi = f"f{self._n}", f"f{self._n + 1}"
+            self._n += 2
+            self.binds[b_lo], self.binds[b_hi] = lo, hi
+            return {"le": f"{col} < :{b_hi}", "gt": f"{col} >= :{b_hi}",
+                    "equals": f"({col} >= :{b_lo} AND {col} < :{b_hi})",
+                    "notEquals": f"({col} < :{b_lo} OR {col} >= :{b_hi})"}[op]
         values = [] if op in ("empty", "notEmpty") else (value if isinstance(value, list) else [value])
         names: list[str] = []
         for v in values:

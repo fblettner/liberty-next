@@ -14,7 +14,10 @@
   reste une date ISO. Le calendrier est partagé (`common/MonthGrid`) ; son titre ouvre un choix du mois et de l'année
   (les 12 mois, l'année par flèches ou 12 à la fois) — dans le sélecteur de période aussi — : une date à un an d'ici
   en trois clics, pas douze. Un filtre de colonne sur une date-heure avec fuseau compare le jour local, celui
-  qu'affiche la grille.
+  qu'affiche la grille. Les champs date-heure du Data Explorer filtrent aussi avec lui (au jour).
+- Data Explorer : un jour dans un filtre sur un champ date ou date-heure est ce jour entier — `≤` / la fin d'un
+  « entre » gardent les lignes de ce jour après 00:00, `=` / `≠` veulent dire dans / hors de ce jour (ils comparaient à
+  minuit).
 - Dates : une date-heure portant son fuseau (un `timestamptz` PostgreSQL, `…+00:00`) s'affiche à l'heure locale du
   navigateur (`2026-10-29 00:54:08`), comme les jours du filtre de période — elle s'affichait en UTC brut, un contrôle
   fait à 00:54 à Paris se lisant la veille. Les valeurs sans fuseau (`DATE` Oracle, dates JD Edwards) restent telles

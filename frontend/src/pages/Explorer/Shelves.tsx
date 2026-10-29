@@ -154,7 +154,9 @@ function FilterChip({ index, row, field, dragging, onDragStart, onDragEnd, onCha
   const [draft, setDraft] = useState(row.value)
   const [draftTo, setDraftTo] = useState(row.valueTo ?? '')
   const commit = () => { if (draft !== row.value || draftTo !== (row.valueTo ?? '')) onChange({ ...row, value: draft, valueTo: draftTo || undefined }) }
-  const inputType = type === 'date' ? 'date' : type === 'datetime' ? 'datetime-local' : type === 'number' ? 'number' : 'text'
+  const inputType = type === 'number' ? 'number' : 'text'
+  // a date or a date-time filters by day: the themed picker (the server takes a day on a date-time as that whole day)
+  const isDay = type === 'date' || type === 'datetime'
   const noValue = row.op === 'empty' || row.op === 'notEmpty'
   const inOp = row.op === 'in'
   // an `in` on a coded field: a picker that appends codes to the comma list
@@ -166,11 +168,11 @@ function FilterChip({ index, row, field, dragging, onDragStart, onDragEnd, onCha
       <span className="sel"><SearchSelect value={row.op} options={ops} onChange={(v) => onChange({ ...row, op: v as FilterOp, value: '', valueTo: undefined })} /></span>
       {!noValue && row.op === 'between' && (
         <>
-          <Narrow>{type === 'date'
+          <Narrow>{isDay
             ? <DatePicker value={draft} onChange={(v) => { setDraft(v); onChange({ ...row, value: v, valueTo: draftTo || undefined }) }} />
             : <Input type={inputType} value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit() }} />}</Narrow>
           <span style={{ color: colors.text.muted }}>→</span>
-          <Narrow>{type === 'date'
+          <Narrow>{isDay
             ? <DatePicker value={draftTo} onChange={(v) => { setDraftTo(v); onChange({ ...row, value: draft, valueTo: v || undefined }) }} />
             : <Input type={inputType} value={draftTo} onChange={(e) => setDraftTo(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit() }} />}</Narrow>
         </>
@@ -180,7 +182,7 @@ function FilterChip({ index, row, field, dragging, onDragStart, onDragEnd, onCha
       )}
       {!noValue && row.op !== 'between' && (valueOpts.length === 0 || pickerIn) && (
         <>
-          <Narrow>{type === 'date' && !inOp
+          <Narrow>{isDay && !inOp
             ? <DatePicker value={draft} onChange={(v) => { setDraft(v); onChange({ ...row, value: v, valueTo: draftTo || undefined }) }} />
             : <Input type={inOp ? 'text' : inputType} value={draft} placeholder={inOp ? t('explorer.inPlaceholder') : ''} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit() }} />}</Narrow>
           {pickerIn && (

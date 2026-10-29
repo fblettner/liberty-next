@@ -13,7 +13,9 @@
   calendar, with Today and Clear. The value stays an ISO date. The calendar is shared (`common/MonthGrid`); its title
   opens a month / year chooser (the 12 months, the year by arrows or 12 at a time) — in the period picker too — so a
   date a year away is three clicks, not twelve. A column filter on a date-time with a time zone compares on the local
-  day, the day the grid shows.
+  day, the day the grid shows. The Data Explorer's date-time fields filter with it too (by day).
+- Data Explorer: a day in a filter on a date or date-time field is that whole day — `≤` / the end of a "between" keep
+  that day's rows after 00:00, `=` / `≠` mean in / out of that day (they compared with midnight).
 - Dates: a date-time carrying its time zone (a PostgreSQL `timestamptz`, `…+00:00`) shows in the browser's local time
   (`2026-10-29 00:54:08`), like the period filter's days — it showed the raw UTC value, a check made at 00:54 in
   Paris reading as the day before. Values without a zone (Oracle `DATE`, JD Edwards dates) show as they are.

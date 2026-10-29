@@ -3,7 +3,7 @@
 // (nomajde JDE Servers), and the record form's themed date picker (nomasx1 License - Contracts:
 // pick, type, a bad date reverts — then closed without saving, the row checked unchanged).
 import { test, expect, type Page } from '@playwright/test'
-import { dialog, openScreen, runGrid, screenRows, select } from './support'
+import { BASE, dialog, login, openScreen, runGrid, screenRows, select } from './support'
 
 async function gridCount(page: Page): Promise<number> {
   const text = await page.getByText(/^\d+ rows? ·/).first().textContent()
@@ -116,4 +116,24 @@ test('JDE Servers: the grid’s column filter on a date is the themed picker, on
   await picker.press('Enter')
   await expect(page.locator('tbody tr').filter({ hasNotText: iso })).toHaveCount(expected.length === 0 ? 1 : 0)
   if (expected.length) await expect(page.locator('tbody tr')).toHaveCount(expected.length)
+})
+
+test('Data Explorer: a date-time field filters with the date picker (no browser control)', async ({ context }) => {
+  const t = await login()
+  await context.addInitScript((s) => {
+    localStorage.setItem('liberty.tokens', JSON.stringify(s)); localStorage.setItem('liberty.language', 'en'); localStorage.setItem('liberty.app', 'nomajde')
+  }, t)
+  const page = await context.newPage()
+  await page.goto(`${BASE}/explorer/nomajde/address_book`)
+  // F03012.AIDTEE (a date-time in JDE's customer master) — the model builds over the remote JDE
+  const entity = page.getByRole('button', { name: /^F03012\b/ }).first()
+  await expect(entity).toBeVisible({ timeout: 60_000 })
+  const fieldRow = page.locator('[title="f03012.AIDTEE"]').first()
+  if (!(await fieldRow.isVisible())) await entity.click()   // the entity's fields fold
+  await expect(fieldRow).toBeVisible()
+  await fieldRow.hover()
+  await fieldRow.getByTitle('Add as a filter').click()
+  await expect(page.locator('input[type="datetime-local"], input[type="date"]')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Pick a date' })).toHaveCount(2)   // a "between": from / to
+  await page.screenshot({ path: test.info().outputPath('explorer-datetime.png') })
 })

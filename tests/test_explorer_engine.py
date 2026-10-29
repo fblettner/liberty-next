@@ -278,3 +278,42 @@ async def test_jdenumber_measure_reads_the_real_amount(env) -> None:
     res = await run(env, rows=[{"field": "company.NAME"}], measures=[{"field": "sales.REVENUE", "agg": "sum"}], filters={"sales.REVENUE__from": "1"})
     assert all(r["sum(sales.REVENUE)"] >= 1 for r in res["rows"])
     fld.format, fld.decimals = None, None
+
+
+@pytest.mark.asyncio
+async def test_a_day_on_a_date_time_covers_the_whole_day(tmp_path) -> None:
+    """A filter day (yyyy-mm-dd) on a date-time field is that whole day: ``<=`` it, ``=`` it and a
+    "between" ending on it keep the rows of that day after 00:00 (they used to stop at midnight)."""
+    url = f"sqlite+aiosqlite:///{tmp_path / 'y.db'}"
+    cfg = ConnectorsFile.model_validate({
+        "pools": {"default": {"url": url}},
+        "connectors": {"shop": {"type": "sql", "pool": "default", "queries": [
+            {"name": "events_get", "sql": "SELECT id AS ID, logged_at AS LOGGED_AT FROM events ORDER BY id"},
+        ]}},
+    })
+    registry = ConnectorRegistry(cfg)
+    async with registry.pools.engine("default").begin() as c:
+        await c.execute(text("CREATE TABLE events (id INTEGER PRIMARY KEY, logged_at TEXT)"))
+        for i, ts in enumerate(["2026-01-19 23:00:00", "2026-01-20 00:00:00", "2026-01-20 15:00:00", "2026-01-21 08:00:00"], 1):
+            await c.execute(text("INSERT INTO events VALUES (:i, :t)"), {"i": i, "t": ts})
+    screens = ScreensFile(screens={"shop": {"events": Screen(
+        id="events", label="Events", read_query="events_get", columns=[ColumnHint(name="LOGGED_AT", format="datetime")],
+    )}})
+    model = parse_explorer({"explorer": {"shop": {"events": {
+        "hub": "events", "entities": {"events": {"query": "events_get", "screen": "events", "key": ["ID"]}}}}}}).explorer["shop"]["events"]
+    view = await build_model_view(registry, screens, "shop", model, language="en")
+    assert view.field("events.LOGGED_AT").type == "datetime"
+
+    async def count(**filters) -> int:
+        out = await run_aggregate(registry, screens, view, AggregateRequest.model_validate({"filters": filters}), debug=True)
+        return out["rows"][0]["count(*)"]
+    try:
+        assert await count(**{"events.LOGGED_AT__to": "2026-01-20"}) == 3            # 15:00 on the 20th kept
+        assert await count(**{"events.LOGGED_AT__from": "2026-01-20", "events.LOGGED_AT__to": "2026-01-20"}) == 2
+        assert await count(**{"events.LOGGED_AT": "2026-01-20", "events.LOGGED_AT__op": "equals"}) == 2
+        assert await count(**{"events.LOGGED_AT": "2026-01-20", "events.LOGGED_AT__op": "notEquals"}) == 2
+        assert await count(**{"events.LOGGED_AT": "2026-01-20", "events.LOGGED_AT__op": "gt"}) == 1   # after the 20th
+        assert await count(**{"events.LOGGED_AT": "2026-01-20", "events.LOGGED_AT__op": "lt"}) == 1   # before the 20th
+        assert await count(**{"events.LOGGED_AT__to": "2026-01-20T12:00:00"}) == 2   # a time: as it is
+    finally:
+        await registry.pools.dispose()
