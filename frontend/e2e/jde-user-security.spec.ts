@@ -129,9 +129,7 @@ test('F0092 / F00950: add a user, set and remove its security, delete the user',
         `SELECT COUNT(*) N FROM #SCHEMA.SY#.F0092#DBLINK.SY# WHERE TRIM(ULUSER) IN ('LYTEST02', 'LYTEST03')`))[0].n
       expect(await others(), 'LYTEST02 / LYTEST03 already exist').toBe(0)
       const page = await openScreen(context, 'nomajde', 'f0092')
-      // the rule check uses the grid's lookups (the language list): let them load first — a lookup
-      // not loaded yet is skipped by the check (docs/work/PLAN.md findings)
-      await page.waitForLoadState('networkidle')
+      // Import at once, the grid's lookups possibly still loading: the check loads the lists it needs
       await page.getByRole('button', { name: 'Import', exact: true }).click()
       await page.locator('input[type="file"]').last().setInputFiles(
         sheet('f0092-check', [{ ULUSER: 'LYTEST02' }, { ULUSER: 'LYTEST03', ULLNGP: 'ZZ' }]))

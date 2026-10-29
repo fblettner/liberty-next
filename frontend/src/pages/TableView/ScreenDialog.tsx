@@ -440,8 +440,10 @@ export function ScreenDialog({
         : `${a.label || a.id} · ${t('http.ok')}`
       setActionStatus({ message: msg, tone: 'ok' })
     }
-    if (result.refresh) onSaved()
-  }, [formValues, savedRow, runOnSaveActions, onSaved, t])
+    // An action that asks for a refresh changed the data: refresh the grid and close the form — left
+    // open, it would keep the values it loaded and a later Save would write them back over the change.
+    if (result.refresh) { onSaved(); onClose() }
+  }, [formValues, savedRow, runOnSaveActions, onSaved, onClose, t])
 
   // ``dialog.on_load`` — fires once after the dialog opens *and* the seeding effect has run
   // (so formValues + savedRow reflect the loaded row). Useful for: refreshing a lookup,

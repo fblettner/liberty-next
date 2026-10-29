@@ -2,10 +2,13 @@
 
 ## 7.0.67 — unreleased
 
+- Import dialog: the rule check loads the lists of values each row needs — a lookup the grid had not loaded yet (an
+  Import opened as the screen opens) or a list narrowed by the row's own values — instead of skipping it and passing
+  the row as valid (`ZZ` went through as a language). A list that cannot be loaded makes the row an error.
 - Record form: when a lifecycle hook fails after the row is written (an `on_insert` API call answering an error, with
   `stop_on_error`), the form stays open with the error — the refresh closed it and hid the message. `onSaved` only
-  refreshes now; the form closes itself after a successful save or delete. (A tab action asking for a refresh no
-  longer closes the form either.)
+  refreshes now; the form closes itself after a successful save or delete. A tab action asking for a refresh still
+  closes the form (left open, it would keep the values it loaded and a later Save would write them back).
 - Record form: a tab action whose prompt is cancelled reports nothing — it showed "<action> · OK".
 - Bulk edit: "Clone row" and paste keep every value, keys included, except a column filled by a `SEQUENCE` (its
   `rules`): left empty, the insert takes a new one — and the 1:1 related rows follow the new key (the save looked the

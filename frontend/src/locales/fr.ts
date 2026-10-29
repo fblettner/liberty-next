@@ -500,6 +500,8 @@ const fr: Resources = {
     modeUpdate: 'Mettre à jour seulement',
     validating: 'Vérification de {{count}} lignes dans la base…',
     checkingRules: 'Vérification des règles de l’écran…',
+    loadingLists: 'Chargement des listes de valeurs…',
+    listUnavailable: 'la liste de valeurs n’a pas pu être chargée',
     checkingDb: 'Vérification dans la base de données…',
     ruleError: 'règle',
     rowNum: 'Ligne {{n}}',

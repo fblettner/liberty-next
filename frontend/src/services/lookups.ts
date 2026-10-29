@@ -251,3 +251,7 @@ export function useLookupTables(specs: LookupSpec[]): Map<string, LookupData> {
 }
 
 export { specKey as lookupKey }
+
+/** One lookup's rows, fetched on demand (the same session cache the hooks use) — for code outside
+ *  React that needs a list the grid has not loaded (the Import check). */
+export const loadLookup = fetchLookup

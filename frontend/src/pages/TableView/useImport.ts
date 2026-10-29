@@ -5,7 +5,7 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import * as XLSX from 'xlsx'
 import type { Column, QueryResult } from '../../types/connectors'
-import { lookupKey, type LookupData } from '../../services/lookups'
+import { loadLookup, lookupKey, type LookupData, type LookupSpec } from '../../services/lookups'
 import { activeRulesWhen } from './dialogHelpers'
 import type { DataRow } from './resultColumns'
 import type { useBatchEdit } from './useBatchEdit'
@@ -13,14 +13,15 @@ import type { useBatchEdit } from './useBatchEdit'
 type BatchEdit = ReturnType<typeof useBatchEdit>
 
 export function useImport({
-  result, keyColumns, activeLookupFor, lookupMaps,
+  result, keyColumns, specForRule, lookupMaps,
   editMode, setEditMode, editsRef, setDirtyRows, setSaveErrors, prependNewRows,
 }: {
   result: QueryResult
   /** Result columns that identify a row — the import matches existing rows on them. */
   keyColumns?: string[]
-  /** The grid's active lookup for a cell (rules_when resolved) — the validation reuses it. */
-  activeLookupFor: (c: Column, row: DataRow) => { rule: Column['rule']; data: LookupData | undefined; key?: string }
+  /** The grid's (rule, binds, row) → the lookup to fetch — the validation resolves each row's list with it. */
+  specForRule: (r: Column['rule'] | null | undefined, binds: { param: string; value?: string | null; source?: string | null }[] | undefined,
+    rowValues: Record<string, unknown>) => LookupSpec | null
   lookupMaps: Map<string, LookupData>
 } & Pick<BatchEdit, 'editMode' | 'setEditMode' | 'editsRef' | 'setDirtyRows' | 'setSaveErrors' | 'prependNewRows'>) {
   const { t } = useTranslation()
@@ -30,19 +31,14 @@ export function useImport({
 
   // ── Import: SCREEN-RULE validation, reusing the grid's OWN resolution ──
   // The DB can't tell a bad lookup/enum value from a good one (a JDE CHAR column accepts any junk),
-  // so we check each cell against its column's rule. Crucially this reuses ``activeRulesWhen`` /
-  // ``activeLookupFor`` — the exact functions that drive the grid display — so it resolves the per-row
-  // ACTIVE rule (rules_when: FSDTAI is a data item for some sec_types, a form name for others; FSDLT's
-  // Y/N flips) and matches trim-tolerantly against the already-fetched lookup. No parallel re-impl.
-  // Trimmed valid-code set per fetched lookup (keyed by spec key), built once.
-  const lookupTrimSets = useMemo(() => {
-    const m = new Map<string, Set<string>>()
-    for (const [key, data] of lookupMaps) m.set(key, new Set([...data.map.keys()].map((k) => k.trim())))
-    return m
-  }, [lookupMaps])
-  const validateImportRow = useCallback((row: Record<string, unknown>): string[] => {
+  // so we check each cell against its column's rule — the per-row ACTIVE rule (rules_when: FSDTAI is a
+  // data item for some sec_types, a form name for others; FSDLT's Y/N flips), matched trim-tolerantly.
+  // A LOOKUP is checked against THIS row's list — ``specForRule`` with the row's binds, the grid's own
+  // resolution — loaded on demand (``loadLookup``, the session cache): a list the grid has not loaded
+  // yet (the screen just opened, or no grid row uses this narrowing) is fetched, never skipped; one
+  // that cannot be loaded makes the row an error rather than a silent pass.
+  const validateImportRow = useCallback(async (row: Record<string, unknown>): Promise<string[]> => {
     const errs: string[] = []
-    const dr = row as DataRow
     for (const c of result.columns) {
       const raw = row[c.name]
       if (raw == null || String(raw).trim() === '') continue   // empty → DB defaults / nullability decide
@@ -52,10 +48,16 @@ export function useImport({
       const aw = c.rules_when?.length ? activeRulesWhen(c.rules_when, row) : null
       const rule = aw ? (aw.rule ?? null) : (c.rule ?? null)
       if (rule?.kind === 'lookup') {
-        const { data, key } = activeLookupFor(c, dr)
-        if (!data || !key) continue   // the narrowed lookup for this row's discriminator isn't loaded
-        const set = lookupTrimSets.get(key)
-        if (set && set.size > 0 && !set.has(val)) errs.push(`${name}: “${val}” is not a valid value`)
+        const spec = specForRule(rule, aw ? aw.lookup_param_binds : undefined, row)
+        if (!spec) continue
+        let codes: Set<string>
+        try {
+          codes = new Set([...(await loadLookup(spec)).map.keys()].map((k) => k.trim()))
+        } catch {
+          errs.push(`${name}: ${t('import.listUnavailable')}`)
+          continue
+        }
+        if (codes.size > 0 && !codes.has(val)) errs.push(`${name}: “${val}” is not a valid value`)
       } else if (rule?.kind === 'enum') {
         if (!rule.values.some((v) => v.value === val || v.value.trim() === val)) errs.push(`${name}: “${val}” is not an allowed value`)
       } else if (rule?.kind === 'boolean') {
@@ -69,7 +71,7 @@ export function useImport({
       }
     }
     return errs
-  }, [result.columns, activeLookupFor, lookupTrimSets])
+  }, [result.columns, specForRule, t])
 
   // Import rows from an Excel/CSV file. Matching is by *header text*, not column position, so the
   // sheet's columns can be in any order and extra columns are ignored: we build `byHeader` =

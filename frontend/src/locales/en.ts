@@ -498,6 +498,8 @@ const en = {
     modeUpdate: 'Update only',
     validating: 'Checking {{count}} rows against the database…',
     checkingRules: 'Checking screen rules…',
+    loadingLists: 'Loading the lists of values…',
+    listUnavailable: 'the list of values could not be loaded',
     checkingDb: 'Checking against the database…',
     ruleError: 'rule',
     rowNum: 'Row {{n}}',

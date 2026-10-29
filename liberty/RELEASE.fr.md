@@ -2,11 +2,15 @@
 
 ## 7.0.67 — non publiée
 
+- Import : le contrôle des règles charge les listes de valeurs dont chaque ligne a besoin — une liste que la grille
+  n'avait pas encore chargée (un import ouvert dès l'ouverture de l'écran) ou une liste restreinte par les valeurs de
+  la ligne — au lieu de l'ignorer et de déclarer la ligne valide (`ZZ` passait comme langue). Une liste impossible à
+  charger met la ligne en erreur.
 - Formulaire : quand une action du cycle de vie échoue après l'écriture de la ligne (un appel d'API d'`on_insert` en
   erreur, avec `stop_on_error`), le formulaire reste ouvert avec l'erreur — le rafraîchissement le fermait et
   masquait le message. `onSaved` ne fait plus que rafraîchir ; le formulaire se ferme lui-même après un
-  enregistrement ou une suppression réussis. (Une action d'onglet demandant un rafraîchissement ne ferme plus le
-  formulaire non plus.)
+  enregistrement ou une suppression réussis. Une action d'onglet demandant un rafraîchissement ferme toujours le
+  formulaire (laissé ouvert, il garderait les valeurs chargées et un Enregistrer suivant les réécrirait).
 - Formulaire : une action d'onglet dont la saisie est annulée n'affiche plus rien — elle affichait « <action> · OK ».
 - Édition en masse : « Cloner la ligne » et le collage gardent toutes les valeurs, clés comprises, sauf une colonne
   remplie par une `SEQUENCE` (ses `rules`) : laissée vide, l'insertion en prend une nouvelle — et les lignes liées

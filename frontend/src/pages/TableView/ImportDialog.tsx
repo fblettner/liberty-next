@@ -76,7 +76,8 @@ export function ImportDialog({
   parseFile: (file: File) => Promise<Record<string, unknown>[] | null>
   /** Screen-rule check for one mapped row → human-readable errors (empty = passes). Reuses the grid's
    *  own rule resolution, so it's rules_when-aware + trim-tolerant. */
-  validateRow: (row: Record<string, unknown>) => string[]
+  /** The screen-rule errors of a row — async: it may load the lists of values the row's lookups need. */
+  validateRow: (row: Record<string, unknown>) => Promise<string[]>
   /** Key columns — used to label each report row so the operator can find it in the sheet. */
   keyColumns: string[]
   connector: string
@@ -129,12 +130,11 @@ export function ImportDialog({
     try {
       // Pass 1 — screen rules (client-side, instant). Reuses the grid's own per-row resolution so
       // bad lookup/enum/boolean values are caught (the DB can't tell — JDE CHAR accepts anything).
-      setProgressLabel(t('import.checkingRules'))
+      // Each row's lookups are loaded as needed (cached: a list is fetched once for all rows).
+      setProgressLabel(t('import.loadingLists'))
       const ruleErr = new Map<number, string>()
-      for (let i = 0; i < rows.length; i++) {
-        const e = validateRow(rows[i])
-        if (e.length) ruleErr.set(i, e.join(' · '))
-      }
+      const checked = await Promise.all(rows.map((r) => validateRow(r)))
+      checked.forEach((e, i) => { if (e.length) ruleErr.set(i, e.join(' · ')) })
       setProgress(0.3)
       // Pass 2 — DB dry-run for the rows that passed the rule check (the real save path, rolled back).
       setProgressLabel(t('import.checkingDb'))

@@ -492,7 +492,7 @@ export function ResultTable({
 
   // The import (Excel / CSV file, the Import dialog, paste from Excel) — into the batch edit.
   const { fileRef, importOpen, setImportOpen, validateImportRow, parseImportFile, onPasteRows, importFile } = useImport({
-    result, keyColumns, activeLookupFor, lookupMaps,
+    result, keyColumns, specForRule, lookupMaps,
     editMode, setEditMode, editsRef, setDirtyRows, setSaveErrors, prependNewRows,
   })
 
