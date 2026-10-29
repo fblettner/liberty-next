@@ -30,7 +30,10 @@ Three applications run on it in production, shipped as a separate licensed bundl
 **Connectors.** SQL pools on PostgreSQL and Oracle (thin driver, optional thick mode for
 network encryption and LOBs over database links) with named queries, tables with their
 read and write statements, schema and dblink placeholders, server-side filters, sequences
-and audit mirrors; API connectors over HTTP with five authentication kinds. Secrets are
+and audit mirrors; one connector over several environments (JD Edwards instances), the
+environment picked in the menu; API connectors over HTTP with five authentication kinds and
+one server per environment (AIS per JD Edwards instance), followed without anyone picking
+it — an environment without its server is refused, never sent to another. Secrets are
 `ENC:` values encrypted at rest or `${ENV}` references, never plain text.
 
 **Screens.** A screen is the business object: the columns and their rules, the filters
@@ -64,7 +67,8 @@ refusing a closed period, checking a control total, reporting the rejected rows)
 call an API, sync from LDAP, run a Python callable, call another job, export a query to
 Excel or CSV, render a saved analysis or a report to Excel or PDF and send it with the
 run's files attached. Cron schedules with presets and parameters (a run per value when a
-parameter holds several), retries, pause and resume, deadline alerts, missed-schedule
+parameter holds several), retries, steps that let the job go on when they fail (the run
+ends failed, naming them), pause and resume, deadline alerts, missed-schedule
 detection, retention of runs and files, the upcoming runs day by day, a run history with
 the step detail, the log and the files (the uploaded spreadsheet included).
 
