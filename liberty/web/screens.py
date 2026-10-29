@@ -32,6 +32,7 @@ from liberty.connectors.dictionary import DictionaryFile
 from liberty.connectors.sql import _hint_to_dict, _resolve_conditional_rule
 from liberty.screens import Screen, ScreensFile
 from liberty.web.deps import get_connectors, get_screens, request_language
+from liberty.web.schemas import AppScreensOut, ScreenDetail, ScreensOut
 
 router = APIRouter(prefix="/api", tags=["screens"])
 
@@ -476,6 +477,7 @@ def _full_view(
     "/screens",
     summary="List screens",
     responses={
+        200: {"model": ScreensOut, "description": "Per app, the screens the caller may read."},
         401: {"description": "Missing / invalid access token."},
     },
 )
@@ -505,6 +507,7 @@ async def list_screens(request: Request, principal: CurrentPrincipal, screens: S
     "/screens/{app}",
     summary="List app screens",
     responses={
+        200: {"model": AppScreensOut, "description": "The app's screens."},
         401: {"description": "Missing / invalid access token."},
         404: {"description": "Unknown app, or every screen in the app is permission-filtered out."},
     },
@@ -534,6 +537,7 @@ async def list_app_screens(
     "/screens/{app}/{screen_id}",
     summary="Get screen",
     responses={
+        200: {"model": ScreenDetail, "description": "The full screen."},
         401: {"description": "Missing / invalid access token."},
         404: {"description": "Unknown screen, OR the caller lacks ``sql:<connector>:<read_query>`` (collapsed to 404 to avoid leaking screen existence)."},
     },

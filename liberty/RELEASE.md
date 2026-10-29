@@ -20,6 +20,11 @@
   `liberty-license` build their parser in `build_parser()` like the other commands.
 - Developer reference → Impact: the groups on the left start folded, with Expand all / Collapse all; a search or the
   unused filter opens the groups holding matches.
+- API documentation: the responses of the main read routes — connectors (list, describe, run a query, call an
+  endpoint, schemas, import), menus, screens and the external addresses — are documented (`/docs`, Developer
+  reference → API: the Response section). Documentation only: declared beside the error responses, the routes return
+  exactly what they did; a test validates each route's JSON against its model so the documentation cannot drift.
+- Developer reference → Command line: the scripts on the left start folded, with Expand all / Collapse all.
 
 ## 7.0.65 — unreleased
 

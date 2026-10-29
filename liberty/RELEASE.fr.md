@@ -24,6 +24,13 @@
   `build_parser()` comme les autres commandes.
 - Référence développeur → Impact : les groupes de gauche démarrent repliés, avec Tout déplier / Tout replier ; une
   recherche ou le filtre des inutilisées ouvre les groupes qui ont des résultats.
+- Documentation de l'API : les réponses des principales routes de lecture — connecteurs (liste, description,
+  exécution d'une requête, appel d'un endpoint, schémas, import), menus, écrans et adresses externes — sont
+  documentées (`/docs`, Référence développeur → API : la section Réponse). De la documentation seulement : déclarées à
+  côté des réponses d'erreur, les routes renvoient exactement la même chose ; un test valide le JSON de chaque route
+  contre son modèle pour que la documentation ne puisse pas diverger.
+- Référence développeur → Ligne de commande : les commandes à gauche démarrent repliées, avec Tout déplier / Tout
+  replier.
 
 ## 7.0.65 — non publiée
 

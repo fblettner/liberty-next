@@ -34,6 +34,7 @@ from liberty.dashboards import DashboardsFile
 from liberty.menus import AppMenu, MenuItem, MenusFile, build_menu_tree
 from liberty.screens import ScreensFile
 from liberty.web.deps import get_connectors, get_menus, get_screens, request_language
+from liberty.web.schemas import AppMenu as AppMenuOut, ExternalUrls, MenusOut
 
 router = APIRouter(prefix="/api", tags=["menus"])
 
@@ -189,7 +190,8 @@ def _app_tree(
     return out
 
 
-@router.get("/external-urls", summary="The install's external addresses")
+@router.get("/external-urls", summary="The install's external addresses",
+            responses={200: {"model": ExternalUrls, "description": "The named addresses."}})
 async def external_urls(request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
     """``{urls: {NAME: address}}`` — ``[app] external_urls``, what a ``#URL.NAME#`` placeholder of an
     ``open_url`` action or a ``url`` menu item becomes in the browser. Signed-in only: an internal
@@ -202,6 +204,7 @@ async def external_urls(request: Request, principal: CurrentPrincipal) -> dict[s
     "/menus",
     summary="List menus",
     responses={
+        200: {"model": MenusOut, "description": "Per app, the menu tree the caller may see."},
         401: {"description": "Missing / invalid access token."},
     },
 )
@@ -225,6 +228,7 @@ async def list_menus(
     "/menus/{app}",
     summary="Get app menu",
     responses={
+        200: {"model": AppMenuOut, "description": "The app's menu tree."},
         401: {"description": "Missing / invalid access token."},
         404: {"description": "App not found, or every item in its menu is permission-filtered out."},
     },

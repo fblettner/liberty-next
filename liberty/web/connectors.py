@@ -36,6 +36,7 @@ from liberty.connectors.sql import StreamDone, StreamMeta, StreamRows
 from liberty.screens import Screen, ScreensFile
 from liberty.web.deps import get_connectors, get_screens, public_connector, request_language, require_permission
 from liberty.web.errors import db_error_detail, http_for_connector_error, summarize_db_error
+from liberty.web.schemas import ApiResultOut, ConnectorInfo, ConnectorList, ImportResult, PoolSchema, PoolSchemas, QueryResultOut
 
 _log = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ Screens = Annotated[ScreensFile, Depends(get_screens)]
     "/connectors",
     summary="List connectors",
     responses={
+        200: {"model": ConnectorList, "description": "The connectors the caller may use."},
         401: {"description": "Missing / invalid access token."},
     },
 )
@@ -74,6 +76,7 @@ async def list_connectors(principal: CurrentPrincipal, connectors: Connectors) -
     "/connectors/{connector}",
     summary="Describe connector",
     responses={
+        200: {"model": ConnectorInfo, "description": "The connector as the caller sees it."},
         401: {"description": "Missing / invalid access token."},
         404: {"description": "Connector doesn't exist, or the caller can't use any of its queries / endpoints."},
     },
@@ -560,6 +563,7 @@ def _stream_sql_ndjson(
 @router.get(
     "/sql/{connector}/_schemas",
     summary="List pool schemas",
+    responses={200: {"model": PoolSchemas, "description": "The pool's schemas."},},
 )
 async def sql_pool_schemas(
     connector: str, principal: CurrentPrincipal, connectors: Connectors,
@@ -594,6 +598,7 @@ async def sql_pool_schemas(
 @router.get(
     "/sql/{connector}/_schema",
     summary="Introspect pool schema",
+    responses={200: {"model": PoolSchema, "description": "The pool's tables and their columns."},},
 )
 async def sql_pool_schema(
     connector: str, request: Request, principal: CurrentPrincipal, connectors: Connectors,
@@ -671,6 +676,7 @@ def _streaming_requested(qp: dict[str, Any]) -> bool:
     "/sql/{connector}/{query}",
     summary="Run query (GET)",
     responses={
+        200: {"model": QueryResultOut, "description": "The result; with ``_stream`` an NDJSON stream of meta / rows / done events instead."},
         401: {"description": "Missing / invalid access token."},
         403: {"description": "Caller lacks ``sql:<connector>:<query>``."},
         404: {"description": "Unknown connector or query."},
@@ -794,6 +800,7 @@ def _import_row_params(row: dict[str, Any]) -> dict[str, Any]:
     "/sql/{connector}/_import",
     summary="Import rows",
     responses={
+        200: {"model": ImportResult, "description": "One result per row; committed only when every row passed and ``commit`` was asked."},
         400: {"description": "Bad mode or no insert/update query for the chosen mode."},
         403: {"description": "Caller lacks ``sql:<connector>:<query>`` on the insert/update query."},
         404: {"description": "Unknown connector."},
@@ -922,6 +929,7 @@ async def sql_import(
     "/sql/{connector}/{query}",
     summary="Run query (POST)",
     responses={
+        200: {"model": QueryResultOut, "description": "The result (rows of a SELECT, the affected count of a write)."},
         401: {"description": "Missing / invalid access token."},
         403: {"description": "Caller lacks ``sql:<connector>:<query>``."},
         404: {"description": "Unknown connector or query."},
@@ -989,7 +997,7 @@ async def sql_query_post(
     "/http/{connector}/{endpoint}",
     summary="Call API endpoint",
     responses={
-        200: {"description": "Always — upstream failure is encoded in the ``success`` / ``status_code`` fields of the structured ``ApiResult`` body."},
+        200: {"model": ApiResultOut, "description": "Always — upstream failure is encoded in the ``success`` / ``status_code`` fields of the structured ``ApiResult`` body."},
         401: {"description": "Missing / invalid access token."},
         403: {"description": "Caller lacks ``api:<connector>:<endpoint>``."},
         404: {"description": "Unknown connector or endpoint."},

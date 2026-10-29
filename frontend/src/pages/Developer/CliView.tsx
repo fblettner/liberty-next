@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Check, Copy, Search } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, Search } from 'lucide-react'
 import { Banner, Button, Card, Centered, Tag } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { ApiError } from '../../api/client'
@@ -33,6 +33,8 @@ const Link = styled.button`border: none; background: none; padding: 0; cursor: p
   &:hover { text-decoration: underline; }`
 const Sub = styled.span`width: 100%; font-size: ${fontSize.micro}; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;`
 const Muted = styled.span`color: ${colors.text.muted};`
+const FoldBtn = styled.button`display: flex; align-items: center; gap: 4px; width: 100%; border: none; background: none; padding: 0; cursor: pointer; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit;`
+const Bar = styled.div`display: flex; justify-content: flex-end; gap: 2px; padding: 4px 8px; border-bottom: 1px solid ${colors.border};`
 
 function CopyUsage({ text }: { text: string }) {
   const { t } = useTranslation()
@@ -81,6 +83,7 @@ export default function CliView() {
   const [error, setError] = useState<string | null>(null)
   const [q, setQ] = useState('')
   const [sel, setSel] = useState<{ script: string; command: string | null }>({ script: '', command: null })
+  const [open, setOpen] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     getCliReference().then((r) => { setRef(r); setSel((s) => (s.script ? s : { script: r.scripts[0]?.name ?? '', command: null })) })
@@ -99,15 +102,29 @@ export default function CliView() {
           <Search size={13} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('developer.cliSearch')} />
         </SideSearch>
+        <Bar>
+          <Button type="button" $variant="ghost" $size="sm" title={t('developer.impactExpandAll')}
+            onClick={() => setOpen(Object.fromEntries(groups.map((g) => [g.script.name, true])))}><ChevronsUpDown size={14} /></Button>
+          <Button type="button" $variant="ghost" $size="sm" title={t('developer.impactCollapseAll')}
+            onClick={() => setOpen({})}><ChevronsDownUp size={14} /></Button>
+        </Bar>
         <SideList>
-          {groups.map((g) => (
+          {groups.map((g) => {
+            // folded by default; a search shows the matches open
+            const folded = !q.trim() && !open[g.script.name]
+            return (
             <div key={g.script.name}>
-              <SideCat>{g.script.name}</SideCat>
-              <SideItem type="button" $on={sel.script === g.script.name && !sel.command} onClick={() => setSel({ script: g.script.name, command: null })}>
+              <SideCat>
+                <FoldBtn type="button" onClick={() => setOpen((o) => ({ ...o, [g.script.name]: folded }))}>
+                  {folded ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                  {g.script.name} · {g.commands.length}
+                </FoldBtn>
+              </SideCat>
+              {!folded && <SideItem type="button" $on={sel.script === g.script.name && !sel.command} onClick={() => setSel({ script: g.script.name, command: null })}>
                 <span className="name">{t('developer.cliOverview')}</span>
                 <span className="n">{t('developer.cliCommandsN', { count: g.script.commands.length })}</span>
-              </SideItem>
-              {g.commands.map((c) => (
+              </SideItem>}
+              {!folded && g.commands.map((c) => (
                 <SideItem key={c.name} type="button" $on={sel.script === g.script.name && sel.command === c.name}
                   onClick={() => setSel({ script: g.script.name, command: c.name })} style={{ flexWrap: 'wrap', rowGap: 2 }} title={c.help ?? c.name}>
                   <span className="name">{c.name}</span>
@@ -115,7 +132,8 @@ export default function CliView() {
                 </SideItem>
               ))}
             </div>
-          ))}
+            )
+          })}
         </SideList>
       </Side>
       <Main style={{ overflow: 'auto' }}>
