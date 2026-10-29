@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findMenuItem, jobTarget, leafPath, splitJobTarget } from './menuPath'
+import { appOfPath, findMenuItem, jobTarget, leafPath, splitJobTarget } from './menuPath'
 
 describe('menuPath', () => {
   it('routes every leaf kind', () => {
@@ -23,5 +23,21 @@ describe('menuPath', () => {
     expect(findMenuItem(menus, 'nomajde', 'users')?.target).toBe('f0092')
     expect(findMenuItem(menus, 'nomajde', 'ghost')).toBeUndefined()
     expect(findMenuItem(menus, 'other', 'users')).toBeUndefined()
+  })
+})
+
+describe('appOfPath', () => {
+  it('reads the app of a page address', () => {
+    expect(appOfPath('/screen/nomajde/jde_health')).toBe('nomajde')
+    expect(appOfPath('/explorer/nomasx1/security')).toBe('nomasx1')
+    expect(appOfPath('/dashboard/nomasx1.auditor')).toBe('nomasx1')
+    expect(appOfPath('/sql/jdedwards/f0092_get')).toBe('jdedwards')
+    expect(appOfPath('/screen/nomajde%20x/a')).toBe('nomajde x')
+  })
+  it('null where the address names no app', () => {
+    expect(appOfPath('/')).toBeNull()
+    expect(appOfPath('/settings/screens')).toBeNull()
+    expect(appOfPath('/dashboard/plain')).toBeNull()
+    expect(appOfPath('/screen')).toBeNull()
   })
 })

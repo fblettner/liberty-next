@@ -122,7 +122,13 @@ export function field(scope: Locator, label: string): Locator {
 
 export async function fill(scope: Locator, label: string, value: string): Promise<void> {
   const input = field(scope, label).locator('input, textarea').first()
-  await input.fill(value)
+  // A form just opened may still apply its defaults and reset what was typed: type, let it settle,
+  // and type again until the value holds.
+  await expect(async () => {
+    await input.fill(value)
+    await input.page().waitForTimeout(300)
+    await expect(input).toHaveValue(value, { timeout: 200 })
+  }).toPass({ timeout: 10_000 })
 }
 
 /** Pick *option* in the dropdown (the shared SearchSelect) of field *label*. */

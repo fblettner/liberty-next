@@ -66,7 +66,9 @@ interface WorkspaceState {
   error: string | null
   currentApp: string | null // the explicitly picked app; null = "(all apps)"
   currentMenu: AppMenuTree | null // the menu the Sidebar shows (the picked app's, or — with one app — that one's)
-  setCurrentApp: (name: string | null) => void
+  /** Pick the app — an operator's switch jumps to its home; ``initial`` (the first pick of a fresh
+   *  session) only selects it, so a link opened in a new browser stays on its page and no tab closes. */
+  setCurrentApp: (name: string | null, opts?: { initial?: boolean }) => void
   /** The Liberty Next workspace's menu (the framework's pages) — superusers only, else null. */
   libertyMenu: AppMenuTree | null
   /** The last application picked (never the Liberty Next workspace) — where its switch returns. */
@@ -218,9 +220,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setLastApp(currentApp)
     try { localStorage.setItem(LAST_APP_KEY, currentApp) } catch { /* ignore — non-fatal */ }
   }, [currentApp])
-  const setCurrentApp = useCallback((name: string | null) => {
+  const setCurrentApp = useCallback((name: string | null, opts?: { initial?: boolean }) => {
     setCurrentAppState(name)
     writeApp(name)
+    if (opts?.initial) return   // a fresh session's first pick: no switch, no jump (the "/" route redirects home itself)
     if (name) setAppSwitches((n) => n + 1)
     // When the operator explicitly picks an app (the workspace picker → this callback) and
     // that app has a configured ``home_path``, navigate straight there. Cancel the redirect

@@ -102,7 +102,13 @@ export function useBatchEdit({
   }, [editMode])
   const addRow = useCallback(() => prependNewRows([{ ...(addSeed ?? {}) }]), [prependNewRows, addSeed])
   // Copy/duplicate a row → a new row seeded from it, with the original recorded as its duplicate source.
-  const duplicateRow = useCallback((row: DataRow) => { const v = valuesOf(row); prependNewRows([v], [v]) }, [prependNewRows, valuesOf])
+  // A copy keeps every value — keys included (F00950: copy, change the role) — except the columns a
+  // SEQUENCE fills on insert: left empty, the insert takes a new one (and the 1:1 groups follow it).
+  const withoutSequence = useCallback((v: Record<string, unknown>) => {
+    const seq = new Set(result.columns.filter((c) => c.sequence).map((c) => c.name.toLowerCase()))
+    return seq.size ? Object.fromEntries(Object.entries(v).filter(([k]) => !seq.has(k.toLowerCase()))) : { ...v }
+  }, [result.columns])
+  const duplicateRow = useCallback((row: DataRow) => { const v = valuesOf(row); prependNewRows([withoutSequence(v)], [v]) }, [prependNewRows, valuesOf, withoutSequence])
   const toggleDelete = useCallback((row: DataRow, isNew: boolean) => {
     if (isNew) {
       setNewRows((p) => p.filter((r) => r !== row)); editsRef.current.delete(row)
@@ -129,7 +135,7 @@ export function useBatchEdit({
   const copySelected = useCallback(() => setClipboard([...selected].map((r) => valuesOf(r))), [selected, valuesOf])
   // Paste copied rows as new rows — each is a duplicate of the row it was copied from (the clipboard
   // snapshot is the source), so Save fires ``on_duplicate`` for them just like the Copy button.
-  const pasteRows = useCallback(() => prependNewRows(clipboard.map((r) => ({ ...r })), clipboard.map((r) => ({ ...r }))), [clipboard, prependNewRows])
+  const pasteRows = useCallback(() => prependNewRows(clipboard.map((r) => withoutSequence(r)), clipboard.map((r) => ({ ...r }))), [clipboard, prependNewRows, withoutSequence])
 
   const save = useCallback(async () => {
     setSaving(true); setSaveErrors([])

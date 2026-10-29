@@ -1193,7 +1193,8 @@ export function ResultTable({
           connector={connector}
           keyColumns={keyColumns}
           onClose={() => setDlgOpen(false)}
-          onSaved={() => { setDlgOpen(false); onSaved?.() }}
+          // refresh only: the form closes itself on success (onClose) and stays open on a failed hook
+          onSaved={() => onSaved?.()}
         />
       )}
       {/* Proxy row-click → sibling-screen dialog (v1's "Display Properties" promotion). Renders
@@ -1216,7 +1217,7 @@ export function ResultTable({
           // builds a null payload and no lock is acquired.
           keyColumns={proxyScreen.key_columns}
           onClose={() => { setProxyOpen(false); setProxyScreen(null) }}
-          onSaved={() => { setProxyOpen(false); setProxyScreen(null); onSaved?.() }}
+          onSaved={() => onSaved?.()}
         />
       )}
       {proxyOpen && proxyError && (

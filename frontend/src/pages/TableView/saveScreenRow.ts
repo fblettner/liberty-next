@@ -17,7 +17,7 @@
 import { api } from '../../api/client'
 import type { Column } from '../../types/connectors'
 import type { ColumnGroup } from '../../types/screens'
-import { originalKeys, resolveBindList, valueFor, withUpper, type Row } from './dialogHelpers'
+import { originalKeys, resolveBindList, valueFor, withUpper, type Row, overlayCI } from './dialogHelpers'
 
 export interface SaveScreenRowArgs {
   /** The screen's effective connector (the main write queries live here). */
@@ -94,7 +94,7 @@ export async function saveScreenRow(a: SaveScreenRowArgs): Promise<{ rowcount: n
     if (!gQuery) continue   // no insert query + no existing row → nothing to do
     // FK link: ``source`` reads the parent's value — prefer the freshly-assigned PK (add), else the
     // current/edited main value.
-    const fk = resolveBindList(grp.param_binds, { ...a.savedRow, ...mainSent, ...resolved })
+    const fk = resolveBindList(grp.param_binds, overlayCI({ ...a.savedRow, ...mainSent }, resolved))
     let gParams: Row
     if (exists) {
       // Original of this group's columns + its key columns → SET untouched + WHERE :key_ORIGINAL.

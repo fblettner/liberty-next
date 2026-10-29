@@ -2,6 +2,19 @@
 
 ## 7.0.67 — unreleased
 
+- Record form: when a lifecycle hook fails after the row is written (an `on_insert` API call answering an error, with
+  `stop_on_error`), the form stays open with the error — the refresh closed it and hid the message. `onSaved` only
+  refreshes now; the form closes itself after a successful save or delete. (A tab action asking for a refresh no
+  longer closes the form either.)
+- Record form: a tab action whose prompt is cancelled reports nothing — it showed "<action> · OK".
+- Bulk edit: "Clone row" and paste keep every value, keys included, except a column filled by a `SEQUENCE` (its
+  `rules`): left empty, the insert takes a new one — and the 1:1 related rows follow the new key (the save looked the
+  parent key up in the wrong case and the related insert failed on its foreign key). Columns carry `sequence`.
+- SQL editor (and every read): a binary value (an Oracle BLOB) comes back as `(binary, N bytes)` — the JSON encoder
+  failed on it and the request ended in a bare HTTP 500; the SQL editor answers any other driver error with its
+  message.
+- A link opened in a fresh browser (no application remembered yet) opens its page, its application selected — it
+  landed on the first application's home.
 - Formats `url` / `email` / `color` (dictionary entry or column): the grid shows a link opening in a new tab, a
   `mailto:`, a colour swatch beside the code; the record form's input gets an open button, or a swatch opening the
   system colour picker. Only safe values: a link is `http(s)` only (`www.…` gets `https://`), an e-mail must look

@@ -13,10 +13,12 @@
 // component stays mounted so the auto-init effect below still runs (the current app must resolve
 // even when the operator loads with the sidebar collapsed).
 import { useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { Database } from 'lucide-react'
 import { SearchSelect } from '../common'
 import { useWorkspace } from '../workspace/WorkspaceContext'
+import { appOfPath } from '../services/menuPath'
 import { colors, fontSize } from '../theme'
 
 const Wrap = styled.div`
@@ -38,11 +40,15 @@ export default function WorkspaceSelect({ collapsed = false }: { collapsed?: boo
   // Auto-init when apps loaded but no app picked yet — drops the "(all apps)" middle state
   // so the picker always reflects a real app (the operator picks across apps, never "none").
   // Runs even when collapsed (component stays mounted) so the current app always resolves.
+  // The app the address points at wins (a shared /screen/<app>/… link opened in a fresh browser), else
+  // the first; picked quietly — no jump to its home, which would leave the linked page.
+  const location = useLocation()
   useEffect(() => {
     if (apps && apps.length > 0 && !currentApp) {
-      setCurrentApp(apps[0].name)
+      const linked = appOfPath(location.pathname)
+      setCurrentApp(linked && apps.some((a) => a.name === linked) ? linked : apps[0].name, { initial: true })
     }
-  }, [apps, currentApp, setCurrentApp])
+  }, [apps, currentApp, setCurrentApp, location.pathname])
 
   if (collapsed) return null
   // the Liberty Next workspace (superusers) is picked like an application, listed after them

@@ -2,6 +2,21 @@
 
 ## 7.0.67 — non publiée
 
+- Formulaire : quand une action du cycle de vie échoue après l'écriture de la ligne (un appel d'API d'`on_insert` en
+  erreur, avec `stop_on_error`), le formulaire reste ouvert avec l'erreur — le rafraîchissement le fermait et
+  masquait le message. `onSaved` ne fait plus que rafraîchir ; le formulaire se ferme lui-même après un
+  enregistrement ou une suppression réussis. (Une action d'onglet demandant un rafraîchissement ne ferme plus le
+  formulaire non plus.)
+- Formulaire : une action d'onglet dont la saisie est annulée n'affiche plus rien — elle affichait « <action> · OK ».
+- Édition en masse : « Cloner la ligne » et le collage gardent toutes les valeurs, clés comprises, sauf une colonne
+  remplie par une `SEQUENCE` (ses `rules`) : laissée vide, l'insertion en prend une nouvelle — et les lignes liées
+  1:1 suivent la nouvelle clé (l'enregistrement cherchait la clé parente dans la mauvaise casse et l'insertion liée
+  échouait sur sa clé étrangère). Les colonnes portent `sequence`.
+- Éditeur SQL (et toute lecture) : une valeur binaire (un BLOB Oracle) revient en `(binary, N bytes)` — l'encodeur
+  JSON échouait et la requête finissait en HTTP 500 brut ; l'éditeur SQL répond à toute autre erreur du pilote par
+  son message.
+- Un lien ouvert dans un navigateur neuf (aucune application mémorisée) ouvre sa page, son application
+  sélectionnée — il arrivait sur l'accueil de la première application.
 - Formats `url` / `email` / `color` (entrée du dictionnaire ou colonne) : la grille affiche un lien ouvert dans un
   nouvel onglet, un `mailto:`, une pastille de couleur à côté du code ; la saisie du formulaire reçoit un bouton
   d'ouverture, ou une pastille ouvrant le sélecteur de couleur du système. Seules les valeurs sûres : un lien est

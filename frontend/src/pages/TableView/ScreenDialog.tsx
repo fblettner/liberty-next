@@ -95,7 +95,9 @@ export function ScreenDialog({
    *  so no operator config is needed). On ``edit`` mode the LOOKUP renders as usual. */
   keyColumns?: string[]
   onClose: () => void
-  /** Called after a successful save; the TableView reruns its SELECT to refresh the grid. */
+  /** The row changed — refresh the grid (the TableView reruns its SELECT). Refresh only: the form
+   *  closes itself (``onClose``) after a successful save / delete, and stays open with its error
+   *  when a hook failed after the row was written (closing it here hid that error). */
   onSaved: () => void
   /** When opened from inside another ScreenDialog (e.g. NestedTableView's row click → edit a
    *  related-rules row), use the smaller auto-height modal variant + bumped Overlay z-index so
@@ -203,8 +205,15 @@ export function ScreenDialog({
   // it in the form means it (a) shows up in the masked input as long-look-alike dots, (b) gets
   // posted back on save, overwriting whatever the user might have set elsewhere. The seeded
   // `savedRow` still carries the original for non-password `:<COL>_ORIGINAL` binds.
+  // Seed once per (open, mode, row, dialog): the grid's refresh after a save hands the form a NEW
+  // columns array for the same row — re-seeding on it wiped the values and the error of a form kept
+  // open because a hook failed after the row was written.
+  const seededFor = useRef<{ open: boolean; mode: DialogMode; row: Row; dlg: unknown } | null>(null)
   useEffect(() => {
-    if (!open || !dlg) return
+    if (!open || !dlg) { seededFor.current = null; return }
+    const last = seededFor.current
+    if (last && last.open === open && last.mode === mode && last.row === row && last.dlg === dlg) return
+    seededFor.current = { open, mode, row, dlg }
     const seeded: Row = {}
     const original: Row = {}
     // ``savedRow`` carries the ORIGINAL of EVERY loaded column (not just the rendered fields) so the
@@ -355,7 +364,7 @@ export function ScreenDialog({
     actions: Action[],
     baseCtx: Row,
     opts?: { track?: boolean },
-  ): Promise<{ ok: boolean; warnings: string[]; errors: string[]; refresh: boolean; error?: string }> => {
+  ): Promise<{ ok: boolean; warnings: string[]; errors: string[]; refresh: boolean; error?: string; cancelled?: boolean }> => {
     // Only the write hooks (on_save/insert/update, on_delete) tag their action calls for change
     // capture — on_load / on_cancel are read/UI and must not land in the package. Gated on the
     // screen actually being change-tracked.
@@ -383,15 +392,15 @@ export function ScreenDialog({
         return next
       })
     }
-    // Soft cancel maps to ok=true with no error (no banner) — same convention the old runner
-    // used. The result.cancelled flag is the explicit signal but the previous shape only had
-    // ok/warnings/refresh/error so we keep it.
+    // Soft cancel (a prompt dismissed) maps to ok=true with no error (no banner); ``cancelled`` says
+    // so — a tab action then reports nothing rather than "· OK".
     return {
       ok: result.ok,
       warnings: result.warnings,
       errors: result.errors,
       refresh: result.refresh,
       error: result.error,
+      cancelled: result.cancelled,
     }
   }, [connector, requestPrompt, sharedActions, screen.change_tracked, screen.app, screen.id])
 
@@ -416,6 +425,7 @@ export function ScreenDialog({
     // capture is gated by an actual write / change_replay on the backend, so this is safe for all.
     const result = await runOnSaveActions([a], ctx, { track: true })
     setActionBusy(null)
+    if (result.cancelled) return   // the operator dismissed the action's prompt: nothing ran, nothing to report
     if (!result.ok) {
       setActionStatus({ message: result.error || a.label || a.id, tone: 'error' })
     } else if (result.errors.length > 0) {

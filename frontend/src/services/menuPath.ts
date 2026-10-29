@@ -47,3 +47,15 @@ export function findMenuItem(menus: MenusByApp | null | undefined, app: string, 
   }
   return walk(tree.items)
 }
+
+/** The app a page address belongs to — ``/screen/<app>/…``, ``/explorer/<app>/…``,
+ *  ``/dashboard/<app>.<id>``, ``/sql|http/<connector>/…`` — or null (``/``, Settings…). Picks the
+ *  app of a link opened in a fresh browser; the caller checks it is one of the user's apps. */
+export function appOfPath(pathname: string): string | null {
+  const parts = pathname.split('/').filter(Boolean).map((p) => decodeURIComponent(p))
+  const [kind, first] = parts
+  if (!first) return null
+  if (kind === 'screen' || kind === 'explorer' || kind === 'sql' || kind === 'http') return first
+  if (kind === 'dashboard') return first.includes('.') ? first.slice(0, first.indexOf('.')) : null
+  return null
+}

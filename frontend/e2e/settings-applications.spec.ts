@@ -9,7 +9,6 @@ import {
 } from './support'
 
 const PREFIX = 'LYTEST-'
-const CLONE_ID = 9901
 
 async function snapshot() {
   const apps = await select('nomasx1',
@@ -117,9 +116,9 @@ test('settings_applications: form add / duplicate / delete, bulk add / change / 
       const clone = newRows(page).first()
       await expect(clone).toBeVisible()
       await clone.locator(`input[value="${PREFIX}DUP"]`).fill(`${PREFIX}CLONE`)
-      // A bulk clone copies the key; an empty one gets a sequence id for the application but not for
-      // its JD Edwards row (foreign-key error) — so the clone gets an explicit unused id.
-      await clone.locator('input[type="number"]').first().fill(String(CLONE_ID))
+      // The key is a SEQUENCE: the clone leaves it empty, the insert takes a new id and the JD Edwards
+      // row (a 1:1 group) follows it.
+      await expect(clone.locator('input[type="number"]').first()).toHaveValue('')
       await saveBulkEdit(page, PREFIX)
       matchesBaseline('sa-4-bulk-change-clone', await snapshot())
     })

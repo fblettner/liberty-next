@@ -134,6 +134,8 @@ export interface Column {
   hidden?: boolean
   /** surface this column in the TableView filter panel (v1's col_filter). */
   filter?: boolean
+  /** filled from a SEQUENCE on insert — a copied row leaves it empty so the insert takes a new one. */
+  sequence?: boolean
   /** a date filter's period opens on this preset (``last7``…); unset = no period, every row. */
   filter_period?: Exclude<DatePreset, 'custom'>
   /** cascading-filter deps (v1's ly_tbl_filters): when the `source` filter has a value, this

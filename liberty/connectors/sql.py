@@ -534,11 +534,24 @@ def _jsonable_number(v: Any) -> Any:
       * fractional (``Decimal('1.5')``) → ``float`` — JS / charts use floats anyway;
       * non-finite (``NaN`` / ``Infinity``) → ``str`` — not representable as a JSON number.
 
-    Everything else (str / int / float / date / bytes / None) passes through untouched."""
+    Binary values: bytes that are UTF-8 text come back as that text (what the JSON encoder did with
+    them); other bytes — a BLOB such as JDE's F98OWSEC.SCSRVBLOBA — as ``(binary, N bytes)``, and an
+    unread LOB locator as ``(LOB)``: the encoder's UTF-8 decode used to fail on them and the request
+    ended in a bare HTTP 500.
+
+    Everything else (str / int / float / date / None) passes through untouched."""
     if isinstance(v, Decimal):
         if not v.is_finite():
             return str(v)
         return int(v) if v == v.to_integral_value() else float(v)
+    if isinstance(v, (bytes, bytearray, memoryview)):
+        b = bytes(v)
+        try:
+            return b.decode("utf-8")
+        except UnicodeDecodeError:
+            return f"(binary, {len(b)} bytes)"
+    if type(v).__name__ in ("LOB", "AsyncLOB"):   # python-oracledb's locator, never read
+        return "(LOB)"
     return v
 
 
@@ -823,6 +836,8 @@ class Column:
     disabled: bool = False
     disabled_when: list[dict[str, Any]] = field(default_factory=list)
     filter: bool = False
+    # Filled from a SEQUENCE on insert (``rules = "SEQUENCE"``) — a copied row leaves it empty.
+    sequence: bool = False
     # A date filter's period opens on this preset (``last7``…); None = no period (every row).
     filter_period: str | None = None
     filter_from: list[dict[str, str]] = field(default_factory=list)
@@ -879,6 +894,8 @@ class Column:
             d["filter"] = True
         if self.filter_period:
             d["filter_period"] = self.filter_period
+        if self.sequence:
+            d["sequence"] = True
         if self.filter_from:
             d["filter_from"] = self.filter_from
         if self.visible_when:
@@ -2987,8 +3004,12 @@ def _resolve_hint(
         rule = dictionary.resolve_rule(synth, connector=connector, language=language)
     elif entry is not None:
         rule = dictionary.resolve_rule(entry, connector=connector, language=language)
+    # The value comes from a SEQUENCE on insert (the hint's rule, else the entry's): a copy of the
+    # row must leave it empty so the insert takes a new one.
+    effective_rules = hint_rules or ((entry.rules or "").strip().upper() if entry is not None else "")
     return Column(
         name=name or h.name, type=type_, label=label, hidden=h.hidden, key=h.key, filter=h.filter, filter_period=h.filter_period,
+        sequence=effective_rules in _RULES_SEQUENCE,
         disable_on_add=h.disable_on_add, disable_on_edit=h.disable_on_edit,
         disabled=h.disabled, disabled_when=[w.as_dict() for w in h.disabled_when],
         filter_from=[{"source": d.source, "column": d.column} for d in h.filter_from],

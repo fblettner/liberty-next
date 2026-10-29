@@ -55,6 +55,6 @@ export function RecordDialog({ app, entity, row, onClose, onSaved }: {
   if (!screen || !record) return <Centered />
   return (
     <ScreenDialog open nested mode="edit" screen={screen} columns={columns} row={record} connector={screen.connector || connector}
-      keyColumns={screen.key_columns ?? entity.key} onClose={onClose} onSaved={() => { onSaved?.(); onClose() }} />
+      keyColumns={screen.key_columns ?? entity.key} onClose={onClose} onSaved={() => onSaved?.()} />
   )
 }

@@ -31,7 +31,7 @@ LIBERTY_E2E_USER=… LIBERTY_E2E_PASSWORD=… npx playwright test settings-appli
 
 ## Safety
 
-- Only test records are created: applications named `LYTEST-…` (plus id 9901 for the bulk clone),
+- Only test records are created: applications named `LYTEST-…`,
   JDE user `LYTEST01` (`LYTEST02` / `LYTEST03` only in a cancelled import check). A scenario stops **before touching anything** if one already exists.
 - An existing record is never changed: before a bulk-edit Save, every edited or deleted row must
   hold a test value, otherwise the edit is cancelled and the test fails.

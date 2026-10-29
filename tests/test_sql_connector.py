@@ -2485,6 +2485,18 @@ def test_filter_wrap_date_only_end_bound_covers_the_whole_day(pools: PoolRegistr
     assert params["day_from"] == _date(2026, 10, 28) and params["day_to"] == _date(2026, 10, 29)
 
 
+def test_binary_values_are_json_safe() -> None:
+    """A BLOB's bytes reach JSON: UTF-8 text as that text, binary as ``(binary, N bytes)`` — the
+    encoder's UTF-8 decode failed on them (a bare HTTP 500 on F98OWSEC.SCSRVBLOBA)."""
+    from fastapi.encoders import jsonable_encoder
+    from liberty.connectors.sql import _jsonable_number
+    assert _jsonable_number(b"plain text") == "plain text"
+    assert _jsonable_number(bytes([0xFF, 0x00, 0x81])) == "(binary, 3 bytes)"
+    assert _jsonable_number(memoryview(b"\xfe\xff")) == "(binary, 2 bytes)"
+    assert jsonable_encoder({"blob": _jsonable_number(bytes(range(256)))}) == {"blob": "(binary, 256 bytes)"}
+    assert _jsonable_number("text") == "text" and _jsonable_number(None) is None
+
+
 def test_filter_period_reaches_the_column() -> None:
     """``filter_period`` (the preset a date filter's period opens on) is carried to the column the
     screen API serves, and left out when unset."""

@@ -134,6 +134,18 @@ export function bindsComplete(binds: ReadonlyArray<ParamBind> | undefined, bound
   return (binds ?? []).every((b) => (b.source?.startsWith('#') && (b.value == null || b.value === '')) || b.param in bound)
 }
 
+/** *base* with *top* laid over it, a key of *top* replacing the same key in any case — Postgres
+ *  returns ``apps_id`` where the server's resolved binds say ``APPS_ID``; a plain spread keeps both and
+ *  a case-insensitive lookup then finds the stale one first. */
+export function overlayCI(base: Row, top: Row): Row {
+  const out: Row = { ...base }
+  for (const [k, v] of Object.entries(top)) {
+    for (const existing of Object.keys(out)) if (existing !== k && existing.toLowerCase() === k.toLowerCase()) delete out[existing]
+    out[k] = v
+  }
+  return out
+}
+
 export function resolveBindList(binds: ReadonlyArray<ParamBind> | undefined, formValues: Row): Record<string, string> {
   const out: Record<string, string> = {}
   for (const b of binds ?? []) {
