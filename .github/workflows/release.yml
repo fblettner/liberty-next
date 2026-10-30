@@ -127,7 +127,7 @@ jobs:
       # insert a "pending" stub and warn — 7.0.55 shipped with empty notes that way — so now
       # a missing section, or a still-pending stub, FAILS the release before anything is
       # built or published. Since the patch number auto-bumps, write the notes under the
-      # *next* version before merging to main (``liberty-release`` skill / docs/work/PLAN.md).
+      # *next* version before merging to main (``liberty-release`` skill / liberty-apps docs/work/PLAN.md).
       - name: Require RELEASE.md section + bump pyproject.toml
         id: bump
         env:

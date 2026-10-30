@@ -4,8 +4,8 @@ Auto-loaded by Claude Code. This file is a **map**: what the project is, the rul
 things live, how to run and ship it. It points at the code instead of narrating it. The
 phase-by-phase build story (Phases 0–8, every Phase 6 slice, the design rationale) is frozen
 in `docs/history/CLAUDE-2026-05-phases.md`; per-version changes are in `liberty/RELEASE.md`
-(EN) / `RELEASE.fr.md`. Working documents (review, plan, ledgers) live in `docs/work/`
-(git-ignored, never committed).
+(EN) / `RELEASE.fr.md`. Working documents (plan, ledgers, procedures) live in the
+private repo: `../liberty-apps/docs/work/` (synced across the dev laptops; never in this public repo).
 
 ## What this is
 
@@ -16,7 +16,7 @@ tables, now **retired**). Three applications run on it in production, from the p
 `../liberty-apps`: **nomasx1** (JD Edwards security / SoD / licence auditing, Postgres),
 **nomajde** (JDE administration, Oracle) and **nomaflow** (the ETL + scheduler jobs). The
 connector pattern comes from `../../JavaProjects/nomaubl` (a Java e-invoicing app whose
-React UI is the model for this frontend — see `docs/work/shared-components.md`).
+React UI is the model for this frontend — see `../liberty-apps/docs/work/shared-components.md`).
 
 Published as the PyPI package `liberty-next` and the image `ghcr.io/fblettner/liberty-next`;
 docs at https://docs.nomana-it.fr/liberty/ (a separate Docusaurus repo).
@@ -377,8 +377,8 @@ python3.12 -m venv .venv && .venv/bin/pip install -c requirements.txt -e ".[dev]
   of the mounts, drops privileges; `docker exec -u liberty` for anything that writes.
 - **Optional features fail clearly**: PDF without the `reports` extra → 503 with the install
   hint; `ldap_sync` without `ldap3` → a StepFailed naming the extra.
-- **i18n**: every `t('key')` needs the key in both locale files; ~700 keys still exist only
-  as inline English defaults in the newer builders (PLAN C10).
+- **i18n**: every `t('key')` needs the key in both locale files (fr is typed against en); an
+  inline English default (`t('key', 'text')`) is a lint error — add the key to `en.ts` and `fr.ts`.
 
 ## Reference
 
@@ -386,5 +386,6 @@ python3.12 -m venv .venv && .venv/bin/pip install -c requirements.txt -e ".[dev]
   SqlConnectorClient}.java`, `src/custom/ubl/web/AiAssistant.java`,
   `src/custom/ubl/auth/AuthManager.java`, `src/web-react/src/{common,pages/Explorer}`.
 - History: `docs/history/CLAUDE-2026-05-phases.md` (the full build narrative up to 7.0.26).
-- Working docs (local, git-ignored): `docs/work/PLAN.md` (the roadmap — read it at the start
-  of a session), `docs/work/REVIEW-2026-10.md`, `docs/work/shared-components.md`.
+- Working docs (private, in `../liberty-apps/docs/work/`): `PLAN.md` (the roadmap — read it at the
+  start of a session), `shared-components.md` (the nomaubl ledger), `UPGRADE-V1-V2.md` (the v1 → v2
+  customer procedure), `archive/` (the October 2026 review and the full plan as it stood).

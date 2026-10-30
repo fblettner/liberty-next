@@ -1,7 +1,7 @@
 // ESLint baseline (A5, 2026-10-26) — chosen from a measurement, not aspiration: the code
 // passes this config with zero errors; the accessibility rules that currently flag ~36
 // sites (clickable rows / chips / cards without a keyboard path, autofocus in dialogs) are
-// WARNINGS until the keyboard pass (docs/work/PLAN.md, C10), as is react-hooks/exhaustive-deps
+// WARNINGS until the keyboard pass (liberty-apps docs/work/PLAN.md, C10), as is react-hooks/exhaustive-deps
 // (32 sites, each to be judged — a wrong "fix" there causes real re-render loops).
 // `npm run lint` is the command; CI runs it with --max-warnings unlimited but zero errors.
 import js from "@eslint/js";

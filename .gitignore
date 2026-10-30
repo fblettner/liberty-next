@@ -51,7 +51,8 @@ config/.versions/
 config/.reports/
 config/.promotion/
 
-# Local working documents (review, plan, ledgers) — never committed to the public repo
+# Working documents live in the private liberty-apps repo (docs/work/); a stray local copy here
+# must never reach this public repo
 docs/work/
 
 # Oracle Instant Client zips are fetched at image build time (Dockerfile); a local copy here is
