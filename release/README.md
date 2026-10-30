@@ -451,8 +451,10 @@ The merge runs inside a throwaway container from the liberty-next image you alre
    the destination, preserving operator-edited TOMLs.
 2. **Updates `.env`**: `APPS_HOST_PATH=<absolute path>` + appends the apps overlay
    to `COMPOSE_FILE`. The license key is pasted in Settings → App (stored in `app.toml`).
-3. **Restarts the stack** — `docker compose up -d` picks up the apps overlay
-   automatically via `COMPOSE_FILE` (no `-f` juggling).
+3. **Restarts the stack** — `docker compose up -d` picks up the apps overlay automatically via
+   `COMPOSE_FILE` (no `-f` juggling); when that leaves the running server as it is (an update: the
+   overlay already there, or `liberty upgrade --apps`), liberty-next is restarted so the new apps are
+   the ones loaded.
 
 The apps land at `./apps/config/` + `./apps/plugins/` on the host. The
 [`docker-compose.apps.yml`](docker-compose.apps.yml) overlay bind-mounts `./apps`

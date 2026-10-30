@@ -178,7 +178,16 @@ chmod 600 .env
 # can't rely on .env's COMPOSE_FILE alone here).
 COMPOSE_FILE_ENV="$(grep -E '^COMPOSE_FILE=' .env | head -1 | cut -d= -f2-)"
 info "Re-applying stack (COMPOSE_FILE=${COMPOSE_FILE_ENV})…"
+before_id="$(docker inspect --format '{{.Id}}' liberty-next 2>/dev/null || true)"
 COMPOSE_FILE="$COMPOSE_FILE_ENV" docker compose up -d
+# ``up -d`` only recreates a container whose configuration changed. On an update (the apps
+# overlay already in the chain — ``liberty apps`` again, or ``liberty upgrade --apps``, whose
+# recreate ran before the new wheel was copied in) it leaves the running server as it is, with
+# the plugins and configuration it loaded before: restart it so the new apps are the ones used.
+if [ -n "$before_id" ] && [ "$before_id" = "$(docker inspect --format '{{.Id}}' liberty-next 2>/dev/null || true)" ]; then
+  info "Restarting liberty-next so it loads the new apps…"
+  COMPOSE_FILE="$COMPOSE_FILE_ENV" docker compose restart liberty-next
+fi
 
 info "Waiting for liberty-next to report healthy…"
 for i in $(seq 1 60); do
