@@ -68,7 +68,7 @@ call an API, sync from LDAP, run a Python callable, call another job, export a q
 Excel or CSV, render a saved analysis or a report to Excel or PDF and send it with the
 run's files attached. Cron schedules with presets and parameters (a run per value when a
 parameter holds several), retries, steps that let the job go on when they fail (the run
-ends failed, naming them), pause and resume, deadline alerts, missed-schedule
+ends failed, naming them), steps turned off for an install, pause and resume, deadline alerts, missed-schedule
 detection, retention of runs and files, the upcoming runs day by day, a run history with
 the step detail, the log and the files (the uploaded spreadsheet included).
 
@@ -86,7 +86,9 @@ model picker, a conversation that stays.
 **Access.** Local users or OpenID Connect (any provider), roles with colon-glob
 permissions, superusers, and **row-level data scope**: a role's rules on a dictionary
 item or a column, with values from a user attribute, narrow every query, export,
-explorer, digest and write. Login throttling, rotating refresh tokens.
+explorer, digest and write. Login throttling, rotating refresh tokens, a temporary password
+changed at the first sign-in (enforced by the server), "Forgot password?" with a single-use
+mailed link.
 
 **Operations.** The Liberty Next workspace (superusers) groups the framework's pages by
 purpose — Build, Administer, Operate, Deploy, Document. Every configuration file is edited
