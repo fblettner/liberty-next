@@ -492,6 +492,11 @@ class Job(BaseModel):
     # modal can override this per-fire without editing the TOML; the per-fire
     # value wins.
     log_level: Literal["WARNING", "INFO", "DEBUG"] = "INFO"
+    # Steps turned off for this install: they never run — not even when a run or a preset selects
+    # every step (``enabled`` is the vendor's default a run may override; this is the operator's
+    # last word). An operator field: the apps installer keeps it across upgrades. Names of steps
+    # the job no longer has are ignored.
+    disabled_steps: list[str] = Field(default_factory=list)
     # Named presets of the Run-with-parameters modal state — saved by operators
     # ("DEBUG security users only", "OUT module only", …) so the next operator
     # picking the same combo clicks once. Stored inline on the job so the

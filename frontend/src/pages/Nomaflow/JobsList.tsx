@@ -200,6 +200,7 @@ export default function JobsList() {
       steps: StepConfig[]
       logLevel: 'WARNING' | 'INFO' | 'DEBUG'
       presets: import('./types').JobPreset[]
+      turnedOff: string[]
     } | null
   >(null)
 
@@ -261,7 +262,7 @@ export default function JobsList() {
       setBusyId(null)
       setParamModalJob({
         job, jobParams, steps: allSteps, logLevel: jobLogLevel,
-        presets: (def?.presets ?? []),
+        presets: (def?.presets ?? []), turnedOff: (def?.disabled_steps ?? []),
       })
     } catch (e) {
       setBusyId(null)
@@ -549,6 +550,7 @@ export default function JobsList() {
           steps={paramModalJob.steps}
           jobLogLevel={paramModalJob.logLevel}
           presets={paramModalJob.presets}
+          turnedOff={paramModalJob.turnedOff}
           onCancel={() => setParamModalJob(null)}
           onSubmit={async (body) => {
             setParamModalJob(null)
@@ -601,7 +603,7 @@ export default function JobsList() {
 // and a key ending in `_connector` (or named exactly `connector`) → SearchSelect of the
 // available connectors loaded from the workspace. Saves typos vs free-text.
 function RunWithParamsModal({
-  job, jobParams, steps, jobLogLevel, presets, onCancel, onSubmit, onSavePreset,
+  job, jobParams, steps, jobLogLevel, presets, turnedOff, onCancel, onSubmit, onSavePreset,
 }: {
   job: JobSummary
   jobParams: Record<string, unknown>
@@ -618,6 +620,8 @@ function RunWithParamsModal({
    *  Empty array hides the dropdown. Picking a preset resets the dialog to the
    *  job's saved values, then applies the preset (presetState.ts). */
   presets: import('./types').JobPreset[]
+  /** The job's steps turned off for this install — shown off and not selectable (the runner skips them anyway). */
+  turnedOff: string[]
   onCancel: () => void
   onSubmit: (body: {
     params?: Record<string, unknown>
@@ -652,9 +656,9 @@ function RunWithParamsModal({
   // way so a missing field doesn't surprise the operator into a disabled step.
   const initialStepEnabled = useMemo(() => {
     const out: Record<string, boolean> = {}
-    for (const s of steps) out[s.name] = s.enabled !== false
+    for (const s of steps) out[s.name] = s.enabled !== false && !turnedOff.includes(s.name)
     return out
-  }, [steps])
+  }, [steps, turnedOff])
   const [stepValues, setStepValues] = useState<Record<string, Record<string, unknown>>>(initialStepKwargs)
   const [stepEnabled, setStepEnabled] = useState<Record<string, boolean>>(initialStepEnabled)
   // file_load steps: a file picked here is uploaded on Run and handed to the step as its
@@ -692,7 +696,7 @@ function RunWithParamsModal({
   // enabled; "None" turns them all off (operator then ticks the one they want).
   const enabledCount = Object.values(stepEnabled).filter(Boolean).length
   const selectAllSteps = () => {
-    setStepEnabled(Object.fromEntries(steps.map((s) => [s.name, true])))
+    setStepEnabled(Object.fromEntries(steps.map((s) => [s.name, !turnedOff.includes(s.name)])))
   }
   const selectNoneSteps = () => {
     setStepEnabled(Object.fromEntries(steps.map((s) => [s.name, false])))
@@ -713,7 +717,7 @@ function RunWithParamsModal({
     )
     setParamValues(next.params)
     setStepValues(next.stepValues)
-    setStepEnabled(next.stepEnabled)
+    setStepEnabled({ ...next.stepEnabled, ...Object.fromEntries(turnedOff.map((n) => [n, false])) })
     setLogLevel(next.logLevel)
   }
   const handleSavePreset = async () => {
@@ -986,16 +990,18 @@ function RunWithParamsModal({
                 const hasKwargs = Object.keys(kwargs).length > 0
                 const expandable = isPython && hasKwargs
                 const isExpanded = !!expandedSteps[s.name]
-                const enabled = stepEnabled[s.name] ?? true
+                const off = turnedOff.includes(s.name)
+                const enabled = !off && (stepEnabled[s.name] ?? true)
                 return (
                   <div key={s.name}>
                     <StepRow $expanded={isExpanded && expandable}>
                       <Checkbox
                         checked={enabled}
+                        disabled={off}
                         onChange={(checked) => setStepEnable(s.name, checked)}
                       />
                       <StepRowName $disabled={!enabled}>{s.name}</StepRowName>
-                      <StepRowCallable $disabled={!enabled}>{subtitle}</StepRowCallable>
+                      <StepRowCallable $disabled={!enabled}>{off ? t('nomaflow.steps.turnedOffTag') : subtitle}</StepRowCallable>
                       <StepRowExpander
                         type="button"
                         onClick={() => toggleStepExpanded(s.name)}

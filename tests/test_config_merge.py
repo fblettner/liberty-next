@@ -421,6 +421,19 @@ def test_jobs_operator_fields_survive_a_product_change() -> None:
     assert rep.refreshed == ["job: collect"] and any("kept your" in n for n in rep.notes)
 
 
+
+def test_jobs_steps_turned_off_by_the_operator_survive() -> None:
+    """``disabled_steps`` (the LDAP step of an install without LDAP) is the operator's: kept across an
+    upgrade that changes the job's steps, and it never makes the job look changed locally."""
+    from liberty.config_merge import merge_jobs
+    prev = {"jobs": [_job("collect", ["A", "LDAP"])]}
+    live = {"jobs": [_job("collect", ["A", "LDAP"], disabled_steps=["LDAP"])]}
+    wheel = {"jobs": [_job("collect", ["A", "LDAP", "B"])]}
+    merged, rep = merge_jobs(wheel, live, prev)
+    j = merged["jobs"][0]
+    assert [s["name"] for s in j["steps"]] == ["A", "LDAP", "B"] and j["disabled_steps"] == ["LDAP"]
+    assert rep.refreshed == ["job: collect"]
+
 def test_jobs_vendor_defaults_move_when_the_operator_never_touched_them() -> None:
     from liberty.config_merge import merge_jobs
     prev = {"jobs": [_job("r", ["A"], schedule="0 6 1 * *")]}

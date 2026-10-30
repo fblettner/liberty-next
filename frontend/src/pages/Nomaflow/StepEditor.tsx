@@ -1013,12 +1013,14 @@ function CallJobForm({ step, patch }: FormProps) {
 }
 
 // ── one step card ──────────────────────────────────────────────────────────────────
-function StepCard({ step, index, count, sqlConnectors, onPatch, onMove, onDuplicate, onDelete }: {
+function StepCard({ step, index, count, sqlConnectors, onPatch, turnedOff, onTurnedOff, onMove, onDuplicate, onDelete }: {
   step: StepConfig
   index: number
   count: number
   sqlConnectors: ConnectorMeta[]
   onPatch: (p: Partial<StepConfig>) => void
+  turnedOff?: boolean
+  onTurnedOff?: (off: boolean) => void
   onMove: (dir: -1 | 1) => void
   onDuplicate: () => void
   onDelete: () => void
@@ -1033,6 +1035,7 @@ function StepCard({ step, index, count, sqlConnectors, onPatch, onMove, onDuplic
         <Tag $tone={STEP_TONE[step.type] ?? 'neutral'}>{step.type}</Tag>
         <HeadName>{step.name || t('nomaflow.steps.unnamed')}</HeadName>
         <HeadSummary>{stepSummary(step)}</HeadSummary>
+        {turnedOff && <Tag $tone="neutral">{t('nomaflow.steps.turnedOffTag')}</Tag>}
         <IconBtn type="button" disabled={index === 0} title={t('common.up')}
           onClick={(e) => { e.stopPropagation(); onMove(-1) }}><ArrowUp size={13} /></IconBtn>
         <IconBtn type="button" disabled={index === count - 1} title={t('common.down')}
@@ -1050,6 +1053,9 @@ function StepCard({ step, index, count, sqlConnectors, onPatch, onMove, onDuplic
           </Field>
           <Checkbox checked={!!step.continue_on_failure} label={t('nomaflow.steps.continueOnFailure')}
             onChange={(c) => onPatch({ continue_on_failure: c || undefined })} />
+          {onTurnedOff && (
+            <Checkbox checked={!!turnedOff} label={t('nomaflow.steps.turnedOff')} onChange={(c) => onTurnedOff(c)} />
+          )}
           {step.type === 'sql_copy' && <SqlCopyForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
           {step.type === 'sql_query' && <SqlQueryForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
           {step.type === 'python' && <PythonForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
@@ -1192,10 +1198,13 @@ function NotifyForm({ step, patch }: FormProps) {
 }
 
 // ── the editor ─────────────────────────────────────────────────────────────────────
-export default function StepEditor({ steps, onChange, connectors }: {
+export default function StepEditor({ steps, onChange, connectors, turnedOff = [], onTurnedOff }: {
   steps: StepConfig[]
   onChange: (steps: StepConfig[]) => void
   connectors: ConnectorMeta[] | null
+  /** The job's ``disabled_steps`` — steps turned off for this install. */
+  turnedOff?: string[]
+  onTurnedOff?: (names: string[]) => void
 }) {
   const { t } = useTranslation()
   const sqlConnectors = useMemo(
@@ -1231,6 +1240,10 @@ export default function StepEditor({ steps, onChange, connectors }: {
             count={steps.length}
             sqlConnectors={sqlConnectors}
             onPatch={(p) => patchStep(i, p)}
+            turnedOff={turnedOff.includes(step.name)}
+            onTurnedOff={onTurnedOff && ((off) => onTurnedOff(off
+              ? [...turnedOff.filter((n) => n !== step.name), step.name]
+              : turnedOff.filter((n) => n !== step.name)))}
             onMove={(dir) => moveStep(i, dir)}
             onDuplicate={() => duplicateStep(i)}
             onDelete={() => deleteStep(i)}

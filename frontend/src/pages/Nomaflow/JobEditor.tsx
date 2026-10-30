@@ -641,6 +641,8 @@ export default function JobEditor() {
               steps={job.steps}
               onChange={(steps) => patch({ steps })}
               connectors={connectors}
+              turnedOff={job.disabled_steps ?? []}
+              onTurnedOff={(names) => patch({ disabled_steps: names.length ? names : undefined })}
             />
           </Section>
         </Stack>

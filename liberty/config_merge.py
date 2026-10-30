@@ -394,7 +394,8 @@ def merge_file(
 # parameters) with what the operator sets from the Jobs page (whether and when it runs). Merging
 # the job as one entity would let a schedule block every product fix to its steps, so the merge is
 # per field: the vendor part is refreshed like any entity, the operator fields stay the operator's.
-JOB_OPERATOR_FIELDS = ("enabled", "schedule", "timezone", "presets", "alerts", "retry", "log_level", "timeout_seconds")
+JOB_OPERATOR_FIELDS = ("enabled", "schedule", "timezone", "presets", "alerts", "retry", "log_level", "timeout_seconds",
+                       "disabled_steps")
 
 
 def _job_vendor_part(job: dict[str, Any]) -> dict[str, Any]:

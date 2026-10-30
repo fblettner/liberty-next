@@ -329,6 +329,10 @@ class JobRunner:
                 # the timeline is complete. Does NOT mark the run as failed —
                 # disabled is operator intent, not an error.
                 resolved_enabled = (step_enabled_overrides or {}).get(step.name, step.enabled)
+                if step.name in job.disabled_steps:   # turned off for this install: no run can select it
+                    _log.info("nomaflow.runner step=%s SKIPPED (turned off for this install)", step.name)
+                    await self._record_disabled_step(run, idx, step, reason="skipped: turned off for this install")
+                    continue
                 if not resolved_enabled:
                     _log.info(
                         "nomaflow.runner step=%s SKIPPED (disabled %s)",
@@ -742,7 +746,7 @@ class JobRunner:
                     error_message="skipped: earlier step failed",
                 ))
 
-    async def _record_disabled_step(self, run: JobRun, idx: int, step: Step) -> None:
+    async def _record_disabled_step(self, run: JobRun, idx: int, step: Step, *, reason: str = "skipped: disabled") -> None:
         """Insert a single CANCELED StepRun row for a step that was disabled
         (jobs.toml ``enabled = false`` or a per-fire ``step_enabled`` override).
 
@@ -762,5 +766,5 @@ class JobRunner:
                 state=RunState.CANCELED.value,
                 started_at=now,
                 finished_at=now,
-                error_message="skipped: disabled",
+                error_message=reason,
             ))

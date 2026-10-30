@@ -701,3 +701,39 @@ query = "q"
     run = await JobRunner(jobs_db, {StepType.SQL_QUERY: executor}, sleep=_noop_sleep).run(job, ManualTrigger(triggered_by="t"))
     assert executor.calls == [("first", 1)]
     assert run.state == RunState.FAILED.value and run.error_message == "boom"
+
+
+
+@pytest.mark.asyncio
+async def test_a_step_turned_off_for_the_install_never_runs(jobs_db, tmp_path) -> None:
+    """``disabled_steps``: not even a run that selects every step (``step_enabled``) runs it; it is
+    recorded as skipped, not failed."""
+    job = _make_job(tmp_path, """
+[[jobs]]
+id = "collect"
+disabled_steps = ["ldap"]
+
+[[jobs.steps]]
+type = "sql_query"
+name = "security"
+connector = "c"
+query = "q"
+
+[[jobs.steps]]
+type = "sql_query"
+name = "ldap"
+connector = "c"
+query = "q"
+enabled = false
+""")
+    executor = RecordingExecutor([])
+    runner = JobRunner(jobs_db, {StepType.SQL_QUERY: executor}, sleep=_noop_sleep)
+    run = await runner.run(job, ManualTrigger(triggered_by="t"), step_enabled_overrides={"security": True, "ldap": True})
+    assert executor.calls == [("security", 1)]
+    assert run.state == RunState.SUCCEEDED.value
+    async with jobs_db.session() as s:
+        rows = (await s.execute(select(StepRun).order_by(StepRun.step_index))).scalars().all()
+    assert [(r.step_name, r.state, r.error_message) for r in rows] == [
+        ("security", RunState.SUCCEEDED.value, None),
+        ("ldap", RunState.CANCELED.value, "skipped: turned off for this install"),
+    ]

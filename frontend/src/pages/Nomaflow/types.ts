@@ -116,6 +116,8 @@ export interface JobConfig {
    *  job's saved defaults. Operators save current state via the modal's
    *  "Save as preset…" button. Empty array hides the dropdown. */
   presets?: JobPreset[]
+  /** Steps turned off for this install: never run, whatever a run or a preset selects. */
+  disabled_steps?: string[]
 }
 
 export interface JobPreset {
