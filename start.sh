@@ -103,7 +103,7 @@ run_api() {  # $1 = "dev" → enable --reload
   echo "==> FastAPI on http://$HOST:$PORT   (SPA: /   API: /api/…   docs: /docs   sio: /socket.io/)"
   # ``asgi_app`` = the Socket.IO + FastAPI wrapped ASGI app (so /socket.io/*
   # reaches the SIO engine; everything else falls through to FastAPI).
-  exec "$PY" -m uvicorn liberty.main:asgi_app --host "$HOST" --port "$PORT" "${extra[@]}"
+  exec "$PY" -m uvicorn liberty.main:asgi_app --host "$HOST" --port "$PORT" ${extra[@]+"${extra[@]}"}
 }
 
 cmd="${1:-serve}"
