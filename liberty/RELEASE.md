@@ -1,5 +1,10 @@
 # Liberty Next — Release notes
 
+## 7.0.70 — unreleased
+
+- nomaflow: the run detail has a **Back** button — to the page the run was opened from (the jobs list through a job's
+  status, the runs list, a parent run); opened from a link, to the jobs list.
+
 ## 7.0.69 — unreleased
 
 - Accounts: a new password at the first sign-in. An account created — or reset by an administrator — with a temporary

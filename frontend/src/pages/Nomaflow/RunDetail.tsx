@@ -7,10 +7,10 @@
 // (including a hung step). Once the run reaches a terminal state, polling stops
 // and the log is the durable copy.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Download, Pause, Play, RefreshCw, ScrollText, Workflow } from 'lucide-react'
+import { ArrowLeft, Download, Pause, Play, RefreshCw, ScrollText, Workflow } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { PageLayout, Button, Banner, Centered, Card, Tag, Mono } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -101,6 +101,10 @@ function fmt(iso: string | null): string {
 export default function RunDetail({ runId: runIdProp }: { runId?: string } = {}) {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  // Back to where the run was opened from (the jobs list, the runs list, a parent run); opened from a
+  // link with nothing before it in this tab's history, to the jobs list.
+  const location = useLocation()
+  const goBack = () => (location.key !== 'default' ? navigate(-1) : navigate('/nomaflow'))
   const params = useParams()
   const runId = runIdProp ?? params.runId ?? ''
   const [data, setData] = useState<RunDetailResponse | null>(null)
@@ -185,6 +189,9 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
       description={data ? `${data.run.job_id} · ${runId}` : runId}
     >
       <Toolbar>
+        <Button $variant="ghost" $size="sm" onClick={goBack}>
+          <ArrowLeft size={14} /> {t('common.goBack')}
+        </Button>
         <Spacer />
         {active && <LiveDot>{t('nomaflow.run.live')}</LiveDot>}
         <Button $variant="ghost" $size="sm" onClick={load}>

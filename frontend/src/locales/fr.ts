@@ -267,6 +267,7 @@ const fr: Resources = {
     edit: 'Modifier',
     undo: 'Annuler la suppression',
     back: 'retour',
+    goBack: 'Retour',
     send: 'Envoyer',
     none: 'aucun',
     no: 'non',

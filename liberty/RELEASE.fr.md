@@ -1,5 +1,11 @@
 # Liberty Next — Notes de version
 
+## 7.0.70 — non publiée
+
+- nomaflow : le détail d'une exécution a un bouton **Retour** — vers la page d'où elle a été ouverte (la liste des
+  tâches par le statut d'une tâche, la liste des exécutions, une exécution parente) ; ouverte depuis un lien, vers la
+  liste des tâches.
+
 ## 7.0.69 — non publiée
 
 - Comptes : un nouveau mot de passe à la première connexion. Un compte créé — ou réinitialisé par un administrateur —

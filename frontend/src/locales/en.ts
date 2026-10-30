@@ -265,6 +265,7 @@ const en = {
     edit: 'Edit',
     undo: 'Undo',
     back: 'back',
+    goBack: 'Back',
     send: 'Send',
     none: 'none',
     no: 'no',
