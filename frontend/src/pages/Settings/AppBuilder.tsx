@@ -44,6 +44,8 @@ interface AppSection {
   log_file_max_mb: number
   log_file_backups: number
   base_path: string
+  /** The address users reach the server at — what a password-reset mail links to. */
+  public_url: string
 }
 interface AiSection {
   enabled: boolean
@@ -196,7 +198,7 @@ const DEFAULTS: {
   app: AppSection; ai: AiSection; license: LicenseSection; oidc: OidcSection; notify: NotifySection; branding: BrandingFields;
   auth: AuthSection; jobs: JobsSection; changesets: ChangesetsSection;
 } = {
-  app: { name: 'Liberty Next', host: '0.0.0.0', port: 8000, log_level: 'info', hot_reload: false, default_language: 'en', oracle_thick: false, default_period: 'thisMonth', default_page_size: 50, dashboard_cache_seconds: 60, tabs_multi: true, tabs_close_on_app_switch: false, tabs_max: 5, drill_inline: false, log_format: 'text', log_file: null, log_file_max_mb: 10, log_file_backups: 5, base_path: '', external_urls: {} },
+  app: { name: 'Liberty Next', host: '0.0.0.0', port: 8000, log_level: 'info', hot_reload: false, default_language: 'en', oracle_thick: false, default_period: 'thisMonth', default_page_size: 50, dashboard_cache_seconds: 60, tabs_multi: true, tabs_close_on_app_switch: false, tabs_max: 5, drill_inline: false, log_format: 'text', log_file: null, log_file_max_mb: 10, log_file_backups: 5, base_path: '', public_url: '', external_urls: {} },
   ai: {
     enabled: true, model: 'claude-opus-4-8', max_tokens: 8192, max_iterations: 8, system_prompt: '',
     thinking: false, effort: '', request_timeout: 120,
@@ -445,6 +447,10 @@ export default function AppBuilder() {
             <Field label={t('settings.app.basePath')}>
               <Input value={app.base_path} onChange={(e) => setApp({ ...app, base_path: e.target.value })}
                 placeholder="/liberty" style={{ width: 220, fontFamily: fonts.mono }} />
+            </Field>
+            <Field label={t('settings.app.publicUrl')}>
+              <Input value={app.public_url ?? ''} onChange={(e) => setApp({ ...app, public_url: e.target.value })}
+                placeholder="https://liberty.example.com" style={{ width: 360, fontFamily: fonts.mono }} />
             </Field>
           </>,
         ),

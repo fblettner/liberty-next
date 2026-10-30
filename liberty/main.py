@@ -804,6 +804,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 **(({"pool": s.auth.pool} if s.auth.backend == "db" else {"toml": str(s.auth.toml_path)})
                    if detailed else {}),
                 "oidc_enabled": app.state.oidc is not None,
+                # the sign-in page offers "Forgot password?" only when a reset mail can be sent
+                "password_reset": bool(s.notify.smtp_host),
             },
             "ai": {
                 "enabled": ai is not None,

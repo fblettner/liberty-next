@@ -72,6 +72,9 @@ class User(Base):
     attributes: Mapped[dict | None] = mapped_column(JSON, default=dict, nullable=True)
     # The provider's subject identifier (the OIDC ``sub`` claim); NULL for local.
     provider_subject: Mapped[str | None] = mapped_column(String(255), index=True)
+    # A new password is required at the next local sign-in (an account created or reset with a
+    # temporary one). Nullable so it can be added to a live table — NULL reads as False.
+    must_change_password: Mapped[bool | None] = mapped_column(Boolean, default=False, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow

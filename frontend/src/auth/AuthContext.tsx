@@ -57,6 +57,8 @@ interface AuthState {
   setTokens: (pair: TokenInput) => Promise<void>;
   oidcLogin: () => void;
   logout: () => void;
+  /** Change the password; the reply's new tokens replace the session's (lifting "change required"). */
+  changePassword: (current: string, next: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -154,13 +156,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [applyTokens],
   );
 
+  const changePassword = useCallback(
+    async (current: string, next: string) => {
+      const pair = await api.post<TokenPair>("/auth/change-password", { current_password: current, new_password: next });
+      await applyTokens(pair);
+    },
+    [applyTokens],
+  );
+
   const oidcLogin = useCallback(() => {
     window.location.href = resolveApiPath("/auth/oidc/login");
   }, []);
 
   const value = useMemo<AuthState>(
-    () => ({ user, ready, login, setTokens: applyTokens, oidcLogin, logout }),
-    [user, ready, login, applyTokens, oidcLogin, logout],
+    () => ({ user, ready, login, setTokens: applyTokens, oidcLogin, logout, changePassword }),
+    [user, ready, login, applyTokens, oidcLogin, logout, changePassword],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -141,6 +141,9 @@ class AppSettings(BaseModel):
     # An ``open_url`` action / a ``url`` menu item writes ``#URL.JDE_WEB#/…`` instead of the address,
     # so the shipped screens carry no customer address; each install sets its own here (App editor).
     external_urls: dict[str, str] = Field(default_factory=dict)
+    # The address users reach this server at (``https://liberty.example.com`` — with the base path
+    # when there is one): what a password-reset mail links to. Blank = the browser's origin.
+    public_url: str = ""
 
     @field_validator("external_urls")
     @classmethod

@@ -83,6 +83,7 @@ class AuthService:
         provider: str = "local",
         provider_subject: str | None = None,
         attributes: Mapping[str, Any] | None = None,
+        must_change_password: bool = False,
     ) -> User:
         if await self.get_user_by_username(username) is not None:
             raise AuthError(f"user {username!r} already exists")
@@ -96,6 +97,8 @@ class AuthService:
             provider=provider,
             provider_subject=provider_subject,
             attributes=normalize_attributes(attributes),
+            # only a local account with a password can be asked to change it
+            must_change_password=bool(must_change_password and password and provider == "local"),
         )
         # Assign the collection explicitly (even if empty) so it counts as loaded —
         # a freshly-flushed object's relationship would otherwise lazy-load on
@@ -105,8 +108,15 @@ class AuthService:
         await self.session.flush()
         return user
 
-    async def set_password(self, user: User, password: str) -> None:
+    async def set_password(self, user: User, password: str, *, must_change: bool = False) -> None:
+        """Set *password*; *must_change* asks for a new one at the next sign-in (a temporary
+        password an administrator gives out) — a password the user chose clears it."""
         user.password_hash = hash_password(password)
+        user.must_change_password = bool(must_change)
+        await self.session.flush()
+
+    async def set_must_change(self, user: User, value: bool) -> None:
+        user.must_change_password = bool(value and user.password_hash and user.provider == "local")
         await self.session.flush()
 
     async def set_active(self, user: User, active: bool) -> None:

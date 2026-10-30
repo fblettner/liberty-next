@@ -2,8 +2,8 @@
 
     liberty-admin init-db [--admin-username admin] [--password … | --password-env VAR]
     liberty-admin create-user <username> [--email …] [--full-name …] [--attribute k=v ...]
-                              [--password … | --password-env VAR] [--role R ...] [--superuser]
-    liberty-admin set-password <username> [--password … | --password-env VAR]
+                              [--password … | --password-env VAR] [--role R ...] [--superuser] [--must-change]
+    liberty-admin set-password <username> [--password … | --password-env VAR] [--must-change]
     liberty-admin set-active <username> {--active | --inactive}
     liberty-admin set-attributes <username> [--attribute k=v ...]
     liberty-admin list-users
@@ -268,6 +268,7 @@ async def _cmd_create_user(ctx: _Context, args: argparse.Namespace) -> int:
     user = await ctx.backend.create_user(
         args.username, password=password, email=args.email, full_name=args.full_name,
         is_superuser=args.superuser, roles=args.role or None, attributes=parse_attributes(args.attribute) or None,
+        must_change_password=args.must_change,
     )
     out = {"user": user.public_dict()}
     if generated:
@@ -278,7 +279,7 @@ async def _cmd_create_user(ctx: _Context, args: argparse.Namespace) -> int:
 
 async def _cmd_set_password(ctx: _Context, args: argparse.Namespace) -> int:
     password, generated = _resolve_password(args)
-    user = await ctx.backend.set_password(args.username, password)
+    user = await ctx.backend.set_password(args.username, password, must_change=args.must_change)
     out = {"user": user.public_dict(), "password_changed": True}
     if generated:
         out["generated_password"] = password
@@ -799,12 +800,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_cu.add_argument("--role", action="append", metavar="ROLE", help="repeatable")
     p_cu.add_argument("--attribute", action="append", metavar="KEY=VALUE", help="data-scope attribute (repeatable; KEY=a,b for a list)")
     p_cu.add_argument("--superuser", action="store_true")
+    p_cu.add_argument("--must-change", action="store_true", help="ask for a new password at the first sign-in")
     _add_password_args(p_cu)
     p_cu.set_defaults(func=_cmd_create_user)
 
     p_sp = sub.add_parser("set-password", help="set a user's password")
     p_sp.add_argument("username")
     _add_password_args(p_sp)
+    p_sp.add_argument("--must-change", action="store_true", help="a temporary password: a new one is asked at the next sign-in")
     p_sp.set_defaults(func=_cmd_set_password)
 
     p_sa = sub.add_parser("set-active", help="enable/disable a user")

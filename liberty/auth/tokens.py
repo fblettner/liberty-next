@@ -48,6 +48,11 @@ def _quiet_short_key():
 
 ACCESS = "access"
 REFRESH = "refresh"
+# A password-reset link (``/auth/forgot-password`` → mail → ``/auth/reset-password``): carries the
+# user and a fingerprint of the password hash it was issued for, so it works once — the reset
+# changes the hash — and not after any other password change.
+RESET = "reset"
+RESET_TTL = 3600
 
 
 class TokenError(Exception):
@@ -118,6 +123,7 @@ class TokenService:
         provider: str = "local",
         scope: list | None = None,
         attributes: dict | None = None,
+        must_change_password: bool = False,
     ) -> IssuedToken:
         claims: dict = {
             "sub": subject,
@@ -132,6 +138,8 @@ class TokenService:
             claims["scope"] = scope
         if attributes:
             claims["attrs"] = attributes
+        if must_change_password:  # every call but the change itself is refused (auth dependency)
+            claims["pwc"] = True
         return self._encode(
             claims,
             self.config.access_ttl,
@@ -140,6 +148,10 @@ class TokenService:
 
     def refresh_token(self, *, subject: str) -> IssuedToken:
         return self._encode({"sub": subject}, self.config.refresh_ttl, REFRESH)
+
+    def reset_token(self, *, subject: str, password_fingerprint: str) -> IssuedToken:
+        """A password-reset link's token (see :data:`RESET`)."""
+        return self._encode({"sub": subject, "pwf": password_fingerprint}, RESET_TTL, RESET)
 
     # -- verification ------------------------------------------------------ #
 

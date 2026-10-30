@@ -1,5 +1,27 @@
 # Liberty Next — Release notes
 
+## 7.0.69 — unreleased
+
+- Accounts: a new password at the first sign-in. An account created — or reset by an administrator — with a temporary
+  password ("Ask for a new password at the next sign-in" in Settings → Access, on by default for a new user;
+  `liberty-admin create-user / set-password --must-change`) opens on a "Choose your password" page; until it's done the
+  server refuses every call but the change itself (403 "password change required" — enforced on the server, not only
+  on the page). Local accounts only: an SSO account is never asked.
+- Sign-in: "Forgot password?". The user gives the username and the account's e-mail; when both match a local account a
+  link is mailed — valid one hour, and once (it is bound to the password it was issued for). The answer is the same
+  whether or not they match, so it never tells who has an account; requests are throttled per address. Offered when
+  SMTP is set (`[notify]`); the link points at the new `[app] public_url` (Settings → App), else the browser's
+  address. New public routes: `POST /auth/forgot-password`, `POST /auth/reset-password`.
+- nomaflow: a step can be turned off for an install — `disabled_steps = ["SECURITY_LDAP"]` on the job, a checkbox
+  in the step editor. It never runs, even when a run or a preset selects every step (the run dialog shows it off and
+  not selectable); it is recorded as skipped, not failed. An operator setting like the schedule: the apps installer
+  keeps it, and it doesn't make the job look changed (so the vendor's fixes to its other steps still arrive) — unlike
+  a step's own `enabled`, the vendor's default a run may override.
+- `./liberty apps` and `./liberty upgrade --apps` restart liberty-next after installing the wheel when the stack
+  was already running: `docker compose up -d` only recreates a container whose configuration changed, so on an update
+  the server kept the plugins and configuration it had loaded before, until a manual `./liberty restart`. A fresh
+  install (the container created by that same `up -d`) is not restarted twice.
+
 ## 7.0.68 — unreleased
 
 - nomaflow: a step can let the job go on when it fails — `continue_on_failure = true` (on the step, or for every step

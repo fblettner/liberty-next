@@ -20,7 +20,7 @@ import { attributeFromText, attributeKeys, attributeToText, screenColumnNames } 
 import type { DictionaryDoc, ScreensDoc } from '../../types/config'
 import { BuilderShell as Shell } from '../../common/builderShell'
 
-interface AppUser { username: string; email: string | null; full_name: string | null; is_active: boolean; is_superuser: boolean; roles: string[]; attributes?: Record<string, string | string[]> | null }
+interface AppUser { username: string; email: string | null; full_name: string | null; is_active: boolean; is_superuser: boolean; roles: string[]; attributes?: Record<string, string | string[]> | null; provider?: string; must_change_password?: boolean }
 
 const Bar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0;`
 const List = styled(Card)`flex: 1; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px;`
@@ -51,6 +51,10 @@ function UserModal({ initial, roleNames, attributeNames, onSaved, onClose }: { i
   const [isActive, setIsActive] = useState(initial?.is_active ?? true)
   const [isSuperuser, setIsSuperuser] = useState(initial?.is_superuser ?? false)
   const [password, setPassword] = useState('')
+  // A temporary password: a new one is asked at the next sign-in — on by default for a new account
+  // (as in nomaubl). Local accounts only: an SSO account has no password here.
+  const isLocal = (initial?.provider ?? 'local') === 'local'
+  const [mustChange, setMustChange] = useState(initial ? !!initial.must_change_password : true)
   // Data-scope attributes as editable rows (key + "a, b" text); an empty value drops the key on save.
   const [attrs, setAttrs] = useState<{ key: string; text: string }[]>(() => Object.entries(initial?.attributes ?? {}).map(([key, v]) => ({ key, text: attributeToText(v) })))
   const [busy, setBusy] = useState(false)
@@ -68,10 +72,10 @@ function UserModal({ initial, roleNames, attributeNames, onSaved, onClose }: { i
     setBusy(true); setError(null)
     try {
       if (isNew) {
-        await api.post('/admin/access/users', { username: u, password, email: email.trim() || null, full_name: fullName.trim() || null, roles, is_superuser: isSuperuser, is_active: isActive, attributes })
+        await api.post('/admin/access/users', { username: u, password, email: email.trim() || null, full_name: fullName.trim() || null, roles, is_superuser: isSuperuser, is_active: isActive, attributes, must_change_password: mustChange })
       } else {
-        await api.patch(`/admin/access/users/${encodeURIComponent(u)}`, { email: email.trim() || null, full_name: fullName.trim() || null, roles, is_active: isActive, is_superuser: isSuperuser, attributes })
-        if (password) await api.post(`/admin/access/users/${encodeURIComponent(u)}/password`, { password })
+        await api.patch(`/admin/access/users/${encodeURIComponent(u)}`, { email: email.trim() || null, full_name: fullName.trim() || null, roles, is_active: isActive, is_superuser: isSuperuser, attributes, ...(isLocal ? { must_change_password: mustChange } : {}) })
+        if (password) await api.post(`/admin/access/users/${encodeURIComponent(u)}/password`, { password, must_change: mustChange })
       }
       onSaved()
     } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) } finally { setBusy(false) }
@@ -122,6 +126,7 @@ function UserModal({ initial, roleNames, attributeNames, onSaved, onClose }: { i
             <PasswordInput value={password} autoComplete="new-password" onChange={(e) => setPassword(e.target.value)}
               placeholder={isNew ? '' : t('settings.access.leaveBlankKeep')} />
           </Field>
+          {isLocal && <Checkbox checked={mustChange} onChange={setMustChange} label={t('settings.access.mustChange')} />}
         </ModalBody>
         <ModalFooter>
           <Button $size="sm" $variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>

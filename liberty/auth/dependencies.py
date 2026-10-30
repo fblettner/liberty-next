@@ -77,6 +77,10 @@ def _principal_from_credentials(
     return Principal.from_claims(claims)
 
 
+# What a session signed in with a temporary password may call (route paths, before base_path).
+_ALLOWED_BEFORE_CHANGE = frozenset({"/auth/me", "/auth/change-password"})
+
+
 async def get_current_principal(
     request: Request, creds: _BearerDep, tokens: Annotated[TokenService, Depends(get_token_service)]
 ) -> Principal:
@@ -89,6 +93,13 @@ async def get_current_principal(
     # scope is passed; a background job has no request and stays unrestricted.
     current_scope.set(principal.data_scope)
     current_username.set(principal.username)
+    # A temporary password: nothing but the change (and who am I) until it's done — enforced here,
+    # not only by the sign-in page, so the API can't be used with a password an admin handed out.
+    if principal.must_change_password:
+        route = request.scope.get("route")
+        if getattr(route, "path", None) not in _ALLOWED_BEFORE_CHANGE:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail="password change required",
+                                headers={"X-Liberty-Password-Change": "required"})
     # The environment picked for the screen (the app switcher's pool) — an API connector with
     # per-pool targets (AIS per JDE environment) calls that environment's server.
     current_pool.set((request.headers.get("x-liberty-pool") or "").strip() or None)

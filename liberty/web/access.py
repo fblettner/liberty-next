@@ -39,6 +39,9 @@ class UserCreate(BaseModel):
     is_superuser: bool = False
     is_active: bool = True
     attributes: dict[str, str | list[str]] = Field(default_factory=dict)
+    # Ask for a new password at the first sign-in (the password given here is a temporary one).
+    # Ignored without a password (an SSO account).
+    must_change_password: bool = False
 
 
 class UserUpdate(BaseModel):
@@ -49,10 +52,13 @@ class UserUpdate(BaseModel):
     is_active: bool | None = None
     is_superuser: bool | None = None
     attributes: dict[str, str | list[str] | None] | None = None   # replaces the user's attributes
+    must_change_password: bool | None = None   # ask (or stop asking) for a new password at the next sign-in
 
 
 class PasswordSet(BaseModel):
     password: str = Field(min_length=8)
+    # A temporary password: the user must choose a new one at the next sign-in.
+    must_change: bool = False
 
 
 class RoleUpsert(BaseModel):
@@ -78,7 +84,7 @@ async def create_user(body: UserCreate, _: Superuser, backend: Backend) -> dict[
         u = await backend.create_user(
             body.username, password=body.password, email=body.email, full_name=body.full_name,
             is_superuser=body.is_superuser, is_active=body.is_active, roles=body.roles,
-            attributes=body.attributes or None,
+            attributes=body.attributes or None, must_change_password=body.must_change_password,
         )
     except AuthError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -109,6 +115,8 @@ async def update_user(username: str, body: UserUpdate, principal: CurrentPrincip
             await backend.set_superuser(username, body.is_superuser)
         if body.attributes is not None:
             await backend.set_attributes(username, body.attributes, replace=True)
+        if body.must_change_password is not None:
+            await backend.set_must_change(username, body.must_change_password)
     except AuthError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     u = await backend.get_by_username(username)
@@ -120,7 +128,7 @@ async def update_user(username: str, body: UserUpdate, principal: CurrentPrincip
 @router.post("/users/{username}/password", summary="Set user password")
 async def set_user_password(username: str, body: PasswordSet, _: Superuser, backend: Backend) -> dict[str, Any]:
     try:
-        await backend.set_password(username, body.password)
+        await backend.set_password(username, body.password, must_change=body.must_change)
     except AuthError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return {"ok": True}

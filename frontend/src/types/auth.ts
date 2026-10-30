@@ -8,6 +8,8 @@ export interface Principal {
   permissions: string[]
   is_superuser: boolean
   provider: string
+  /** Signed in with a temporary password: a new one is required before anything else. */
+  must_change_password?: boolean
 }
 
 export interface TokenPair {

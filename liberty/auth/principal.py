@@ -44,6 +44,8 @@ class Principal:
     # Row-level data scope as carried in the token (resolved groups) and the user attributes.
     scope: tuple = ()
     attributes: dict = field(default_factory=dict)
+    # Signed in with a temporary password: only the password change is allowed until it's done.
+    must_change_password: bool = False
 
     @property
     def data_scope(self):
@@ -66,6 +68,7 @@ class Principal:
             provider=claims.get("provider") or "local",
             scope=tuple(claims.get("scope") or ()),
             attributes=dict(claims.get("attrs") or {}),
+            must_change_password=bool(claims.get("pwc")),
         )
 
     @classmethod
@@ -120,4 +123,5 @@ class Principal:
             "provider": self.provider,
             "attributes": dict(self.attributes),
             "scope": [list(g) for g in self.scope] or None,
+            "must_change_password": self.must_change_password,
         }

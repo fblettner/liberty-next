@@ -5,6 +5,8 @@ import { useAuth } from "./auth/AuthContext";
 import { Centered } from "./common";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
+import ChangePasswordRequired from "./pages/Login/ChangePasswordRequired";
+import ResetPassword from "./pages/Login/ResetPassword";
 import OidcCallback from "./pages/OidcCallback";
 import { useTabs, type TabKind } from "./tabs/TabsContext";
 import { useWorkspace } from "./workspace/WorkspaceContext";
@@ -27,6 +29,8 @@ function RequireAuth({ children }: { children: ReactNode }) {
   const location = useLocation();
   if (!ready) return <Centered />;
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  // a temporary password: the new one first (the server refuses everything else until then)
+  if (user.must_change_password && user.provider === "local") return <ChangePasswordRequired />;
   return <>{children}</>;
 }
 
@@ -82,6 +86,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/oidc/callback" element={<OidcCallback />} />
       <Route
         path="/"

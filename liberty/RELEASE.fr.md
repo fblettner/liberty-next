@@ -1,5 +1,31 @@
 # Liberty Next — Notes de version
 
+## 7.0.69 — non publiée
+
+- Comptes : un nouveau mot de passe à la première connexion. Un compte créé — ou réinitialisé par un administrateur —
+  avec un mot de passe temporaire (« Demander un nouveau mot de passe à la prochaine connexion » dans Paramètres →
+  Accès, coché par défaut pour un nouvel utilisateur ; `liberty-admin create-user / set-password --must-change`)
+  s'ouvre sur une page « Choisissez votre mot de passe » ; tant que ce n'est pas fait, le serveur refuse tout appel
+  sauf le changement lui-même (403 « password change required » — imposé par le serveur, pas seulement par la page).
+  Comptes locaux uniquement : un compte SSO n'est jamais concerné.
+- Connexion : « Mot de passe oublié ? ». L'utilisateur indique son identifiant et l'e-mail du compte ; quand les deux
+  correspondent à un compte local, un lien est envoyé — valable une heure, et une seule fois (il est lié au mot de
+  passe pour lequel il a été émis). La réponse est la même qu'ils correspondent ou non : elle ne révèle jamais qui a
+  un compte ; les demandes sont limitées par adresse. Proposé quand le SMTP est configuré (`[notify]`) ; le lien pointe
+  vers la nouvelle `[app] public_url` (Paramètres → App), sinon l'adresse du navigateur. Nouvelles routes publiques :
+  `POST /auth/forgot-password`, `POST /auth/reset-password`.
+- nomaflow : une étape peut être désactivée pour une installation — `disabled_steps = ["SECURITY_LDAP"]` sur le job,
+  une case à cocher dans l'éditeur d'étape. Elle ne s'exécute jamais, même quand une exécution ou un préréglage
+  sélectionne toutes les étapes (la boîte d'exécution la montre désactivée et non sélectionnable) ; elle est
+  enregistrée comme ignorée, pas en échec. Un réglage de l'exploitant comme la planification : l'installateur des
+  applications le conserve, et le job ne paraît pas modifié (les corrections de l'éditeur sur ses autres étapes
+  arrivent donc toujours) — contrairement au `enabled` d'une étape, valeur par défaut de l'éditeur qu'une exécution
+  peut remplacer.
+- `./liberty apps` et `./liberty upgrade --apps` redémarrent liberty-next après l'installation du wheel quand la pile
+  tournait déjà : `docker compose up -d` ne recrée qu'un conteneur dont la configuration a changé, donc lors d'une mise
+  à jour le serveur gardait les plugins et la configuration chargés avant, jusqu'à un `./liberty restart` manuel. Une
+  première installation (le conteneur créé par ce même `up -d`) n'est pas redémarrée deux fois.
+
 ## 7.0.68 — non publiée
 
 - nomaflow : une étape peut laisser le job continuer quand elle échoue — `continue_on_failure = true` (sur l'étape, ou

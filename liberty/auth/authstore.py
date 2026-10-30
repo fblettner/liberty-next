@@ -66,6 +66,8 @@ class AuthUser(BaseModel):
     full_name: str | None = None
     # Free-form attributes a role's scope may read (`source = "#USER.company#"`): company, pole, …
     attributes: dict[str, str | list[str]] = Field(default_factory=dict)
+    # A new password is required at the next local sign-in (created / reset with a temporary one).
+    must_change_password: bool = False
 
 
 class AuthFile(BaseModel):
@@ -132,6 +134,8 @@ class UserRecord:
     attributes: dict[str, Any] = field(default_factory=dict)
     # The resolved data scope (liberty.auth.scope.resolve_scope): None = unrestricted.
     scope: list[list[dict[str, Any]]] | None = None
+    # A new password is required at the next local sign-in.
+    must_change_password: bool = False
 
     @property
     def role_names(self) -> list[str]:
@@ -142,7 +146,7 @@ class UserRecord:
             "id": self.id, "username": self.username, "email": self.email, "full_name": self.full_name,
             "is_active": self.is_active, "is_superuser": self.is_superuser, "provider": self.provider,
             "roles": self.roles, "permissions": self.permissions, "attributes": dict(self.attributes),
-            "scope": self.scope,
+            "scope": self.scope, "must_change_password": self.must_change_password,
         }
 
 
@@ -163,9 +167,10 @@ class AuthBackend(Protocol):
         self, username: str, *, password: str | None = None, email: str | None = None,
         full_name: str | None = None, is_superuser: bool = False, is_active: bool = True,
         roles: list[str] | None = None, provider: str = "local", provider_subject: str | None = None,
-        attributes: Mapping[str, Any] | None = None,
+        attributes: Mapping[str, Any] | None = None, must_change_password: bool = False,
     ) -> UserRecord: ...
-    async def set_password(self, username: str, password: str) -> UserRecord: ...
+    async def set_password(self, username: str, password: str, *, must_change: bool = False) -> UserRecord: ...
+    async def set_must_change(self, username: str, value: bool) -> UserRecord: ...
     async def set_active(self, username: str, active: bool) -> UserRecord: ...
     async def set_superuser(self, username: str, value: bool) -> UserRecord: ...
     async def update_profile(
@@ -211,7 +216,7 @@ class TomlAuthBackend:
             id=username, username=username, email=u.email, full_name=u.full_name,
             password_hash=u.password_hash, is_active=u.active, is_superuser=sup,
             provider=u.provider, provider_subject=u.sub, roles=sorted(u.roles), permissions=perms,
-            attributes=dict(u.attributes), scope=scope,
+            attributes=dict(u.attributes), scope=scope, must_change_password=u.must_change_password,
         )
 
     def _get(self, f: AuthFile, username: str) -> AuthUser:
@@ -296,7 +301,7 @@ class TomlAuthBackend:
         self, username: str, *, password: str | None = None, email: str | None = None,
         full_name: str | None = None, is_superuser: bool = False, is_active: bool = True,
         roles: list[str] | None = None, provider: str = "local", provider_subject: str | None = None,
-        attributes: Mapping[str, Any] | None = None,
+        attributes: Mapping[str, Any] | None = None, must_change_password: bool = False,
     ) -> UserRecord:
         f = load_auth(self.path)
         if username in f.users:
@@ -308,15 +313,25 @@ class TomlAuthBackend:
             password_hash=hash_password(password) if password else None, roles=list(roles or []),
             active=is_active, superuser=is_superuser, provider=provider, sub=provider_subject,
             email=email, full_name=full_name, attributes=normalize_attributes(attributes),
+            # only a local account with a password can be asked to change it
+            must_change_password=bool(must_change_password and password and provider == "local"),
         )
         f.users[username] = u
         save_auth(self.path, f)
         return self._record(f, username, u)
 
-    async def set_password(self, username: str, password: str) -> UserRecord:
+    async def set_password(self, username: str, password: str, *, must_change: bool = False) -> UserRecord:
         f = load_auth(self.path)
         u = self._get(f, username)
         u.password_hash = hash_password(password)
+        u.must_change_password = bool(must_change)
+        save_auth(self.path, f)
+        return self._record(f, username, u)
+
+    async def set_must_change(self, username: str, value: bool) -> UserRecord:
+        f = load_auth(self.path)
+        u = self._get(f, username)
+        u.must_change_password = bool(value and u.password_hash and u.provider == "local")
         save_auth(self.path, f)
         return self._record(f, username, u)
 
@@ -401,7 +416,7 @@ class DbAuthBackend:
             id=str(u.id), username=u.username, email=u.email, full_name=u.full_name,
             password_hash=u.password_hash, is_active=u.is_active, is_superuser=u.is_superuser,
             provider=u.provider, provider_subject=u.provider_subject, roles=u.role_names, permissions=u.permissions,
-            attributes=dict(u.attributes or {}), scope=scope,
+            attributes=dict(u.attributes or {}), scope=scope, must_change_password=bool(u.must_change_password),
         )
 
     async def ready(self) -> list:
@@ -457,23 +472,32 @@ class DbAuthBackend:
         self, username: str, *, password: str | None = None, email: str | None = None,
         full_name: str | None = None, is_superuser: bool = False, is_active: bool = True,
         roles: list[str] | None = None, provider: str = "local", provider_subject: str | None = None,
-        attributes: Mapping[str, Any] | None = None,
+        attributes: Mapping[str, Any] | None = None, must_change_password: bool = False,
     ) -> UserRecord:
         async with self.db.session() as s:
             u = await AuthService(s).create_user(
                 username, password=password, email=email, full_name=full_name, is_superuser=is_superuser,
                 is_active=is_active, roles=roles, provider=provider, provider_subject=provider_subject,
-                attributes=attributes,
+                attributes=attributes, must_change_password=must_change_password,
             )
             return self._record(u)
 
-    async def set_password(self, username: str, password: str) -> UserRecord:
+    async def set_password(self, username: str, password: str, *, must_change: bool = False) -> UserRecord:
         async with self.db.session() as s:
             svc = AuthService(s)
             u = await svc.get_user_by_username(username)
             if u is None:
                 raise AuthError(f"unknown user {username!r}")
-            await svc.set_password(u, password)
+            await svc.set_password(u, password, must_change=must_change)
+            return self._record(u)
+
+    async def set_must_change(self, username: str, value: bool) -> UserRecord:
+        async with self.db.session() as s:
+            svc = AuthService(s)
+            u = await svc.get_user_by_username(username)
+            if u is None:
+                raise AuthError(f"unknown user {username!r}")
+            await svc.set_must_change(u, value)
             return self._record(u)
 
     async def set_active(self, username: str, active: bool) -> UserRecord:
