@@ -34,6 +34,9 @@
 #   LIBERTY_MASTER_KEY       v1 ENC: field-decryption key (must equal v1's MASTER_KEY)
 #   LIBERTY_LICENSE_KEY      RS256 JWT unlocking `licensed = true` connectors
 #   ANTHROPIC_API_KEY        for the AI assistant
+#   LIBERTY_APP_CONFIG       the app.toml to load — unset = config/app-dev.toml when it exists (a
+#                            developer's own, gitignored: encrypted keys, [connectors] pools_path),
+#                            else config/app.toml
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -41,6 +44,9 @@ VENV="${VENV:-.venv}"
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8000}"
 PY="$VENV/bin/python"
+if [ -z "${LIBERTY_APP_CONFIG:-}" ] && [ -f config/app-dev.toml ]; then
+  export LIBERTY_APP_CONFIG=config/app-dev.toml
+fi
 
 die() { echo "error: $*" >&2; exit 1; }
 

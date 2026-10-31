@@ -66,6 +66,7 @@ def load_registry(settings: Settings, license_result: LicenseResult | None) -> C
         license=license_result,
         default_language=settings.app.default_language,
         oracle_thick=settings.app.oracle_thick,
+        pools_path=settings.connectors.pools_path,
     )
 
 

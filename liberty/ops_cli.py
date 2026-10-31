@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version as _dist_version
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 from urllib.request import urlopen
 
 FRAMEWORK_DIST = "liberty-next"
@@ -261,13 +261,18 @@ def last_upgrade(env: Env) -> str:
     return f"{r['component']} {r['from_version'] or '-'} → {r['to_version']} ({r['created_at'][:19]})"
 
 
+def _effective_pools(env: Env) -> dict[str, Any]:
+    """The raw ``[pools.*]`` the server runs on: connectors.toml's, overlaid by ``[connectors] pools_path``."""
+    from liberty.connectors.config import read_raw_pools
+
+    s = env.settings.connectors
+    return {**read_raw_pools(s.config_path), **read_raw_pools(s.pools_path)}
+
+
 def sqlite_file(env: Env) -> Path | None:
     """The default pool's SQLite file when the framework runs on SQLite (the pipx default)."""
     try:
-        import tomllib
-
-        doc = tomllib.loads(Path(env.settings.connectors.config_path).read_text(encoding="utf-8"))
-        url = doc.get("pools", {}).get("default", {}).get("url", "")
+        url = _effective_pools(env).get("default", {}).get("url", "")
     except (OSError, Exception):  # noqa: BLE001
         url = ""
     from liberty.config import substitute_env
@@ -283,12 +288,9 @@ def sqlite_file(env: Env) -> Path | None:
 
 def default_pool_url(env: Env) -> str | None:
     try:
-        import tomllib
-
         from liberty.config import substitute_env
 
-        doc = tomllib.loads(Path(env.settings.connectors.config_path).read_text(encoding="utf-8"))
-        url = doc.get("pools", {}).get("default", {}).get("url", "")
+        url = _effective_pools(env).get("default", {}).get("url", "")
         return substitute_env(url) if url else None
     except Exception:  # noqa: BLE001
         return None
@@ -359,7 +361,7 @@ def _doctor(env: Env) -> tuple[int, list[str]]:
         try:
             from liberty.connectors import load_connectors
 
-            load_connectors(conn, master_key=env.settings.crypto.master_key)
+            load_connectors(conn, master_key=env.settings.crypto.master_key, pools_path=env.settings.connectors.pools_path)
             p_ok(f"connectors.toml parses: {conn}")
         except Exception as exc:  # noqa: BLE001
             p_fail(f"connectors.toml does not load: {type(exc).__name__}: {str(exc)[:160]}", "fix the file (Liberty Next → Build → Connectors cannot open while it is broken)")
@@ -373,12 +375,9 @@ def _doctor(env: Env) -> tuple[int, list[str]]:
         p_warn("LIBERTY_APPS_DIR unset — open-framework install (no licensed apps)")
     # master key vs ENC: pool passwords
     try:
-        import tomllib
-
         from liberty.crypto import decrypt_or_keep, is_encrypted
 
-        doc = tomllib.loads(conn.read_text(encoding="utf-8")) if conn.exists() else {}
-        bad = [n for n, c in doc.get("pools", {}).items()
+        bad = [n for n, c in _effective_pools(env).items()
                if is_encrypted(c.get("password", "")) and decrypt_or_keep(c["password"], env.settings.crypto.master_key or "")[1]]
         p_fail("the master key cannot decrypt the password of pool(s): " + ", ".join(bad), "LIBERTY_MASTER_KEY must be the key those ENC: values were made with") if bad else p_ok("master key decrypts every pool password")
     except Exception as exc:  # noqa: BLE001

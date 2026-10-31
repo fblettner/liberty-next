@@ -1,5 +1,20 @@
 # Liberty Next — Release notes
 
+## 7.0.71 — unreleased
+
+- Pools: `[connectors] pools_path` in app.toml names a local file whose `[pools.*]` replace the same-named pools of
+  connectors.toml (a pool it doesn't name still comes from there) — for the server, the CLIs (`liberty-ops` backup /
+  doctor, `liberty-admin`, `liberty-connectors`) and hot reload; the Pools editor then saves to it. For a development
+  machine whose connectors.toml is the apps repository's: its own hosts and passwords stay out of the shared file,
+  while the connectors edited there are still committed. Unset (the default), nothing changes.
+- The Pools and Connectors editors no longer flatten `${VAR}` references on a save: the editor reads the values
+  resolved, so saving wrote back the resolved value — `${POSTGRES_HOST:-pg}` became the host it pointed at, and a
+  later change of the environment had no effect on that pool. A value left as it was is now written as its
+  reference again; one the user changed is written as typed. A password given as a `${VAR}` reference is no longer
+  encrypted into an `ENC:` copy of the reference.
+- `./start.sh` loads `config/app-dev.toml` when it exists and `LIBERTY_APP_CONFIG` isn't set — a developer's own
+  settings (gitignored), so the committed `config/app.toml` stays as shipped.
+
 ## 7.0.70 — unreleased
 
 - nomaflow: the run detail has a **Back** button — to the page the run was opened from (the jobs list through a job's

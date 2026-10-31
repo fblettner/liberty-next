@@ -68,6 +68,7 @@ class _Context:
         self.license = verify_license(settings.license.key, master_key=settings.crypto.master_key)
         self.registry = load_connectors(
             connectors_path, master_key=settings.crypto.master_key, license=self.license,
+            pools_path=settings.connectors.pools_path,
         )
         self.backend = build_auth_backend(settings, self.registry.pools)
 

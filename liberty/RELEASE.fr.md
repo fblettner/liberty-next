@@ -1,5 +1,21 @@
 # Liberty Next — Notes de version
 
+## 7.0.71 — non publiée
+
+- Pools : `[connectors] pools_path` dans app.toml désigne un fichier local dont les `[pools.*]` remplacent les pools
+  de même nom de connectors.toml (un pool qu'il ne cite pas vient toujours de là) — pour le serveur, les CLI
+  (`liberty-ops` sauvegarde / doctor, `liberty-admin`, `liberty-connectors`) et le rechargement à chaud ; l'éditeur
+  des pools enregistre alors dans ce fichier. Pour un poste de développement dont connectors.toml est celui du dépôt
+  des applications : ses propres hôtes et mots de passe restent hors du fichier partagé, les connecteurs qu'on y
+  modifie sont toujours commités. Non renseigné (par défaut), rien ne change.
+- Les éditeurs des pools et des connecteurs n'aplatissent plus les références `${VAR}` à l'enregistrement : l'éditeur
+  lit les valeurs résolues, l'enregistrement réécrivait donc la valeur résolue — `${POSTGRES_HOST:-pg}` devenait
+  l'hôte vers lequel il pointait, et un changement ultérieur de l'environnement restait sans effet sur ce pool. Une
+  valeur laissée telle quelle est désormais réécrite sous forme de référence ; une valeur modifiée est écrite telle
+  que saisie. Un mot de passe donné par une référence `${VAR}` n'est plus chiffré en une copie `ENC:` de la référence.
+- `./start.sh` charge `config/app-dev.toml` quand il existe et que `LIBERTY_APP_CONFIG` n'est pas défini — les
+  réglages propres d'un développeur (ignorés par git), le `config/app.toml` commité reste tel que livré.
+
 ## 7.0.70 — non publiée
 
 - nomaflow : le détail d'une exécution a un bouton **Retour** — vers la page d'où elle a été ouverte (la liste des

@@ -43,7 +43,7 @@ FILE_ONLY: dict[str, str] = {
 # The deployment layout: where the configuration files are. Set by the installation (LIBERTY_APPS_DIR,
 # the Docker volumes); pointing one at another place from a screen would show an empty configuration.
 _LAYOUT = "deployment layout — follows LIBERTY_APPS_DIR / the install; changed in app.toml, then a restart"
-for _key in ("connectors.config_path", "connectors.dictionary_path", "menus.config_path", "screens.config_path",
+for _key in ("connectors.config_path", "connectors.dictionary_path", "connectors.pools_path", "menus.config_path", "screens.config_path",
              "charts.config_path", "actions.config_path", "dashboards.config_path", "explorer.config_path",
              "theme.config_path", "ai.config_path", "jobs.config_path", "reports.templates_config_path",
              "notify.config_path", "auth.toml_path", "app.static_dir"):

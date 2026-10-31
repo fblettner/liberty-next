@@ -87,6 +87,7 @@ def _settings(tmp_path: Path) -> SimpleNamespace:
         connectors=SimpleNamespace(
             config_path=tmp_path / "connectors.toml",
             dictionary_path=tmp_path / "dictionary.toml",
+            pools_path=None,
         ),
         crypto=SimpleNamespace(master_key=""),
     )

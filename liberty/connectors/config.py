@@ -1235,13 +1235,35 @@ def parse_connectors(data: dict[str, Any], *, env: dict[str, str] | None = None)
     return ConnectorsFile.model_validate(_migrate_legacy_shape(substitute_env(data, env=env)))
 
 
+def read_raw_pools(path: Path | str | None) -> dict[str, Any]:
+    """The raw ``[pools.*]`` of a TOML file (``${VAR}`` references unresolved); ``{}`` when the
+    file is missing or no path is given."""
+    if path is None or not Path(path).exists():
+        return {}
+    with Path(path).open("rb") as fh:
+        return dict(tomllib.load(fh).get("pools") or {})
+
+
+def overlay_pools(data: dict[str, Any], pools_path: Path | str | None) -> dict[str, Any]:
+    """*data* (a raw connectors.toml) with the pools of *pools_path* (``[connectors] pools_path``)
+    replacing its same-named ones — the effective pools of an install that keeps its own."""
+    local = read_raw_pools(pools_path)
+    if not local:
+        return data
+    return {**data, "pools": {**(data.get("pools") or {}), **local}}
+
+
 def load_connectors_file(
-    path: Path | str, *, env: dict[str, str] | None = None
+    path: Path | str, *, env: dict[str, str] | None = None, pools_path: Path | str | None = None,
 ) -> ConnectorsFile:
-    """Load and validate ``connectors.toml``. A missing file yields an empty config."""
+    """Load and validate ``connectors.toml`` (its pools overlaid by *pools_path*'s, when given).
+    A missing file yields an empty config."""
     path = Path(path)
-    if not path.exists():
+    data: dict[str, Any] = {}
+    if path.exists():
+        with path.open("rb") as fh:
+            data = tomllib.load(fh)
+    data = overlay_pools(data, pools_path)
+    if not data:
         return ConnectorsFile()
-    with path.open("rb") as fh:
-        data = tomllib.load(fh)
     return parse_connectors(data, env=env)

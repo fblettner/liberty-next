@@ -115,6 +115,31 @@ def substitute_env(value: Any, *, env: dict[str, str] | None = None) -> Any:
     return value
 
 
+def _as_text(value: Any) -> str | None:
+    """A scalar as the text a ``${VAR}`` reference resolves to (booleans the TOML way)."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (str, int, float)):
+        return str(value)
+    return None
+
+
+def keep_env_refs(new: Any, raw: Any, *, env: dict[str, str] | None = None) -> Any:
+    """*new* (an editor's value, read back with the ``${VAR}`` references resolved) with every
+    value still equal to what *raw* (the same entry on disk) resolves to put back as *raw* — so
+    a save doesn't flatten ``${POSTGRES_HOST:-pg}`` into the host it pointed at. A value the
+    user changed is written as given. Recurses into tables; arrays are kept whole or not."""
+    if isinstance(new, dict) and isinstance(raw, dict):
+        return {k: keep_env_refs(v, raw[k], env=env) if k in raw else v for k, v in new.items()}
+    if isinstance(new, list) and isinstance(raw, list):
+        return raw if substitute_env(raw, env=env) == new else new
+    if isinstance(raw, str) and _ENV_REF.search(raw):
+        resolved = substitute_env(raw, env=env)
+        if resolved == new or (_as_text(new) is not None and resolved == _as_text(new)):
+            return raw
+    return new
+
+
 class AppSettings(BaseModel):
     name: str = "Liberty Next"
     host: str = "0.0.0.0"
@@ -208,6 +233,11 @@ class ConnectorSettings(BaseModel):
     # Shared field dictionary (labels/types referenced by query column hints). Empty → use
     # `dictionary.toml` next to `config_path`. A missing file is fine (no shared entries).
     dictionary_path: Path | None = None
+    # A local file whose ``[pools.*]`` replace the same-named pools of ``config_path`` (a pool it
+    # doesn't name still comes from there); the Pools editor then saves to it. For a development
+    # machine whose connectors.toml is the apps repo's: its own hosts and passwords stay out of
+    # the shared file. None = the pools live in connectors.toml.
+    pools_path: Path | None = None
 
 
 class MenuSettings(BaseModel):

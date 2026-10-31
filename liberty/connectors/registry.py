@@ -147,6 +147,7 @@ def load_connectors(
     license: LicenseResult | None = None,
     default_language: str = "en",
     oracle_thick: bool = False,
+    pools_path: Path | str | None = None,
 ) -> ConnectorRegistry:
     """Load ``connectors.toml`` at *path* (and the shared ``dictionary.toml`` — *dictionary_path*,
     or ``dictionary.toml`` next to *path* — a missing file is fine) and build a :class:`ConnectorRegistry`.
@@ -156,10 +157,11 @@ def load_connectors(
     cover are dropped (logged) — without a key, the open framework simply doesn't load them. Names in
     ``ALWAYS_LICENSED_CONNECTORS`` are gated the same way **regardless** of their on-disk ``licensed``
     flag — operators can't bypass licensing on those by unchecking the Settings checkbox.
+    *pools_path* (``[connectors] pools_path``): a local file whose pools replace the same-named ones.
     """
     path = Path(path)
     dict_path = Path(dictionary_path) if dictionary_path else path.with_name("dictionary.toml")
-    cfg = load_connectors_file(path)
+    cfg = load_connectors_file(path, pools_path=pools_path)
     gated = {
         name for name, c in cfg.connectors.items()
         if (getattr(c, "licensed", False) or name in ALWAYS_LICENSED_CONNECTORS)

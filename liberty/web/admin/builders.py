@@ -17,6 +17,7 @@ from liberty.actions.config import SharedActionsFile
 from liberty.ai.appconfig import AiFile
 from liberty.charts.config import ChartsFile
 from liberty.config import (
+    keep_env_refs,
     substitute_env,
 )
 from liberty.connectors.config import (
@@ -26,6 +27,7 @@ from liberty.connectors.config import (
     SqlConnectorConfig,
     load_connectors_file,
     parse_connectors,
+    read_raw_pools,
 )
 from liberty.connectors.dictionary import (
     DictionaryFile,
@@ -89,10 +91,17 @@ def _dictionary_path(settings: Any) -> Path:
 
 @router.get("/config/pools", summary="Get pools")
 async def get_pools_config(request: Request, _: Superuser) -> dict[str, Any]:
-    """The current ``[pools.*]`` as ``{name: PoolConfig dict}`` (a missing file → no pools)."""
-    path = Path(request.app.state.settings.connectors.config_path)
-    cfg = load_connectors_file(path)
-    return {"path": str(path), "pools": {name: p.model_dump() for name, p in cfg.pools.items()}}
+    """The current ``[pools.*]`` as ``{name: PoolConfig dict}`` (a missing file → no pools): connectors.toml's,
+    overlaid by ``[connectors] pools_path``'s when set — ``path`` is the file a save writes to."""
+    s = request.app.state.settings.connectors
+    cfg = load_connectors_file(Path(s.config_path), pools_path=s.pools_path)
+    return {"path": str(_pools_file(request)), "pools": {name: p.model_dump() for name, p in cfg.pools.items()}}
+
+
+def _pools_file(request: Request) -> Path:
+    """Where the Pools editor saves: ``[connectors] pools_path`` when set, else connectors.toml."""
+    s = request.app.state.settings.connectors
+    return Path(s.pools_path or s.config_path)
 
 
 class PoolsBody(BaseModel):
@@ -119,7 +128,7 @@ def _encrypt_secret_fields(
     out = dict(data)
     for f in fields:
         v = out.get(f)
-        if not isinstance(v, str) or not v or is_encrypted(v):
+        if not isinstance(v, str) or not v or is_encrypted(v) or "${" in v:   # a ${VAR} reference: the env holds the secret
             continue
         try:
             out[f] = encrypt(v, master_key)
@@ -139,9 +148,16 @@ async def put_pools_config(body: PoolsBody, request: Request, _: Superuser) -> d
 
     Pool passwords are encrypted with the configured master key before write — a UI edit that
     typed a plaintext password lands on disk as ``ENC:…``. Already-ENC: values pass through
-    unchanged (the operator probably didn't touch the field; ``encrypt`` is idempotent)."""
+    unchanged (the operator probably didn't touch the field; ``encrypt`` is idempotent).
+
+    With ``[connectors] pools_path`` set the pools are written to that file instead, connectors.toml
+    untouched. A value the editor got back resolved from a ``${VAR}`` reference and didn't change is
+    written as the reference again (else a save would pin the host it pointed at)."""
     settings = request.app.state.settings
     master_key = settings.crypto.master_key
+    path = _pools_file(request)
+    # the raw pools on disk: the target file's, else (first save to a pools_path) connectors.toml's
+    raw_pools = {**read_raw_pools(settings.connectors.config_path), **read_raw_pools(path)}
     # validate + normalise (drop default-valued keys so the file stays terse)
     new_pools: dict[str, dict[str, Any]] = {}
     for name, raw in body.pools.items():
@@ -149,11 +165,11 @@ async def put_pools_config(body: PoolsBody, request: Request, _: Superuser) -> d
             normalised = PoolConfig.model_validate(raw).model_dump(exclude_defaults=True)
         except ValidationError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"pool {name!r}: {exc}") from exc
+        normalised = keep_env_refs(normalised, raw_pools.get(name) or {})
         new_pools[name] = _encrypt_secret_fields(
             normalised, _POOL_PASSWORD_FIELDS, master_key, context=f"pool {name!r}",
         )
 
-    path = Path(request.app.state.settings.connectors.config_path)
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     doc = tomlkit.parse(text) if text.strip() else tomlkit.document()
     pools = doc.get("pools")
@@ -228,6 +244,21 @@ async def put_connectors_parsed(body: ConnectorsParsedBody, request: Request, _:
     from liberty.connectors.config import _migrate_legacy_shape
     migrated = _migrate_legacy_shape({"connectors": body.connectors})
     body.connectors = migrated.get("connectors") or {}
+    path = Path(request.app.state.settings.connectors.config_path)
+    existing_doc: dict[str, Any] = {}
+    if path.exists():
+        try:
+            existing_doc = tomllib.loads(path.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError as exc:
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"existing connectors.toml is unparseable, refusing to overwrite: {exc}",
+            ) from exc
+    # the editor got the connectors back with their ${VAR} references resolved: an unchanged value
+    # is written as the reference again (an install's ${JDE_AIS_URL} stays one) — before the secrets
+    # are encrypted, so a ${VAR} password isn't turned into an ENC: copy of its value
+    on_disk = existing_doc.get("connectors") or {}
+    body.connectors = {n: keep_env_refs(c, on_disk.get(n) or {}) for n, c in body.connectors.items()}
     for name, raw in body.connectors.items():
         # Enforce always-licensed names: the UI may have stripped or unset the flag, but the
         # framework gates these regardless of what's on disk — keep the file accurate by
@@ -267,16 +298,6 @@ async def put_connectors_parsed(body: ConnectorsParsedBody, request: Request, _:
     # round-trip byte-identically via tomllib → tomli_w; just the trailing comments / blank
     # lines / formatting can change). Connectors lose their inter-section comments too. Both
     # are auto-generated by the builders; operators don't hand-edit comments in practice.
-    path = Path(request.app.state.settings.connectors.config_path)
-    existing_doc: dict[str, Any] = {}
-    if path.exists():
-        try:
-            existing_doc = tomllib.loads(path.read_text(encoding="utf-8"))
-        except tomllib.TOMLDecodeError as exc:
-            raise HTTPException(
-                status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"existing connectors.toml is unparseable, refusing to overwrite: {exc}",
-            ) from exc
     new_doc: dict[str, Any] = {}
     if "pools" in existing_doc:
         new_doc["pools"] = existing_doc["pools"]

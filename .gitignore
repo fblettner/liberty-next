@@ -24,6 +24,8 @@ config/auth.toml.tmp
 # templates (copy them, or run liberty-migrate). nomasx1 / nomajde etc. ship these files separately.
 config/connectors.toml
 config/connectors.toml.tmp
+# a dev machine's own pools ([connectors] pools_path) — its hosts and passwords, never committed
+config/pools.local.toml
 config/dictionary.toml
 config/menus.toml
 config/screens.toml

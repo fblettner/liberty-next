@@ -79,6 +79,9 @@ async def start_watcher(app: FastAPI) -> asyncio.Task[None]:
         (getattr(getattr(settings, "notify", None), "config_path", None), _reload_notifications),
         (getattr(getattr(settings, "ai", None), "config_path", None), _reload_ai),
         (settings.connectors.config_path, _reload_connectors),
+        # [connectors] pools_path — watched once it exists (the Pools editor creates it on a save)
+        (settings.connectors.pools_path if settings.connectors.pools_path and Path(settings.connectors.pools_path).exists()
+         else None, _reload_connectors),
     ):
         if path_attr:
             handlers[Path(path_attr).resolve()] = handler
@@ -201,10 +204,14 @@ async def _reload_connectors(app: FastAPI, path: Path) -> None:
     from liberty.runtime import rebuild_runtime
     old = app.state.connectors
 
-    # Detect pool changes by comparing the [pools.*] section on disk to the live pools.
+    # Detect pool changes by comparing the [pools.*] on disk (connectors.toml's, overlaid by
+    # [connectors] pools_path's) to the live pools.
+    from liberty.connectors.config import overlay_pools
     try:
-        with path.open("rb") as fh:
-            on_disk_pools = tomllib.load(fh).get("pools", {})
+        conn_path = Path(app.state.settings.connectors.config_path)
+        with conn_path.open("rb") as fh:
+            on_disk = tomllib.load(fh)
+        on_disk_pools = overlay_pools(on_disk, app.state.settings.connectors.pools_path).get("pools", {})
     except Exception as exc:                     # noqa: BLE001
         _log.warning("hot_reload skip %s — file unparseable: %s", path.name, exc)
         return

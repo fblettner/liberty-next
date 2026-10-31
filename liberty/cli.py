@@ -36,7 +36,7 @@ def _registry(args: argparse.Namespace) -> ConnectorRegistry:
     if args.config:
         return load_connectors(args.config)
     settings = load_settings()
-    return load_connectors(settings.connectors.config_path)
+    return load_connectors(settings.connectors.config_path, pools_path=settings.connectors.pools_path)
 
 
 def _emit(obj: Any) -> None:
