@@ -85,7 +85,7 @@ fastapi-cli==0.0.32
     # via
     #   liberty-next
     #   liberty-next (pyproject.toml)
-fonttools==4.67.0
+fonttools==4.68.0
     # via weasyprint
 greenlet==3.5.6
     # via sqlalchemy
@@ -144,11 +144,11 @@ openpyxl==3.1.5
     # via
     #   liberty-next
     #   liberty-next (pyproject.toml)
-opentelemetry-api==1.45.1
+opentelemetry-api==1.45.2
     # via
     #   anthropic
     #   fastapi
-oracledb==26.0.1
+oracledb==26.1.0
     # via
     #   liberty-next
     #   liberty-next (pyproject.toml)
@@ -156,17 +156,17 @@ pillow==13.0.0
     # via weasyprint
 psycopg2-binary==2.9.13
     # via liberty-next
-pyasn1==0.6.4
+pyasn1==0.6.5
     # via ldap3
 pycparser==3.12
     # via cffi
-pydantic==2.14.1
+pydantic==2.14.2
     # via
     #   anthropic
     #   fastapi
     #   liberty-next
     #   liberty-next (pyproject.toml)
-pydantic-core==2.50.1
+pydantic-core==2.50.2
     # via pydantic
 pydyf==0.13.0
     # via weasyprint
@@ -180,13 +180,13 @@ pyphen==0.18.1
     # via weasyprint
 python-dotenv==1.2.4
     # via uvicorn
-python-engineio==4.14.0
+python-engineio==4.15.1
     # via python-socketio
 python-multipart==0.0.32
     # via
     #   liberty-next
     #   liberty-next (pyproject.toml)
-python-socketio==5.17.0
+python-socketio==5.17.1
     # via
     #   liberty-next
     #   liberty-next (pyproject.toml)
