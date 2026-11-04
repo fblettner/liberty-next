@@ -186,6 +186,14 @@ jobs:
           python -m twine check dist/*
           ls -lh dist/
 
+      # Without the key the app still starts, but every license is refused (restricted mode).
+      - name: Require the license public key in the wheel
+        run: |
+          if ! python -m zipfile -l dist/*.whl | grep -F "liberty/licensing/public.pem" > /dev/null; then
+            echo "::error::liberty/licensing/public.pem is missing from the wheel (see package-data in pyproject.toml)"
+            exit 1
+          fi
+
       # ── build + push the Docker image ────────────────────────────────────────
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
