@@ -26,10 +26,12 @@ from liberty.auth.dependencies import (
     get_auth_backend,
     get_oidc,
     get_token_service,
+    require_permission,
 )
 from liberty.auth.oidc import OIDCClient
 from liberty.auth.throttle import LoginThrottle, client_ip
-from liberty.auth.tokens import REFRESH, RESET, RESET_TTL, TokenError, TokenService
+from liberty.auth.principal import Principal
+from liberty.auth.tokens import PERSONAL, REFRESH, RESET, RESET_TTL, TokenError, TokenService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 _log = logging.getLogger("liberty.auth")
@@ -424,6 +426,77 @@ async def reset_password(
     await backend.set_password(user.username, body.new_password)   # clears "change at next sign-in"
     _log.info("password reset through a mailed link for %s", user.username)
     return {"ok": True}
+
+
+# -- personal access tokens --------------------------------------------------- #
+
+PERSONAL_TOKEN_PERMISSION = "mcp:use"
+
+
+class PersonalTokenRequest(BaseModel):
+    days: int = Field(default=90, ge=1, description="How long the token is valid; capped by `[ai] mcp_token_max_days`.")
+
+
+class PersonalToken(BaseModel):
+    token: str
+    expires_at: int   # epoch seconds
+    days: int
+
+
+def principal_for(user: UserRecord) -> Principal:
+    """The caller a user is right now — the snapshot :func:`_issue_pair` puts in an access
+    token, taken from the store instead of from claims."""
+    return Principal(
+        id=user.id, username=user.username, email=user.email, roles=tuple(user.role_names),
+        permissions=tuple(user.permissions), is_superuser=user.is_superuser, provider=user.provider,
+        scope=tuple(user.scope or ()), attributes=dict(user.attributes or {}),
+    )
+
+
+async def principal_from_personal_token(token: str, tokens: TokenService, backend: AuthBackend) -> Principal:
+    """The caller behind a personal access token, re-read from the store as ``/auth/refresh``
+    does: a deactivated account, a changed role or data scope, a password change (the token is
+    bound to the hash it was issued for) apply at the next call. Raises :class:`TokenError`."""
+    claims = tokens.decode(token, expected_type=PERSONAL)
+    user = await backend.get_by_id(str(claims.get("sub")))
+    if user is None or not user.is_active:
+        raise TokenError("the account is inactive or gone")
+    if claims.get("pwf") != _password_fingerprint(user.password_hash):
+        raise TokenError("the token was ended by a password change")
+    if user.must_change_password and user.provider == "local":
+        raise TokenError("the account must change its password first")
+    principal = principal_for(user)
+    if not principal.has_permission(PERSONAL_TOKEN_PERMISSION):
+        raise TokenError(f"the account no longer holds {PERSONAL_TOKEN_PERMISSION}")
+    return principal
+
+
+@router.post(
+    "/tokens",
+    response_model=PersonalToken,
+    summary="Create a personal access token",
+    responses={403: {"description": "The caller lacks `mcp:use`."}},
+)
+async def create_personal_token(
+    body: PersonalTokenRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_permission(PERSONAL_TOKEN_PERMISSION))],
+    backend: Annotated[AuthBackend, Depends(get_auth_backend)],
+    tokens: Annotated[TokenService, Depends(get_token_service)],
+) -> PersonalToken:
+    """A token the caller gives an external client (Claude, through the MCP endpoint) to act as
+    them: every call re-reads the account, so it carries the caller's current permissions and
+    data scope, never more. It is shown once and not stored. It ends at its expiry, when the
+    account is deactivated or loses `mcp:use`, and when the account's password changes — which is
+    how to end one that leaked."""
+    user = await backend.get_by_id(principal.id)
+    if user is None or not user.is_active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+    cap = max(1, int(getattr(request.app.state.settings.ai, "mcp_token_max_days", 366) or 366))
+    days = min(body.days, cap)
+    issued = tokens.personal_token(subject=user.id, password_fingerprint=_password_fingerprint(user.password_hash), ttl=days * 86400)
+    _log.info("personal access token issued for %s (%d days)", user.username, days)
+    return PersonalToken(token=issued.token, expires_at=issued.expires_at, days=days)
 
 
 # -- OIDC ------------------------------------------------------------------- #

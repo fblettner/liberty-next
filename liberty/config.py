@@ -375,6 +375,10 @@ class AISettings(BaseModel):
     # The audit and usage record (ly2_ai_call: who, model, tokens, tools — never the question, the
     # answer or a row): turns older than this many days are dropped; 0 keeps them all.
     usage_retention_days: int = Field(default=90, ge=0)
+    # The MCP endpoint (/mcp): the same tools, for an external client (Claude) acting as a user
+    # through a personal access token. Off by default; needs the `mcp` extra.
+    mcp_enabled: bool = False
+    mcp_token_max_days: int = Field(default=366, ge=1)   # the longest life of a personal access token
     app_tools: bool = True  # the tools the applications ship in ai.toml ([ai.<app>.tools.<id>] — a plugin function each)
     explorer_tools: bool = True  # explorer_models / explorer_fields / explorer_query — aggregates on the Data Explorer models
     allowed_connectors: list[str] = Field(default_factory=list)  # empty → all

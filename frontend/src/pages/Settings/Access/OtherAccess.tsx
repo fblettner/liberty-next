@@ -57,7 +57,11 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
       { value: 'nomaflow:view', label: t('settings.access.nomaflowView'), mono: 'nomaflow:view' },
       { value: 'nomaflow:edit', label: t('settings.access.nomaflowEdit'), mono: 'nomaflow:edit' },
     ]
-    if (type === 'ai') return [{ value: 'ai:chat', label: t('settings.access.aiChat'), mono: 'ai:chat' }]
+    if (type === 'ai') return [
+      { value: 'ai:chat', label: t('settings.access.aiChat'), mono: 'ai:chat' },
+      // a personal access token + the /mcp endpoint: the assistant's tools from an external client (Claude)
+      { value: 'mcp:use', label: t('settings.access.mcpUse'), mono: 'mcp:use' },
+    ]
     return []
   }, [type, sqlConns, apiConns, dashboardIds, jobIds, t])
 

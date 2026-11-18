@@ -2,15 +2,18 @@
 //   • Profile  — avatar + name + role chip; username (read-only), full name + email (editable
 //                for local accounts), role, settings access. Save → PATCH /auth/profile.
 //   • Security — change password (current / new / confirm). Save → POST /auth/change-password.
+//   • Access tokens — for who holds `mcp:use`: a personal access token for an external client
+//                (Claude, through the /mcp endpoint). POST /auth/tokens; shown once.
 // OIDC accounts are read-only here (their profile + password live at the identity provider).
 // Reads the *live* record from GET /auth/profile so edits show immediately (the JWT claims only
 // refresh on next login).
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { User, Shield, X } from 'lucide-react'
+import { User, Shield, KeyRound, Copy, X } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
-import { api, ApiError } from '../api/client'
+import { api, ApiError, resolveApiPath } from '../api/client'
+import { hasPermission } from '../pages/Settings/Access/permissions'
 import { Overlay, Modal, ModalBody, ModalFooter, Button, Tag, FieldLabel, Input, PasswordInput, Banner } from '../common'
 import { colors, fontSize, fonts, radius } from '../theme'
 import { attributeToText, describeScope, type ScopeRule } from '../pages/Settings/Access/scopeRules'
@@ -86,7 +89,9 @@ const Note = styled.div`
 export function ProfileModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation()
   const { user } = useAuth()
-  const [tab, setTab] = useState<'profile' | 'security'>('profile')
+  const [tab, setTab] = useState<'profile' | 'security' | 'tokens'>('profile')
+  const [days, setDays] = useState(90)
+  const [token, setToken] = useState<{ token: string; expires_at: number; days: number } | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
@@ -115,7 +120,20 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
   const initial = (displayName || '?').charAt(0).toUpperCase()
   const roleChip = profile?.roles?.[0] ?? (profile?.is_superuser ? t('profile.superuser') : null)
 
-  const switchTab = (next: 'profile' | 'security') => { setTab(next); setError(null); setStatus(null) }
+  const switchTab = (next: 'profile' | 'security' | 'tokens') => { setTab(next); setError(null); setStatus(null) }
+  // a personal access token is for who may use the MCP endpoint (the server checks it again)
+  const mayToken = !!user && (user.is_superuser || hasPermission(user.permissions ?? [], 'mcp:use'))
+  const mcpUrl = new URL(resolveApiPath('/mcp'), window.location.origin).href
+
+  const createToken = async () => {
+    setBusy(true); setError(null); setStatus(null)
+    try {
+      setToken(await api.post<{ token: string; expires_at: number; days: number }>('/auth/tokens', { days }))
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally { setBusy(false) }
+  }
+  const copy = (text: string) => { void navigator.clipboard?.writeText(text).then(() => setStatus(t('profile.copied'))).catch(() => undefined) }
 
   const saveProfile = async () => {
     setBusy(true); setError(null); setStatus(null)
@@ -169,13 +187,39 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
               <Shield size={15} /> {t('profile.tabSecurity')}
             </TabBtn>
           )}
+          {mayToken && (
+            <TabBtn $active={tab === 'tokens'} onClick={() => switchTab('tokens')}>
+              <KeyRound size={15} /> {t('profile.tabTokens')}
+            </TabBtn>
+          )}
         </Tabs>
 
         <ModalBody>
           {error && <Banner $tone="error">{error}</Banner>}
           {status && <Banner $tone="ok">{status}</Banner>}
 
-          {tab === 'profile' ? (
+          {tab === 'tokens' ? (
+            <>
+              <Note>{t('profile.tokenIntro')}</Note>
+              <ReadRow><span className="k">{t('profile.tokenUrl')}</span><span className="v" style={{ fontFamily: fonts.mono }}>{mcpUrl}</span></ReadRow>
+              {token ? (
+                <>
+                  <Field>
+                    <FieldLabel>{t('profile.tokenValue')}</FieldLabel>
+                    <Input readOnly value={token.token} style={{ fontFamily: fonts.mono }} onFocus={(e) => e.currentTarget.select()} />
+                  </Field>
+                  <Note>{t('profile.tokenOnce', { date: new Date(token.expires_at * 1000).toLocaleDateString() })}</Note>
+                  <div><Button $size="sm" $variant="ghost" onClick={() => copy(token.token)}><Copy size={13} /> {t('profile.copy')}</Button></div>
+                </>
+              ) : (
+                <Field>
+                  <FieldLabel>{t('profile.tokenDays')}</FieldLabel>
+                  <Input type="number" min={1} value={days} style={{ width: 130 }} onChange={(e) => setDays(Math.max(1, Number(e.target.value) || 1))} />
+                </Field>
+              )}
+              <Note>{t('profile.tokenEnds')}</Note>
+            </>
+          ) : tab === 'profile' ? (
             <>
               <ReadRow><span className="k">{t('login.username')}</span><span className="v">{profile?.username ?? user?.username}</span></ReadRow>
               <Field>
@@ -226,7 +270,9 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
 
         <ModalFooter>
           <Button $size="sm" $variant="ghost" onClick={onClose}>{t('common.close')}</Button>
-          {isLocal && <Button $size="sm" $variant="primary" disabled={!canSave} onClick={onSave}>{busy ? t('profile.saving') : t('common.save')}</Button>}
+          {tab === 'tokens'
+            ? !token && <Button $size="sm" $variant="primary" disabled={busy} onClick={() => void createToken()}>{t('profile.tokenCreate')}</Button>
+            : isLocal && <Button $size="sm" $variant="primary" disabled={!canSave} onClick={onSave}>{busy ? t('profile.saving') : t('common.save')}</Button>}
         </ModalFooter>
       </Box>
     </Overlay>

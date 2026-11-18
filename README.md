@@ -85,6 +85,8 @@ the screens check, under the same row-level scope, and totals or rankings come f
 Data Explorer models. Starter questions per app and screen, follow-up suggestions, a
 model picker, a conversation that stays; every question is recorded for the
 administrators (who, model, tokens, tools — never the question, the answer or a row).
+The same tools are served over **MCP** (`/mcp`): Claude Desktop, claude.ai or Claude Code
+connect with a user's personal access token and act with that user's rights.
 
 **Access.** Local users or OpenID Connect (any provider), roles with colon-glob
 permissions, superusers, and **row-level data scope**: a role's rules on a dictionary

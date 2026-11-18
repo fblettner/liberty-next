@@ -4,6 +4,8 @@ Two token kinds, distinguished by the ``typ`` claim:
 
 * ``access``  — short-lived; carries identity *and* authorisation snapshot
   (``roles``, ``perms``, ``sup``) so request handlers need no DB hit;
+* ``personal`` — a personal access token for an external client (the MCP endpoint): carries only
+  ``sub`` and the password fingerprint; the user is re-read at each call;
 * ``refresh`` — long-lived; carries only ``sub``; exchanged for a fresh access
   token (which re-reads the user, so role changes take effect). **Rotated** on use:
   the pair returned by ``/auth/refresh`` carries a new refresh token and the one just
@@ -53,6 +55,11 @@ REFRESH = "refresh"
 # changes the hash — and not after any other password change.
 RESET = "reset"
 RESET_TTL = 3600
+# A personal access token (``POST /auth/tokens``): what a user gives an external client — the MCP
+# endpoint — in place of a sign-in. Like the reset link it carries only the user and the
+# fingerprint of the password hash it was issued for: the user is re-read at every call (roles,
+# data scope, active), and a password change ends every personal token of the account.
+PERSONAL = "personal"
 
 
 class TokenError(Exception):
@@ -148,6 +155,10 @@ class TokenService:
 
     def refresh_token(self, *, subject: str) -> IssuedToken:
         return self._encode({"sub": subject}, self.config.refresh_ttl, REFRESH)
+
+    def personal_token(self, *, subject: str, password_fingerprint: str, ttl: int) -> IssuedToken:
+        """A personal access token valid *ttl* seconds (see :data:`PERSONAL`)."""
+        return self._encode({"sub": subject, "pwf": password_fingerprint}, ttl, PERSONAL)
 
     def reset_token(self, *, subject: str, password_fingerprint: str) -> IssuedToken:
         """A password-reset link's token (see :data:`RESET`)."""

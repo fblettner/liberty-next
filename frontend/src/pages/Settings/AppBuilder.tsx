@@ -64,6 +64,8 @@ interface AiSection {
   ops_tools: boolean
   explorer_tools: boolean
   app_tools: boolean
+  mcp_enabled: boolean
+  mcp_token_max_days: number
   allowed_connectors: string[]
   web_fetch_domains: string[]
   web_fetch_max_uses: number
@@ -205,7 +207,7 @@ const DEFAULTS: {
   ai: {
     enabled: true, model: 'claude-opus-4-8', max_tokens: 8192, max_iterations: 8, system_prompt: '',
     thinking: false, effort: '', request_timeout: 120,
-    connector_tools: true, sql_max_rows: 200, usage_retention_days: 90, api_tool: false, scaffold_tools: false, ops_tools: false, explorer_tools: true, app_tools: true, allowed_connectors: [],
+    connector_tools: true, sql_max_rows: 200, usage_retention_days: 90, api_tool: false, scaffold_tools: false, ops_tools: false, explorer_tools: true, app_tools: true, mcp_enabled: false, mcp_token_max_days: 366, allowed_connectors: [],
     web_fetch_domains: [], web_fetch_max_uses: 5, allowed_models: [], starters: {}, api_key: '',
   },
   license: { key: '' },
@@ -726,6 +728,14 @@ export default function AppBuilder() {
               checked={ai.explorer_tools} onChange={(c) => setAi({ ...ai, explorer_tools: c })} />
             <Checkbox label={t('settings.app.aiAppTools')}
               checked={ai.app_tools} onChange={(c) => setAi({ ...ai, app_tools: c })} />
+
+            <Hint>{t('settings.app.aiMcpHint')}</Hint>
+            <Checkbox label={t('settings.app.aiMcpEnabled')}
+              checked={ai.mcp_enabled} onChange={(c) => setAi({ ...ai, mcp_enabled: c })} />
+            <Field label={t('settings.app.aiMcpTokenDays')}>
+              <Input type="number" min={1} value={ai.mcp_token_max_days}
+                onChange={(e) => setAi({ ...ai, mcp_token_max_days: Math.max(1, Number(e.target.value) || 1) })} style={{ width: 130 }} />
+            </Field>
 
             <Field label={t('settings.app.aiAllowedConnectors')}>
               <ConnectorPicker

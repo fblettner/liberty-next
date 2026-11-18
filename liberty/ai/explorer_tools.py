@@ -240,6 +240,6 @@ def build_explorer_tools(state: Callable[[], Any], *, allowed: list[str] | None 
         tool(explorer_fields, summary_keys=("app", "model")),
         tool(explorer_query, summary_keys=("app", "model")),
         tool(explorer_saved, summary_keys=("app", "model")),
-        tool(explorer_save_analysis, summary_keys=("app", "model", "name")),
-        tool(explorer_save_dashboard, summary_keys=("app", "model", "name")),
+        tool(explorer_save_analysis, summary_keys=("app", "model", "name"), read_only=False),
+        tool(explorer_save_dashboard, summary_keys=("app", "model", "name"), read_only=False),
     ]

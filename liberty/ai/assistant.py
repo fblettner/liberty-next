@@ -364,12 +364,7 @@ class AiAssistant:
                 yield ChatEvent("tool_call", name=block.name, input=arguments, summary=summary)
                 content, is_error = await self.tools.execute(block.name, arguments)
                 full_size = len(content)
-                if len(content) > TOOL_RESULT_MAX_CHARS:
-                    content = (
-                        content[:TOOL_RESULT_MAX_CHARS]
-                        + f"\n…[cut: the result was {len(content)} characters, above the {TOOL_RESULT_MAX_CHARS} limit. "
-                        "Narrow the call — filters, a limit, fewer columns — and call again.]"
-                    )
+                content = cut_result(content)
                 # Sniff for a Proposal in the tool result — write-capable tools (the
                 # scaffold_* set) return ``{"proposal": {...}, "message": ...}``. When
                 # we find one, emit an extra ``proposal`` event so the chat UI can
@@ -399,6 +394,18 @@ class AiAssistant:
             return
         for key in total:
             total[key] += int(getattr(usage, key, 0) or 0)
+
+
+def cut_result(content: str) -> str:
+    """A tool result within :data:`TOOL_RESULT_MAX_CHARS` — cut, with a note asking for a
+    narrower call, when it is above (the chat loop and the MCP endpoint both apply it)."""
+    if len(content) <= TOOL_RESULT_MAX_CHARS:
+        return content
+    return (
+        content[:TOOL_RESULT_MAX_CHARS]
+        + f"\n…[cut: the result was {len(content)} characters, above the {TOOL_RESULT_MAX_CHARS} limit. "
+        "Narrow the call — filters, a limit, fewer columns — and call again.]"
+    )
 
 
 def _truncate(text: str, limit: int = 280) -> str:

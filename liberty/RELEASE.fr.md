@@ -1,7 +1,25 @@
 # Liberty Next — Notes de version
 
-## 7.0.78 — non publiée
+## 7.0.77 — non publiée
 
+- **Point d'accès MCP** (`/mcp`) — les outils de l'assistant depuis un client externe : Claude Desktop, claude.ai ou
+  Claude Code atteignent une installation Liberty par un connecteur personnalisé et agissent en tant qu'utilisateur
+  Liberty. Rien des outils n'est réécrit : le client se voit proposer ce que l'utilisateur a dans le chat, un appel
+  passe par les mêmes contrôles de permission et le même périmètre de données, et chaque appel figure dans
+  l'enregistrement d'usage (Supervision → Usage de l'IA) sous le canal `mcp`. Les outils dont le résultat est une
+  carte du chat Liberty (les propositions de génération) ne sont pas proposés ; un outil qui enregistre quelque
+  chose le signale au client. Désactivé par défaut : `[ai] mcp_enabled` (Paramètres → App → IA, appliqué sans
+  redémarrage). Nécessite le nouvel extra `mcp` — le paquet officiel `mcp` — inclus dans `liberty-next[all]` et
+  dans l'image.
+- **Jetons d'accès personnels** — ce qu'un utilisateur donne au connecteur à la place d'une connexion. Un
+  utilisateur détenant la nouvelle permission `mcp:use` en crée un dans son profil (le nouvel onglet **Jetons
+  d'accès**, ou `POST /auth/tokens`) : il n'est affiché qu'une fois et n'est pas conservé, valable 90 jours par
+  défaut et `[ai] mcp_token_max_days` (366) au plus. Le compte est relu à chaque appel : le jeton porte les droits
+  de l'utilisateur à l'instant, jamais plus ; il prend fin à son expiration, quand le compte est désactivé ou perd
+  `mcp:use`, et quand le mot de passe du compte change — c'est ainsi qu'on met fin à un jeton qui a fuité (il n'y a
+  pas de liste de jetons à révoquer un par un). Un jeton personnel n'ouvre que le point d'accès MCP ; le reste de
+  l'API le refuse. Pour connecter Claude : un connecteur personnalisé sur `https://<serveur>/mcp` avec l'en-tête de
+  requête `Authorization: Bearer <jeton>`.
 - Assistant IA : `sql_query` exécute une requête comme le fait son écran. Depuis sa première version l'outil appelait
   le connecteur directement — un « simple exécuteur SQL », selon la documentation même de la route — et tout ce
   qu'apporte un écran manquait : les libellés et formats des colonnes, les filtres de l'écran, les filtres par
@@ -14,9 +32,6 @@
   appel, au lieu de lire la table 200 lignes à la fois.
 - `describe_instance` et `search_catalog` indiquent le connecteur d'un écran quand ce n'est pas celui de
   l'application (l'assistant appelait `nomajde.f0004_get` pour une requête située sur `jdedwards`).
-
-## 7.0.77 — non publiée
-
 - Assistant IA : les applications livrent des outils. `ai.toml` accepte `[ai.<app>.tools.<id>]` — une fonction des
   plugins de l'application (`callable = "module:fonction"`, un des points d'entrée `j_`), la description d'après
   laquelle le modèle le choisit, et la permission requise pour l'utilisateur (`plugin:<callable>` sauf si une autre
@@ -47,9 +62,6 @@
 - Image : les correctifs de sécurité du système de base sont appliqués à la construction (`apt-get upgrade` : apt,
   zlib) et `pyasn1` passe en 0.6.5 — l'analyse de l'image à la publication refusait 7 alertes HIGH, toutes corrigées
   en amont.
-
-## 7.0.75 — non publiée
-
 - Assistant IA : un enregistrement d'audit et d'usage. Chaque question posée à l'assistant est conservée dans
   `ly2_ai_call` (créée au démarrage, sur le pool d'authentification) : qui a demandé, depuis la page de quelle
   application, le modèle, les jetons (entrée, sortie, lus depuis / écrits dans le cache), la durée, l'issue, et
@@ -64,9 +76,6 @@
 - `[ai] usage_retention_days` (90 ; Paramètres → App → IA ; 0 conserve tout) : les questions plus anciennes sont
   supprimées avec la purge des notifications, et le stockage figure dans **Supervision → Rétention** (taille,
   aperçu, purge).
-
-## 7.0.74 — non publiée
-
 - Assistant IA : les outils répondent pour l'utilisateur connecté. **Un changement de comportement** : jusqu'ici
   `ai:chat` seul permettait à l'assistant d'exécuter toutes les requêtes de lecture des connecteurs qui lui sont
   ouverts (le périmètre de données s'appliquait, pas les permissions). Chaque outil vérifie maintenant ce que
@@ -78,9 +87,6 @@
   pas. Les outils d'exploitation et de génération sont proposés aux super-utilisateurs uniquement. Un utilisateur
   qui avait `ai:chat` sans les permissions `sql:` / `explorer:` d'une application obtient moins de réponses de
   l'assistant : les accorder, comme pour les écrans.
-
-## 7.0.73 — non publiée
-
 - Assistant IA : trouver une requête ou un écran ne demande plus de lire tout le catalogue. `list_connectors` ne liste
   que les requêtes de lecture (une requête d'écriture était listée alors que l'assistant ne peut jamais l'exécuter)
   et, sur une installation trop grande pour être listée en une fois, renvoie une vue d'ensemble — le modèle précise
@@ -93,9 +99,6 @@
   d'outils renvoyait les tours précédents — surtout leurs résultats d'outils — au plein tarif d'entrée ; ils sont
   maintenant lus depuis le cache de prompt (cache automatique sur la requête, en plus du point de cache du prompt
   système). L'outil d'évaluation affiche la part de l'entrée lue depuis le cache.
-
-## 7.0.72 — non publiée
-
 - Assistant IA : un jeu d'évaluation. `python -m liberty.ai.evals <fichiers de cas>` joue des questions sur un serveur
   en marche (le compte de `LIBERTY_E2E_USER` / `LIBERTY_E2E_PASSWORD` : les permissions et le périmètre de données
   font donc partie de ce qui est mesuré) et vérifie chaque réponse : les outils appelés, les textes et les chiffres
@@ -111,9 +114,6 @@
   question pouvait lire une table entière dans un seul résultat d'outil. Au-delà du plafond le résultat indique
   `truncated` et demande au modèle de ne pas compter ni additionner les lignes reçues ; le modèle peut en demander
   moins avec `limit`.
-
-## 7.0.71 — non publiée
-
 - Pools : `[connectors] pools_path` dans app.toml désigne un fichier local dont les `[pools.*]` remplacent les pools
   de même nom de connectors.toml (un pool qu'il ne cite pas vient toujours de là) — pour le serveur, les CLI
   (`liberty-ops` sauvegarde / doctor, `liberty-admin`, `liberty-connectors`) et le rechargement à chaud ; l'éditeur

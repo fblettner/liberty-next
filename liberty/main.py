@@ -365,8 +365,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await asyncio.sleep(6 * 3600)
 
         app.state.notify_retention_task = asyncio.create_task(_notify_retention_loop())
+        from liberty.ai.mcp_server import running as mcp_running
         try:
-            yield
+            # the MCP session manager lives as long as the application ([ai] mcp_enabled is read per request)
+            async with mcp_running(app):
+                yield
         finally:
             app.state.notify_retention_task.cancel()
             try:
@@ -743,6 +746,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(logs_router)
     app.include_router(retention_router)
     app.include_router(ai_usage_router)
+    # The MCP endpoint — the assistant's tools for an external client; mounted always, switched
+    # per request by ``[ai] mcp_enabled`` (liberty.ai.mcp_server).
+    from liberty.ai.mcp_server import endpoint as mcp_endpoint
+    app.mount("/mcp", mcp_endpoint(app), name="mcp")
     app.include_router(promotion_router)
     app.include_router(developer_router)
 

@@ -1,7 +1,22 @@
 # Liberty Next — Release notes
 
-## 7.0.78 — unreleased
+## 7.0.77 — unreleased
 
+- **MCP endpoint** (`/mcp`) — the assistant's tools from an external client: Claude Desktop, claude.ai or Claude Code
+  reach a Liberty installation through a custom connector and act as a Liberty user. Nothing of the tools is written
+  again: the client is offered what the user is offered in the chat, a call goes through the same permission checks
+  and the same data scope, and every call is in the usage record (Monitoring → AI usage) under the `mcp` channel.
+  The tools whose result is a card of the Liberty chat (the scaffolding proposals) are not offered; a tool that saves
+  something says so to the client. Off by default: `[ai] mcp_enabled` (Settings → App → AI, applied without a
+  restart). Needs the new `mcp` extra — the official `mcp` package — which `liberty-next[all]` and the image include.
+- **Personal access tokens** — what a user gives the connector in place of a sign-in. A user holding the new
+  permission `mcp:use` creates one in their profile (the new **Access tokens** tab, or `POST /auth/tokens`): it is
+  shown once and not stored, valid 90 days by default and `[ai] mcp_token_max_days` (366) at most. The account is
+  re-read at every call, so the token carries the user's rights of the moment, never more: it ends at its expiry,
+  when the account is deactivated or loses `mcp:use`, and when the account's password changes — which is how a
+  leaked token is ended (there is no list of tokens to revoke one by one). A personal token opens nothing but the
+  MCP endpoint; the rest of the API refuses it. To connect Claude: a custom connector on `https://<server>/mcp` with
+  the request header `Authorization: Bearer <token>`.
 - AI assistant: `sql_query` runs a query the way its screen does. Since its first version the tool called the
   connector directly — a "bare SQL runner", as the route's own documentation put it — so everything a screen brings
   was missing: the column labels and formats, the screen's filters, the dictionary filters, the environment of the
@@ -13,9 +28,6 @@
   instead of reading the table 200 rows at a time.
 - `describe_instance` and `search_catalog` give a screen's connector when it is not the application's own (the
   assistant called `nomajde.f0004_get` for a query that is on `jdedwards`).
-
-## 7.0.77 — unreleased
-
 - AI assistant: the applications ship tools. `ai.toml` takes `[ai.<app>.tools.<id>]` — a function of the application's
   plugins (`callable = "module:function"`, one of the `j_` entry points), the description the model picks it by, and
   the permission the user needs (`plugin:<callable>` unless another is named). The model sees it as `<app>_<id>`, with
@@ -42,9 +54,6 @@
   this rule, follows.
 - Image: the security fixes of the base system are applied at build (`apt-get upgrade`: apt, zlib) and `pyasn1` is
   0.6.5 — the release's image scan refused 7 HIGH findings, all with a fix available.
-
-## 7.0.75 — unreleased
-
 - AI assistant: an audit and usage record. Each question to the assistant is kept in `ly2_ai_call` (created at
   start-up, on the auth pool): who asked, from which application's page, the model, the tokens (input, output, read
   from / written to the cache), the time, how it ended, and each tool call — its name, what it was called on (the
@@ -56,9 +65,6 @@
   their tool calls (a click on a user narrows them). `GET /admin/ai-usage`.
 - `[ai] usage_retention_days` (90; Settings → App → AI; 0 keeps everything): older questions are dropped with the
   notifications' purge, and the store is on **Monitoring → Retention** (size, preview, purge).
-
-## 7.0.74 — unreleased
-
 - AI assistant: the tools answer for the signed-in user. **A change of behaviour**: until now `ai:chat` alone let the
   assistant run every read query of the connectors it is allowed (the data scope applied, the permissions did not).
   Each tool now checks what the screens check: `sql_query` needs `sql:<connector>:<query>`, `api_call`
@@ -68,9 +74,6 @@
   not named at all, and a refusal says the same for a query that exists and one that does not. The operations and
   scaffolding tools are offered to superusers only. A user who had `ai:chat` without the `sql:` / `explorer:`
   permissions of an application gets fewer answers from the assistant: grant them, as for the screens.
-
-## 7.0.73 — unreleased
-
 - AI assistant: finding a query or a screen no longer means reading the whole catalogue. `list_connectors` lists the
   read queries only (a writable one was listed although the assistant can never run it) and, on an installation too
   large to list at once, returns an overview — the model then narrows with `connector` (one connector's list) or
@@ -82,9 +85,6 @@
   their tool results above all — again at the full input price; they are now read from the prompt cache (automatic
   caching on the request, next to the cache point on the system prompt). The evaluation runner shows the share of
   the input read from the cache.
-
-## 7.0.72 — unreleased
-
 - AI assistant: an evaluation set. `python -m liberty.ai.evals <case files>` plays questions against a live server
   (the account of `LIBERTY_E2E_USER` / `LIBERTY_E2E_PASSWORD`, so the permissions and the data scope are part of what
   is measured) and checks each answer: the tools called, texts and figures it must carry, no failed tool call. It
@@ -97,9 +97,6 @@
   inherited the pool's `max_rows`, which is sized for the grid (rows streamed): on a pool at 500 000 one question could
   read a whole table into a single tool result. Beyond the cap the result says `truncated` and tells the model not to
   count or add up the rows it got; the model can ask for fewer with `limit`.
-
-## 7.0.71 — unreleased
-
 - Pools: `[connectors] pools_path` in app.toml names a local file whose `[pools.*]` replace the same-named pools of
   connectors.toml (a pool it doesn't name still comes from there) — for the server, the CLIs (`liberty-ops` backup /
   doctor, `liberty-admin`, `liberty-connectors`) and hot reload; the Pools editor then saves to it. For a development

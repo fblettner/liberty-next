@@ -61,7 +61,7 @@ Python 3.12 · FastAPI · SQLAlchemy 2.0 async · asyncpg (Postgres) + oracledb 
 thick-mode option for NNE / LOB-over-dblink) · Pydantic 2 · PyJWT (HS256) · authlib (OIDC,
 any provider) · argon2-cffi · python-socketio · APScheduler · tomlkit / tomli-w · openpyxl ·
 Anthropic SDK. Optional extras: `reports` (WeasyPrint, needs Pango), `ldap` (ldap3),
-`alembic` (+ psycopg2) — `liberty-next[all]` for every feature (the image, the dev venv and
+`alembic` (+ psycopg2), `mcp` (the official `mcp` package: the /mcp endpoint) — `liberty-next[all]` for every feature (the image, the dev venv and
 CI install `[all]`). Frontend: React 19 + Vite + TypeScript + @emotion/styled +
 react-i18next (EN/FR) + @tanstack/react-table + react-virtual + recharts + Monaco (bundled,
 lazy) + socket.io-client; built `frontend/dist/` is served by the backend.
@@ -112,6 +112,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           allow-listed like call_plugin, permission `plugin:<callable>`, framework objects injected; a ToolRegistry provider read at call time),
                           usage.py (the audit and usage record: ly2_ai_call, one row per turn — who, model, tokens, tools, never the question /
                           answer / rows; TurnRecorder fed by the chat route; read by web/ai_usage.py = /admin/ai-usage, Monitoring → AI usage),
+                          mcp_server.py (the /mcp endpoint, `[ai] mcp_enabled`: the official `mcp` package's low-level server + stateless Streamable HTTP manager
+                          over ToolRegistry.offered / execute; the caller = a personal access token, `auth/routes.principal_from_personal_token`),
                           evals.py (the evaluation set: cases in TOML, played against a live server, checked on tools / texts / figures)
   jobs/ (nomaflow)        schema.py (jobs.toml), registry, runner (state machine, retries,
                           cancel), scheduler (APScheduler, single process), recovery, retention,
@@ -188,6 +190,7 @@ tests/                    pytest (asyncio auto mode); SQLite fixtures; no live D
 | `/api/notifications` `/admin/notify/test` | `web/notifications.py` | my inbox (list, unread count, mark read); a superuser's test send through the dispatcher |
 | `/api/explorer` | `web/explorer.py` | the explorer models the caller may use (perm `explorer:{app}:{model}`), `{app}/{model}/model` with the discovered fields (`?refresh=1`), `POST {app}/query` (aggregate: rows / measures / filters bag / period / sort / limit), `POST {app}/detail` (rows, paged, `drill`), `POST {app}/calc/test`, `GET/PUT {app}/saved/{analyses|dashboards}` + `DELETE …/{id}`, `POST {app}/export` (xlsx / pdf) |
 | `/ai` | `ai/routes.py` | `POST /ai/chat` (SSE), `GET /ai/tools` — perm `ai:chat` |
+| `/mcp` | `ai/mcp_server.py` (an ASGI mount) | the assistant's tools over MCP for an external client — a personal access token (`POST /auth/tokens`, perm `mcp:use`) as `Authorization: Bearer`; 404 unless `[ai] mcp_enabled` |
 | `/admin` | `web/admin/` (the config builders' backend: one module per section — `bundles` (reload), `versions`, `builders` (parsed GET / PUT, `_merge_screens`), `assistant`, `modules`, `theme`, `jobs`, `app_settings`, `usages` (find usages / dependencies, packages), `proposals`, `clone`, `delete`, `rename`… — imported in route-registration order by `__init__`, which re-exports every name), `web/dictgen.py` | reload, `GET /admin/config/schema`, `GET/PUT /admin/config/<section>/parsed`, rename / move / clone / delete-with-deps / find-usages / dependencies / integrity, packages (build / import), versions, AI proposal apply, API test, dictionary scan — **superuser** |
 | `/admin/promotion` | `web/promotion.py` + `promotion.py` | promote to another instance: targets (`[promotion.targets.*]`, password ENC:), `push` (config package or approved change package → the target's preview / apply), history (`<config>/.promotion/`) — **superuser** |
 | `/admin/access` `/admin/jobs` `/admin/changesets` | `web/access.py`, `web/jobs.py`, `web/changesets.py` | roles / permissions, nomaflow jobs + runs + presets + `{job}/upload` / `runs/{id}/files/{name}` + `retention` / `missed` policies, change packages |
@@ -371,7 +374,8 @@ LIBERTY_E2E_USER=… LIBERTY_E2E_PASSWORD=… .venv/bin/python -m liberty.ai.eva
   `liberty.runtime.rebuild_runtime` so every pool holder (auth backend, changesets DB, user
   views, nomaflow job DB + executors, AI tools, reports) is rebound.
 - **Tokens**: HS256 via PyJWT; access 1 h / refresh 14 d; refresh tokens rotate (60 s reuse
-  grace for racing tabs). Login throttle: 10 failures / 5 min per user, 5× per address.
+  grace for racing tabs). A `personal` token (the MCP endpoint only) carries the user id + the password-hash
+  fingerprint: the account is re-read at each call; a password change ends every one. Login throttle: 10 failures / 5 min per user, 5× per address.
 - **Streaming**: SELECTs stream as NDJSON (`?_stream=1`); writes are plain POSTs.
 - **Single-process assumptions**: APScheduler's in-memory jobstore and the Socket.IO lock
   rooms are per process — run one replica (PLAN D3 before scaling out).

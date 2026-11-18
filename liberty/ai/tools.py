@@ -124,6 +124,8 @@ class Tool:
     summary_keys: tuple[str, ...] = ()  # which input keys to surface in the UI indicator
     superuser_only: bool = False        # configuration / operations tools: offered to and run for superusers only
     permission: str | None = None       # a permission the caller must hold to be offered the tool and to run it
+    chat_only: bool = False             # its result is a card of the Liberty chat (a proposal to apply): not offered over MCP
+    read_only: bool = True              # False for a tool that saves something (told to an MCP client as a hint)
 
     def definition(self) -> dict[str, Any]:
         """The ``tools[]`` entry for the Messages API request."""
@@ -176,6 +178,8 @@ def tool(
     description: str | None = None,
     summary_keys: tuple[str, ...] = (),
     superuser_only: bool = False,
+    chat_only: bool = False,
+    read_only: bool = True,
 ) -> Tool | Callable[[Callable[..., Any]], Tool]:
     """Turn a function into a :class:`Tool` (usable as ``@tool`` or ``@tool(...)``)."""
 
@@ -189,6 +193,8 @@ def tool(
             is_async=inspect.iscoroutinefunction(fn),
             summary_keys=summary_keys,
             superuser_only=superuser_only,
+            chat_only=chat_only,
+            read_only=read_only,
         )
 
     return build(func) if func is not None else build
