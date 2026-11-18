@@ -36,7 +36,10 @@ FROM python:3.12.15-slim AS runtime
 #   libharfbuzz0b, libfontconfig1 — WeasyPrint (PDF report rendering, liberty.reports.render)
 # No DB client libs needed — asyncpg (Postgres), oracledb (thin mode), and psycopg2-binary
 # (Alembic's sync runner) all ship self-contained wheels.
+# ``apt-get upgrade``: the base image is pinned, so the security fixes Debian published since it
+# was built (apt, zlib… — what the release's image scan refuses) come in here.
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         curl \
         libpango-1.0-0 \

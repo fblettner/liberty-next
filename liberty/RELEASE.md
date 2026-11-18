@@ -12,6 +12,8 @@
   changes for a superuser or a role holding `*`. To check a role: Settings → Access shows what it sees — the role
   editor follows the same rule (`GET /admin/access/menu-rules`). The AI assistant, which names the applications by
   this rule, follows.
+- Image: the security fixes of the base system are applied at build (`apt-get upgrade`: apt, zlib) and `pyasn1` is
+  0.6.5 — the release's image scan refused 7 HIGH findings, all with a fix available.
 
 ## 7.0.75 — unreleased
 

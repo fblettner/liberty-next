@@ -156,7 +156,7 @@ pillow==13.0.0
     # via weasyprint
 psycopg2-binary==2.9.13
     # via liberty-next
-pyasn1==0.6.4
+pyasn1==0.6.5
     # via ldap3
 pycparser==3.12
     # via cffi

@@ -13,6 +13,9 @@
   à lister une application. Rien ne change pour un super-utilisateur ou un rôle détenant `*`. Pour vérifier un rôle :
   Paramètres → Accès montre ce qu'il voit — l'éditeur de rôle suit la même règle (`GET /admin/access/menu-rules`).
   L'assistant IA, qui nomme les applications selon cette règle, suit.
+- Image : les correctifs de sécurité du système de base sont appliqués à la construction (`apt-get upgrade` : apt,
+  zlib) et `pyasn1` passe en 0.6.5 — l'analyse de l'image à la publication refusait 7 alertes HIGH, toutes corrigées
+  en amont.
 
 ## 7.0.75 — non publiée
 
