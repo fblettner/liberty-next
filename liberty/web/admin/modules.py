@@ -322,6 +322,13 @@ async def put_ai_parsed(body: AiBody, request: Request, _: Superuser) -> dict[st
             d["screens"] = screens
         if block.playbooks:
             d["playbooks"] = {pid: pb.model_dump(exclude_none=True) for pid, pb in block.playbooks.items()}
+        if block.tools:
+            d["tools"] = {tid: tl.model_dump(exclude_none=True) for tid, tl in block.tools.items()}
+        # the starters per language (`l.fr`): the editor does not show them yet, a save must keep them
+        locales = {lang: loc.model_dump(exclude_defaults=True) for lang, loc in block.l.items()}
+        locales = {lang: v for lang, v in locales.items() if v}
+        if locales:
+            d["l"] = locales
         normalized["ai"][app] = d
     import tomli_w
     new_text = tomli_w.dumps(normalized)

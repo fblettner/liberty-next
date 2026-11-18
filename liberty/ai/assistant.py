@@ -20,6 +20,7 @@ from typing import Any, AsyncIterator, Callable
 
 import json
 
+from liberty.ai.app_tools import app_tools_provider
 from liberty.ai.connector_tools import build_connector_tools
 from liberty.ai.explorer_tools import build_explorer_tools
 from liberty.ai.instance_tools import build_instance_tools
@@ -74,6 +75,9 @@ DEFAULT_SYSTEM_PROMPT = (
     "   — two or three questions the user is likely to ask next, in their language, as a JSON "
     "list of strings; nothing after that line. Leave the line out when no follow-up makes "
     "sense (a yes/no answer, an error report).\n\n"
+    "10. A tool named `<application>_<something>` is shipped by that application for its own "
+    "subject. When the question is about what its description covers, prefer it to composing the "
+    "answer from row queries.\n\n"
     "Scaffolding tools (introspect_table / scaffold_*): when enabled they let you propose "
     "new connector queries, dictionary entries, screens, and menu items. These tools never "
     "write to disk — they return a Proposal envelope that the user reviews and applies via "
@@ -478,4 +482,7 @@ def build_assistant(
             registry.add(*build_explorer_tools(state, allowed=settings.allowed_connectors or None))
         if settings.ops_tools:
             registry.add(*build_ops_tools(state))
+        if settings.app_tools:
+            # read at call time: a reload of ai.toml is seen without rebuilding the assistant
+            registry.provider = app_tools_provider(state, allowed=settings.allowed_connectors or None)
     return AiAssistant(settings, client=client, tools=registry)

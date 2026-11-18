@@ -12,6 +12,10 @@ like the other per-app files, edited under Liberty Next → Build → AI)::
     description = "User, role, environments"
     body = "1. Open Security → Users and click Add…\n2. …"   # Markdown (a multi-line TOML string)
 
+    [ai.nomajde.tools.object_access]                         # offered to the model as nomajde_object_access
+    callable = "nomajde.lookup:j_object_access"              # a plugin function (read-only by contract)
+    description = "Who can run a JDE object, or what a role can do: …"
+
 Playbooks are step-by-step procedures (Markdown) the assistant loads with ``load_playbook``
 when the user asks how to do something in the application.
 A block keyed ``"*"`` (``[ai."*"]``) is for every application: its starters apply where no
@@ -21,11 +25,14 @@ merged on top by :func:`merged_starters`, so a customer can override what the ap
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+_TOOL_ID = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 class StarterGroup(BaseModel):
@@ -53,6 +60,24 @@ class Playbook(BaseModel):
     body: str = Field(min_length=1, description="The procedure, Markdown; the assistant follows it step by step.")
 
 
+class AiTool(BaseModel):
+    """A tool the application ships for the assistant: a function of its plugins the model can
+    call for the application's own subject (``[ai.<app>.tools.<id>]``, offered as ``<app>_<id>``).
+    Read-only by contract: the function must not change anything — the assistant has no write
+    path. Its arguments are the function's parameters (types from the hints, descriptions from
+    the docstring's ``Args:``), minus what the framework injects (``connectors``, ``settings``,
+    ``ctx``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    callable: str = Field(pattern=r"^[A-Za-z_][\w.]*:[A-Za-z_]\w*$", description="The function, as `module:function` — one of the plugins' `j_` entry points.")
+    description: str = Field(min_length=1, description="What the tool answers and when to use it — the model picks a tool by it.")
+    permission: str | None = Field(default=None, description="The permission the user needs; default `plugin:<callable>`.")
+
+    def required_permission(self) -> str:
+        return self.permission or f"plugin:{self.callable}"
+
+
 class AiLocale(BaseModel):
     """The starters of one app in one language: what ``l.fr`` carries — the app's starters and
     groups, and the screens' — each list replacing its English counterpart when present."""
@@ -67,10 +92,19 @@ class AiLocale(BaseModel):
 class AppAi(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    @field_validator("tools")
+    @classmethod
+    def _tool_ids(cls, v: dict[str, AiTool]) -> dict[str, AiTool]:
+        for tid in v:
+            if not _TOOL_ID.match(tid):
+                raise ValueError(f"tool id {tid!r}: lowercase letters, digits and `_`, starting with a letter")
+        return v
+
     starters: list[str] = Field(default_factory=list, description="Starter questions shown anywhere in this app.")
     groups: list[StarterGroup] = Field(default_factory=list, description="Starter questions by heading; shown instead of `starters` when set.")
     screens: dict[str, ScreenAi] = Field(default_factory=dict, description="Per-screen starters, keyed by screen id.")
     playbooks: dict[str, Playbook] = Field(default_factory=dict, description="Procedures the assistant can load, keyed by id.")
+    tools: dict[str, AiTool] = Field(default_factory=dict, description="Tools the assistant can call, keyed by id (letters, digits, `_`); offered as `<app>_<id>`.")
     l: dict[str, AiLocale] = Field(default_factory=dict, description="The starters per language (``l.fr``): a list given there replaces the English one for that language.")
 
     def for_language(self, language: str | None) -> AppAi:
@@ -118,6 +152,10 @@ class AiFile(BaseModel):
                 if scr.groups:
                     out[f"{app}/{sid}"] = [g.model_dump() for g in scr.groups]
         return out
+
+    def tools(self) -> list[tuple[str, str, AiTool]]:
+        """``(app, id, tool)`` for every tool, apps and ids in file order."""
+        return [(app, tid, t) for app, block in self.ai.items() for tid, t in block.tools.items()]
 
     def playbooks(self) -> list[tuple[str, str, Playbook]]:
         """``(app, id, playbook)`` for every playbook, apps and ids in file order."""

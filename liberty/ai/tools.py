@@ -123,6 +123,7 @@ class Tool:
     is_async: bool = False
     summary_keys: tuple[str, ...] = ()  # which input keys to surface in the UI indicator
     superuser_only: bool = False        # configuration / operations tools: offered to and run for superusers only
+    permission: str | None = None       # a permission the caller must hold to be offered the tool and to run it
 
     def definition(self) -> dict[str, Any]:
         """The ``tools[]`` entry for the Messages API request."""
@@ -139,6 +140,35 @@ class Tool:
         return " ".join(parts) if parts else self.name
 
 
+def schema_of(fn: Callable[..., Any], *, exclude: typing.Iterable[str] = ()) -> tuple[str, dict[str, Any]]:
+    """``(description, input_schema)`` of a function: the docstring's text, and a JSON Schema
+    object from its parameters — type from the hint, description from the ``Args:`` block,
+    required when there is no default. *exclude* names parameters the model never supplies
+    (what the framework injects into a plugin callable)."""
+    skip = set(exclude)
+    sig = inspect.signature(fn)
+    try:
+        hints = typing.get_type_hints(fn)
+    except Exception:  # forward refs that don't resolve — degrade to str
+        hints = {}
+    doc_desc, doc_params = _parse_docstring(fn.__doc__)
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+    for pname, param in sig.parameters.items():
+        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD) or pname in skip:
+            continue
+        schema = _schema_for_annotation(hints.get(pname, param.annotation))
+        if pname in doc_params:
+            schema = {**schema, "description": doc_params[pname]}
+        properties[pname] = schema
+        if param.default is inspect.Parameter.empty:
+            required.append(pname)
+    input_schema: dict[str, Any] = {"type": "object", "properties": properties}
+    if required:
+        input_schema["required"] = required
+    return doc_desc, input_schema
+
+
 def tool(
     func: Callable[..., Any] | None = None,
     *,
@@ -150,26 +180,7 @@ def tool(
     """Turn a function into a :class:`Tool` (usable as ``@tool`` or ``@tool(...)``)."""
 
     def build(fn: Callable[..., Any]) -> Tool:
-        sig = inspect.signature(fn)
-        try:
-            hints = typing.get_type_hints(fn)
-        except Exception:  # forward refs that don't resolve — degrade to str
-            hints = {}
-        doc_desc, doc_params = _parse_docstring(fn.__doc__)
-        properties: dict[str, Any] = {}
-        required: list[str] = []
-        for pname, param in sig.parameters.items():
-            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-                continue
-            schema = _schema_for_annotation(hints.get(pname, param.annotation))
-            if pname in doc_params:
-                schema = {**schema, "description": doc_params[pname]}
-            properties[pname] = schema
-            if param.default is inspect.Parameter.empty:
-                required.append(pname)
-        input_schema: dict[str, Any] = {"type": "object", "properties": properties}
-        if required:
-            input_schema["required"] = required
+        doc_desc, input_schema = schema_of(fn)
         return Tool(
             name=name or fn.__name__,
             description=description or doc_desc or fn.__name__,
@@ -185,9 +196,22 @@ def tool(
 
 @dataclass(slots=True)
 class ToolRegistry:
-    """An ordered, name-keyed set of tools. Order is stable → prompt-cache friendly."""
+    """An ordered, name-keyed set of tools. Order is stable → prompt-cache friendly.
+
+    *provider* adds tools read at call time — what the applications ship in ``ai.toml``, seen
+    after a reload without rebuilding the assistant. They come after the built-in ones, and a
+    built-in name always wins."""
 
     _tools: dict[str, Tool] = field(default_factory=dict)
+    provider: Callable[[], list[Tool]] | None = None
+
+    def _all(self) -> dict[str, Tool]:
+        if self.provider is None:
+            return self._tools
+        out = dict(self._tools)
+        for t in self.provider():
+            out.setdefault(t.name, t)
+        return out
 
     def add(self, *tools: Tool) -> ToolRegistry:
         for t in tools:
@@ -195,23 +219,24 @@ class ToolRegistry:
         return self
 
     def __len__(self) -> int:
-        return len(self._tools)
+        return len(self._all())
 
     def __contains__(self, name: object) -> bool:
-        return name in self._tools
+        return name in self._all()
 
     def names(self) -> list[str]:
-        return list(self._tools)
+        return list(self._all())
 
     def get(self, name: str) -> Tool | None:
-        return self._tools.get(name)
+        return self._all().get(name)
 
     def offered(self, principal: Principal | None = None) -> list[Tool]:
         """The tools *principal* is offered: all of them for a superuser (or outside a request),
         the others without the superuser-only ones. Two stable lists, so the prompt cache holds."""
+        tools = list(self._all().values())
         if principal is None or principal.is_superuser:
-            return list(self._tools.values())
-        return [t for t in self._tools.values() if not t.superuser_only]
+            return tools
+        return [t for t in tools if not t.superuser_only and (t.permission is None or principal.has_permission(t.permission))]
 
     def definitions(self, principal: Principal | None = None) -> list[dict[str, Any]]:
         return [t.definition() for t in self.offered(principal)]
@@ -224,6 +249,8 @@ class ToolRegistry:
         who = current_principal.get()
         if t.superuser_only and who is not None and not who.is_superuser:
             return json.dumps({"error": f"permission denied: {name} is for administrators"}), True
+        if t.permission is not None and who is not None and not who.has_permission(t.permission):
+            return json.dumps({"error": f"permission denied: the signed-in user may not use {name} (missing {t.permission}). Tell the user."}), True
         try:
             result = await t.run(arguments)
         except Exception as exc:  # surface to the model so it can adjust

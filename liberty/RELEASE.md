@@ -1,5 +1,19 @@
 # Liberty Next — Release notes
 
+## 7.0.77 — unreleased
+
+- AI assistant: the applications ship tools. `ai.toml` takes `[ai.<app>.tools.<id>]` — a function of the application's
+  plugins (`callable = "module:function"`, one of the `j_` entry points), the description the model picks it by, and
+  the permission the user needs (`plugin:<callable>` unless another is named). The model sees it as `<app>_<id>`, with
+  the function's own parameters as arguments (types from the hints, descriptions from the docstring); `connectors`,
+  `settings` and `ctx` are supplied by the server, never by the model. A tool is offered only to a user holding its
+  permission, only when its application is loaded (a licensed connector without its key ships nothing) and allowed to
+  the assistant; a function that is not a plugin entry point, or cannot be imported, is left out with a warning.
+  Read-only by contract. Edited under **AI → Tools**, applied on a reload without a restart; `[ai] app_tools = false`
+  (Settings → App → AI) switches them all off.
+- Settings → AI: a save no longer drops what the page does not show — the starters per language (`l.fr`) were lost on
+  every save, a screen's starter groups when its questions were edited.
+
 ## 7.0.76 — unreleased
 
 - Menus: an application is listed for what the user may open in it. **A change of behaviour for restricted users**:

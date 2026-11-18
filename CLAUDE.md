@@ -107,6 +107,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           instance_tools.py (describe_instance [app], search_catalog, list_playbooks / load_playbook: read app.state at call time;
                           connector_tools.py = list_connectors [connector / search; an overview on a large install] + sql_query [own row cap]),
                           ops_tools.py (jobs_status / server_log / integrity_checks — opt-in `[ai] ops_tools`),
+                          app_tools.py (the tools the APPS ship: `[ai.<app>.tools.<id>]` = a plugin `j_` function offered as `<app>_<id>`,
+                          allow-listed like call_plugin, permission `plugin:<callable>`, framework objects injected; a ToolRegistry provider read at call time),
                           usage.py (the audit and usage record: ly2_ai_call, one row per turn — who, model, tokens, tools, never the question /
                           answer / rows; TurnRecorder fed by the chat route; read by web/ai_usage.py = /admin/ai-usage, Monitoring → AI usage),
                           evals.py (the evaluation set: cases in TOML, played against a live server, checked on tools / texts / figures)
@@ -228,7 +230,7 @@ hot-reloadable (`[app] hot_reload = true`, `web/hot_reload.py`) or reloaded via
 | `reports.toml` | `[reports] templates_config_path` | `reports/schema.py` | Reports |
 | `jobs.toml` | `[jobs]` (default `${LIBERTY_APPS_DIR}/../plugins/nomaflow/jobs.toml`) | `jobs/schema.py` | nomaflow → Jobs |
 | `explorer.toml` | `[explorer]` | `explorer/config.py::ExplorerFile` (`[explorer.<app>.<model>]`, perm `explorer:<app>:<model>`) | Explorer (models per app: hub, entities, relations, bundled analyses) |
-| `ai.toml` | `[ai] config_path` | `ai/appconfig.py::AiFile` (`[ai.<app>] starters`, `[ai.<app>.screens.<id>] starters`) | AI (what the apps ship; the operator's `[ai] starters` in app.toml win) |
+| `ai.toml` | `[ai] config_path` | `ai/appconfig.py::AiFile` (`[ai.<app>] starters`, `[ai.<app>.screens.<id>] starters`, `.playbooks.<id>`, `.tools.<id>`) | AI (what the apps ship; the operator's `[ai] starters` in app.toml win) |
 | `notifications.toml` | `[notify] config_path` (+ the inbox pool and SMTP, edited under App) | `notify/rules.py::NotificationsFile` | Notifications |
 | `auth.toml` | `[auth] backend = "toml"` | `auth/authstore.py::AuthFile` | Access |
 

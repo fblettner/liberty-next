@@ -1,16 +1,17 @@
 // AI settings — `ai.toml`, the assistant material an application SHIPS: starter questions
-// for the app and for each of its screens (playbooks next). A scope bar picks the app; the
+// for the app and for each of its screens, playbooks, and tools (a plugin function each). A scope bar picks the app; the
 // page edits that app's block in place and saves the file whole (PUT /admin/config/ai/parsed
 // + reload). The operator's own questions live in App → AI Assistant and win over these.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, Sparkles, LayoutList, Trash2, BookOpen, Plus, Edit3 } from 'lucide-react'
+import { Save, Sparkles, LayoutList, Trash2, BookOpen, Plus, Edit3, Wrench } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Centered, SearchSelect, SpinnerRing, useModals, type SearchSelectOption } from '../../common'
-import type { AiDoc, AppAiBody, PlaybookBody, ScreensDoc } from '../../types/config'
+import type { AiDoc, AiToolBody, AppAiBody, PlaybookBody, ScreensDoc } from '../../types/config'
 import { QuestionsList } from './AiStartersEditor'
 import { AiPlaybookModal } from './AiPlaybookModal'
+import { AiToolModal } from './AiToolModal'
 import { ScopeBar, type ScopeOption } from './ScopeBar'
 import { AddScopeModal } from './AddScopeModal'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -44,6 +45,7 @@ export default function AiBuilder() {
   const { focusApp: currentApp, connectors } = useWorkspace()
   const [scope, setScope] = useState('')
   const [editing, setEditing] = useState<(PlaybookBody & { id: string }) | null | undefined>(undefined)
+  const [editingTool, setEditingTool] = useState<(AiToolBody & { id: string }) | null | undefined>(undefined)
   const [doc, setDoc] = useState<Record<string, AppAiBody> | null>(null)
   const [saved, setSaved] = useState<Record<string, AppAiBody> | null>(null)
   const [screens, setScreens] = useState<ScreensDoc['screens']>({})
@@ -83,13 +85,20 @@ export default function AiBuilder() {
     .filter(([id]) => !screenIds.includes(id))
     .map(([id, s]) => ({ value: id, label: (typeof s?.label === 'string' && s.label) || id, mono: id }))
     .sort((a, b) => a.value.localeCompare(b.value))
-  const setScreen = (id: string, starters: string[]) => update({ screens: { ...(block.screens ?? {}), [id]: { starters } } })
+  const setScreen = (id: string, starters: string[]) => update({ screens: { ...(block.screens ?? {}), [id]: { ...(block.screens?.[id] ?? {}), starters } } })
   const dropScreen = (id: string) => { const next = { ...(block.screens ?? {}) }; delete next[id]; update({ screens: next }) }
   const playbookIds = Object.keys(block.playbooks ?? {})
   const savePlaybook = (id: string, body: PlaybookBody) => { update({ playbooks: { ...(block.playbooks ?? {}), [id]: body } }); setEditing(undefined) }
   const dropPlaybook = async (id: string) => {
     if (!(await modals.confirm({ title: t('common.delete'), message: t('settings.ai.deletePlaybook', { id }), variant: 'danger' }))) return
     const next = { ...(block.playbooks ?? {}) }; delete next[id]; update({ playbooks: next })
+  }
+
+  const toolIds = Object.keys(block.tools ?? {})
+  const saveTool = (id: string, body: AiToolBody) => { update({ tools: { ...(block.tools ?? {}), [id]: body } }); setEditingTool(undefined) }
+  const dropTool = async (id: string) => {
+    if (!(await modals.confirm({ title: t('common.delete'), message: t('settings.ai.deleteTool', { id: `${scope}_${id}` }), variant: 'danger' }))) return
+    const next = { ...(block.tools ?? {}) }; delete next[id]; update({ tools: next })
   }
 
   const persist = async () => {
@@ -170,7 +179,33 @@ export default function AiBuilder() {
               )
             })}
           </Section>
+          <Section>
+            <SectionHead><Wrench size={14} /> {t('settings.ai.tools')} <span className="spacer" />
+              <Button $variant="ghost" $size="sm" onClick={() => setEditingTool(null)} disabled={busy || scope === '*'}><Plus size={13} /> {t('settings.ai.addTool')}</Button>
+            </SectionHead>
+            <Hint>{t('settings.ai.toolsHint')}</Hint>
+            {toolIds.length === 0 && <Empty>{t('settings.ai.noTools')}</Empty>}
+            {toolIds.map((id) => {
+              const tool = block.tools![id]
+              return (
+                <Item key={id} onClick={() => setEditingTool({ ...tool, id })}>
+                  <Wrench className="icon" size={16} />
+                  <span className="text">
+                    <span className="name">{scope}_{id}<span style={{ color: colors.text.secondary }}> — {tool.callable}</span></span>
+                    <span className="meta">{tool.description}</span>
+                  </span>
+                  <span className="actions" onClick={(ev) => ev.stopPropagation()}>
+                    <Button $variant="ghost" $size="sm" onClick={() => setEditingTool({ ...tool, id })} disabled={busy}><Edit3 size={13} /> {t('common.edit')}</Button>
+                    <Button $variant="ghost" $size="sm" onClick={() => void dropTool(id)} disabled={busy} style={{ color: colors.red.main }}><Trash2 size={13} /> {t('common.delete')}</Button>
+                  </span>
+                </Item>
+              )
+            })}
+          </Section>
         </Body>
+      )}
+      {editingTool !== undefined && (
+        <AiToolModal app={scope} initial={editingTool} takenIds={toolIds} onSave={saveTool} onClose={() => setEditingTool(undefined)} />
       )}
       {editing !== undefined && (
         <AiPlaybookModal initial={editing} takenIds={playbookIds} onSave={savePlaybook} onClose={() => setEditing(undefined)} />

@@ -51,7 +51,7 @@ _APP_SAFE_KEYS = {
 }
 _AI_SAFE_KEYS = {
     "enabled", "model", "max_tokens", "max_iterations", "system_prompt", "thinking",
-    "effort", "request_timeout", "connector_tools", "sql_max_rows", "usage_retention_days", "api_tool", "scaffold_tools", "ops_tools", "explorer_tools",
+    "effort", "request_timeout", "connector_tools", "sql_max_rows", "usage_retention_days", "api_tool", "scaffold_tools", "ops_tools", "explorer_tools", "app_tools",
     "allowed_connectors", "web_fetch_domains", "web_fetch_max_uses", "allowed_models", "starters",
     "api_key",   # sensitive — encrypted on save, masked on GET
 }

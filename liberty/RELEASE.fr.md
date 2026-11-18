@@ -1,5 +1,21 @@
 # Liberty Next — Notes de version
 
+## 7.0.77 — non publiée
+
+- Assistant IA : les applications livrent des outils. `ai.toml` accepte `[ai.<app>.tools.<id>]` — une fonction des
+  plugins de l'application (`callable = "module:fonction"`, un des points d'entrée `j_`), la description d'après
+  laquelle le modèle le choisit, et la permission requise pour l'utilisateur (`plugin:<callable>` sauf si une autre
+  est indiquée). Le modèle le voit sous le nom `<app>_<id>`, avec pour arguments les paramètres de la fonction (types
+  d'après les annotations, descriptions d'après la docstring) ; `connectors`, `settings` et `ctx` sont fournis par le
+  serveur, jamais par le modèle. Un outil n'est proposé qu'à un utilisateur détenant sa permission, seulement quand
+  son application est chargée (un connecteur sous licence sans sa clé ne livre rien) et ouverte à l'assistant ; une
+  fonction qui n'est pas un point d'entrée de plugin, ou qui ne peut pas être importée, est écartée avec un
+  avertissement. En lecture seule par contrat. Édités sous **IA → Outils**, appliqués au rechargement sans
+  redémarrage ; `[ai] app_tools = false` (Paramètres → App → IA) les désactive tous.
+- Paramètres → IA : un enregistrement ne supprime plus ce que la page n'affiche pas — les questions de démarrage par
+  langue (`l.fr`) étaient perdues à chaque enregistrement, les groupes de questions d'un écran quand ses questions
+  étaient modifiées.
+
 ## 7.0.76 — non publiée
 
 - Menus : une application est listée pour ce que l'utilisateur peut y ouvrir. **Un changement de comportement pour

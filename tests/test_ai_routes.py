@@ -262,6 +262,33 @@ def test_model_picker_and_starters(app) -> None:
         assert r.status_code == 200 and app.state.ai._client.messages.calls[-1]["model"] == "claude-haiku-5-5"
 
 
+def test_saving_the_ai_config_keeps_the_tools_and_the_languages(tmp_path, monkeypatch) -> None:
+    """The editor shows neither the starters per language (`l.fr`) nor a screen's groups: a save
+    must write them back as they were (it dropped `l`), and the tools with them."""
+    app = _make_app(tmp_path)
+    with TestClient(app) as client:
+        h = {"Authorization": f"Bearer {_login(client, 'admin', 'adminpw')}"}
+        doc = {"nomajde": {
+            "starters": ["Who has no role?"],
+            "tools": {"object_access": {"callable": "nomajde.lookup:j_object_access", "description": "Who can run an object."},
+                      "udc": {"callable": "nomajde.lookup:j_udc", "description": "The values of a UDC.", "permission": "sql:jdedwards:*"}},
+            "l": {"fr": {"starters": ["Qui n'a pas de rôle ?"], "screens": {"f0092": {"starters": ["Jamais connectés"]}}}},
+        }}
+        assert client.put("/admin/config/ai/parsed", json={"ai": doc}, headers=h).status_code == 200
+        back = client.get("/admin/config/ai/parsed", headers=h).json()["ai"]["nomajde"]
+        assert back["tools"] == {"object_access": {"callable": "nomajde.lookup:j_object_access", "description": "Who can run an object.", "permission": None},
+                                 "udc": {"callable": "nomajde.lookup:j_udc", "description": "The values of a UDC.", "permission": "sql:jdedwards:*"}}
+        assert back["l"]["fr"]["starters"] == ["Qui n'a pas de rôle ?"] and back["l"]["fr"]["screens"]["f0092"]["starters"] == ["Jamais connectés"]
+        # what the editor sends back (the whole document it read) is stable
+        assert client.put("/admin/config/ai/parsed", json={"ai": {"nomajde": back}}, headers=h).status_code == 200
+        assert client.get("/admin/config/ai/parsed", headers=h).json()["ai"]["nomajde"] == back
+        text = (tmp_path / "ai.toml").read_text()
+        assert "[ai.nomajde.tools.object_access]" in text and "[ai.nomajde.l.fr]" in text
+        bad = {"nomajde": {"tools": {"Bad-Id": {"callable": "a:b", "description": "x"}}}}
+        assert client.put("/admin/config/ai/parsed", json={"ai": bad}, headers=h).status_code == 422
+
+
+
 def test_bundled_starters_are_edited_and_merged_under_the_operators(app, tmp_path) -> None:
     with TestClient(app) as client:
         token = _login(client, "admin", "adminpw")
@@ -274,7 +301,7 @@ def test_bundled_starters_are_edited_and_merged_under_the_operators(app, tmp_pat
         text = (tmp_path / "ai.toml").read_text()
         assert "f0093" not in text and 'starters = [\n    "Who has no role?",' in text and "[ai.nomajde.playbooks.create_user]" in text
         assert client.get("/admin/config/ai/parsed", headers=h).json()["ai"] == {"nomajde": {"starters": ["Who has no role?"], "groups": [], "screens": {"f0092": {"starters": ["Users never logged in"], "groups": []}},
-                                                                                         "playbooks": {"create_user": {"title": "Create a user", "description": None, "body": "1. Open Users\n2. Add"}}, "l": {}}}
+                                                                                         "playbooks": {"create_user": {"title": "Create a user", "description": None, "body": "1. Open Users\n2. Add"}}, "tools": {}, "l": {}}}
         assert client.put("/admin/config/ai/parsed", json={"ai": {"nomajde": {"playbook": 1}}}, headers=h).status_code == 422
         # the running server sees it after a reload, with the operator's [ai] starters on top
         assert client.post("/admin/reload", headers=h).status_code == 200

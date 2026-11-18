@@ -265,7 +265,9 @@ export interface ExplorerDoc {
 /** `GET /admin/config/ai/parsed` — the apps' assistant material (ai.toml). */
 export interface ScreenAiBody { starters?: string[] }
 export interface PlaybookBody { title: string; description?: string | null; body: string }
-export interface AppAiBody { starters?: string[]; screens?: Record<string, ScreenAiBody>; playbooks?: Record<string, PlaybookBody> }
+/** A tool the app ships for the assistant: a plugin function, offered to the model as `<app>_<id>`. */
+export interface AiToolBody { callable: string; description: string; permission?: string | null }
+export interface AppAiBody { starters?: string[]; screens?: Record<string, ScreenAiBody>; playbooks?: Record<string, PlaybookBody>; tools?: Record<string, AiToolBody> }
 export interface AiDoc { path: string; ai: Record<string, AppAiBody> }
 
 export interface DashboardsDoc {
