@@ -1,5 +1,19 @@
 # Liberty Next — Notes de version
 
+## 7.0.76 — non publiée
+
+- Menus : une application est listée pour ce que l'utilisateur peut y ouvrir. **Un changement de comportement pour
+  les utilisateurs restreints** : une entrée de tableau de bord était affichée dès que le tableau de bord existait et
+  la page Explorateur de données à tout le monde ; un utilisateur ayant les permissions d'une seule application
+  voyait donc toutes les applications dans le sélecteur — chacune avec un tableau de bord vide et un Explorateur sans
+  modèle. Désormais une entrée de tableau de bord est affichée à qui peut lire au moins un de ses widgets de données
+  (ou détient `dashboard:<id>` ou le `menu:<app>:<id>` de l'entrée ; un tableau de bord fait seulement de textes et de
+  liens reste affiché), la page Explorateur de données à qui peut utiliser un modèle de cette application
+  (`explorer:<app>:<modèle>`), et les liens sans permission (une page ouverte, une adresse externe) ne suffisent plus
+  à lister une application. Rien ne change pour un super-utilisateur ou un rôle détenant `*`. Pour vérifier un rôle :
+  Paramètres → Accès montre ce qu'il voit — l'éditeur de rôle suit la même règle (`GET /admin/access/menu-rules`).
+  L'assistant IA, qui nomme les applications selon cette règle, suit.
+
 ## 7.0.75 — non publiée
 
 - Assistant IA : un enregistrement d'audit et d'usage. Chaque question posée à l'assistant est conservée dans

@@ -1,5 +1,18 @@
 # Liberty Next — Release notes
 
+## 7.0.76 — unreleased
+
+- Menus: an application is listed for what the user may open in it. **A change of behaviour for restricted users**:
+  a dashboard entry was shown as soon as the dashboard existed and the Data Explorer page to everyone, so a user with
+  the permissions of one application saw every application in the switcher — each with a dashboard that rendered
+  empty and an Explorer with no model. Now a dashboard entry is shown to who can read at least one of its data
+  widgets (or holds `dashboard:<id>` or the entry's `menu:<app>:<id>`; a dashboard of texts and links only stays
+  shown), the Data Explorer page to who may use a model of that application (`explorer:<app>:<model>`), and links
+  that need no permission (an open page, an external address) no longer list an application by themselves. Nothing
+  changes for a superuser or a role holding `*`. To check a role: Settings → Access shows what it sees — the role
+  editor follows the same rule (`GET /admin/access/menu-rules`). The AI assistant, which names the applications by
+  this rule, follows.
+
 ## 7.0.75 — unreleased
 
 - AI assistant: an audit and usage record. Each question to the assistant is kept in `ly2_ai_call` (created at

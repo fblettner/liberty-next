@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from liberty.auth.authstore import AuthBackend, AuthError
@@ -135,6 +135,29 @@ async def set_user_password(username: str, body: PasswordSet, _: Superuser, back
 
 
 # ── roles ─────────────────────────────────────────────────────────────────────────────────
+@router.get("/menu-rules", summary="What shows a menu entry")
+async def menu_rules(request: Request, _: Superuser) -> dict[str, Any]:
+    """What the role editor needs to tell whether a role sees a menu entry, beyond the entry's
+    own target — the rule of :mod:`liberty.web.menus`: ``dashboards`` gives, per dashboard id,
+    the permissions of its data widgets (any one shows the entry) and ``open`` when it has none
+    (texts and links: shown to all); ``explorer`` the models of each application (any one shows
+    its Data Explorer page)."""
+    from liberty.web.dashboards import widget_permissions
+
+    st = request.app.state
+    charts = getattr(st, "charts", None)
+    dashboards: dict[str, Any] = {}
+    catalog = getattr(st, "dashboards", None)
+    for _scope, _did, d in (catalog.iter_dashboards() if catalog is not None else []):
+        perms, has_data = widget_permissions(d, charts)
+        dashboards[d.qualified_id] = {"permissions": perms, "open": not has_data}
+    explorer: dict[str, list[str]] = {}
+    models = getattr(st, "explorer", None)
+    for app, mid, _m in (models.items() if models is not None and hasattr(models, "items") else []):
+        explorer.setdefault(app, []).append(mid)
+    return {"dashboards": dashboards, "explorer": explorer}
+
+
 @router.get("/roles", summary="List roles")
 async def list_roles(_: Superuser, backend: Backend) -> dict[str, Any]:
     return {"roles": [_role_dict(r) for r in await backend.list_roles()]}

@@ -32,9 +32,13 @@ def build_instance_tools(state: Callable[[], Any], *, allowed: list[str] | None 
         who = caller()
         if who is None or who.is_superuser:
             return list(menu.items)
-        from liberty.web.menus import _keeper   # the one definition of menu visibility
+        from liberty.web.menus import _keeper, app_is_theirs   # the one definition of menu visibility
 
-        keep = _keeper(who, dashboards, app, screens_file)
+        st = state()
+        explorer = getattr(st, "explorer", None)
+        keep = _keeper(who, dashboards, app, screens_file, charts=getattr(st, "charts", None), explorer=explorer)
+        if not app_is_theirs(who, app, menu, keep, dashboards, explorer):
+            return []      # links that need no permission do not make the application theirs
         kept = {it.id for it in menu.items if it.type is not None and keep(it, it.connector or app)}
         grew = True
         while grew:      # folders, innermost first

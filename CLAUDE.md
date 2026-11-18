@@ -197,7 +197,9 @@ carrying the item — hint `dd`, same name, or name minus the connector's `dd_pr
 → `CO`); the auth dependency publishes it in `liberty.auth.scope.current_scope` so code without
 principal plumbing is covered (`liberty.auth.principal.current_principal` likewise: the AI tools check the caller's
 permissions through `liberty.ai.tools.may` / `require`, and `AiAssistant.chat(principal=…)` sets both for the stream); jobs are unrestricted. Attributes come from `liberty-admin`, the
-Access API or `[oidc] attribute_claims`. Permission strings: `sql:{connector}:{query}`, `api:{connector}:{endpoint}`, `plugin:{ref}`,
+Access API or `[oidc] attribute_claims`. Menus (`web/menus.py`): a dashboard entry needs a readable data widget (or `dashboard:<id>` / the menu allow), the
+Explorer page a model of the app, and permission-less links never list an application by themselves — the role editor
+mirrors it from `GET /admin/access/menu-rules`. Permission strings: `sql:{connector}:{query}`, `api:{connector}:{endpoint}`, `plugin:{ref}`,
 `ai:chat` (opens the chat only: each tool then needs the `sql:` / `api:` / `explorer:` / `job:` permission of what it touches; ops and scaffold tools are superuser-only), with colon-segment globs (`sql:nomasx1:*`, `*`); superusers bypass. The permission
 is checked **before** the connector lookup (no name enumeration). A mutating query needs both
 `writable = true` in TOML and the caller's permission. DB errors: non-superusers get the

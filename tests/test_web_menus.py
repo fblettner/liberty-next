@@ -419,3 +419,87 @@ def test_nomaflow_page_items_need_nomaflow_view() -> None:
     assert keep(("nomaflow:edit",))(jobs, "nomaflow") is True
     assert keep(("menu:nomaflow:jobs",))(jobs, "nomaflow") is True
     assert keep(("*", "!menu:nomaflow:jobs"))(jobs, "nomaflow") is False
+
+
+# -- an application is listed for what the caller may open in it (7.0.76) -----------------
+
+
+def _visibility_fixture():
+    from types import SimpleNamespace
+
+    from liberty.dashboards.config import parse_dashboards
+    from liberty.menus.config import parse_menus
+
+    dashboards = parse_dashboards({"dashboards": {
+        "audit": {
+            "overview": {"label": "Overview", "widgets": [
+                {"type": "stat", "label": "Users", "connector": "audit", "query": "kpi_users", "value_column": "N"},
+                {"type": "stat", "label": "Roles", "connector": "audit", "query": "kpi_roles", "value_column": "N"},
+                {"type": "text", "markdown": "A note"},
+            ]},
+            "welcome": {"label": "Welcome", "widgets": [{"type": "text", "markdown": "Hello"}]},
+        },
+    }})
+    menus = parse_menus({"menus": {"audit": {"label": "Audit", "items": [
+        {"id": "overview", "label": "Overview", "type": "dashboard", "target": "audit.overview"},
+        {"id": "welcome", "label": "Welcome", "type": "dashboard", "target": "audit.welcome"},
+        {"id": "explorer", "label": "Data Explorer", "type": "page", "target": "/explorer"},
+        {"id": "reports", "label": "Reports", "type": "page", "target": "/reports"},
+        {"id": "docs", "label": "Documentation", "type": "url", "target": "https://docs.example.com"},
+        {"id": "users", "label": "Users", "type": "query", "target": "users_get"},
+    ]}}})
+    explorer = SimpleNamespace(items=lambda: [("audit", "security", object()), ("sales", "orders", object())])
+    return dashboards, menus.menus["audit"], explorer
+
+
+def _seen(*perms: str, superuser: bool = False):
+    """``(kept leaf ids, whether the application is listed)`` for a caller."""
+    from liberty.auth.principal import Principal
+    from liberty.web.menus import _keeper, app_is_theirs
+
+    dashboards, menu, explorer = _visibility_fixture()
+    who = Principal(id="1", username="u", permissions=perms, is_superuser=superuser)
+    keep = _keeper(who, dashboards, "audit", charts=None, explorer=explorer)
+    kept = [it.id for it in menu.items if keep(it, it.connector or "audit")]
+    return kept, app_is_theirs(who, "audit", menu, keep, dashboards, explorer)
+
+
+def test_a_dashboard_entry_needs_a_readable_widget() -> None:
+    from liberty.auth.principal import Principal
+    from liberty.web.dashboards import readable
+
+    dashboards, _menu, _explorer = _visibility_fixture()
+    overview, welcome = dashboards.find("audit.overview"), dashboards.find("audit.welcome")
+    nobody = Principal(id="1", username="u", permissions=("sql:sales:*",))
+    assert readable(nobody, overview, None) is False                      # data widgets, none of them theirs
+    assert readable(Principal(id="1", username="u", permissions=("sql:audit:kpi_roles",)), overview, None) is True
+    assert readable(nobody, welcome, None) is None                        # texts only: nothing to permit
+
+    assert "overview" not in _seen("sql:sales:*")[0]
+    assert "overview" in _seen("sql:audit:kpi_users")[0]
+    assert "overview" in _seen("dashboard:audit.overview")[0]             # the explicit allows still surface it
+    assert "overview" in _seen("menu:audit:overview")[0]
+    assert "overview" not in _seen("sql:audit:*", "!dashboard:audit.overview")[0]
+
+
+def test_the_explorer_page_needs_a_model_of_the_application() -> None:
+    assert "explorer" not in _seen("sql:audit:users_get")[0]
+    assert "explorer" not in _seen("explorer:sales:orders")[0]            # another application's model
+    assert "explorer" in _seen("explorer:audit:security")[0]
+    assert "explorer" in _seen("explorer:audit:*")[0]
+    assert "explorer" in _seen("menu:audit:explorer")[0]
+
+
+def test_open_links_do_not_list_an_application() -> None:
+    """The case found by the assistant's evaluation: an account of another application saw
+    every application, each with an empty dashboard, the Explorer and the Reports pages."""
+    kept, listed = _seen("sql:sales:*", "explorer:sales:*", "ai:chat")
+    assert kept == ["welcome", "reports", "docs"] and listed is False     # nothing here carries a permission of theirs
+    kept, listed = _seen("sql:audit:users_get")
+    assert kept == ["welcome", "reports", "docs", "users"] and listed is True   # one query → the app, with its open links
+    assert _seen("explorer:audit:security")[1] is True
+    assert _seen("sql:audit:kpi_users")[1] is True
+    assert _seen("menu:audit:docs")[1] is True                            # an explicit menu allow counts, whatever the leaf
+    kept, listed = _seen("*")
+    assert listed is True and len(kept) == 6
+    assert _seen(superuser=True) == (kept, True)

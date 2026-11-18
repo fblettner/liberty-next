@@ -15,7 +15,7 @@ import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import RoleEditor, { type AppRole } from './Access/RoleEditor'
 import { PermChip } from './Access/OtherAccess'
-import { buildMenuForest, type MenusCatalog } from './Access/permissions'
+import { buildMenuForest, type MenuRules, type MenusCatalog } from './Access/permissions'
 import { attributeFromText, attributeKeys, attributeToText, screenColumnNames } from './Access/scopeRules'
 import type { DictionaryDoc, ScreensDoc } from '../../types/config'
 import { BuilderShell as Shell } from '../../common/builderShell'
@@ -145,6 +145,7 @@ export default function AccessBuilder() {
   const [roles, setRoles] = useState<AppRole[] | null>(null)
   const [menus, setMenus] = useState<MenusCatalog>({})
   const [dashboardIds, setDashboardIds] = useState<string[]>([])
+  const [menuRules, setMenuRules] = useState<MenuRules | undefined>(undefined)
   const [dictionary, setDictionary] = useState<DictionaryDoc | null>(null)
   const [columnNames, setColumnNames] = useState<Record<string, string[]>>({})
   const [error, setError] = useState<string | null>(null)
@@ -161,8 +162,10 @@ export default function AccessBuilder() {
       api.get<{ dashboards: Record<string, unknown> }>('/admin/config/dashboards/parsed').catch(() => ({ dashboards: {} })),
       api.get<DictionaryDoc>('/admin/config/dictionary/parsed').catch((): DictionaryDoc | null => null),
       api.get<ScreensDoc>('/admin/config/screens/parsed').catch((): ScreensDoc | null => null),
+      api.get<MenuRules>('/admin/access/menu-rules').catch((): MenuRules | undefined => undefined),
     ])
-      .then(([u, r, m, d, dict, scr]) => {
+      .then(([u, r, m, d, dict, scr, rules]) => {
+        setMenuRules(rules)
         setUsers(u.users); setRoles(r.roles); setMenus(m.menus ?? {}); setDashboardIds(Object.keys(d.dashboards ?? {})); setDictionary(dict); setColumnNames(screenColumnNames(scr))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
@@ -172,7 +175,7 @@ export default function AccessBuilder() {
   const roleNames = useMemo(() => (roles ?? []).map((r) => r.name), [roles])
   const attributeNames = useMemo(() => attributeKeys(roles ?? [], users ?? []), [roles, users])
   // The superuser's screen catalog resolves `screen` leaves to their read query (a superuser sees every screen).
-  const forest = useMemo(() => buildMenuForest(menus, screens ?? {}), [menus, screens])
+  const forest = useMemo(() => buildMenuForest(menus, screens ?? {}, menuRules), [menus, screens, menuRules])
 
   if (error && !users) return <Banner $tone="error">{error}</Banner>
   if (!users || !roles) return <Centered />

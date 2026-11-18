@@ -80,8 +80,11 @@ you are looking at (the screen, its filters, the row you clicked), knows what th
 installation holds, queries your data read-only, follows the procedures the apps ship
 (playbooks), proposes new queries, dictionary items, screens and menu items that you
 apply with one click, and reads the server's jobs, log and integrity checks when the
-operator allows it. Starter questions per app and screen, follow-up suggestions, a
-model picker, a conversation that stays.
+operator allows it. It answers for the signed-in user: each tool checks the permission
+the screens check, under the same row-level scope, and totals or rankings come from the
+Data Explorer models. Starter questions per app and screen, follow-up suggestions, a
+model picker, a conversation that stays; every question is recorded for the
+administrators (who, model, tokens, tools — never the question, the answer or a row).
 
 **Access.** Local users or OpenID Connect (any provider), roles with colon-glob
 permissions, superusers, and **row-level data scope**: a role's rules on a dictionary

@@ -97,6 +97,31 @@ describe('parsePermissions / buildPermissions', () => {
     expect(leafVisible([], f.nomajde[0])).toBe(true)
     expect(leafVisible(['*', '!menu:nomajde:jde'], f.nomajde[0])).toBe(false)
   })
+  it('a dashboard needs a readable widget, the Data Explorer a model of the app — the server rules', () => {
+    const items = { audit: { items: [
+      { id: 'board', label: 'Board', type: 'dashboard', target: 'audit.overview' },
+      { id: 'welcome', label: 'Welcome', type: 'dashboard', target: 'audit.welcome' },
+      { id: 'explorer', label: 'Explorer', type: 'page', target: '/explorer' },
+    ] } }
+    const rules = {
+      dashboards: { 'audit.overview': { permissions: ['sql:audit:kpi_users', 'sql:audit:kpi_roles'], open: false }, 'audit.welcome': { permissions: [], open: true } },
+      explorer: { audit: ['security'], sales: ['orders'] },
+    }
+    const [board, welcome, explorer] = buildMenuForest(items, {}, rules).audit
+    expect(leafVisible(['sql:sales:*'], board)).toBe(false)               // would render empty: not a link
+    expect(leafVisible(['sql:audit:kpi_roles'], board)).toBe(true)
+    expect(leafVisible(['dashboard:audit.overview'], board)).toBe(true)
+    expect(leafVisible(['menu:audit:board'], board)).toBe(true)
+    expect(leafVisible(['sql:audit:*', '!dashboard:audit.overview'], board)).toBe(false)
+    expect(leafVisible([], welcome)).toBe(true)                           // texts and links only
+    expect(leafVisible(['explorer:sales:orders'], explorer)).toBe(false)
+    expect(leafVisible(['explorer:audit:*'], explorer)).toBe(true)
+    expect(leafVisible(['menu:audit:explorer'], explorer)).toBe(true)
+    // without the rules (an older server): as before
+    const [oldBoard, , oldExplorer] = buildMenuForest(items, {}).audit
+    expect(leafVisible([], oldBoard)).toBe(true)
+    expect(leafVisible([], oldExplorer)).toBe(true)
+  })
   it('a nomaflow page needs nomaflow:view (edit includes it), like the backend', () => {
     const f = buildMenuForest({ nomaflow: { items: [{ id: 'jobs', label: 'Jobs', type: 'page', target: '/nomaflow/schedule' }] } }, {})
     const jobs = f.nomaflow[0]

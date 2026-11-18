@@ -172,6 +172,43 @@ def _can_read(principal: Principal, widget_dict: dict[str, Any]) -> bool:
     return principal.has_permission(f"sql:{target[0]}:{target[1]}")
 
 
+def widget_permissions(dashboard: Dashboard, charts: ChartsFile | None) -> tuple[list[str], bool]:
+    """``(permissions, has_data)`` — the ``sql:<connector>:<query>`` of each data widget of
+    *dashboard* (a chart through its chart definition), and whether it has any data widget at
+    all (texts and links are not; the jobs widget is, for superusers only, with no permission
+    to list)."""
+    perms: list[str] = []
+    has_data = False
+    for w in dashboard.widgets:
+        if isinstance(w, (TextWidget, LinksWidget)):
+            continue
+        has_data = True
+        if isinstance(w, JobsWidget):
+            continue
+        if isinstance(w, ChartWidget):
+            wd = _resolve_chart_widget(w, charts, dashboard.connector) if charts is not None else None
+        elif isinstance(w, KpiWidget):
+            wd = _resolve_kpi_widget(w)
+        elif isinstance(w, TableWidget):
+            wd = _resolve_table_widget(w)
+        else:
+            wd = _resolve_plain_widget(w)
+        target = _widget_query(wd) if wd is not None else None
+        if target is not None and f"sql:{target[0]}:{target[1]}" not in perms:
+            perms.append(f"sql:{target[0]}:{target[1]}")
+    return perms, has_data
+
+
+def readable(principal: Principal, dashboard: Dashboard, charts: ChartsFile | None) -> bool | None:
+    """Whether *principal* can read something of *dashboard*: True when at least one of its data
+    widgets is theirs, False when it has data widgets and none is, None when it has none (texts
+    and links only — nothing to permit). What decides whether a menu entry to it is shown."""
+    perms, has_data = widget_permissions(dashboard, charts)
+    if not has_data:
+        return None
+    return principal.is_superuser or any(principal.has_permission(p) for p in perms)
+
+
 def _resolve_filters(dashboard: Dashboard, principal: Principal, language: str | None = None) -> list[dict[str, Any]]:
     """Build the wire shape for the dashboard's filter bar. A filter is included iff the caller
     holds the permission for its options query (the dropdown can't render otherwise); the rest

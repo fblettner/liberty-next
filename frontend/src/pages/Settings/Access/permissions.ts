@@ -24,8 +24,19 @@ export interface MenuNode {
   target: string | null
   /** What the leaf runs: `sql:<c>:<q>` / `api:<c>:<e>` / `dashboard:<id>`; `nomaflow:view` for a nomaflow page; null for folders and the other pages. */
   targetPerm: string | null
+  /** Permissions any one of which also shows the leaf: a dashboard's data-widget queries, the
+   *  application's explorer models for its Data Explorer page (GET /admin/access/menu-rules). */
+  anyOf?: string[]
+  /** A leaf that needs no permission (a dashboard of texts and links, an open page). */
+  open?: boolean
   children: MenuNode[]
 }
+/** `GET /admin/access/menu-rules` — what shows a menu entry beyond its own target. */
+export interface MenuRules {
+  dashboards: Record<string, { permissions: string[]; open: boolean }>
+  explorer: Record<string, string[]>
+}
+export const EXPLORER_PAGE = '/explorer'
 export type MenuForest = Record<string, MenuNode[]>
 
 export const nodeKey = (app: string, id: string): string => `menu:${app}:${id}`
@@ -53,7 +64,21 @@ export function targetPermission(app: string, item: MenuItemRaw, screens: Record
   return `${item.type === 'endpoint' ? 'api' : 'sql'}:${conn}:${item.target}`
 }
 
-export function buildMenuForest(menus: MenusCatalog, screens: Record<string, ScreenRef[]>): MenuForest {
+/** What else shows a leaf, from the server's rules: `anyOf` / `open` (absent without rules). */
+function leafRule(app: string, it: MenuItemRaw, rules: MenuRules | undefined): Pick<MenuNode, 'anyOf' | 'open'> {
+  if (!rules || !it.target) return {}
+  if (it.type === 'dashboard') {
+    const d = rules.dashboards[it.target]
+    return d ? { anyOf: d.permissions, open: d.open } : {}
+  }
+  if (it.type === 'page' && it.target === EXPLORER_PAGE) {
+    const models = rules.explorer[app] ?? []
+    return models.length ? { anyOf: models.map((m) => `explorer:${app}:${m}`) } : {}
+  }
+  return {}
+}
+
+export function buildMenuForest(menus: MenusCatalog, screens: Record<string, ScreenRef[]>, rules?: MenuRules): MenuForest {
   const out: MenuForest = {}
   for (const [app, m] of Object.entries(menus)) {
     const items = m.items ?? []
@@ -62,7 +87,7 @@ export function buildMenuForest(menus: MenusCatalog, screens: Record<string, Scr
     for (const it of items) {
       nodes.set(it.id, {
         app, id: it.id, key: nodeKey(app, it.id), label: it.label || it.id, type: it.type ?? null, target: it.target ?? null,
-        targetPerm: targetPermission(app, it, screens), children: [],
+        targetPerm: targetPermission(app, it, screens), ...leafRule(app, it, rules), children: [],
       })
     }
     const roots: MenuNode[] = []
@@ -85,12 +110,19 @@ export function flattenForest(forest: MenuForest): MenuNode[] {
 
 
 /** Whether the sidebar shows a leaf for a user holding *perms* — the `_keeper` rule: an explicit
- *  menu deny hides it; a dashboard needs no grant (existence is the gate) unless denied; a page
- *  is shown unless its feature area has a permission (the nomaflow pages); otherwise the target must be runnable or the menu explicitly allowed. */
+ *  menu deny hides it; a dashboard is shown to who can read one of its data widgets or holds
+ *  `dashboard:<id>` / the menu allow (texts and links only: to all); the Data Explorer page to who
+ *  may use a model of the application; another page unless its feature area has a permission
+ *  (the nomaflow pages); otherwise the target must be runnable or the menu explicitly allowed. */
 export function leafVisible(perms: string[], node: MenuNode): boolean {
   if (isDenied(perms, node.key)) return false
-  if (node.type === 'dashboard') return !isDenied(perms, node.targetPerm ?? '')
+  if (node.type === 'dashboard') {
+    if (isDenied(perms, node.targetPerm ?? '')) return false
+    if (node.anyOf === undefined) return true   // no rules loaded: the entry's existence, as before
+    return !!node.open || hasPermission(perms, node.targetPerm ?? '') || hasPermission(perms, node.key) || node.anyOf.some((p) => hasPermission(perms, p))
+  }
   if (node.type === 'url') return true   // an external address: the menu deny (above) gates it
+  if (node.type === 'page' && node.anyOf !== undefined) return hasPermission(perms, node.key) || node.anyOf.some((p) => hasPermission(perms, p))
   if (node.type === 'page') return node.targetPerm == null || hasPermission(perms, node.key)
     || [node.targetPerm, ...(INCLUDED_IN[node.targetPerm] ?? [])].some((p) => hasPermission(perms, p))
   if (node.targetPerm == null) return hasPermission(perms, node.key)

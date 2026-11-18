@@ -140,3 +140,27 @@ def test_role_scope_and_user_attributes(app) -> None:
         assert r.status_code == 422
         r = client.put("/admin/access/roles/filiale", json={"permissions": [], "scope": []}, headers=h)
         assert r.json()["scope"] == []
+
+
+def test_menu_rules_for_the_role_editor(app) -> None:
+    """What shows a menu entry beyond its own target: a dashboard's data-widget permissions (or
+    `open` for texts and links), the explorer models of each application. Superuser only."""
+    from types import SimpleNamespace
+
+    from liberty.dashboards.config import parse_dashboards
+
+    with TestClient(app) as client:
+        app.state.dashboards = parse_dashboards({"dashboards": {"audit": {
+            "overview": {"label": "Overview", "widgets": [
+                {"type": "stat", "label": "Users", "connector": "audit", "query": "kpi_users", "value_column": "N"},
+                {"type": "stat", "label": "Again", "connector": "audit", "query": "kpi_users", "value_column": "M"},
+                {"type": "text", "markdown": "A note"}]},
+            "welcome": {"label": "Welcome", "widgets": [{"type": "text", "markdown": "Hello"}]},
+        }}})
+        app.state.explorer = SimpleNamespace(items=lambda: [("audit", "security", None), ("audit", "licences", None), ("sales", "orders", None)])
+        out = client.get("/admin/access/menu-rules", headers=_h(client, "admin")).json()
+        assert out["dashboards"] == {
+            "audit.overview": {"permissions": ["sql:audit:kpi_users"], "open": False},
+            "audit.welcome": {"permissions": [], "open": True},
+        }
+        assert out["explorer"] == {"audit": ["security", "licences"], "sales": ["orders"]}
