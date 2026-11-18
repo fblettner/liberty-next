@@ -2754,6 +2754,8 @@ const fr: Resources = {
       licenseNotSet: 'absente — mode restreint',
       licenseHint: 'JWT signé par l\'éditeur qui déverrouille les connecteurs sous licence (nomasx1, nomajde, …). Vide → mode « restreint » : les connecteurs sous licence ne sont pas chargés. Chiffré au repos avec la clé maître de l\'installation.',
       licenseKey: 'Clé de licence',
+      usageHint: 'Une installation sous licence signale une fois par jour à l’outil de gestion des licences : le nom de cet environnement, sa version et son nombre de comptes actifs — rien d’autre. La tâche « liberty-usage-report » (Nomaflow → Tâches) montre chaque envoi et peut être mise en pause.',
+      usageUrl: 'Adresse du rapport d’usage (vide = rien n’est envoyé)',
       aiSection: 'Assistant IA',
       aiNoKey: 'aucune clé API',
       aiDisabled: 'désactivé',
@@ -2817,6 +2819,7 @@ const fr: Resources = {
       saved: 'Enregistré dans {{path}}.',
       intro: 'Réglages maîtres (app.toml). Les secrets enregistrés ici sont chiffrés au repos avec la clé maître de l\'installation.',
       name: 'Nom de l\'application',
+      environment: 'Environnement (production, test… — nommé dans le rapport d’usage de la licence)',
       oidcHint: 'Authentification unique via tout fournisseur OIDC (Keycloak, Okta, Entra ID…). L\'utilisateur est créé à la première connexion avec les rôles associés.',
     },
     charts: {

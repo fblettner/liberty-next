@@ -41,8 +41,11 @@ async def get_jobs_parsed(request: Request, _: JobsEditor) -> dict[str, Any]:
     inputs to the values the scheduler is actually using."""
     from liberty.jobs import load_jobs
 
+    from liberty.jobs.builtin import builtin_jobs
+
     path = Path(request.app.state.settings.jobs.config_path)
-    registry = load_jobs(path)
+    # with the framework's built-in jobs: the editor shows them, and saving one writes it to the file
+    registry = load_jobs(path, builtins=builtin_jobs(request.app.state.settings))
     return {
         "path": str(path),
         # Defaults included on purpose — see docstring. Without this the panel inputs

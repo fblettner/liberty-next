@@ -142,6 +142,9 @@ def keep_env_refs(new: Any, raw: Any, *, env: dict[str, str] | None = None) -> A
 
 class AppSettings(BaseModel):
     name: str = "Liberty Next"
+    # What this installation is — "production", "test", "dev"… Shown nowhere but in the licence
+    # usage report (liberty.licensing.usage), where the licence tool tells production from the rest.
+    environment: str = ""
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "info"
@@ -413,6 +416,9 @@ class LicenseSettings(BaseModel):
     aren't loaded). Supply it via the env var, not hard-coded."""
 
     key: str = ""   # ${LIBERTY_LICENSE_KEY}
+    # Where a licensed installation sends its daily usage report (environment, version, enabled
+    # accounts — liberty.licensing.usage; the nomaflow job liberty-usage-report). Blank = nothing sent.
+    usage_url: str = "https://nomalms.nomana-it.fr/api/usage"
 
 
 class ReportsBrandingSettings(BaseModel):

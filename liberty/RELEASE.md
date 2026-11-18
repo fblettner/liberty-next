@@ -1,5 +1,18 @@
 # Liberty Next — Release notes
 
+## 7.0.78 — unreleased
+
+- **Licence usage report.** A licensed installation tells the licence management tool, once a day, which
+  environment it is, its version and its number of enabled accounts — nothing else: no figure of the applications,
+  no name, no data. It is sent by a nomaflow job the framework ships itself, `liberty-usage-report`, on purpose in
+  the open: it is listed under Nomaflow → Jobs, each run shows what was sent and what the tool answered, a refused
+  or unreachable send is the run's error, and it can be run now, paused or rescheduled like any job (its first
+  change writes it into `jobs.toml`). The job exists only where there is a licence key; `[license] usage_url`
+  (Administer → App → License) is where it reports — blank it and nothing is sent.
+- `[app] environment` (Administer → App): what the installation is — "production", "test"… — named in that report.
+- nomaflow: the framework can ship jobs of its own (`liberty.jobs.builtin`), added to the list unless `jobs.toml` has
+  a job of the same id.
+
 ## 7.0.77 — unreleased
 
 - **MCP endpoint** (`/mcp`) — the assistant's tools from an external client: Claude Desktop, claude.ai or Claude Code

@@ -82,6 +82,7 @@ def load_jobs(
     path: Path | str,
     *,
     env: dict[str, str] | None = None,
+    builtins: list[Job] | None = None,
 ) -> JobRegistry:
     """Read ``jobs.toml`` at *path* and build a :class:`JobRegistry`.
 
@@ -96,12 +97,15 @@ def load_jobs(
        ``source.connector`` from the defaults).
     4. Pydantic validation of the resulting :class:`JobsFile`.
 
+    *builtins* are the jobs the framework ships itself (:mod:`liberty.jobs.builtin`): each is
+    added after the file's jobs unless the file has a job of that id — the file's version wins.
+
     Returns an empty registry for a missing file — the framework should boot
     without nomaflow as long as the operator hasn't provided a catalogue yet.
     """
     path = Path(path)
     if not path.exists():
-        return JobRegistry(JobsFile())
+        return JobRegistry(JobsFile(jobs=list(builtins or [])))
     with path.open("rb") as f:
         data: dict[str, Any] = tomllib.load(f)
     data = substitute_env(data, env=env)
@@ -111,7 +115,10 @@ def load_jobs(
             job["steps"] = [
                 _merge_step_defaults(defaults, step) for step in job.get("steps", [])
             ]
-    return JobRegistry(JobsFile.model_validate(data))
+    config = JobsFile.model_validate(data)
+    in_file = {j.id for j in config.jobs}
+    config.jobs = [*config.jobs, *(b for b in builtins or [] if b.id not in in_file)]
+    return JobRegistry(config)
 
 
 _MERGEABLE_DICTS = ("source", "target", "headers", "mapping", "op_kwargs")

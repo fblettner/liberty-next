@@ -21,6 +21,7 @@ from typing import Any
 from liberty.config import Settings
 from liberty.connectors import ConnectorRegistry
 from liberty.jobs.db import JobDatabase
+from liberty.jobs.builtin import builtin_jobs
 from liberty.jobs.registry import JobRegistry, load_jobs
 from liberty.jobs.runner import Broadcaster, JobRunner
 from liberty.jobs.scheduler import JobScheduler
@@ -236,7 +237,7 @@ async def build_nomaflow(
         )
         return None
 
-    registry = load_jobs(settings.jobs.config_path)
+    registry = load_jobs(settings.jobs.config_path, builtins=builtin_jobs(settings))
     db = JobDatabase(connectors.pools, pool_name)
     # Self-bootstrap the schema. Idempotent (create_all skips existing tables);
     # makes "deploy and forget init-db" work as long as the pool itself exists.
@@ -328,7 +329,7 @@ async def hot_reload_registry(
     ``app.state.jobs.registry`` (the runner's reference also gets updated via
     :attr:`JobScheduler._registry` — kept atomic by happening in one task).
     """
-    new_registry = load_jobs(settings.jobs.config_path)
+    new_registry = load_jobs(settings.jobs.config_path, builtins=builtin_jobs(settings))
     scheduler = components.scheduler
 
     # The scheduler's _registry attribute is what _run_or_drop reads to find

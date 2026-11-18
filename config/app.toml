@@ -1,5 +1,6 @@
 [app]
 name = "Liberty Next"
+environment = ""                 # what this installation is ("production", "test"…) — in the licence usage report
 host = "0.0.0.0"
 port = 8000
 log_level = "info"
@@ -71,6 +72,9 @@ master_key = "${LIBERTY_MASTER_KEY}"
 # env var, never hard-code. Inspect a key with `liberty-license verify <key>`; status at GET /api/license.
 [license]
 key = "${LIBERTY_LICENSE_KEY}"
+# Where a licensed installation reports once a day: its environment, version and number of enabled
+# accounts (the nomaflow job liberty-usage-report shows each send). Blank = nothing is sent.
+usage_url = "https://nomalms.nomana-it.fr/api/usage"
 
 # AI assistant — Anthropic Messages API with an agentic tool-use loop.
 # POST /ai/chat streams Server-Sent Events; gated behind the `ai:chat` permission.

@@ -77,7 +77,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           lock, rebinds every pool holder, disposes the old registry last
   config.py               Settings (app.toml): one *Settings class per section, see below
   crypto.py / crypto_cli  AES-256-GCM "ENC:" field encryption, byte-compatible with v1
-  licensing/              RS256 license-key verification (embedded public.pem)
+  licensing/              RS256 license-key verification (embedded public.pem); usage.py = the daily usage report to the licence
+                          tool (environment / version / enabled accounts, NomaUBL's shape; `[license] usage_url`)
   theme.py                theme.toml + GET /api/theme (operator branding)
   framework_enums.py      the widget / enum registries the builders render from
   coercion.py             kwargs coercion shared by python job steps and reports
@@ -115,7 +116,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           mcp_server.py (the /mcp endpoint, `[ai] mcp_enabled`: the official `mcp` package's low-level server + stateless Streamable HTTP manager
                           over ToolRegistry.offered / execute; the caller = a personal access token, `auth/routes.principal_from_personal_token`),
                           evals.py (the evaluation set: cases in TOML, played against a live server, checked on tools / texts / figures)
-  jobs/ (nomaflow)        schema.py (jobs.toml), registry, runner (state machine, retries,
+  jobs/ (nomaflow)        schema.py (jobs.toml), registry (load_jobs adds builtin.py's jobs — the framework's own, e.g.
+                          liberty-usage-report — unless jobs.toml has the id), runner (state machine, retries,
                           cancel), scheduler (APScheduler, single process), recovery, retention,
                           missed.py (missed-schedule check: expected cron instants vs the run
                           history → MISSED runs + the `missed` job event), runlog, wiring, steps/{sql_query,sql_copy,http,python,ldap_sync,call_job,report (a saved

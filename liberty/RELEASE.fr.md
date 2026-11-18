@@ -1,5 +1,20 @@
 # Liberty Next — Notes de version
 
+## 7.0.78 — non publiée
+
+- **Rapport d'usage de la licence.** Une installation sous licence signale une fois par jour à l'outil de gestion des
+  licences quel environnement elle est, sa version et son nombre de comptes actifs — rien d'autre : aucun chiffre des
+  applications, aucun nom, aucune donnée. Il est envoyé par une tâche nomaflow livrée par le framework,
+  `liberty-usage-report`, volontairement visible : elle figure sous Nomaflow → Tâches, chaque exécution montre ce
+  qui a été envoyé et la réponse de l'outil, un envoi refusé ou impossible est l'erreur de l'exécution, et elle se
+  lance, se met en pause ou se replanifie comme toute tâche (sa première modification l'écrit dans `jobs.toml`). La
+  tâche n'existe que là où il y a une clé de licence ; `[license] usage_url` (Administrer → App → Licence) est
+  l'adresse du rapport — vide, rien n'est envoyé.
+- `[app] environment` (Administrer → App) : ce qu'est l'installation — « production », « test »… — nommé dans ce
+  rapport.
+- nomaflow : le framework peut livrer ses propres tâches (`liberty.jobs.builtin`), ajoutées à la liste sauf si
+  `jobs.toml` contient une tâche du même identifiant.
+
 ## 7.0.77 — non publiée
 
 - **Point d'accès MCP** (`/mcp`) — les outils de l'assistant depuis un client externe : Claude Desktop, claude.ai ou

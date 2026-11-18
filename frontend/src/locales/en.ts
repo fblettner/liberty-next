@@ -2761,6 +2761,8 @@ const en = {
       licenseNotSet: 'not set — restricted mode',
       licenseHint: 'Vendor-signed JWT that unlocks licensed connectors (nomasx1, nomajde, …). Empty → "restricted" mode: licensed connectors aren\'t loaded. Encrypted at rest with the install master key.',
       licenseKey: 'License key',
+      usageHint: 'A licensed installation reports once a day to the licence management tool: this environment’s name, its version and its number of enabled accounts — nothing else. The job "liberty-usage-report" (Nomaflow → Jobs) shows each send and can be paused.',
+      usageUrl: 'Usage report address (blank = nothing is sent)',
       aiSection: 'AI Assistant',
       aiNoKey: 'no API key',
       aiDisabled: 'disabled',
@@ -2824,6 +2826,7 @@ const en = {
       saved: 'Saved to {{path}}.',
       intro: 'Master settings (app.toml). Secrets stored here are encrypted at rest with the install master key. License key, AI api_key and OIDC client_secret take effect immediately on save — only host / port / log_level changes still need a server restart.',
       name: 'App name',
+      environment: 'Environment (production, test… — named in the licence usage report)',
       oidcHint: 'Single sign-on via any OIDC-compliant provider (Keycloak, Okta, Auth0, Azure AD, …). Register https://<your-host>/auth/oidc/callback as the redirect URI. The client_secret is encrypted at rest with the install master key.',
     },
     charts: {

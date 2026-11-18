@@ -500,10 +500,19 @@ async def set_job_enabled(job_id: str, request: Request, principal: Editor, body
     except UnknownJobError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"unknown job {job_id!r}") from None
     path = Path(request.app.state.settings.jobs.config_path)
-    doc = tomlkit.parse(path.read_text(encoding="utf-8"))
+    doc = tomlkit.parse(path.read_text(encoding="utf-8") if path.exists() else "")
     entry = next((j for j in doc.get("jobs", []) if j.get("id") == job_id), None)
     if entry is None:
-        raise HTTPException(status.HTTP_409_CONFLICT, detail=f"{job_id!r} is not in {path.name} (reload first)")
+        from liberty.jobs.builtin import builtin_ids
+
+        if job_id not in builtin_ids(request.app.state.settings):
+            raise HTTPException(status.HTTP_409_CONFLICT, detail=f"{job_id!r} is not in {path.name} (reload first)")
+        # A built-in job changed for the first time: it is written into jobs.toml, and from
+        # then on the file's version is the job (liberty.jobs.builtin).
+        if "jobs" not in doc:
+            doc["jobs"] = tomlkit.aot()
+        doc["jobs"].append(tomlkit.item(job.model_dump(by_alias=True, exclude_defaults=True, exclude_none=True)))
+        entry = doc["jobs"][-1]
     entry["enabled"] = enabled
     new_text = tomlkit.dumps(doc)
     JobsFile.model_validate(tomllib.loads(new_text))

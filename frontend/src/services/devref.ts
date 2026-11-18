@@ -79,7 +79,7 @@ export function filterRoutes(routes: ApiRoute[], q: string, group: string): ApiR
 /** The label a setting has in its editor (an i18n key; Liberty Next → Administer → App field labels), so the
  *  Configuration view reads like the screens. Keys edited elsewhere or file-only have their own. */
 export const CONFIG_LABELS: Record<string, string> = {
-  'app.name': 'settings.app.name', 'app.host': 'settings.app.host', 'app.port': 'settings.app.port',
+  'app.name': 'settings.app.name', 'app.environment': 'settings.app.environment', 'app.host': 'settings.app.host', 'app.port': 'settings.app.port',
   'app.log_level': 'settings.app.logLevel', 'app.log_format': 'settings.app.logFormat', 'app.log_file': 'settings.app.logFile',
   'app.log_file_max_mb': 'settings.app.logMaxMb', 'app.log_file_backups': 'settings.app.logBackups',
   'app.log_levels': 'developer.labels.logLevels', 'app.static_dir': 'developer.labels.staticDir', 'app.base_path': 'settings.app.basePath',
@@ -102,7 +102,7 @@ export const CONFIG_LABELS: Record<string, string> = {
   'ai.api_tool': 'settings.app.aiApiTool', 'ai.scaffold_tools': 'settings.app.aiScaffoldTools', 'ai.ops_tools': 'settings.app.aiOpsTools',
   'ai.explorer_tools': 'settings.app.aiExplorerTools', 'ai.app_tools': 'settings.app.aiAppTools', 'ai.mcp_enabled': 'settings.app.aiMcpEnabled', 'ai.mcp_token_max_days': 'settings.app.aiMcpTokenDays', 'ai.sql_max_rows': 'settings.app.aiSqlMaxRows', 'ai.usage_retention_days': 'settings.app.aiUsageRetention', 'ai.allowed_connectors': 'settings.app.aiAllowedConnectors', 'ai.web_fetch_domains': 'settings.app.aiWebDomains',
   'ai.web_fetch_max_uses': 'settings.app.aiWebMaxUses', 'ai.allowed_models': 'settings.app.aiAllowedModels', 'ai.starters': 'settings.app.aiStarters',
-  'license.key': 'settings.app.licenseKey', 'crypto.master_key': 'developer.labels.masterKey',
+  'license.key': 'settings.app.licenseKey', 'license.usage_url': 'settings.app.usageUrl', 'crypto.master_key': 'developer.labels.masterKey',
   'notify.enabled': 'settings.app.notifyEnabled', 'notify.pool': 'settings.app.notifyPool', 'notify.smtp_host': 'settings.app.smtpHost',
   'notify.smtp_port': 'settings.app.smtpPort', 'notify.smtp_user': 'settings.app.smtpUser', 'notify.smtp_password': 'settings.app.smtpPassword',
   'notify.smtp_from': 'settings.app.smtpFrom', 'notify.smtp_tls': 'settings.app.smtpStartTls', 'notify.smtp_ssl': 'settings.app.smtpImplicitTls',

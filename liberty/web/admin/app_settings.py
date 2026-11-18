@@ -43,7 +43,7 @@ from liberty.licensing import verify_license
 # Keys safe to expose: secrets, path fields, and backend toggles that require a coordinated
 # DB/auth migration stay out. Everything else round-trips through the editor.
 _APP_SAFE_KEYS = {
-    "name", "host", "port", "log_level", "hot_reload", "default_language", "oracle_thick",
+    "name", "environment", "host", "port", "log_level", "hot_reload", "default_language", "oracle_thick",
     "default_period", "default_page_size", "dashboard_cache_seconds",
     "tabs_multi", "tabs_close_on_app_switch", "tabs_max", "drill_inline",
     "log_format", "log_file", "log_file_max_mb", "log_file_backups", "base_path", "external_urls",
@@ -55,7 +55,7 @@ _AI_SAFE_KEYS = {
     "allowed_connectors", "web_fetch_domains", "web_fetch_max_uses", "allowed_models", "starters",
     "api_key",   # sensitive — encrypted on save, masked on GET
 }
-_LICENSE_SAFE_KEYS = {"key"}   # sensitive — encrypted on save, masked on GET
+_LICENSE_SAFE_KEYS = {"key", "usage_url"}   # key: sensitive — encrypted on save, masked on GET
 _OIDC_SAFE_KEYS = {
     "enabled", "discovery_url", "client_id", "scopes",
     "username_claim", "email_claim", "name_claim",
