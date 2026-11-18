@@ -24,6 +24,12 @@
 - A server run from a checkout of the applications' repository (development) now knows the applications' version —
   from the repository's `pyproject.toml` — where it knew it only for an installed wheel or a materialised bundle:
   the usage report, the upgrade journal and the release-notes page name it.
+- **MCP endpoint: `/mcp` was unreachable on a real server.** The endpoint answered `/mcp/` only; the bare `/mcp` — the
+  address a client is given — fell to the application's page, which refuses a POST (405): Claude's connector check
+  reported "Connecting to the server — 405". It went unseen because the tests ran without the page and followed the
+  redirect that then exists. The endpoint is now routed at `/mcp` itself, ahead of the page. On 7.0.77, give the
+  connector `https://<server>/mcp/` with the trailing slash. The OAuth discovery addresses
+  (`/.well-known/oauth-protected-resource`, `oauth-authorization-server`) now answer a plain 404 instead of the page.
 
 ## 7.0.77 — unreleased
 

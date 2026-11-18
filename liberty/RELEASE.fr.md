@@ -28,6 +28,13 @@
   applications — d'après le `pyproject.toml` du dépôt — alors qu'il ne la connaissait que pour un wheel installé ou
   un bundle matérialisé : le rapport d'usage, le journal des mises à niveau et la page des notes de version la
   nomment.
+- **Point d'accès MCP : `/mcp` était inaccessible sur un vrai serveur.** Le point d'accès ne répondait qu'à `/mcp/` ;
+  `/mcp` sans barre finale — l'adresse donnée à un client — tombait sur la page de l'application, qui refuse un POST
+  (405) : la vérification du connecteur de Claude indiquait « Connecting to the server — 405 ». Le défaut est passé
+  inaperçu parce que les tests tournaient sans la page et suivaient la redirection qui existe alors. Le point d'accès
+  est désormais routé sur `/mcp` lui-même, avant la page. En 7.0.77, donner au connecteur `https://<serveur>/mcp/`
+  avec la barre finale. Les adresses de découverte OAuth (`/.well-known/oauth-protected-resource`,
+  `oauth-authorization-server`) répondent maintenant un simple 404 au lieu de la page.
 
 ## 7.0.77 — non publiée
 

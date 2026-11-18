@@ -26,7 +26,7 @@ pytest.importorskip("mcp")
 HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
 
 
-def _app(tmp_path, *, mcp_enabled: bool = True):
+def _app(tmp_path, *, mcp_enabled: bool = True, static_dir: str = ""):
     db_url = f"sqlite+aiosqlite:///{tmp_path / 'auth.db'}"
     conn_toml = tmp_path / "connectors.toml"
     conn_toml.write_text(f'[pools.default]\nurl = "{db_url}"\n')
@@ -44,7 +44,7 @@ def _app(tmp_path, *, mcp_enabled: bool = True):
 
     asyncio.run(seed())
     return create_app(Settings(
-        app=AppSettings(static_dir=""), connectors=ConnectorSettings(config_path=Path(conn_toml)),
+        app=AppSettings(static_dir=static_dir), connectors=ConnectorSettings(config_path=Path(conn_toml)),
         auth=AuthSettings(backend="db", jwt_secret="mcp-endpoint-test-secret-0123456789abcdef", pool="default"),
         ai=AISettings(enabled=True, api_key="", config_path=tmp_path / "ai.toml", mcp_enabled=mcp_enabled),
     ))
@@ -149,3 +149,27 @@ def test_the_endpoint_is_off_unless_enabled(tmp_path) -> None:
         app.state.settings.ai.mcp_enabled = True                                           # read per request: no restart
         app.state.ai = AiAssistant(AISettings(enabled=True), client=None, tools=_tools({}))
         assert _rpc(client, token, "tools/list").status_code == 200
+
+
+def test_the_bare_path_reaches_the_endpoint_when_the_page_is_served(tmp_path) -> None:
+    """On a real server the application's page is mounted at "/": `/mcp` — the address a client
+    is given — fell to it (a 405 on the POST) and the endpoint was unreachable (7.0.77). No
+    redirect is followed here: the bare path must answer by itself."""
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<html><head></head><body>the page</body></html>")
+    served = _app(tmp_path, static_dir=str(dist))                 # with the page mounted at "/"
+    with TestClient(served, follow_redirects=False) as client:
+        served.state.ai = AiAssistant(AISettings(enabled=True), client=None, tools=_tools({}))
+        assert client.get("/somewhere").status_code == 200 and "the page" in client.get("/somewhere").text   # the page is there
+        token = _token(client, "bob", "bobpw-123")
+        body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        for path in ("/mcp", "/mcp/"):
+            none = client.post(path, json=body, headers=HEADERS)
+            assert none.status_code == 401 and none.headers["www-authenticate"] == "Bearer", (path, none.status_code)
+            ok = client.post(path, json=body, headers={**HEADERS, "Authorization": f"Bearer {token}"})
+            assert ok.status_code == 200 and [t["name"] for t in ok.json()["result"]["tools"]] == ["lookup", "save_it", "shop_stock"], path
+        # no OAuth here: the discovery addresses say so instead of serving the page
+        for path in ("/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-authorization-server"):
+            r = client.get(path)
+            assert r.status_code == 404 and "personal access token" in r.json()["detail"], path

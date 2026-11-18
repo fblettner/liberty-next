@@ -746,10 +746,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(logs_router)
     app.include_router(retention_router)
     app.include_router(ai_usage_router)
-    # The MCP endpoint — the assistant's tools for an external client; mounted always, switched
-    # per request by ``[ai] mcp_enabled`` (liberty.ai.mcp_server).
-    from liberty.ai.mcp_server import endpoint as mcp_endpoint
-    app.mount("/mcp", mcp_endpoint(app), name="mcp")
+    # The MCP endpoint — the assistant's tools for an external client; always routed, switched
+    # per request by ``[ai] mcp_enabled`` (liberty.ai.mcp_server). Before the page's mount at "/".
+    from liberty.ai.mcp_server import install as install_mcp
+    install_mcp(app)
     app.include_router(promotion_router)
     app.include_router(developer_router)
 

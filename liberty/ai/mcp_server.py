@@ -140,9 +140,45 @@ async def running(app: Any) -> AsyncIterator[None]:
             app.state.mcp = None
 
 
+class _Asgi:
+    """An ASGI callable as an object: Starlette's ``Route`` treats a function as a
+    request → response endpoint and anything else as an ASGI app."""
+
+    def __init__(self, serve: Any) -> None:
+        self._serve = serve
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        await self._serve(scope, receive, send)
+
+
+def install(app: Any) -> None:
+    """Serve the endpoint at ``/mcp`` — the exact path a client is given — and under ``/mcp/``.
+    A mount alone answers ``/mcp/`` only: without the application's page mounted at ``/`` the
+    router redirects ``/mcp`` to it, with it the bare path fell to the page (a 405 on the POST),
+    so the endpoint was unreachable on a real server (7.0.77). Must be called before the page
+    is mounted. The OAuth discovery addresses answer a plain 404: this server signs in with a
+    token in the request header, and the page's HTML there would read as broken metadata."""
+    from starlette.responses import JSONResponse
+    from starlette.routing import Mount, Route
+
+    serve = _Asgi(endpoint(app))
+
+    async def no_oauth(_request: Any) -> Any:
+        return JSONResponse({"detail": "This server has no OAuth sign-in: send a personal access token as Authorization: Bearer"}, status_code=404)
+
+    app.router.routes.extend([
+        Route("/mcp", endpoint=serve, methods=["GET", "POST", "DELETE"], name="mcp"),
+        Mount("/mcp", app=serve, name="mcp-sub"),
+        Route("/.well-known/oauth-protected-resource", endpoint=no_oauth, methods=["GET"]),
+        Route("/.well-known/oauth-protected-resource/{rest:path}", endpoint=no_oauth, methods=["GET"]),
+        Route("/.well-known/oauth-authorization-server", endpoint=no_oauth, methods=["GET"]),
+        Route("/.well-known/oauth-authorization-server/{rest:path}", endpoint=no_oauth, methods=["GET"]),
+    ])
+
+
 def endpoint(app: Any) -> Any:
-    """The ASGI app mounted at ``/mcp``: the switch, the personal access token, then the
-    package's session manager."""
+    """The ASGI app behind ``/mcp``: the switch, the personal access token, then the package's
+    session manager."""
     from liberty.auth.routes import principal_from_personal_token
 
     async def reply(send: Any, status: int, detail: str, headers: list[tuple[bytes, bytes]] | None = None) -> None:
