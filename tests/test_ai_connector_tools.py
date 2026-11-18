@@ -215,3 +215,86 @@ async def test_list_connectors_search(large_registry) -> None:
     none = await lc.run({"search": "payroll"})
     assert none["connectors"] == [] and none["matches"] == 0 and "No match" in none["note"]
     assert (await lc.run({"search": "_put"}))["matches"] == 0             # a writable query is never listed
+
+
+# -- sql_query runs a SELECT the way its screen does (web/connectors.select_events) ------------
+
+
+@pytest_asyncio.fixture
+async def udc(tmp_path):
+    """A UDC-types table on a JDE-style connector (2-character column prefix), read by a screen."""
+    import sqlalchemy as sa
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from liberty.screens.config import parse_screens
+
+    url = f"sqlite+aiosqlite:///{tmp_path / 'udc.db'}"
+    engine = create_async_engine(url)
+    rows = [{"sy": "00", "rt": f"A{i:03d}", "dl": f"Type {i}", "seq": i} for i in range(300)] + [
+        {"sy": "01", "rt": "ST", "dl": "Search Type", "seq": 500}, {"sy": "01", "rt": "PH", "dl": "Phone Type", "seq": 501},
+        {"sy": "01", "rt": "LP", "dl": "Language", "seq": 502}]
+    async with engine.begin() as conn:
+        await conn.execute(sa.text("CREATE TABLE f0004 (dtsy TEXT, dtrt TEXT, dtdl01 TEXT, dtuseq INTEGER)"))
+        await conn.execute(sa.text("INSERT INTO f0004 VALUES (:sy, :rt, :dl, :seq)"), rows)
+    await engine.dispose()
+    select = "SELECT dtsy AS DTSY, dtrt AS DTRT, dtdl01 AS DTDL01, dtuseq AS DTUSEQ FROM f0004 ORDER BY dtsy, dtrt"
+    cfg = ConnectorsFile(
+        pools={"default": PoolConfig(url=url)},
+        connectors={"jde": SqlConnectorConfig(type="sql", pool="default", dd_prefix=2, queries=[
+            QueryDef(name="f0004_get", sql=select, label="UDC types"),
+            QueryDef(name="no_screen_get", sql=select),
+        ])},
+    )
+    screens = parse_screens({"screens": {"admin": {"f0004": {
+        "connector": "jde", "read_query": "f0004_get", "label": "UDC Types",
+        "columns": [{"name": "DTSY", "label": "System"}, {"name": "DTRT", "label": "Type", "dd": "RT"}, {"name": "DTDL01", "label": "Description"},
+                    {"name": "DTUSEQ", "label": "Sequence", "format": "integer"}],
+    }}}})
+    reg = ConnectorRegistry(cfg)
+    yield {t.name: t for t in build_connector_tools(reg, max_rows=200, screens=lambda: screens)}
+    await reg.aclose()
+
+
+@pytest.mark.asyncio
+async def test_sql_query_runs_like_the_screen(udc) -> None:
+    whole = await udc["sql_query"].run({"connector": "jde", "query": "f0004_get"})
+    assert whole["row_count"] == 200 and whole["truncated"] is True           # 303 rows: system 01 is beyond the cap
+    assert "narrow with `filters`" in whole["note"]
+    assert [c["label"] for c in whole["columns"]] == ["System", "Type", "Description", "Sequence"]   # the screen's labels
+
+
+@pytest.mark.asyncio
+async def test_sql_query_filters_are_the_dictionary_binds(udc) -> None:
+    q = udc["sql_query"]
+    by_column = await q.run({"connector": "jde", "query": "f0004_get", "filters": {"DTSY": "01"}})
+    assert [r["DTRT"] for r in by_column["rows"]] == ["LP", "PH", "ST"] and by_column["truncated"] is False
+    by_item = await q.run({"connector": "jde", "query": "f0004_get", "filters": {"DTSY": "01", "RT": "ST"}})   # the dictionary item the screen gives the column
+    assert [r["DTDL01"] for r in by_item["rows"]] == ["Search Type"]
+    by_name = await q.run({"connector": "jde", "query": "f0004_get", "filters": {"DTSY": "01", "DTRT": "ST"}})   # a column name is sent as its item
+    assert [r["DTDL01"] for r in by_name["rows"]] == ["Search Type"]
+    with pytest.raises(Exception, match="filter SY matches no column"):            # on a screen column the item is the hint's, not a guess
+        await q.run({"connector": "jde", "query": "f0004_get", "filters": {"SY": "01"}})
+    no_screen = await q.run({"connector": "jde", "query": "no_screen_get", "filters": {"SY": "01", "RT": "ST"}})   # no screen: the name minus the table prefix
+    assert [r["DTDL01"] for r in no_screen["rows"]] == ["Search Type"]
+    typed = await q.run({"connector": "jde", "query": "f0004_get", "filters": {"DTUSEQ": "501"}})            # typed by the column's format
+    assert [r["DTRT"] for r in typed["rows"]] == ["PH"]
+    ranged = await q.run({"connector": "jde", "query": "f0004_get", "filters": {"DTUSEQ_from": 500, "DTUSEQ_to": 501}})
+    assert sorted(r["DTRT"] for r in ranged["rows"]) == ["PH", "ST"]
+    bare = await q.run({"connector": "jde", "query": "no_screen_get", "filters": {"dtsy": "01"}})           # no screen needed
+    assert bare["row_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_sql_query_refuses_a_filter_that_was_not_applied(udc) -> None:
+    """The connector ignores a dictionary bind no column carries — every row would pass for the
+    filtered ones."""
+    with pytest.raises(Exception, match="filter SYSTEM matches no column of jde.f0004_get — it was not applied. The columns are: DTSY, DTRT, DTDL01, DTUSEQ"):
+        await udc["sql_query"].run({"connector": "jde", "query": "f0004_get", "filters": {"SYSTEM": "01", "DTSY": "01"}})
+
+
+@pytest.mark.asyncio
+async def test_sql_query_still_refuses_a_write_and_an_unknown_query(udc) -> None:
+    with pytest.raises(Exception):
+        await udc["sql_query"].run({"connector": "jde", "query": "ghost"})
+    with pytest.raises(Exception, match="no connector|not a SQL connector|ghost"):
+        await udc["sql_query"].run({"connector": "ghost", "query": "f0004_get"})

@@ -134,3 +134,20 @@ async def test_tool_results_are_capped_with_a_narrow_it_note() -> None:
     sent = client.messages.calls[1]["messages"][2]["content"][0]["content"]
     assert len(sent) < TOOL_RESULT_MAX_CHARS + 300 and sent.startswith("x" * 100) and "Narrow" in sent and str(TOOL_RESULT_MAX_CHARS * 2) in sent
     assert json.loads("1") == 1
+
+
+@pytest.mark.asyncio
+async def test_a_screen_on_another_connector_says_so() -> None:
+    """The application nomajde reads its screens on the connector jdedwards: the model must not
+    call `nomajde.f0092_get`."""
+    st = _state()
+    st.screens = ScreensFile(screens={"nomajde": {
+        "f0092": Screen(id="f0092", app="nomajde", label="Users", connector="jdedwards", read_query="f0092_get"),
+        "health": Screen(id="health", app="nomajde", label="Servers", read_query="jde_health_get"),
+    }})
+    tools = {t.name: t for t in build_instance_tools(lambda: st)}
+    screens = next(a for a in (await tools["describe_instance"].run({}))["apps"] if a["id"] == "nomajde")["screens"]
+    assert screens == [{"id": "f0092", "label": "Users", "read_query": "f0092_get", "connector": "jdedwards"},
+                       {"id": "health", "label": "Servers", "read_query": "jde_health_get"}]
+    found = [r for r in (await tools["search_catalog"].run({"query": "f0092"}))["results"] if r["kind"] == "screen"]
+    assert found == [{"kind": "screen", "app": "nomajde", "id": "f0092", "label": "Users", "read_query": "f0092_get", "connector": "jdedwards"}]

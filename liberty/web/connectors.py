@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Annotated, Any, AsyncIterator
+from typing import Annotated, Any, AsyncIterator, Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -442,34 +442,22 @@ async def _run_sql(
     return result.to_dict()
 
 
-def _stream_sql_ndjson(
+def select_events(
     connectors: ConnectorRegistry, connector: str, query: str, params: dict[str, Any], *,
     language: str | None = None, max_rows: int | None = None, user: str | None = None,
     screens: ScreensFile | None = None, chunk_size: int | None = None,
     screen_hint: tuple[str, str] | None = None,
     pool: str | None = None,
-    verbose_errors: bool = False,
     scope: DataScope | None = None,
-) -> StreamingResponse:
-    """Stream *query*'s rows as NDJSON (``application/x-ndjson``). Same per-screen prep as
-    :func:`_run_sql` — column hints, ``screen_max_rows``, dictionary scope — except writes are
-    rejected (streaming is SELECT-only; the SQLConnector enforces this and raises). The
-    response body is a sequence of newline-delimited JSON objects:
-
-      * ``{"kind":"meta","columns":[…],"cap":N,"chunk_size":N}`` — once at the top.
-      * ``{"kind":"rows","rows":[…],"sent":N}`` — repeatedly, ``chunk_size`` rows each.
-      * ``{"kind":"done","total":N,"truncated":bool,"duration_ms":…}`` — exactly once.
-      * ``{"kind":"error","detail":…}`` — emitted instead of the ``done`` line if the query
-        raises mid-stream. The HTTP status is still 200 (the headers have already been sent
-        by then); the consumer's NDJSON parser sees the error line and reports it as a
-        terminal event.
-
-    Errors raised **before** any byte ships (permission check, missing connector / query,
-    non-SELECT) propagate as standard HTTP errors via ``http_for_connector_error``.
-    """
-    # ── prep (mirrors _run_sql) — done synchronously so any failure raises before we start
-    # streaming. Once the generator below begins yielding, headers have been sent and we
-    # can't change the status code; preflight everything we can up here.
+) -> tuple[Any, Callable[[], AsyncIterator[Any]]]:
+    """A SELECT run the way a screen runs it — the one definition, for the NDJSON route
+    (:func:`_stream_sql_ndjson`) and the AI assistant's ``sql_query``: the screen of the query
+    (its column hints, ``max_rows``, dictionary scope = the screen's app), the request's params
+    with their screen filters (``COL`` / ``COL_op``) and dictionary binds (``_dd_<ITEM>``), the
+    environment's pool, the caller's data scope. Returns ``(connector, events)``; everything that
+    can fail before the first row (unknown connector / query, a non-SELECT) raises here as an
+    HTTP error, then ``events()`` yields the connector's :class:`StreamMeta` / ``StreamRows`` /
+    ``StreamDone``."""
     screen, _slot, screen_app = (None, None, None)
     if screen_hint and screens:
         app_h, sid_h = screen_hint
@@ -500,17 +488,56 @@ def _stream_sql_ndjson(
 
     plain, dd_binds = split_dd_binds(params)
 
+
+    def events() -> AsyncIterator[Any]:
+        return conn.execute_stream(
+            query, plain, language=language, max_rows=max_rows, user=user,
+            column_hints=column_hints, screen_max_rows=screen_max_rows,
+            dictionary_scope=dict_scope, chunk_size=chunk_size or 100, scope=scope,
+            dd_binds=dd_binds or None,
+        )
+
+    return conn, events
+
+
+def _stream_sql_ndjson(
+    connectors: ConnectorRegistry, connector: str, query: str, params: dict[str, Any], *,
+    language: str | None = None, max_rows: int | None = None, user: str | None = None,
+    screens: ScreensFile | None = None, chunk_size: int | None = None,
+    screen_hint: tuple[str, str] | None = None,
+    pool: str | None = None,
+    verbose_errors: bool = False,
+    scope: DataScope | None = None,
+) -> StreamingResponse:
+    """Stream *query*'s rows as NDJSON (``application/x-ndjson``). Same per-screen prep as
+    :func:`_run_sql` — column hints, ``screen_max_rows``, dictionary scope — except writes are
+    rejected (streaming is SELECT-only; the SQLConnector enforces this and raises). The
+    response body is a sequence of newline-delimited JSON objects:
+
+      * ``{"kind":"meta","columns":[…],"cap":N,"chunk_size":N}`` — once at the top.
+      * ``{"kind":"rows","rows":[…],"sent":N}`` — repeatedly, ``chunk_size`` rows each.
+      * ``{"kind":"done","total":N,"truncated":bool,"duration_ms":…}`` — exactly once.
+      * ``{"kind":"error","detail":…}`` — emitted instead of the ``done`` line if the query
+        raises mid-stream. The HTTP status is still 200 (the headers have already been sent
+        by then); the consumer's NDJSON parser sees the error line and reports it as a
+        terminal event.
+
+    Errors raised **before** any byte ships (permission check, missing connector / query,
+    non-SELECT) propagate as standard HTTP errors via ``http_for_connector_error``.
+    """
+    # The prep is done before the response starts, so any failure raises as a plain HTTP error:
+    # once the generator below begins yielding, the headers are sent and the status is fixed.
+    conn, events = select_events(
+        connectors, connector, query, params, language=language, max_rows=max_rows, user=user,
+        screens=screens, chunk_size=chunk_size, screen_hint=screen_hint, pool=pool, scope=scope,
+    )
+
     async def gen() -> AsyncIterator[bytes]:
         """Render each StreamEvent to a single NDJSON line (UTF-8 bytes, trailing ``\\n``).
         Wraps the connector's async generator with an exception handler so a mid-stream
         failure becomes a terminal ``error`` event instead of a hung connection."""
         try:
-            async for ev in conn.execute_stream(
-                query, plain, language=language, max_rows=max_rows, user=user,
-                column_hints=column_hints, screen_max_rows=screen_max_rows,
-                dictionary_scope=dict_scope, chunk_size=chunk_size or 100, scope=scope,
-                dd_binds=dd_binds or None,
-            ):
+            async for ev in events():
                 # The three concrete event types render to plain dicts; ``json.dumps`` with
                 # ``default=str`` handles dates / datetimes / Decimals the same way the
                 # non-streaming response does (FastAPI uses jsonable_encoder which falls back
@@ -704,7 +731,8 @@ async def sql_query_get(
     When the query is the ``read_query`` of a Screen, that screen's column hints +
     ``max_rows`` + audit table + dictionary scope (the screen's app) are applied
     automatically — that's how the same query has Settings-rich behaviour from the
-    screen runtime and stays a bare SQL runner when called by the AI assistant."""
+    screen runtime (the AI assistant's ``sql_query`` runs it the same way, through
+    :func:`select_events`) and stays a bare SQL runner for a query no screen reads."""
     require_permission(principal, f"sql:{connector}:{query}")
     # GET must not mutate — only SELECTs are allowed here; everything else uses POST.
     try:

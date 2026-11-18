@@ -104,7 +104,12 @@ def build_instance_tools(state: Callable[[], Any], *, allowed: list[str] | None 
             by_id = {sid: s for sid, s in (screens.get(name) or {}).items() if may(f"sql:{s.connector or name}:{s.read_query}")}
             if by_id:
                 # the read query by its exact name: the model must not guess `<screen>_get`
-                entry["screens"] = [{"id": sid, "label": s.label or s.description or sid, "read_query": s.read_query} for sid, s in by_id.items()]
+                # … and the connector that query is on, when it is not the application itself
+                entry["screens"] = [
+                    {"id": sid, "label": s.label or s.description or sid, "read_query": s.read_query,
+                     **({"connector": s.connector} if s.connector and s.connector != name else {})}
+                    for sid, s in by_id.items()
+                ]
             if restricted and not (entry.get("menu") or entry.get("screens") or name in model_apps):
                 continue      # nothing of this application is the caller's: not even its name
             apps.append(entry)

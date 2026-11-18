@@ -1,5 +1,19 @@
 # Liberty Next — Release notes
 
+## 7.0.78 — unreleased
+
+- AI assistant: `sql_query` runs a query the way its screen does. Since its first version the tool called the
+  connector directly — a "bare SQL runner", as the route's own documentation put it — so everything a screen brings
+  was missing: the column labels and formats, the screen's filters, the dictionary filters, the environment of the
+  page. It now goes through the same function as the screens' route (`web/connectors.select_events`, extracted from
+  the streaming route, which uses it too). The tool takes `filters` — `{column: value}`, sent as the framework's
+  dictionary binds (what a dashboard filter sends): the connector finds the column, types and trims the value, with or
+  without a screen; a range is `<column>_from` / `<column>_to`. A filter that matches no column is refused instead
+  of being ignored. On a JD Edwards install, "the UDC types of system 01" or "the data item AN8" is one call
+  instead of reading the table 200 rows at a time.
+- `describe_instance` and `search_catalog` give a screen's connector when it is not the application's own (the
+  assistant called `nomajde.f0004_get` for a query that is on `jdedwards`).
+
 ## 7.0.77 — unreleased
 
 - AI assistant: the applications ship tools. `ai.toml` takes `[ai.<app>.tools.<id>]` — a function of the application's

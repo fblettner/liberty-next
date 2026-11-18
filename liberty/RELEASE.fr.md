@@ -1,5 +1,20 @@
 # Liberty Next — Notes de version
 
+## 7.0.78 — non publiée
+
+- Assistant IA : `sql_query` exécute une requête comme le fait son écran. Depuis sa première version l'outil appelait
+  le connecteur directement — un « simple exécuteur SQL », selon la documentation même de la route — et tout ce
+  qu'apporte un écran manquait : les libellés et formats des colonnes, les filtres de l'écran, les filtres par
+  dictionnaire, l'environnement de la page. Il passe désormais par la même fonction que la route des écrans
+  (`web/connectors.select_events`, extraite de la route en flux, qui l'utilise aussi). L'outil accepte `filters` —
+  `{colonne: valeur}`, transmis comme les liaisons de dictionnaire du framework (ce qu'envoie un filtre de tableau de
+  bord) : le connecteur trouve la colonne, type et nettoie la valeur, avec ou sans écran ; une plage s'écrit
+  `<colonne>_from` / `<colonne>_to`. Un filtre qui ne correspond à aucune colonne est refusé au lieu d'être ignoré.
+  Sur une installation JD Edwards, « les types UDC du système 01 » ou « l'élément de données AN8 » devient un seul
+  appel, au lieu de lire la table 200 lignes à la fois.
+- `describe_instance` et `search_catalog` indiquent le connecteur d'un écran quand ce n'est pas celui de
+  l'application (l'assistant appelait `nomajde.f0004_get` pour une requête située sur `jdedwards`).
+
 ## 7.0.77 — non publiée
 
 - Assistant IA : les applications livrent des outils. `ai.toml` accepte `[ai.<app>.tools.<id>]` — une fonction des

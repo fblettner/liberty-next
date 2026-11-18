@@ -41,7 +41,10 @@ DEFAULT_SYSTEM_PROMPT = (
     "endpoint names — never invent or derive one. Where to get them: the page context names the "
     "query of the page the user is on; describe_instance gives each screen's read query; "
     "list_connectors lists the queries with their parameters — pass `search` (keywords) to find "
-    "one, since on a large installation it returns an overview only when called with no argument.\n"
+    "one, since on a large installation it returns an overview only when called with no argument. "
+    "A screen's query is on the screen's connector, which is not always its application's name. "
+    "To find a record or the rows of one value in a large table, pass `filters` to sql_query "
+    "instead of reading the table.\n"
     "2. SQL access is read-only — there is no tool to mutate data. If the user asks you to "
     "change something, explain that you can only read.\n"
     "3. If a tool fails, tell the user the tool name, the input you tried, and the error "
@@ -470,6 +473,7 @@ def build_assistant(
             allowed=settings.allowed_connectors or None,
             include_api=settings.api_tool,
             max_rows=settings.sql_max_rows,
+            screens=(lambda: getattr(state(), "screens", None)) if state is not None else None,
         ))
     if settings.scaffold_tools:
         registry.add(*build_scaffold_tools(

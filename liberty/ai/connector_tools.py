@@ -16,9 +16,10 @@ stable across config changes and lets ``list_connectors`` be the source of truth
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Callable
 
 from liberty.ai.tools import Tool, caller, may, require, tool
+from liberty.auth.scope import column_items
 from liberty.connectors import APIConnector, ConnectorRegistry, SQLConnector, flatten_query_metas
 from liberty.connectors.api import current_pool
 from liberty.connectors.base import ConnectorError
@@ -42,6 +43,26 @@ def _haystack(entry: dict[str, Any]) -> str:
     return " ".join(str(entry.get(k) or "") for k in ("name", "label", "description")).casefold()
 
 
+def _as_item(key: str, dd_of: dict[str, str]) -> str:
+    """A `filters` key as the dictionary bind to send: a screen column's name becomes the item
+    its hint gives it (``DTSY`` → ``SY``), the range suffix kept; anything else as given."""
+    k = str(key)
+    for suffix in ("_from", "_to"):
+        if k.endswith(suffix) and k[: -len(suffix)].lower() in dd_of:
+            return dd_of[k[: -len(suffix)].lower()] + suffix
+    return dd_of.get(k.lower(), k)
+
+
+def _filter_item(key: str) -> str:
+    """The column / dictionary item a `filters` key names, without its range suffix, lower-cased."""
+    k = str(key)
+    for suffix in ("_from", "_to"):
+        if k.endswith(suffix):
+            k = k[: -len(suffix)]
+            break
+    return k.lower()
+
+
 def _size(obj: Any) -> int:
     return len(json.dumps(obj, default=str))
 
@@ -56,6 +77,7 @@ def build_connector_tools(
     allowed: list[str] | None = None,
     include_api: bool = False,
     max_rows: int = DEFAULT_SQL_MAX_ROWS,
+    screens: Callable[[], Any] | None = None,
 ) -> list[Tool]:
     """Build the connector-backed tool set.
 
@@ -63,6 +85,9 @@ def build_connector_tools(
         connectors: the live registry.
         allowed: if non-empty, restrict to these connector names.
         include_api: also offer ``api_call`` (API endpoints may have side effects).
+        screens: ``() -> ScreensFile`` — ``sql_query`` runs a SELECT through the web layer's
+            ``select_events``, the function the screens' own route uses: with the catalogue, a
+            query behind a screen gets that screen's column hints and filters.
         max_rows: the most rows ``sql_query`` returns (``[ai] sql_max_rows``) — its own cap, not
             the pool's: a pool sized for the grid (500 000 rows, streamed) would otherwise be
             read in full into one tool result.
@@ -176,43 +201,79 @@ def build_connector_tools(
             ),
         }
 
-    async def sql_query(connector: str, query: str, params: dict[str, Any] | None = None, limit: int | None = None) -> dict[str, Any]:
-        """Run a named, read-only SQL query on a configured SQL connector.
+    async def sql_query(
+        connector: str, query: str, params: dict[str, Any] | None = None, filters: dict[str, Any] | None = None, limit: int | None = None,
+    ) -> dict[str, Any]:
+        """Run a named, read-only SQL query on a configured SQL connector — the way its screen
+        runs it: same labels and formats, same filters, the user's data scope.
 
-        Queries are predefined in the connector config; you only supply parameter
-        values. Writable (data-mutating) queries are refused. Call list_connectors
-        first to learn the connector + query names and which params they accept.
+        Queries are predefined in the connector config; you supply parameter values and
+        filters. Writable (data-mutating) queries are refused.
 
         The result holds the first rows only (a capped number); "truncated": true means more
         rows exist — the rows you got are then a sample, never a basis for a count or a total.
+        To find a record, or the rows of one value, do NOT read the table: pass `filters`.
 
         Args:
-            connector: connector name (from list_connectors).
+            connector: connector name (from list_connectors) — a screen's query is on the screen's connector, which may differ from its application.
             query: query name on that connector.
             params: optional {param: value} for the query's :bind parameters.
+            filters: {column: value} — only the rows where that result column equals the value, e.g. {"DTSY": "01"}; a column name of the result or its dictionary item; "<column>_from" / "<column>_to" give a range.
             limit: fewer rows than the cap, when a few are enough (a sample, a lookup).
         """
+        from fastapi import HTTPException
+
+        from liberty.web.connectors import DD_PARAM_PREFIX, _column_hints_for, _find_screen_for_query, select_events   # how a screen runs a SELECT
+
         # the permission before the lookup, like the HTTP route: no name enumeration
         require(f"sql:{connector}:{query}", f"the query {connector}.{query}")
-        conn = _sql(connector)
-        qdef = conn.get_query(query)  # raises QueryNotFoundError
+        qdef = _sql(connector).get_query(query)  # raises QueryNotFoundError
         if qdef.writable:
             raise ConnectorError(f"query {connector}.{query} is writable and not available to the assistant")
         cap = row_cap if limit is None else max(1, min(int(limit), row_cap))
-        # The streaming path: a server-side cursor, closed once the cap is reached — execute()
-        # would have the driver fetch the whole result before the cap cuts it.
+        # `filters` are the framework's dictionary binds (what a dashboard filter sends): the
+        # connector finds the column carrying each one, types and trims the value. A screen
+        # column carries the item its hint names (DTSY → SY): a filter given by column name is
+        # sent under that item.
+        catalog = screens() if screens is not None else None
+        hints = _column_hints_for(_find_screen_for_query(catalog, connector, query)[0]) if catalog is not None else None
+        dd_of = {h.name.lower(): (h.dd or h.name) for h in hints or [] if h.dd != ""}
+        wanted = {_as_item(k, dd_of): v for k, v in (filters or {}).items()}
+        request = {**(params or {}), **{f"{DD_PARAM_PREFIX}{k}": v for k, v in wanted.items()}}
+        who = caller()
+        try:
+            conn, events = select_events(
+                connectors, connector, query, request, max_rows=cap, chunk_size=min(cap, 500),
+                user=who.username if who is not None else None, screens=catalog, pool=current_pool.get(),
+            )
+        except HTTPException as exc:
+            raise ConnectorError(str(exc.detail)) from exc
         out: dict[str, Any] = {"connector": connector, "query": query, "columns": [], "rows": [], "row_count": 0, "truncated": False}
-        async for ev in conn.execute_stream(query, params or {}, max_rows=cap, chunk_size=min(cap, 500)):
+        # Which dictionary items the result columns carry — the connector's own rule (the screen
+        # hint's dd, else the column's name and, on a dd_prefix connector, the name minus the prefix).
+        prefix = int(getattr(conn.config, "dd_prefix", 0) or 0)
+        carried: set[str] = set()
+        async for ev in events():
             if isinstance(ev, StreamMeta):
                 out["columns"] = [c.to_dict() for c in ev.columns]
+                for c in ev.columns:
+                    carried |= column_items(c.name.lower(), dd_of, prefix)
             elif isinstance(ev, StreamRows):
                 out["rows"].extend(ev.rows)
             elif isinstance(ev, StreamDone):
                 out["row_count"], out["truncated"], out["duration_ms"] = ev.total, ev.truncated, round(ev.duration_ms, 3)
+        # A dictionary bind no column carries is ignored by the connector (right for a dashboard
+        # widget, wrong here: the model would take every row for the filtered ones).
+        missed = sorted({k for k in wanted if _filter_item(k) not in carried})
+        if missed:
+            raise ConnectorError(
+                f"filter {', '.join(missed)} matches no column of {connector}.{query} — it was not applied. "
+                f"The columns are: {', '.join(c['name'] for c in out['columns'])}"
+            )
         if out["truncated"]:
             out["note"] = (
                 f"Only the first {out['row_count']} rows are returned; more exist. Do not count or add them up: "
-                "narrow the query with its params, or use the Data Explorer tools for a count, a total or a ranking."
+                "narrow with `filters` (or the query's params), or use the Data Explorer tools for a count, a total or a ranking."
             )
         return out
 

@@ -105,7 +105,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           (SSE; `/ai/tools` also lists the pickable models + starters), catalog.py (the model list),
                           appconfig.py (ai.toml: what the APPS ship — starters per app / screen, playbooks),
                           instance_tools.py (describe_instance [app], search_catalog, list_playbooks / load_playbook: read app.state at call time;
-                          connector_tools.py = list_connectors [connector / search; an overview on a large install] + sql_query [own row cap]),
+                          connector_tools.py = list_connectors [connector / search; an overview on a large install] + sql_query [own row cap;
+                          runs through web/connectors.select_events like a screen's read; `filters` = the dictionary binds]),
                           ops_tools.py (jobs_status / server_log / integrity_checks — opt-in `[ai] ops_tools`),
                           app_tools.py (the tools the APPS ship: `[ai.<app>.tools.<id>]` = a plugin `j_` function offered as `<app>_<id>`,
                           allow-listed like call_plugin, permission `plugin:<callable>`, framework objects injected; a ToolRegistry provider read at call time),
