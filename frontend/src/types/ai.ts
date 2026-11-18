@@ -39,7 +39,15 @@ export interface Proposal {
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  /** The names of the files attached to a question (kept with the conversation). */
+  attachments?: string[]
+  /** The files themselves, as the parts the model reads (`POST /ai/attachments`): in memory only,
+   *  for the questions of the open conversation — never stored. */
+  blocks?: unknown[]
 }
+
+/** `POST /ai/attachments`: a file prepared for a question. */
+export interface Attachment { name: string; kind: 'image' | 'pdf' | 'table' | 'text'; size: number; block: unknown; note?: string }
 
 /** A conversation kept for the user (the saved-views store, kind `chat`): what they saw of it. */
 export interface Conversation { id: string; title: string; app: string | null; updated_at: string | null; messages: ChatMessage[] }
@@ -59,6 +67,8 @@ export interface AiInfo {
   starters: Record<string, string[]>
   /** The same keys with the questions under headings (ai.toml `groups`); shown as pills when a key has them. */
   starter_groups?: Record<string, StarterGroup[]>
+  /** Files attached to a question: the size limit (0 = off) and the extensions the picker offers. */
+  attachments?: { max_mb: number; accept: string[] }
 }
 
 export interface StarterGroup { label: string | null; starters: string[] }

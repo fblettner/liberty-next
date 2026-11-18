@@ -382,6 +382,9 @@ class AISettings(BaseModel):
     # through a personal access token. Off by default; needs the `mcp` extra.
     mcp_enabled: bool = False
     mcp_token_max_days: int = Field(default=366, ge=1)   # the longest life of a personal access token
+    # Files attached to a question (liberty.ai.attachments): an image, a PDF, a spreadsheet or a text
+    # file the assistant READS — the most megabytes of one upload; 0 = no attachment at all.
+    attachment_max_mb: int = Field(default=10, ge=0, le=30)
     app_tools: bool = True  # the tools the applications ship in ai.toml ([ai.<app>.tools.<id>] — a plugin function each)
     explorer_tools: bool = True  # explorer_models / explorer_fields / explorer_query — aggregates on the Data Explorer models
     allowed_connectors: list[str] = Field(default_factory=list)  # empty → all

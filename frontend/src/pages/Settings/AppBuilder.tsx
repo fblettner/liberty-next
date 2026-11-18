@@ -67,6 +67,7 @@ interface AiSection {
   app_tools: boolean
   mcp_enabled: boolean
   mcp_token_max_days: number
+  attachment_max_mb: number
   allowed_connectors: string[]
   web_fetch_domains: string[]
   web_fetch_max_uses: number
@@ -209,7 +210,7 @@ const DEFAULTS: {
   ai: {
     enabled: true, model: 'claude-opus-4-8', max_tokens: 8192, max_iterations: 8, system_prompt: '',
     thinking: false, effort: '', request_timeout: 120,
-    connector_tools: true, sql_max_rows: 200, usage_retention_days: 90, api_tool: false, scaffold_tools: false, ops_tools: false, explorer_tools: true, app_tools: true, mcp_enabled: false, mcp_token_max_days: 366, allowed_connectors: [],
+    connector_tools: true, sql_max_rows: 200, usage_retention_days: 90, api_tool: false, scaffold_tools: false, ops_tools: false, explorer_tools: true, app_tools: true, mcp_enabled: false, mcp_token_max_days: 366, attachment_max_mb: 10, allowed_connectors: [],
     web_fetch_domains: [], web_fetch_max_uses: 5, allowed_models: [], starters: {}, api_key: '',
   },
   license: { key: '', usage_url: 'https://nomalms.nomana-it.fr/api/usage' },
@@ -723,6 +724,10 @@ export default function AppBuilder() {
             <Field label={t('settings.app.aiSqlMaxRows')}>
               <Input type="number" min={1} max={10000} value={ai.sql_max_rows}
                 onChange={(e) => setAi({ ...ai, sql_max_rows: Number(e.target.value) || 200 })} style={{ width: 130 }} />
+            </Field>
+            <Field label={t('settings.app.aiAttachmentMaxMb')}>
+              <Input type="number" min={0} max={30} value={ai.attachment_max_mb}
+                onChange={(e) => setAi({ ...ai, attachment_max_mb: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })} style={{ width: 130 }} />
             </Field>
             <Field label={t('settings.app.aiUsageRetention')}>
               <Input type="number" min={0} value={ai.usage_retention_days}

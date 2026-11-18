@@ -57,9 +57,25 @@ export function trimHistory(messages: ChatMessage[]): ChatMessage[] {
   return kept
 }
 
+/** A conversation as it is kept (this device, the server): without the attached files themselves
+ *  — their names stay with the question. */
+export function forStorage(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((m) => ({ role: m.role, content: m.content, ...(m.attachments?.length ? { attachments: m.attachments } : {}) }))
+}
+
+/** A conversation as it is sent to `POST /ai/chat`: a question with attached files carries them
+ *  as parts before its text; one whose files are gone (a resumed conversation) says so. */
+export function forApi(messages: ChatMessage[]): { role: ChatMessage['role']; content: string | unknown[] }[] {
+  return messages.map((m) => {
+    if (m.blocks?.length) return { role: m.role, content: [...m.blocks, { type: 'text', text: m.content }] }
+    if (m.attachments?.length) return { role: m.role, content: `[attached then, no longer available: ${m.attachments.join(', ')}]\n${m.content}` }
+    return { role: m.role, content: m.content }
+  })
+}
+
 export function saveHistory(messages: ChatMessage[]): void {
   try {
-    const kept = trimHistory(messages)
+    const kept = forStorage(trimHistory(messages))
     if (kept.length === 0) localStorage.removeItem(HISTORY_KEY)
     else localStorage.setItem(HISTORY_KEY, JSON.stringify(kept))
   } catch { /* storage blocked — the conversation just does not survive the drawer */ }
@@ -129,7 +145,7 @@ export async function listConversations(): Promise<Conversation[]> {
 
 /** Save (create or replace) a conversation; an empty one is not kept. */
 export async function saveConversation(id: string, messages: ChatMessage[], app: string | null): Promise<void> {
-  const kept = trimHistory(messages)
+  const kept = forStorage(trimHistory(messages))
   if (kept.length === 0) return
   await api.put('/api/views/chat', { key: VIEW_KEY, name: id, payload: { title: titleOf(kept), app, messages: kept } })
 }

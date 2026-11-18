@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
-import { Send, ArrowRight, Check, X, FileEdit, AlertTriangle, Square, Plus, Sparkles, ChevronRight, ChevronDown, History, StickyNote, Trash2 } from 'lucide-react'
-import { ApiError, api, streamSSE } from '../../api/client'
-import type { AiInfo, AiModel, AiNote, ChatEvent, ChatMessage, Conversation, Proposal, StarterGroup } from '../../types/ai'
+import { Send, ArrowRight, Check, X, FileEdit, AlertTriangle, Square, Plus, Sparkles, ChevronRight, ChevronDown, History, StickyNote, Trash2, Paperclip } from 'lucide-react'
+import { ApiError, api, apiUpload, streamSSE } from '../../api/client'
+import type { AiInfo, AiModel, AiNote, Attachment, ChatEvent, ChatMessage, Conversation, Proposal, StarterGroup } from '../../types/ai'
 import { getPageContext, renderPageContext, subscribePageContext, summarizePageContext, type PageContext } from '../../services/aiContext'
 import {
-  currentConversationId, deleteConversation, deleteNote, listConversations, listNotes, loadHistory, loadModel, newConversationId, overflow,
+  currentConversationId, deleteConversation, deleteNote, forApi, listConversations, listNotes, loadHistory, loadModel, newConversationId, overflow,
   pickStarterGroups, saveConversation, saveHistory, saveModel, saveNote, setCurrentConversationId, trimHistory,
 } from '../../services/aiChat'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
@@ -22,7 +22,7 @@ type ProposalState = 'pending' | 'applying' | 'applied' | 'skipped' | 'error'
 // payload from the result; the model needs it, the operator doesn't. Errors keep their
 // message since that's actionable.
 type Entry =
-  | { kind: 'msg'; role: 'user' | 'assistant'; text: string }
+  | { kind: 'msg'; role: 'user' | 'assistant'; text: string; files?: string[] }
   | { kind: 'tool'; ok: boolean | null; name: string; callSummary: string; error?: string }
   | { kind: 'proposal'; toolName: string; proposal: Proposal; state: ProposalState; error?: string }
 
@@ -178,6 +178,13 @@ const PayloadPre = styled.pre`
 
 
 
+const FileRow = styled.div`display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px;`
+const FileChip = styled.span`
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: ${radius.sm};
+  border: 1px solid ${colors.border}; background: ${colors.bg.input}; font-size: ${fontSize.micro}; color: ${colors.text.secondary};
+  & button { all: unset; cursor: pointer; display: inline-flex; color: ${colors.text.muted}; }
+  & button:hover { color: ${colors.red.main}; }
+`
 const PanelBox = styled.div`
   flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;
   & .head { font-size: ${fontSize.micro}; color: ${colors.text.muted}; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 6px; }
@@ -233,7 +240,7 @@ function foldTools(entries: Entry[]): (Entry | { kind: 'tools'; items: Extract<E
 /** The transcript rebuilt from a persisted history: the message bubbles only (tool lines and
  *  proposal cards are not kept — the model's view of them lives in the assistant text). */
 function entriesOf(messages: ChatMessage[]): Entry[] {
-  return messages.map((m) => ({ kind: 'msg', role: m.role, text: m.content }))
+  return messages.map((m) => ({ kind: 'msg', role: m.role, text: m.content, files: m.attachments }))
 }
 
 export default function Chat({ onClose }: { onClose?: () => void }) {
@@ -263,6 +270,12 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
   const conversationRef = useRef<string>(currentConversationId())
   const [panel, setPanel] = useState(false)
   const [conversations, setConversations] = useState<Conversation[]>([])
+  // Files attached to the next question (POST /ai/attachments prepares each): read by the
+  // assistant, kept in memory for this conversation only.
+  const [attachInfo, setAttachInfo] = useState<{ max_mb: number; accept: string[] }>({ max_mb: 0, accept: [] })
+  const [pending, setPending] = useState<Attachment[]>([])
+  const [attaching, setAttaching] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
   const [notes, setNotes] = useState<AiNote[]>([])
   // The model picked on this device — only offered when the operator allowed more than one;
   // a pick that is no longer allowed falls back to the configured model.
@@ -293,6 +306,7 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
         setModels(r.models ?? [])
         setStarters(r.starters ?? {})
         setStarterGroups(r.starter_groups ?? {})
+        setAttachInfo(r.attachments ?? { max_mb: 0, accept: [] })
       })
       .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
   }, [])
@@ -334,11 +348,12 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
   // stream fills the assistant bubble. ``show = false`` is the control-plane turn sent after
   // Apply / Skip on a proposal — the assistant re-reads state and continues; the operator
   // never typed it, so the transcript does not show it.
-  async function runTurn(text: string, show: boolean) {
+  async function runTurn(text: string, show: boolean, files: Attachment[] = []) {
     if (busy) return
     setError(null); setBusy(true); setFollowups([]); setHeading(null)
-    historyRef.current = [...historyRef.current, { role: 'user', content: text }]
-    setEntries((es) => [...es, ...(show ? [{ kind: 'msg', role: 'user', text } as Entry] : []), { kind: 'msg', role: 'assistant', text: '' }])
+    const names = files.map((f) => f.name)
+    historyRef.current = [...historyRef.current, { role: 'user', content: text, ...(files.length ? { attachments: names, blocks: files.map((f) => f.block) } : {}) }]
+    setEntries((es) => [...es, ...(show ? [{ kind: 'msg', role: 'user', text, files: names } as Entry] : []), { kind: 'msg', role: 'assistant', text: '' }])
 
     let assistantText = ''
     const appendAssistant = (chunk: string) => {
@@ -381,7 +396,7 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
     abortRef.current = controller
     try {
       await streamSSE('/ai/chat', {
-        messages: trimHistory(historyRef.current), context: contextText(), model: model && model !== defaultModel ? model : undefined,
+        messages: forApi(trimHistory(historyRef.current)), context: contextText(), model: model && model !== defaultModel ? model : undefined,
       }, (raw) => {
         const ev = raw as ChatEvent
         if (ev.type === 'token') appendAssistant(ev.text ?? '')
@@ -409,9 +424,21 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
 
   async function send(preset?: string) {
     const text = (preset ?? input).trim()
-    if (!text || busy) return
-    setInput('')
-    await runTurn(text, true)
+    if (!text || busy || attaching) return
+    const files = pending
+    setInput(''); setPending([])
+    await runTurn(text, true, files)
+  }
+
+  async function attach(file: File | undefined) {
+    if (!file) return
+    setError(null); setAttaching(true)
+    try {
+      const a = await apiUpload<Attachment>('/ai/attachments', file)
+      setPending((cur) => [...cur.filter((x) => x.name !== a.name), a])
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally { setAttaching(false) }
   }
 
   // Mutate a proposal entry's state in place (the operator clicked Apply / Skip on it).
@@ -457,6 +484,7 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
   }
 
   function reset() {
+    setPending([])
     conversationRef.current = newConversationId()
     setCurrentConversationId(conversationRef.current)
     historyRef.current = []
@@ -536,6 +564,9 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
             />
           ) : e.kind === 'msg' ? (
             <Bubble key={i} $role={e.role}>
+              {e.files && e.files.length > 0 && (
+                <FileRow>{e.files.map((n) => <FileChip key={n}><Paperclip size={11} /> {n}</FileChip>)}</FileRow>
+              )}
               {e.text ? (
                 e.role === 'assistant' ? (
                   <Markdown>{e.text}</Markdown>
@@ -564,7 +595,27 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
           </Suggestions>
         </>
       )}
+      {pending.length > 0 && (
+        <FileRow style={{ padding: '4px 12px 0' }}>
+          {pending.map((a) => (
+            <FileChip key={a.name} title={a.note}>
+              <Paperclip size={11} /> {a.name}{a.note ? ' *' : ''}
+              <button type="button" onClick={() => setPending((cur) => cur.filter((x) => x.name !== a.name))} title={t('common.remove')}><X size={11} /></button>
+            </FileChip>
+          ))}
+        </FileRow>
+      )}
       <InputArea>
+        {attachInfo.max_mb > 0 && (
+          <>
+            <input ref={fileRef} type="file" accept={attachInfo.accept.join(',')} style={{ display: 'none' }} tabIndex={-1}
+              onChange={(ev) => { void attach(ev.target.files?.[0]); ev.target.value = '' }} />
+            <IconBtn type="button" onClick={() => fileRef.current?.click()} disabled={!available || busy || attaching}
+              title={t('chat.attach', { mb: attachInfo.max_mb })}>
+              {attaching ? <SpinnerRing size={12} thickness={2} /> : <Paperclip size={14} />}
+            </IconBtn>
+          </>
+        )}
         <InputBox
           value={input}
           onChange={(ev) => setInput(ev.target.value)}

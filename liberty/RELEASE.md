@@ -3,7 +3,8 @@
 ## 7.0.78 — unreleased
 
 - **Licence usage report.** A licensed installation tells the licence management tool, once a day, which
-  environment it is, its version and its number of enabled accounts — nothing else: no figure of the applications,
+  environment it is, its version — the framework's (`liberty-next`) and, when the applications are installed, theirs
+  (`liberty-apps`), one report each — and its number of enabled accounts — nothing else: no figure of the applications,
   no name, no data. It is sent by a nomaflow job the framework ships itself, `liberty-usage-report`, on purpose in
   the open: it is listed under Nomaflow → Jobs, each run shows what was sent and what the tool answered, a refused
   or unreachable send is the run's error, and it can be run now, paused or rescheduled like any job (its first
@@ -12,6 +13,17 @@
 - `[app] environment` (Administer → App): what the installation is — "production", "test"… — named in that report.
 - nomaflow: the framework can ship jobs of its own (`liberty.jobs.builtin`), added to the list unless `jobs.toml` has
   a job of the same id.
+- AI assistant: **attach a file to a question**. A paperclip in the chat lets the user give the assistant a file to
+  read: an image (a screenshot of an error), a PDF (a procedure), a spreadsheet or a CSV (a list to compare with what
+  the installation holds), a text or log file. An image and a PDF go to the model as they are; a spreadsheet, a CSV
+  and a text file are sent as text — the first sheet, the delimiter detected, cut beyond a size with a mark on the
+  file. The assistant only reads it: nothing is loaded into a table, nothing is stored. The file stays with the
+  conversation while it is open; the saved conversation keeps its name only, and a resumed question says its file
+  is no longer there. `[ai] attachment_max_mb` (10; Administer → App → AI Assistant; 0 = no attachment). A file is
+  input tokens at every question of its conversation.
+- A server run from a checkout of the applications' repository (development) now knows the applications' version —
+  from the repository's `pyproject.toml` — where it knew it only for an installed wheel or a materialised bundle:
+  the usage report, the upgrade journal and the release-notes page name it.
 
 ## 7.0.77 — unreleased
 

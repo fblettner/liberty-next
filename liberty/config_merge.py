@@ -693,15 +693,31 @@ def bundled_version(config_dir: Path | str | None) -> str | None:
         return None
 
 
+def checkout_version(config_dir: Path | str | None) -> str | None:
+    """The apps version of a development checkout: ``LIBERTY_APPS_DIR`` is then the ``config``
+    folder of the liberty-apps repository, whose ``pyproject.toml`` (one level up) carries the
+    version — nothing is installed and no bundle was materialised."""
+    if not config_dir:
+        return None
+    try:
+        import tomllib
+
+        project = tomllib.loads((Path(config_dir).parent / "pyproject.toml").read_text(encoding="utf-8")).get("project") or {}
+    except (OSError, ValueError):
+        return None
+    return str(project.get("version")) if project.get("name") == "liberty-apps" and project.get("version") else None
+
+
 def apps_version(config_dir: Path | str | None) -> str | None:
-    """Installed apps bundle version: the pip metadata when the wheel is installed in this
-    interpreter (pipx / venv), else the materialised bundle's manifest, else None."""
+    """The apps version this server runs: the pip metadata when the wheel is installed in this
+    interpreter (pipx / venv), else the materialised bundle's manifest (Docker), else the
+    repository's own version when the server runs from a checkout (development), else None."""
     from importlib.metadata import PackageNotFoundError, version
 
     try:
         return version("liberty-apps")
     except PackageNotFoundError:
-        return bundled_version(config_dir)
+        return bundled_version(config_dir) or checkout_version(config_dir)
 
 
 def _same_bytes(a: Path, b: Path) -> bool:

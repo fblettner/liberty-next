@@ -4,8 +4,11 @@ has. Nothing else: no figure of the applications, no name, no data.
 
 The same report NomaUBL sends (``custom.ubl.license.UsageReport``), to the same address, in the
 same shape — which is built into NomaUBL and must not change: ``POST <url>`` with the licence
-key as bearer and ``{environment, fingerprint, version, users, full, months}``. Liberty has no
-monthly figures, so ``months`` is empty and ``full`` is true (the report is the whole of it).
+key as bearer and ``{environment, fingerprint, version, users, full, months}``, plus ``product``
+(an optional field the tool files the installation by). Liberty is two products there, so two
+reports go, the same but for those two fields: ``liberty-next`` with the framework's version,
+always, and ``liberty-apps`` with the installed applications' version, when they are installed.
+Liberty has no monthly figures, so ``months`` is empty and ``full`` is true.
 
 It runs as the nomaflow job ``liberty-usage-report`` (:mod:`liberty.jobs.builtin`), visible and
 pausable like any job, on purpose: the customer can see what is sent, when, and what the tool
@@ -22,10 +25,14 @@ from typing import Any
 import httpx
 
 from liberty.config import Settings
+from liberty.config_merge import apps_version
 
 _log = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 20.0
+# The licence tool's product names — exact: it files each report under the product of that name.
+FRAMEWORK_PRODUCT = "liberty-next"
+APPS_PRODUCT = "liberty-apps"
 
 
 class UsageReportError(RuntimeError):
@@ -75,44 +82,56 @@ async def enabled_users(settings: Settings, connectors: Any) -> int | None:
         return None
 
 
-async def build_report(settings: Settings, connectors: Any) -> dict[str, Any]:
-    """What is sent — also what ``GET /api/license/usage`` shows."""
+async def build_reports(settings: Settings, connectors: Any) -> list[dict[str, Any]]:
+    """What is sent: one report per product of the installation, the same but for ``product``
+    and ``version`` — the framework always, the applications when they are installed. The names
+    are the licence tool's exact product names (a plain "liberty" would match neither)."""
     from liberty import __version__
 
-    report: dict[str, Any] = {
-        "environment": (settings.app.environment or "").strip(),
-        "fingerprint": fingerprint(settings, connectors),
-        "version": __version__,
-    }
+    products = [(FRAMEWORK_PRODUCT, __version__)]
+    installed = apps_version(settings.connectors.config_path.parent)
+    if installed:
+        products.append((APPS_PRODUCT, installed))
+    environment = (settings.app.environment or "").strip()
+    print_ = fingerprint(settings, connectors)
     users = await enabled_users(settings, connectors)
-    if users is not None:
-        report["users"] = users
-    report["full"] = True       # no monthly figures: this is the whole report
-    report["months"] = []
-    return report
+    reports: list[dict[str, Any]] = []
+    for product, version in products:
+        report: dict[str, Any] = {"product": product, "environment": environment, "fingerprint": print_, "version": version}
+        if users is not None:
+            report["users"] = users
+        report["full"] = True       # no monthly figures: this is the whole report
+        report["months"] = []
+        reports.append(report)
+    return reports
 
 
 async def send_usage_report(*, settings: Settings, connectors: Any, **_: object) -> dict[str, Any]:
-    """Send the report; the job run's result says what was sent and what the tool answered.
-    Anything that prevents the send is raised, so the run fails with the reason."""
+    """Send the reports; the job run's result says what was sent and what the tool answered.
+    Anything that prevents a send is raised, so the run fails with the reason."""
     url = (settings.license.usage_url or "").strip()
     if not url:
         raise UsageReportError("no address configured ([license] usage_url is blank), nothing sent")
     key = licence_key(settings)
     if not key:
         raise UsageReportError("no licence key, nothing sent")
-    report = await build_report(settings, connectors)
-    try:
-        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-            res = await client.post(url, json=report, headers={"Authorization": f"Bearer {key}"})
-    except httpx.HTTPError as exc:
-        raise UsageReportError(f"{type(exc).__name__} from {url}: {exc}") from exc
-    answer = res.text.strip()
-    if not res.is_success:
-        raise UsageReportError(f"HTTP {res.status_code} from {url}" + (f" : {answer[:300]}" if answer else ""))
-    sent = (
-        f"environment {report['environment'] or '(unnamed)'}, version {report['version']}"
-        + (f", {report['users']} enabled account(s)" if "users" in report else "")
+    reports = await build_reports(settings, connectors)
+    sent: list[str] = []
+    async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+        for report in reports:
+            try:
+                res = await client.post(url, json=report, headers={"Authorization": f"Bearer {key}"})
+            except httpx.HTTPError as exc:
+                raise UsageReportError(f"{report['product']}: {type(exc).__name__} from {url}: {exc}") from exc
+            answer = res.text.strip()
+            if not res.is_success:
+                raise UsageReportError(f"{report['product']}: HTTP {res.status_code} from {url}" + (f" : {answer[:300]}" if answer else ""))
+            sent.append(f"{report['product']} {report['version']} -> HTTP {res.status_code}")
+    first = reports[0]
+    summary = (
+        f"environment {first['environment'] or '(unnamed)'}"
+        + (f", {first['users']} enabled account(s)" if "users" in first else "")
+        + " — " + "; ".join(sent)
     )
-    _log.info("usage report sent to %s: %s -> HTTP %s", url, sent, res.status_code)
-    return {"sent": sent, "to": url, "status": res.status_code, "report": report}
+    _log.info("usage report sent to %s: %s", url, summary)
+    return {"sent": summary, "to": url, "reports": reports}

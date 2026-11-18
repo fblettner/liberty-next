@@ -14,11 +14,12 @@ import json
 import logging
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from liberty.ai.appconfig import AiFile, merged_starters
+from liberty.ai.attachments import AttachmentError, accepted, check_content, to_block
 from liberty.web.deps import request_language
 from liberty.ai.assistant import AiAssistant
 from liberty.ai.catalog import label_for
@@ -90,7 +91,39 @@ async def tools(
         # assistant.settings is the AISettings ([ai] in app.toml): the operator's starters win over ai.toml's
         "starters": merged_starters(getattr(request.app.state, "ai_config", None), assistant.settings.starters, request_language(request)),
         "starter_groups": (getattr(request.app.state, "ai_config", None) or AiFile()).starter_groups(request_language(request)),
+        # files attached to a question: the size limit (0 = off) and the extensions the picker offers
+        "attachments": {"max_mb": assistant.settings.attachment_max_mb, "accept": accepted() if assistant.settings.attachment_max_mb > 0 else []},
     }
+
+
+@router.post(
+    "/attachments",
+    summary="Prepare a file for a question",
+    responses={
+        400: {"description": "The file is too big, empty, of a kind that cannot be attached, or unreadable."},
+        403: {"description": "Caller lacks ``ai:chat`` permission."},
+        404: {"description": "AI assistant is disabled, or attachments are (``[ai] attachment_max_mb = 0``)."},
+    },
+)
+async def attach(
+    request: Request,
+    _: Annotated[Principal, Depends(require_permission(_AI_CHAT))],
+    file: Annotated[UploadFile, File(description="An image, a PDF, a spreadsheet or a text file.")],
+) -> dict[str, Any]:
+    """Turn an uploaded file into the part of a message the assistant reads: ``{name, kind,
+    size, block[, note]}``. The browser adds ``block`` to the user message it sends to
+    ``POST /ai/chat``. Nothing is stored and nothing is loaded anywhere: an image or a PDF comes
+    back as base64, a spreadsheet or a text file as text (cut beyond a size, ``note`` says so)."""
+    assistant = _assistant(request)
+    max_mb = assistant.settings.attachment_max_mb
+    if max_mb <= 0:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Attachments are disabled ([ai] attachment_max_mb = 0)")
+    limit = max_mb * 1_048_576
+    data = await file.read(limit + 1)
+    try:
+        return to_block(file.filename or "file", data, max_bytes=limit)
+    except AttachmentError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 NOTE_KIND = "ai_note"   # the user's notes in the saved-views store (liberty/web/views.py), keyed by application or "*"
@@ -188,6 +221,13 @@ async def chat(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="The first message must have role 'user'")
     if body.model and body.model not in _allowed_models(assistant):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"model {body.model!r} is not allowed — see [ai] allowed_models")
+    limit = assistant.settings.attachment_max_mb * 1_048_576
+    try:
+        for m in body.messages:
+            if m.role == "user":
+                check_content(m.content, max_bytes=limit)
+    except AttachmentError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     api_messages = [{"role": m.role, "content": m.content} for m in body.messages]
 
     app = app_of(body.context)

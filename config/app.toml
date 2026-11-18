@@ -94,6 +94,7 @@ request_timeout = 120
 connector_tools = true           # expose list_connectors + sql_query (read-only queries only)
 mcp_enabled = false              # the MCP endpoint (/mcp): the assistant's tools for an external client (Claude), per user
 mcp_token_max_days = 366         # the longest life of a personal access token (POST /auth/tokens, permission mcp:use)
+attachment_max_mb = 10           # a file attached to a question (image, PDF, spreadsheet, text): megabytes at most; 0 = none
 app_tools = true                 # the tools the applications ship in ai.toml (a plugin function each, read-only)
 usage_retention_days = 90        # the usage record (who, model, tokens, tools — no question, answer or row): days kept; 0 = all
 sql_max_rows = 200               # the most rows one sql_query call returns (the assistant's own cap, not the pool's)

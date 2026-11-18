@@ -95,7 +95,7 @@ def test_load_jobs_adds_a_built_in_unless_the_file_has_it(tmp_path) -> None:
 # -- the report --------------------------------------------------------------------------
 
 
-def test_the_report_is_nomaubls_shape_without_monthly_figures(tmp_path) -> None:
+def test_the_report_is_nomaubls_shape_without_monthly_figures(tmp_path, monkeypatch) -> None:
     from liberty.runtime import load_registry
 
     (tmp_path / "a").mkdir()
@@ -105,18 +105,25 @@ def test_the_report_is_nomaubls_shape_without_monthly_figures(tmp_path) -> None:
     async def go():
         reg = load_registry(s, None)
         try:
-            return await usage.build_report(s, reg), usage.fingerprint(s, reg), usage.fingerprint(other, load_registry(other, None))
+            return await usage.build_reports(s, reg), usage.fingerprint(s, reg), usage.fingerprint(other, load_registry(other, None))
         finally:
             await reg.aclose()
 
-    report, again, elsewhere = asyncio.run(go())
-    assert report == {"environment": "Production", "fingerprint": again, "version": __version__,
-                      "users": 5, "full": True, "months": []}        # the five enabled accounts of the seed
+    monkeypatch.setattr(usage, "apps_version", lambda config_dir: None)
+    reports, again, elsewhere = asyncio.run(go())
+    framework = {"product": "liberty-next", "environment": "Production", "fingerprint": again, "version": __version__,
+                 "users": 5, "full": True, "months": []}          # the five enabled accounts of the seed
+    assert reports == [framework]                                    # no applications installed: the framework alone
+    seen_dirs: list = []
+    monkeypatch.setattr(usage, "apps_version", lambda config_dir: seen_dirs.append(config_dir) or "0.1.11")
+    assert asyncio.run(go())[0] == [framework, {**framework, "product": "liberty-apps", "version": "0.1.11"}]   # the same, but product and version
+    assert seen_dirs[0] == s.connectors.config_path.parent
     assert len(again) == 16 and elsewhere != again                   # another database, another installation
 
 
-def test_the_job_sends_the_report_and_shows_it(tmp_path, lms) -> None:
+def test_the_job_sends_the_report_and_shows_it(tmp_path, lms, monkeypatch) -> None:
     seen, answer = lms
+    monkeypatch.setattr(usage, "apps_version", lambda config_dir: "0.1.11")
     app = create_app(_settings(tmp_path))
     with TestClient(app) as client:
         h = _h(client, "admin")
@@ -126,15 +133,18 @@ def test_the_job_sends_the_report_and_shows_it(tmp_path, lms) -> None:
         run_id = client.post(f"/admin/jobs/{USAGE_JOB_ID}/run", headers=h, json={}).json()["run_id"]
         detail = _finished(client, h, run_id)
         assert (detail.get("run") or detail)["state"] == "SUCCEEDED", detail
-        assert len(seen) == 1 and seen[0]["url"] == URL and seen[0]["auth"] == "Bearer the.licence.key"
-        assert seen[0]["body"] == {"environment": "Production", "fingerprint": seen[0]["body"]["fingerprint"], "version": __version__,
-                                   "users": 5, "full": True, "months": []}
+        assert len(seen) == 2 and {s["url"] for s in seen} == {URL} and {s["auth"] for s in seen} == {"Bearer the.licence.key"}
+        base = {"environment": "Production", "fingerprint": seen[0]["body"]["fingerprint"], "users": 5, "full": True, "months": []}
+        assert [s["body"] for s in seen] == [{"product": "liberty-next", "version": __version__, **base},
+                                              {"product": "liberty-apps", "version": "0.1.11", **base}]
+        assert "liberty-next" in json.dumps(detail) and "liberty-apps 0.1.11 -> HTTP 200" in json.dumps(detail)   # the run shows both sends
 
         # refused by the tool: the run fails with the reason
         answer.update(status=401, body={"detail": "Invalid licence key"})
         run_id = client.post(f"/admin/jobs/{USAGE_JOB_ID}/run", headers=h, json={}).json()["run_id"]
         detail = _finished(client, h, run_id)
-        assert (detail.get("run") or detail)["state"] == "FAILED" and "HTTP 401" in json.dumps(detail) and "Invalid licence key" in json.dumps(detail)
+        assert (detail.get("run") or detail)["state"] == "FAILED" and "liberty-next: HTTP 401" in json.dumps(detail) and "Invalid licence key" in json.dumps(detail)
+        assert len(seen) == 3                                         # the first report refused: the second is not sent
 
 
 def _finished(client: TestClient, h: dict, run_id: str) -> dict:
@@ -184,3 +194,19 @@ def test_nothing_is_sent_without_a_key_or_an_address(tmp_path, lms) -> None:
         with pytest.raises(usage.UsageReportError, match=reason):
             asyncio.run(usage.send_usage_report(settings=_settings(tmp_path, seed=False, **kw), connectors=None))
     assert seen == []
+
+
+def test_the_apps_version_of_a_development_checkout(tmp_path) -> None:
+    """A server run from the liberty-apps repository has nothing installed and no materialised
+    bundle: the version is the repository's own (`<config>/../pyproject.toml`)."""
+    from liberty.config_merge import checkout_version
+
+    config = tmp_path / "liberty-apps" / "config"
+    config.mkdir(parents=True)
+    assert checkout_version(config) is None                                    # no pyproject.toml
+    (config.parent / "pyproject.toml").write_text('[project]\nname = "liberty-apps"\nversion = "0.1.11"\n')
+    assert checkout_version(config) == "0.1.11"
+    (config.parent / "pyproject.toml").write_text('[project]\nname = "something-else"\nversion = "9.9"\n')
+    assert checkout_version(config) is None                                    # another project's folder is not the applications
+    (config.parent / "pyproject.toml").write_text("not toml [")
+    assert checkout_version(config) is None and checkout_version(None) is None

@@ -3,7 +3,8 @@
 ## 7.0.78 — non publiée
 
 - **Rapport d'usage de la licence.** Une installation sous licence signale une fois par jour à l'outil de gestion des
-  licences quel environnement elle est, sa version et son nombre de comptes actifs — rien d'autre : aucun chiffre des
+  licences quel environnement elle est, sa version — celle du framework (`liberty-next`) et, quand les applications
+  sont installées, la leur (`liberty-apps`), un rapport chacune — et son nombre de comptes actifs — rien d'autre : aucun chiffre des
   applications, aucun nom, aucune donnée. Il est envoyé par une tâche nomaflow livrée par le framework,
   `liberty-usage-report`, volontairement visible : elle figure sous Nomaflow → Tâches, chaque exécution montre ce
   qui a été envoyé et la réponse de l'outil, un envoi refusé ou impossible est l'erreur de l'exécution, et elle se
@@ -14,6 +15,19 @@
   rapport.
 - nomaflow : le framework peut livrer ses propres tâches (`liberty.jobs.builtin`), ajoutées à la liste sauf si
   `jobs.toml` contient une tâche du même identifiant.
+- Assistant IA : **joindre un fichier à une question**. Un trombone dans le chat permet de donner à l'assistant un
+  fichier à lire : une image (une capture d'écran d'erreur), un PDF (une procédure), un classeur ou un CSV (une
+  liste à comparer avec ce que contient l'installation), un fichier texte ou un journal. Une image et un PDF sont
+  transmis tels quels au modèle ; un classeur, un CSV et un fichier texte le sont sous forme de texte — la première
+  feuille, le séparateur détecté, coupés au-delà d'une taille avec une marque sur le fichier. L'assistant ne fait
+  que le lire : rien n'est chargé dans une table, rien n'est conservé. Le fichier reste avec la conversation tant
+  qu'elle est ouverte ; la conversation enregistrée n'en garde que le nom, et une question reprise indique que son
+  fichier n'est plus là. `[ai] attachment_max_mb` (10 ; Administrer → App → Assistant IA ; 0 = aucune pièce jointe).
+  Un fichier compte en jetons d'entrée à chaque question de sa conversation.
+- Un serveur lancé depuis une copie du dépôt des applications (développement) connaît désormais la version des
+  applications — d'après le `pyproject.toml` du dépôt — alors qu'il ne la connaissait que pour un wheel installé ou
+  un bundle matérialisé : le rapport d'usage, le journal des mises à niveau et la page des notes de version la
+  nomment.
 
 ## 7.0.77 — non publiée
 

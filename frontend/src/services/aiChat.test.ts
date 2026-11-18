@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  CONVERSATIONS_MAX, HISTORY_MAX, currentConversationId, loadHistory, loadModel, newConversationId, overflow, pickStarterGroups, pickStarters,
+  CONVERSATIONS_MAX, HISTORY_MAX, currentConversationId, forApi, forStorage, loadHistory, loadModel, newConversationId, overflow, pickStarterGroups, pickStarters,
   saveHistory, saveModel, setCurrentConversationId, titleOf, trimHistory,
 } from './aiChat'
 import type { Conversation } from '../types/ai'
@@ -87,5 +87,30 @@ describe('conversations', () => {
     }))
     expect(overflow(all).map((c) => c.id).sort()).toEqual(['c0', 'c1'])
     expect(overflow(all.slice(0, 5))).toEqual([])
+  })
+})
+
+describe('attached files', () => {
+  const block = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }
+  const turn = [
+    { role: 'user' as const, content: 'What is this error?', attachments: ['error.png'], blocks: [block] },
+    { role: 'assistant' as const, content: 'ORA-00911.' },
+  ]
+  it('sends the files as parts before the question', () => {
+    expect(forApi(turn)).toEqual([
+      { role: 'user', content: [block, { type: 'text', text: 'What is this error?' }] },
+      { role: 'assistant', content: 'ORA-00911.' },
+    ])
+  })
+  it('keeps the names, never the files', () => {
+    const kept = forStorage(turn)
+    expect(kept).toEqual([{ role: 'user', content: 'What is this error?', attachments: ['error.png'] }, { role: 'assistant', content: 'ORA-00911.' }])
+    expect(JSON.stringify(kept)).not.toContain('AAAA')
+    localStorage.clear()
+    saveHistory(turn)
+    expect(localStorage.getItem('liberty.ai.history')).not.toContain('AAAA')
+  })
+  it('says so when a resumed question no longer has its file', () => {
+    expect(forApi(forStorage(turn))[0].content).toBe('[attached then, no longer available: error.png]\nWhat is this error?')
   })
 })
