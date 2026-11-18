@@ -122,6 +122,24 @@ async def build_user_views(settings: Settings, connectors: ConnectorRegistry) ->
         return None
 
 
+async def build_ai_usage(settings: Settings, connectors: ConnectorRegistry) -> Any | None:
+    """The assistant's audit and usage record on the auth pool — ``None`` when the assistant is
+    off or the pool is unusable (logged; the chat then works without being recorded)."""
+    auth = getattr(settings, "auth", None)
+    ai = getattr(settings, "ai", None)
+    if auth is None or ai is None or not ai.enabled:
+        return None
+    try:
+        from liberty.ai.usage import AiUsageStore
+
+        store = AiUsageStore(connectors.pools, auth.pool)
+        journal_schema(settings, await store.create_schema())
+        return store
+    except Exception as exc:  # noqa: BLE001 — never let the usage record take the app down
+        _log.warning("AI usage store on pool %r unusable (%s) — the assistant's usage is not recorded", auth.pool, exc)
+        return None
+
+
 async def build_notifications(settings: Settings, connectors: ConnectorRegistry) -> Any | None:
     """The notification inbox store on ``[notify] pool`` — ``None`` when disabled or the pool is
     unusable (logged; the bell then shows nothing, the dispatcher's portal channel reports it)."""
@@ -312,6 +330,13 @@ async def _rebind_pool_holders(app: Any, settings: Settings, new: ConnectorRegis
             state.user_views.rebind(new.pools)
         else:
             state.user_views = await build_user_views(settings, new)
+
+    # The assistant's usage record — same policy.
+    if hasattr(state, "ai_usage"):
+        if state.ai_usage is not None:
+            state.ai_usage.rebind(new.pools)
+        else:
+            state.ai_usage = await build_ai_usage(settings, new)
 
     # Notifications — the inbox store rebinds; the dispatcher reads the holders lazily.
     if hasattr(state, "notifications"):

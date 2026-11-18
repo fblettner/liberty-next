@@ -173,6 +173,7 @@ class ChatEvent:
     message: str | None = None
     stop_reason: str | None = None
     usage: dict[str, int] | None = None
+    size: int | None = None     # a tool_result's full size in characters (before any cut) — for the usage record
     # Structured payload for ``proposal`` events — the Proposal envelope from
     # liberty.ai.proposal so the chat UI can render an Apply card. None for every
     # other event type.
@@ -189,6 +190,7 @@ class ChatEvent:
             "message": self.message,
             "stop_reason": self.stop_reason,
             "usage": self.usage,
+            "size": self.size,
             "data": self.data,
         }.items() if v is not None}
 
@@ -354,6 +356,7 @@ class AiAssistant:
                 summary = tdef.summarize(arguments) if tdef else block.name
                 yield ChatEvent("tool_call", name=block.name, input=arguments, summary=summary)
                 content, is_error = await self.tools.execute(block.name, arguments)
+                full_size = len(content)
                 if len(content) > TOOL_RESULT_MAX_CHARS:
                     content = (
                         content[:TOOL_RESULT_MAX_CHARS]
@@ -372,7 +375,7 @@ class AiAssistant:
                         parsed = None
                     if isinstance(parsed, dict) and isinstance(parsed.get("proposal"), dict):
                         yield ChatEvent("proposal", name=block.name, data=parsed["proposal"])
-                yield ChatEvent("tool_result", name=block.name, ok=not is_error, summary=_truncate(content))
+                yield ChatEvent("tool_result", name=block.name, ok=not is_error, summary=_truncate(content), size=full_size)
                 results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,

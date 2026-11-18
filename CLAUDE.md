@@ -107,6 +107,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           instance_tools.py (describe_instance [app], search_catalog, list_playbooks / load_playbook: read app.state at call time;
                           connector_tools.py = list_connectors [connector / search; an overview on a large install] + sql_query [own row cap]),
                           ops_tools.py (jobs_status / server_log / integrity_checks — opt-in `[ai] ops_tools`),
+                          usage.py (the audit and usage record: ly2_ai_call, one row per turn — who, model, tokens, tools, never the question /
+                          answer / rows; TurnRecorder fed by the chat route; read by web/ai_usage.py = /admin/ai-usage, Monitoring → AI usage),
                           evals.py (the evaluation set: cases in TOML, played against a live server, checked on tools / texts / figures)
   jobs/ (nomaflow)        schema.py (jobs.toml), registry, runner (state machine, retries,
                           cancel), scheduler (APScheduler, single process), recovery, retention,
@@ -369,7 +371,7 @@ LIBERTY_E2E_USER=… LIBERTY_E2E_PASSWORD=… .venv/bin/python -m liberty.ai.eva
 - **Single-process assumptions**: APScheduler's in-memory jobstore and the Socket.IO lock
   rooms are per process — run one replica (PLAN D3 before scaling out).
 - **Audit**: `Screen.audit_table` mirrors writes into `AUD_<table>` in the same transaction.
-- **Framework tables** (nomaflow run history, change packages, saved views, optional `ly2_*` auth):
+- **Framework tables** (nomaflow run history, change packages, saved views, the AI usage record, optional `ly2_*` auth):
   every store's `create_schema()` goes through `liberty.schema_sync.sync_tables` — `create_all` plus
   forward-adding the model columns a live table lacks — and returns the changes, journaled as
   `framework-schema` via `runtime.journal_schema`. Adding a column to a model is therefore enough;

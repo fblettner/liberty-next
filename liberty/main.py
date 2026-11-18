@@ -18,12 +18,13 @@ from starlette.staticfiles import StaticFiles
 from liberty import __version__
 from liberty.ai.assistant import build_assistant
 from liberty.ai.routes import router as ai_router
+from liberty.web.ai_usage import router as ai_usage_router
 from liberty.auth.authstore import build_auth_backend
 from liberty.auth.oidc import build_oidc
 from liberty.auth.routes import router as auth_router
 from liberty.auth.dependencies import OptionalPrincipal
 from liberty.auth.tokens import MIN_SECRET_BYTES, TokenConfig, TokenService
-from liberty.runtime import build_changesets_db, build_dispatcher, build_notifications, build_user_views, load_registry
+from liberty.runtime import build_ai_usage, build_changesets_db, build_dispatcher, build_notifications, build_user_views, load_registry
 from liberty.config import AuthSettings, Settings, load_settings
 from liberty.connectors import ConnectorRegistry
 from liberty.connectors.base import ConnectorError
@@ -251,6 +252,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # like the changesets table above so a bad/unreachable pool degrades the
         # feature rather than failing boot (the grid then just won't persist).
         app.state.user_views = await build_user_views(settings, app.state.connectors)
+        app.state.ai_usage = await build_ai_usage(settings, app.state.connectors)
         if app.state.user_views is not None:
             from liberty.explorer.store import sync_bundled
             try:
@@ -344,6 +346,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         res = await purge_change_packages(app.state.changesets_db, cdays)
                         if res["packages"] or res["import_logs"]:
                             _log.info("change packages: %s older than %d days dropped", res, cdays)
+                    usage = getattr(app.state, "ai_usage", None)
+                    udays = int(getattr(app.state.settings.ai, "usage_retention_days", 0) or 0)
+                    if usage is not None and udays > 0:
+                        n = await usage.delete_older_than(udays)
+                        if n:
+                            _log.info("AI usage: %d turn(s) older than %d days dropped", n, udays)
                     store = getattr(app.state, "notifications", None)
                     days = int(getattr(app.state.settings.notify, "retention_days", 0) or 0)
                     if store is not None and days > 0:
@@ -734,6 +742,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(notifications_router)
     app.include_router(logs_router)
     app.include_router(retention_router)
+    app.include_router(ai_usage_router)
     app.include_router(promotion_router)
     app.include_router(developer_router)
 

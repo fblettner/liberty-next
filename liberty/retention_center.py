@@ -13,6 +13,8 @@ store               what goes                                  set in
                     past ``max_age_days`` (newest kept)         job's step settings
 ``change_packages`` exported / promoted packages and import    app.toml ``[changesets]
                     logs past ``retention_days`` (0 = keep)    retention_days``
+``ai_usage``        the assistant's turns past the age         app.toml ``[ai]
+                    (0 = keep)                                 usage_retention_days``
 ``saved_views``     nothing — the users' own analyses / views  (shown for its size)
 ``server_log``      rotated by size                            app.toml ``[app] log_file_*``
 ==================  =========================================  ===============================
@@ -33,7 +35,7 @@ from typing import Any
 
 _log = logging.getLogger(__name__)
 
-STORES = ("runs", "work_area", "notifications", "config_versions", "change_packages", "saved_views", "doc_reports", "server_log")
+STORES = ("runs", "work_area", "notifications", "config_versions", "change_packages", "ai_usage", "saved_views", "doc_reports", "server_log")
 CONFIG_PURGE_CALLABLE = "liberty.jobs.maintenance:purge_config_versions"
 
 
@@ -118,6 +120,12 @@ async def status(st: Any) -> list[dict[str, Any]]:
         days = int(getattr(settings.changesets, "retention_days", 0) or 0)
         out.append({"id": "change_packages", "policy": {"days": days}, "where": "app.toml [changesets] retention_days",
                     "size": {"packages": sum(by_status.values()), "by_status": by_status, "import_logs": int(bundles)}, "can_run": days > 0})
+    # the assistant's usage record
+    usage = getattr(st, "ai_usage", None)
+    if usage is not None:
+        days = int(getattr(settings.ai, "usage_retention_days", 0) or 0)
+        out.append({"id": "ai_usage", "policy": {"days": days}, "where": "app.toml [ai] usage_retention_days",
+                    "size": {"turns": await usage.count()}, "can_run": days > 0})
     # saved views
     views = getattr(st, "user_views", None)
     if views is not None:
@@ -199,4 +207,10 @@ async def run(st: Any, store: str, *, dry_run: bool) -> dict[str, Any]:
             raise ValueError("no change-package retention ([changesets] retention_days = 0)")
         res = await purge_change_packages(db, days, dry_run=dry_run)
         return {"deleted": res["packages"] + res["import_logs"], "detail": res}
+    if store == "ai_usage":
+        usage = getattr(st, "ai_usage", None)
+        days = int(getattr(settings.ai, "usage_retention_days", 0) or 0)
+        if usage is None or days <= 0:
+            raise ValueError("no AI usage retention ([ai] usage_retention_days = 0, or the assistant is off)")
+        return {"deleted": await usage.delete_older_than(days, dry_run=dry_run)}
     raise ValueError(f"{store!r} has nothing to purge")

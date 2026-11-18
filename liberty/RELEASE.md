@@ -1,5 +1,19 @@
 # Liberty Next — Release notes
 
+## 7.0.75 — unreleased
+
+- AI assistant: an audit and usage record. Each question to the assistant is kept in `ly2_ai_call` (created at
+  start-up, on the auth pool): who asked, from which application's page, the model, the tokens (input, output, read
+  from / written to the cache), the time, how it ended, and each tool call — its name, what it was called on (the
+  connector and query, the model, the keywords), whether it failed and why, its size and its time. **Never the
+  question, the answer or a row a tool returned.** A question the user abandons half-way is recorded with what had
+  happened; a store that is down never breaks a conversation.
+- **Monitoring → AI usage** (superusers): the period in figures — questions, users, tokens with the share read from
+  the cache, tool calls and failures, average time — by user, day, model and tool, and the latest questions with
+  their tool calls (a click on a user narrows them). `GET /admin/ai-usage`.
+- `[ai] usage_retention_days` (90; Settings → App → AI; 0 keeps everything): older questions are dropped with the
+  notifications' purge, and the store is on **Monitoring → Retention** (size, preview, purge).
+
 ## 7.0.74 — unreleased
 
 - AI assistant: the tools answer for the signed-in user. **A change of behaviour**: until now `ai:chat` alone let the

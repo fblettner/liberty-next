@@ -1,5 +1,22 @@
 # Liberty Next — Notes de version
 
+## 7.0.75 — non publiée
+
+- Assistant IA : un enregistrement d'audit et d'usage. Chaque question posée à l'assistant est conservée dans
+  `ly2_ai_call` (créée au démarrage, sur le pool d'authentification) : qui a demandé, depuis la page de quelle
+  application, le modèle, les jetons (entrée, sortie, lus depuis / écrits dans le cache), la durée, l'issue, et
+  chaque appel d'outil — son nom, sur quoi il a été appelé (le connecteur et la requête, le modèle, les mots-clés),
+  s'il a échoué et pourquoi, sa taille et sa durée. **Jamais la question, la réponse ni une ligne renvoyée par un
+  outil.** Une question abandonnée en cours de route est enregistrée avec ce qui s'était passé ; un stockage en
+  panne n'interrompt jamais une conversation.
+- **Supervision → Usage de l'IA** (super-utilisateurs) : la période en chiffres — questions, utilisateurs, jetons
+  avec la part lue depuis le cache, appels d'outils et échecs, durée moyenne — par utilisateur, jour, modèle et
+  outil, et les dernières questions avec leurs appels d'outils (un clic sur un utilisateur les restreint).
+  `GET /admin/ai-usage`.
+- `[ai] usage_retention_days` (90 ; Paramètres → App → IA ; 0 conserve tout) : les questions plus anciennes sont
+  supprimées avec la purge des notifications, et le stockage figure dans **Supervision → Rétention** (taille,
+  aperçu, purge).
+
 ## 7.0.74 — non publiée
 
 - Assistant IA : les outils répondent pour l'utilisateur connecté. **Un changement de comportement** : jusqu'ici

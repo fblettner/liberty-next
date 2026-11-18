@@ -58,6 +58,7 @@ interface AiSection {
   request_timeout: number
   connector_tools: boolean
   sql_max_rows: number
+  usage_retention_days: number
   api_tool: boolean
   scaffold_tools: boolean
   ops_tools: boolean
@@ -203,7 +204,7 @@ const DEFAULTS: {
   ai: {
     enabled: true, model: 'claude-opus-4-8', max_tokens: 8192, max_iterations: 8, system_prompt: '',
     thinking: false, effort: '', request_timeout: 120,
-    connector_tools: true, sql_max_rows: 200, api_tool: false, scaffold_tools: false, ops_tools: false, explorer_tools: true, allowed_connectors: [],
+    connector_tools: true, sql_max_rows: 200, usage_retention_days: 90, api_tool: false, scaffold_tools: false, ops_tools: false, explorer_tools: true, allowed_connectors: [],
     web_fetch_domains: [], web_fetch_max_uses: 5, allowed_models: [], starters: {}, api_key: '',
   },
   license: { key: '' },
@@ -709,6 +710,10 @@ export default function AppBuilder() {
             <Field label={t('settings.app.aiSqlMaxRows')}>
               <Input type="number" min={1} max={10000} value={ai.sql_max_rows}
                 onChange={(e) => setAi({ ...ai, sql_max_rows: Number(e.target.value) || 200 })} style={{ width: 130 }} />
+            </Field>
+            <Field label={t('settings.app.aiUsageRetention')}>
+              <Input type="number" min={0} value={ai.usage_retention_days}
+                onChange={(e) => setAi({ ...ai, usage_retention_days: Math.max(0, Number(e.target.value) || 0) })} style={{ width: 130 }} />
             </Field>
             <Checkbox label={t('settings.app.aiApiTool')}
               checked={ai.api_tool} onChange={(c) => setAi({ ...ai, api_tool: c })} />

@@ -11,6 +11,7 @@ when enabled but unconfigured (no API key), the stream's first event is an
 from __future__ import annotations
 
 import json
+import logging
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -21,10 +22,12 @@ from liberty.ai.appconfig import AiFile, merged_starters
 from liberty.web.deps import request_language
 from liberty.ai.assistant import AiAssistant
 from liberty.ai.catalog import label_for
+from liberty.ai.usage import TurnRecorder, app_of
 from liberty.auth.dependencies import require_permission
 from liberty.auth.principal import Principal
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+_log = logging.getLogger(__name__)
 
 _AI_CHAT = "ai:chat"
 
@@ -88,6 +91,18 @@ async def tools(
         "starters": merged_starters(getattr(request.app.state, "ai_config", None), assistant.settings.starters, request_language(request)),
         "starter_groups": (getattr(request.app.state, "ai_config", None) or AiFile()).starter_groups(request_language(request)),
     }
+
+
+async def _record(request: Request, recorder: TurnRecorder) -> None:
+    """Keep the turn in the usage record — best-effort: a store that is down is logged, never
+    an error for the user."""
+    store = getattr(request.app.state, "ai_usage", None)
+    if store is None:
+        return
+    try:
+        await store.record(recorder)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("AI usage: the turn of %s could not be recorded (%s)", recorder.username, exc)
 
 
 def _allowed_models(assistant: AiAssistant) -> list[str]:
@@ -154,10 +169,18 @@ async def chat(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"model {body.model!r} is not allowed — see [ai] allowed_models")
     api_messages = [{"role": m.role, "content": m.content} for m in body.messages]
 
+    recorder = TurnRecorder(username=principal.username, model=body.model or assistant.settings.model, app=app_of(body.context))
+
     async def event_stream():
-        async for event in assistant.chat(api_messages, model=body.model, context=body.context, principal=principal):
-            yield f"data: {json.dumps(event.to_dict())}\n\n"
-        yield "data: [DONE]\n\n"
+        try:
+            async for event in assistant.chat(api_messages, model=body.model, context=body.context, principal=principal):
+                payload = event.to_dict()
+                recorder.observe(payload)
+                yield f"data: {json.dumps(payload)}\n\n"
+            yield "data: [DONE]\n\n"
+        finally:
+            # also when the client went away mid-turn: what happened was still paid for
+            await _record(request, recorder)
 
     return StreamingResponse(
         event_stream(),

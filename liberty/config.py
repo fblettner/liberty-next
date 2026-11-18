@@ -372,6 +372,9 @@ class AISettings(BaseModel):
     # Off by default: the log tail can carry what the server logged; enable for an install
     # whose chat users are administrators.
     ops_tools: bool = False
+    # The audit and usage record (ly2_ai_call: who, model, tokens, tools — never the question, the
+    # answer or a row): turns older than this many days are dropped; 0 keeps them all.
+    usage_retention_days: int = Field(default=90, ge=0)
     explorer_tools: bool = True  # explorer_models / explorer_fields / explorer_query — aggregates on the Data Explorer models
     allowed_connectors: list[str] = Field(default_factory=list)  # empty → all
     # Server-side web_fetch (Anthropic-hosted); disabled unless domains are listed

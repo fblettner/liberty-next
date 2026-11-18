@@ -264,7 +264,7 @@ _CATEGORIES: dict[str, str] = {
     "theme": "Workspace", "license": "Workspace", "dictgen": "Workspace",
     "explorer": "Features", "reports": "Features", "notifications": "Features", "plugins": "Features",
     "jobs": "nomaflow & deployment", "changesets": "nomaflow & deployment", "promotion": "nomaflow & deployment",
-    "admin": "Settings", "logs": "Operations", "retention": "Operations", "developer": "Operations", "meta": "Operations",
+    "admin": "Settings", "logs": "Operations", "retention": "Operations", "ai_usage": "Operations", "developer": "Operations", "meta": "Operations",
     "ai": "Assistant",
 }
 
