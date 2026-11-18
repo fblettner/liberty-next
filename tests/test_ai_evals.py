@@ -186,7 +186,8 @@ def test_run_plays_each_case_and_reports(fake_server: list[dict]) -> None:
     assert "context" not in fake_server[1]
     total = evals.summarize(results)
     assert total["cases"] == 3 and total["passed"] == 1 and total["tool_calls"] == 2
-    assert total["tokens_in"] == 2000 and total["tokens_out"] == 40
+    assert total["tokens_in"] == 2000 and total["tokens_cached"] == 1800 and total["tokens_out"] == 40
+    assert "1000 in (90% cached)" in evals.result_line(results[0])
     line = evals.result_line(results[1])
     assert line.startswith("FAIL  wrong") and "explorer_query" in line and "- answer lacks the figure 1" in line
 

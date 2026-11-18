@@ -46,9 +46,8 @@ async def test_list_connectors(registry) -> None:
     listing = await _tool(tools, "list_connectors").run({})
     db = listing["connectors"][0]
     assert db["name"] == "db" and db["type"] == "sql"
-    by_name = {q["name"]: q for q in db["queries"]}
-    assert by_name["answer"]["read_only"] is True
-    assert by_name["wipe"]["read_only"] is False
+    # the read queries only (sql_query refuses a writable one), without their empty fields
+    assert db["queries"] == [{"name": "answer", "label": "The answer"}]
 
 
 @pytest.mark.asyncio
@@ -154,3 +153,65 @@ def test_the_setting_reaches_the_tool(big_registry) -> None:
     import asyncio
     out = asyncio.run(a.tools.get("sql_query").run({"connector": "db", "query": "lines"}))
     assert out["row_count"] == 7
+
+
+@pytest_asyncio.fixture
+async def large_registry():
+    """Two connectors with enough queries to be above the full-listing size."""
+    def queries(prefix: str, n: int) -> list[QueryDef]:
+        return [
+            QueryDef(name=f"{prefix}{i:04d}_get", sql="SELECT 1", label=f"{prefix.upper()}{i:04d}",
+                     description=f"Table number {i} of the {prefix} module, a description long enough to weigh")
+            for i in range(n)
+        ] + [QueryDef(name=f"{prefix}_put", sql="DELETE FROM x", writable=True)]
+
+    cfg = ConnectorsFile(
+        pools={"default": PoolConfig(url="sqlite+aiosqlite:///:memory:")},
+        connectors={
+            "jde": SqlConnectorConfig(type="sql", pool="default", queries=[
+                *queries("f", 400), QueryDef(name="address_book", sql="SELECT 1", label="Address Book", description="Who's who")]),
+            "audit": SqlConnectorConfig(type="sql", pool="default", queries=queries("sod", 30)),
+        },
+    )
+    reg = ConnectorRegistry(cfg)
+    yield reg
+    await reg.aclose()
+
+
+@pytest.mark.asyncio
+async def test_list_connectors_overview_on_a_large_install(large_registry) -> None:
+    from liberty.ai.connector_tools import LIST_MAX_CHARS
+
+    lc = _tool(build_connector_tools(large_registry), "list_connectors")
+    out = await lc.run({})
+    assert out["connectors"] == [{"name": "jde", "type": "sql", "count": 401}, {"name": "audit", "type": "sql", "count": 30}]
+    assert "search" in out["note"] and len(json.dumps(out)) < 1000
+    # one connector that fits: its queries in full, the writable one left out
+    audit = await lc.run({"connector": "audit"})
+    assert len(audit["connectors"][0]["queries"]) == 30 and "note" not in audit
+    assert audit["connectors"][0]["queries"][0] == {
+        "name": "sod0000_get", "label": "SOD0000", "description": "Table number 0 of the sod module, a description long enough to weigh"}
+    # one connector that does not: names and labels only
+    jde = await lc.run({"connector": "jde"})
+    assert len(jde["connectors"][0]["queries"]) == 401 and "description" not in jde["connectors"][0]["queries"][0]
+    assert "names and labels only" in jde["note"]
+    assert len(json.dumps(audit)) <= LIST_MAX_CHARS
+    with pytest.raises(Exception, match="no connector 'ghost'"):
+        await lc.run({"connector": "ghost"})
+
+
+@pytest.mark.asyncio
+async def test_list_connectors_search(large_registry) -> None:
+    lc = _tool(build_connector_tools(large_registry), "list_connectors")
+    out = await lc.run({"search": "Address BOOK"})                      # every word, any case, label or description
+    assert out == {"connectors": [{"name": "jde", "type": "sql", "queries": [
+        {"name": "address_book", "label": "Address Book", "description": "Who's who"}]}], "matches": 1}
+    one = await lc.run({"search": "sod0007"})
+    assert [q["name"] for q in one["connectors"][0]["queries"]] == ["sod0007_get"] and one["connectors"][0]["name"] == "audit"
+    scoped = await lc.run({"search": "table sod0007", "connector": "audit"})   # words in any order, one connector
+    assert scoped["matches"] == 1
+    many = await lc.run({"search": "table number"})                      # capped, with the real count
+    assert many["matches"] == 430 and sum(len(c["queries"]) for c in many["connectors"]) == 40 and "first 40" in many["note"]
+    none = await lc.run({"search": "payroll"})
+    assert none["connectors"] == [] and none["matches"] == 0 and "No match" in none["note"]
+    assert (await lc.run({"search": "_put"}))["matches"] == 0             # a writable query is never listed

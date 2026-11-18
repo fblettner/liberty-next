@@ -13,6 +13,9 @@ from typing import Any, Callable
 
 from liberty.ai.tools import Tool, tool
 
+# The most results one search_catalog call returns.
+SEARCH_MAX_RESULTS = 40
+
 
 def build_instance_tools(state: Callable[[], Any], *, allowed: list[str] | None = None) -> list[Tool]:
     allow = set(allowed or [])
@@ -23,52 +26,63 @@ def build_instance_tools(state: Callable[[], Any], *, allowed: list[str] | None 
     def _ai_config() -> Any:
         return getattr(state(), "ai_config", None)
 
-    def describe_instance() -> dict[str, Any]:
+    def describe_instance(app: str | None = None) -> dict[str, Any]:
         """Describe this Liberty installation: the applications (connectors) with their menus,
         screens, dashboards, explorer models, the scheduled jobs and the playbooks available.
 
         Call it when the user asks what exists, where something is, or which application /
         screen / job handles a subject. Returns ids and labels only (no data, no SQL).
+
+        Args:
+            app: only this application (its menus, screens, dashboards, models, playbooks) —
+                pass the app of the page context when the question is about it. The jobs are
+                listed without it only.
         """
         st = state()
+
+        def _wanted(name: str) -> bool:
+            return _visible(name) and (not app or name == app)
+
         connectors = getattr(st, "connectors", None)
         screens = getattr(getattr(st, "screens", None), "screens", {}) or {}
         menus = getattr(getattr(st, "menus", None), "menus", {}) or {}
         apps: list[dict[str, Any]] = []
         for name in sorted(connectors.names()) if connectors is not None else []:
-            if not _visible(name):
+            if not _wanted(name):
                 continue
             conn = connectors.get(name)
-            app: dict[str, Any] = {"id": name, "type": type(conn).__name__.replace("Connector", "").lower()}
+            entry: dict[str, Any] = {"id": name, "type": type(conn).__name__.replace("Connector", "").lower()}
             menu = menus.get(name)
             if menu is not None:
                 if menu.label:
-                    app["label"] = menu.label     # the app's display name lives on its menu
-                app["menu"] = [
+                    entry["label"] = menu.label     # the app's display name lives on its menu
+                entry["menu"] = [
                     {"id": it.id, "label": it.label, **({"type": it.type} if it.type else {}), **({"target": it.target} if it.target else {})}
                     for it in menu.items
                 ]
             by_id = screens.get(name) or {}
             if by_id:
                 # the read query by its exact name: the model must not guess `<screen>_get`
-                app["screens"] = [{"id": sid, "label": s.label or s.description or sid, "read_query": s.read_query} for sid, s in by_id.items()]
-            apps.append(app)
+                entry["screens"] = [{"id": sid, "label": s.label or s.description or sid, "read_query": s.read_query} for sid, s in by_id.items()]
+            apps.append(entry)
+        if app and not apps:
+            raise KeyError(f"no application {app!r} — call describe_instance with no argument for the list")
         out: dict[str, Any] = {"apps": apps}
         dashboards = getattr(st, "dashboards", None)
         if dashboards is not None and hasattr(dashboards, "iter_dashboards"):
             out["dashboards"] = [
                 {"id": d.qualified_id, "label": getattr(d, "label", None) or did}
-                for scope, did, d in dashboards.iter_dashboards() if _visible(scope)
+                for scope, did, d in dashboards.iter_dashboards() if _wanted(scope)
             ]
         explorer = getattr(st, "explorer", None)
         if explorer is not None and hasattr(explorer, "items"):
             out["explorer_models"] = [
-                {"app": app, "id": mid, "label": m.label or mid, "entities": sorted(m.entities)}
-                for app, mid, m in explorer.items() if _visible(app)
+                {"app": a, "id": mid, "label": m.label or mid, "entities": sorted(m.entities)}
+                for a, mid, m in explorer.items() if _wanted(a)
             ]
         jobs = getattr(st, "jobs", None)
         registry = getattr(jobs, "registry", None)
-        if registry is not None:
+        if registry is not None and not app:
             out["jobs"] = [
                 {"id": j.id, **({"description": j.description} if j.description else {}),
                  "schedule": j.schedule, "enabled": j.enabled, "steps": [s.name for s in j.steps]}
@@ -77,9 +91,54 @@ def build_instance_tools(state: Callable[[], Any], *, allowed: list[str] | None 
         cfg = _ai_config()
         if cfg is not None:
             out["playbooks"] = [
-                {"app": app, "id": pid, "title": pb.title}
-                for app, pid, pb in cfg.playbooks() if _visible(app)
+                {"app": a, "id": pid, "title": pb.title}
+                for a, pid, pb in cfg.playbooks() if _visible(a) and (not app or a in (app, "*"))
             ]
+        return out
+
+    def search_catalog(query: str) -> dict[str, Any]:
+        """Find things of this installation by keyword: screens (with their read query), menu
+        entries, dashboards, explorer models, jobs and playbooks whose id, label or description
+        contains every word. Quicker than describe_instance when you look for one subject
+        ("address book", "licence", "sales load"). For the connector queries themselves, use
+        list_connectors with `search`.
+
+        Args:
+            query: the keywords, in the language of the labels or by id (e.g. "f0092", "users role").
+        """
+        words = query.casefold().split()
+        if not words:
+            raise ValueError("give at least one keyword")
+        full = describe_instance()
+        hits: list[dict[str, Any]] = []
+
+        def _add(kind: str, item: dict[str, Any], *, app_id: str | None = None) -> None:
+            text = " ".join(str(v) for v in item.values() if isinstance(v, (str, int))).casefold()
+            if all(w in text for w in words):
+                hits.append({"kind": kind, **({"app": app_id} if app_id else {}), **item})
+
+        for a in full["apps"]:
+            label = a.get("label")
+            _add("application", {"id": a["id"], **({"label": label} if label else {})})
+            for s in a.get("screens", []):
+                _add("screen", s, app_id=a["id"])
+            for m in a.get("menu", []):
+                _add("menu", m, app_id=a["id"])
+        for d in full.get("dashboards", []):
+            _add("dashboard", d)
+        for m in full.get("explorer_models", []):
+            _add("explorer_model", {**m, "entities": ", ".join(m["entities"])})
+        for j in full.get("jobs", []):
+            _add("job", {**j, "steps": ", ".join(str(s) for s in j["steps"])})
+        cfg = _ai_config()
+        for a, pid, pb in (cfg.playbooks() if cfg is not None else []):
+            if _visible(a):
+                _add("playbook", {"app": a, "id": pid, "title": pb.title, **({"description": pb.description} if pb.description else {})})
+        out: dict[str, Any] = {"matches": len(hits), "results": hits[:SEARCH_MAX_RESULTS]}
+        if len(hits) > SEARCH_MAX_RESULTS:
+            out["note"] = f"{len(hits)} matches, the first {SEARCH_MAX_RESULTS} shown — add a word to narrow."
+        elif not hits:
+            out["note"] = "No match. Try other words, or list_connectors with `search` for a connector query."
         return out
 
     def list_playbooks() -> list[dict[str, Any]]:
@@ -111,7 +170,8 @@ def build_instance_tools(state: Callable[[], Any], *, allowed: list[str] | None 
         return {"app": app, "id": id, "title": pb.title, "body": pb.body}
 
     return [
-        tool(describe_instance),
+        tool(describe_instance, summary_keys=("app",)),
+        tool(search_catalog, summary_keys=("query",)),
         tool(list_playbooks),
         tool(load_playbook, summary_keys=("app", "id")),
     ]

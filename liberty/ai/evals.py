@@ -263,12 +263,19 @@ def tokens_in(usage: dict[str, int]) -> int:
     return sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
 
 
+def _cached_share(usage: dict[str, int]) -> str:
+    total = tokens_in(usage)
+    return f"{round(100 * int(usage.get('cache_read_input_tokens') or 0) / total)}%" if total else "0%"
+
+
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "cases": len(results),
         "passed": sum(1 for r in results if not r["fails"]),
         "tool_calls": sum(len(r["tool_calls"]) for r in results),
         "tokens_in": sum(tokens_in(r["usage"]) for r in results),
+        # of which read from the prompt cache (billed at a fraction of the input price)
+        "tokens_cached": sum(int(r["usage"].get("cache_read_input_tokens") or 0) for r in results),
         "tokens_out": sum(int(r["usage"].get("output_tokens") or 0) for r in results),
         "seconds": round(sum(r["seconds"] for r in results), 1),
     }
@@ -278,7 +285,7 @@ def result_line(result: dict[str, Any]) -> str:
     names = [c["name"] for c in result["tool_calls"]]
     line = (
         f"{'PASS' if not result['fails'] else 'FAIL'}  {result['id']:<32} "
-        f"{len(names):>2} calls  {tokens_in(result['usage']):>7} in  {int(result['usage'].get('output_tokens') or 0):>5} out  "
+        f"{len(names):>2} calls  {tokens_in(result['usage']):>7} in ({_cached_share(result['usage']):>3} cached)  {int(result['usage'].get('output_tokens') or 0):>5} out  "
         f"{result['seconds']:>6.1f} s  {' > '.join(names)}"
     )
     return "\n".join([line, *(f"      - {f}" for f in result["fails"])])
@@ -315,7 +322,7 @@ def main(argv: list[str] | None = None) -> int:
     total = summarize(results)
     print(
         f"\n{total['passed']} / {total['cases']} passed · {total['tool_calls']} tool calls · "
-        f"{total['tokens_in']} tokens in · {total['tokens_out']} out · {total['seconds']} s"
+        f"{total['tokens_in']} tokens in ({total['tokens_cached']} read from the cache) · {total['tokens_out']} out · {total['seconds']} s"
     )
     if args.out:
         args.out.write_text(json.dumps({"url": args.url, "user": args.user, "model": args.model, "summary": total, "results": results}, indent=2, ensure_ascii=False), encoding="utf-8")

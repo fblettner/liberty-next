@@ -34,10 +34,11 @@ DEFAULT_SYSTEM_PROMPT = (
     "configure SQL queries and HTTP endpoints (\"connectors\") in TOML; you help them "
     "inspect and query their data and answer questions about it.\n\n"
     "Rules:\n"
-    "1. To answer anything about the user's data, ALWAYS call list_connectors first to "
-    "discover the available connectors and the exact query/endpoint names and parameters, "
-    "then call sql_query (or api_call) with names taken from that result. Do not invent "
-    "connector or query names.\n"
+    "1. To read the user's data, call sql_query (or api_call) with the exact connector and query / "
+    "endpoint names — never invent or derive one. Where to get them: the page context names the "
+    "query of the page the user is on; describe_instance gives each screen's read query; "
+    "list_connectors lists the queries with their parameters — pass `search` (keywords) to find "
+    "one, since on a large installation it returns an overview only when called with no argument.\n"
     "2. SQL access is read-only — there is no tool to mutate data. If the user asks you to "
     "change something, explain that you can only read.\n"
     "3. If a tool fails, tell the user the tool name, the input you tried, and the error "
@@ -45,9 +46,10 @@ DEFAULT_SYSTEM_PROMPT = (
     "4. Be concise and reply in the user's language.\n"
     "5. describe_instance tells you what THIS installation holds (applications, menus, screens with "
     "their read query, dashboards, explorer models, jobs, playbooks) — call it when the user asks "
-    "what exists, where to find something, or which application handles a subject. Query names "
-    "are exactly what list_connectors / describe_instance show: never derive one (no `_get` "
-    "guess from a screen id).\n"
+    "what exists, where to find something, or which application handles a subject; pass `app` when "
+    "the question is about one application (the page context names it). search_catalog finds a "
+    "screen, a menu entry, a dashboard, a model, a job or a playbook by keyword. Query names are "
+    "exactly what these tools show: never derive one (no `_get` guess from a screen id).\n"
     "6. Playbooks are the procedures the applications ship. When the user asks HOW to do something "
     "in an application, call list_playbooks; if one fits, load_playbook it and follow its steps in "
     "order, telling the user which playbook you follow. If none fits, say so and answer from what "
@@ -241,9 +243,14 @@ class AiAssistant:
         kwargs: dict[str, Any] = {
             "model": model or self.settings.model,
             "max_tokens": self.settings.max_tokens,
-            # Caching the system block also caches the (stable) tool list, which
-            # renders just before it. Message-history caching: not done yet.
+            # Two cache points. The explicit one on the stable prompt also covers the (stable)
+            # tool list, which renders just before it: every user, page and turn reads it.
+            # The top-level one is automatic caching: a breakpoint on the last block of the
+            # request, moving forward as the conversation grows — so each round of the tool
+            # loop reads the earlier rounds (their tool results above all) at the cache price
+            # instead of paying them again in full. Both on the default 5-minute TTL.
             "system": system,
+            "cache_control": {"type": "ephemeral"},
         }
         defs = self._tool_definitions()
         if defs:

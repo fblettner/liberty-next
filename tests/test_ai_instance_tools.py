@@ -57,6 +57,41 @@ async def test_describe_instance_summarises_the_state() -> None:
 
 
 @pytest.mark.asyncio
+async def test_describe_instance_for_one_app() -> None:
+    tools = _tools()
+    out = await tools["describe_instance"].run({"app": "nomajde"})
+    assert [a["id"] for a in out["apps"]] == ["nomajde"]
+    assert out["dashboards"] == [] and "jobs" not in out                 # another app's dashboard, the jobs: not here
+    assert [p["id"] for p in out["playbooks"]] == ["create_user", "dup_role"]
+    with pytest.raises(KeyError, match="no application 'ghost'"):
+        await tools["describe_instance"].run({"app": "ghost"})
+
+
+@pytest.mark.asyncio
+async def test_search_catalog_finds_by_keyword() -> None:
+    search = _tools()["search_catalog"]
+    out = await search.run({"query": "users"})
+    assert {(r["kind"], r["id"]) for r in out["results"]} == {("screen", "f0092"), ("menu", "users")} and out["matches"] == 2
+    assert next(r for r in out["results"] if r["kind"] == "screen") == {"kind": "screen", "app": "nomajde", "id": "f0092", "label": "Users", "read_query": "f0092_get"}
+    assert [(r["kind"], r["id"]) for r in (await search.run({"query": "f0092_get"}))["results"]] == [("screen", "f0092")]   # by read query
+    assert [(r["kind"], r["id"]) for r in (await search.run({"query": "collect nightly"}))["results"]] == [("job", "nightly")]
+    assert [(r["kind"], r["id"]) for r in (await search.run({"query": "DUPLICATE role"}))["results"]] == [("playbook", "dup_role")]
+    assert [(r["kind"], r["id"]) for r in (await search.run({"query": "security overview"}))["results"]] == [("dashboard", "nomasx1.overview")]
+    none = await search.run({"query": "payroll"})
+    assert none["results"] == [] and "No match" in none["note"]
+    with pytest.raises(ValueError):
+        await search.run({"query": "  "})
+
+
+@pytest.mark.asyncio
+async def test_search_catalog_respects_allowed_connectors() -> None:
+    st = _state()
+    search = {t.name: t for t in build_instance_tools(lambda: st, allowed=["nomasx1"])}["search_catalog"]
+    assert (await search.run({"query": "users"}))["matches"] == 0
+    assert [r["id"] for r in (await search.run({"query": "sod audit"}))["results"]] == ["sox"]
+
+
+@pytest.mark.asyncio
 async def test_playbooks_are_listed_and_loaded() -> None:
     tools = _tools()
     listed = await tools["list_playbooks"].run({})

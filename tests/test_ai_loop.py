@@ -237,6 +237,7 @@ def test_request_kwargs_shape() -> None:
     kw = a._request_kwargs(model=None)
     assert kw["model"] == "claude-opus-4-7"
     assert kw["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert kw["cache_control"] == {"type": "ephemeral"}      # automatic caching of the growing history (the tool rounds)
     assert kw["thinking"] == {"type": "adaptive"}
     assert kw["output_config"] == {"effort": "high"}
     wf = [t for t in kw["tools"] if t.get("name") == "web_fetch"][0]

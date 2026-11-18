@@ -1,5 +1,20 @@
 # Liberty Next — Notes de version
 
+## 7.0.73 — non publiée
+
+- Assistant IA : trouver une requête ou un écran ne demande plus de lire tout le catalogue. `list_connectors` ne liste
+  que les requêtes de lecture (une requête d'écriture était listée alors que l'assistant ne peut jamais l'exécuter)
+  et, sur une installation trop grande pour être listée en une fois, renvoie une vue d'ensemble — le modèle précise
+  ensuite avec `connector` (la liste d'un connecteur) ou `search` (mots-clés sur le nom, le libellé ou la
+  description). `describe_instance` accepte une `app`, et un nouvel outil, `search_catalog`, trouve un écran, une
+  entrée de menu, un tableau de bord, un modèle de l'explorateur, une tâche ou un playbook par mot-clé. Sur une grande
+  installation la liste complète était coupée à la limite des résultats d'outil — le modèle ne voyait pas une partie
+  des requêtes — et repayée à chaque tour de la conversation.
+- Assistant IA : la conversation est mise en cache à mesure qu'elle grandit. Dans une même question, chaque tour
+  d'outils renvoyait les tours précédents — surtout leurs résultats d'outils — au plein tarif d'entrée ; ils sont
+  maintenant lus depuis le cache de prompt (cache automatique sur la requête, en plus du point de cache du prompt
+  système). L'outil d'évaluation affiche la part de l'entrée lue depuis le cache.
+
 ## 7.0.72 — non publiée
 
 - Assistant IA : un jeu d'évaluation. `python -m liberty.ai.evals <fichiers de cas>` joue des questions sur un serveur

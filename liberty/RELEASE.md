@@ -1,5 +1,19 @@
 # Liberty Next — Release notes
 
+## 7.0.73 — unreleased
+
+- AI assistant: finding a query or a screen no longer means reading the whole catalogue. `list_connectors` lists the
+  read queries only (a writable one was listed although the assistant can never run it) and, on an installation too
+  large to list at once, returns an overview — the model then narrows with `connector` (one connector's list) or
+  `search` (keywords on the name, label or description). `describe_instance` takes an `app`, and a new tool,
+  `search_catalog`, finds a screen, a menu entry, a dashboard, an explorer model, a job or a playbook by keyword. On a
+  large installation the full list was cut at the tool-result limit — the model could not see part of the queries —
+  and was paid again on every round of the conversation.
+- AI assistant: the conversation is cached as it grows. Within one question each tool round sent the earlier rounds —
+  their tool results above all — again at the full input price; they are now read from the prompt cache (automatic
+  caching on the request, next to the cache point on the system prompt). The evaluation runner shows the share of
+  the input read from the cache.
+
 ## 7.0.72 — unreleased
 
 - AI assistant: an evaluation set. `python -m liberty.ai.evals <case files>` plays questions against a live server
