@@ -1,5 +1,19 @@
 # Liberty Next — Notes de version
 
+## 7.0.74 — non publiée
+
+- Assistant IA : les outils répondent pour l'utilisateur connecté. **Un changement de comportement** : jusqu'ici
+  `ai:chat` seul permettait à l'assistant d'exécuter toutes les requêtes de lecture des connecteurs qui lui sont
+  ouverts (le périmètre de données s'appliquait, pas les permissions). Chaque outil vérifie maintenant ce que
+  vérifient les écrans : `sql_query` demande `sql:<connecteur>:<requête>`, `api_call` `api:<connecteur>:<endpoint>`,
+  les outils de l'Explorateur de données `explorer:<app>:<modèle>` ; `list_connectors`, `describe_instance`,
+  `search_catalog` et les playbooks ne montrent que ce que l'utilisateur peut ouvrir (un écran par sa requête de
+  lecture, une entrée de menu selon la règle du menu, une tâche par `job:<id>`) — une application sans rien pour
+  l'utilisateur n'est pas nommée du tout, et un refus est le même pour une requête qui existe et une qui n'existe
+  pas. Les outils d'exploitation et de génération sont proposés aux super-utilisateurs uniquement. Un utilisateur
+  qui avait `ai:chat` sans les permissions `sql:` / `explorer:` d'une application obtient moins de réponses de
+  l'assistant : les accorder, comme pour les écrans.
+
 ## 7.0.73 — non publiée
 
 - Assistant IA : trouver une requête ou un écran ne demande plus de lire tout le catalogue. `list_connectors` ne liste

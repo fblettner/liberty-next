@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from liberty.ai.tools import Tool, tool
+from liberty.ai.tools import Tool, caller, may, require, tool
 from liberty.connectors import APIConnector, ConnectorRegistry, SQLConnector, flatten_query_metas
 from liberty.connectors.api import current_pool
 from liberty.connectors.base import ConnectorError
@@ -97,21 +97,25 @@ def build_connector_tools(
             return [
                 _compact({"name": q["name"], "label": q.get("label"), "description": q.get("description"),
                           "params": q.get("params"), "bind_params": q.get("bind_params")})
-                for q in flatten_query_metas(desc) if not q.get("writable", False)
+                for q in flatten_query_metas(desc)
+                if not q.get("writable", False) and may(f"sql:{desc['name']}:{q['name']}")
             ]
         if include_api and desc["type"] == "api":
             return [
                 _compact({"name": e["name"], "label": e.get("label"), "description": e.get("description"),
                           "method": e.get("method"), "params": e.get("params")})
-                for e in desc["endpoints"]
+                for e in desc["endpoints"] if may(f"api:{desc['name']}:{e['name']}")
             ]
         return []
 
     def _catalog() -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
-        return [
+        """Each connector with what the caller may call on it — a connector with nothing the
+        caller may call is not listed at all (no name enumeration)."""
+        out = [
             (desc, _entries(desc)) for desc in connectors.describe()
             if _visible(desc["name"]) and (desc["type"] == "sql" or (include_api and desc["type"] == "api"))
         ]
+        return out if caller() is None else [(d, e) for d, e in out if e]
 
     def list_connectors(connector: str | None = None, search: str | None = None) -> dict[str, Any]:
         """The connectors available to you and their read queries / endpoints: the exact names
@@ -188,6 +192,8 @@ def build_connector_tools(
             params: optional {param: value} for the query's :bind parameters.
             limit: fewer rows than the cap, when a few are enough (a sample, a lookup).
         """
+        # the permission before the lookup, like the HTTP route: no name enumeration
+        require(f"sql:{connector}:{query}", f"the query {connector}.{query}")
         conn = _sql(connector)
         qdef = conn.get_query(query)  # raises QueryNotFoundError
         if qdef.writable:
@@ -221,6 +227,7 @@ def build_connector_tools(
             endpoint: endpoint name on that connector.
             params: optional {param: value} for the endpoint's {{placeholders}}.
         """
+        require(f"api:{connector}:{endpoint}", f"the endpoint {connector}.{endpoint}")
         conn = _api(connector)
         result = await conn.call(endpoint, params or {})
         return result.to_dict()

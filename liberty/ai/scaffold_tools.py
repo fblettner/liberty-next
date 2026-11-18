@@ -333,9 +333,9 @@ def build_scaffold_tools(
         return wrap(prop, message=f"Proposed menu item for {screen_id}.")
 
     return [
-        tool(introspect_table, summary_keys=("connector", "table")),
-        tool(scaffold_crud_queries, summary_keys=("connector", "table")),
-        tool(scaffold_dict_entries, summary_keys=("scope",)),
-        tool(scaffold_screen, summary_keys=("app", "screen_id")),
-        tool(scaffold_menu_item, summary_keys=("app", "screen_id")),
+        tool(introspect_table, summary_keys=("connector", "table"), superuser_only=True),
+        tool(scaffold_crud_queries, summary_keys=("connector", "table"), superuser_only=True),
+        tool(scaffold_dict_entries, summary_keys=("scope",), superuser_only=True),
+        tool(scaffold_screen, summary_keys=("app", "screen_id"), superuser_only=True),
+        tool(scaffold_menu_item, summary_keys=("app", "screen_id"), superuser_only=True),
     ]

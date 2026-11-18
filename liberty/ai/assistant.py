@@ -26,6 +26,8 @@ from liberty.ai.instance_tools import build_instance_tools
 from liberty.ai.ops_tools import build_ops_tools
 from liberty.ai.scaffold_tools import build_scaffold_tools
 from liberty.ai.tools import ToolRegistry
+from liberty.auth.principal import Principal, current_principal
+from liberty.auth.scope import current_scope, current_username
 from liberty.config import AISettings
 from liberty.connectors import ConnectorRegistry
 
@@ -219,8 +221,8 @@ class AiAssistant:
 
     # -- request assembly -------------------------------------------------- #
 
-    def _tool_definitions(self) -> list[dict[str, Any]]:
-        defs = self.tools.definitions()
+    def _tool_definitions(self, principal: Principal | None = None) -> list[dict[str, Any]]:
+        defs = self.tools.definitions(principal)
         if self.settings.web_fetch_domains:
             defs.append({
                 "type": _WEB_FETCH_TYPE,
@@ -230,7 +232,7 @@ class AiAssistant:
             })
         return defs
 
-    def _request_kwargs(self, *, model: str | None, context: str | None = None) -> dict[str, Any]:
+    def _request_kwargs(self, *, model: str | None, context: str | None = None, principal: Principal | None = None) -> dict[str, Any]:
         # The stable prompt is the cached block; the page context (changes with every screen the
         # user opens) comes AFTER it, without cache_control, so it never breaks the cached prefix.
         system: list[dict[str, Any]] = [{"type": "text", "text": self.system_prompt, "cache_control": {"type": "ephemeral"}}]
@@ -252,7 +254,7 @@ class AiAssistant:
             "system": system,
             "cache_control": {"type": "ephemeral"},
         }
-        defs = self._tool_definitions()
+        defs = self._tool_definitions(principal)
         if defs:
             kwargs["tools"] = defs
         if self.settings.thinking:
@@ -261,11 +263,11 @@ class AiAssistant:
             kwargs["output_config"] = {"effort": self.settings.effort}
         return kwargs
 
-    def tool_catalog(self) -> list[dict[str, Any]]:
-        """Metadata for the configured tools (for the /ai/tools debug endpoint)."""
+    def tool_catalog(self, principal: Principal | None = None) -> list[dict[str, Any]]:
+        """Metadata for the tools *principal* is offered (for the /ai/tools debug endpoint)."""
         cat: list[dict[str, Any]] = [
             {"name": t["name"], "description": t["description"], "input_schema": t["input_schema"]}
-            for t in self.tools.definitions()
+            for t in self.tools.definitions(principal)
         ]
         if self.settings.web_fetch_domains:
             cat.append({"name": "web_fetch", "type": _WEB_FETCH_TYPE, "allowed_domains": list(self.settings.web_fetch_domains)})
@@ -274,21 +276,30 @@ class AiAssistant:
     # -- the loop ---------------------------------------------------------- #
 
     async def chat(
-        self, messages: list[dict[str, Any]], *, model: str | None = None, context: str | None = None
+        self, messages: list[dict[str, Any]], *, model: str | None = None, context: str | None = None,
+        principal: Principal | None = None,
     ) -> AsyncIterator[ChatEvent]:
         """Run the agentic loop for *messages*; yield :class:`ChatEvent`s.
 
         *messages* is a standard Messages-API list (``[{"role": "user", "content": ...}]``).
         It is copied — the caller's list isn't mutated. *context* is the page context the
         browser rendered (see :data:`CONTEXT_MAX_CHARS`); it rides as a second, uncached
-        system block for this call only.
+        system block for this call only. *principal* is the user the turn runs for: the
+        tools check their permissions against it and the queries run under its data scope.
         """
         if self._client is None:
             yield ChatEvent("error", message="Anthropic API key is not configured (set [ai] api_key / ANTHROPIC_API_KEY).")
             return
 
+        if principal is not None:
+            # Set here, in the generator that runs the tools, and not left to the request's
+            # dependency alone: the caller and its data scope must hold wherever this stream
+            # is consumed from (the SSE response today, an MCP session tomorrow).
+            current_principal.set(principal)
+            current_scope.set(principal.data_scope)
+            current_username.set(principal.username)
         convo: list[dict[str, Any]] = list(messages)
-        base_kwargs = self._request_kwargs(model=model, context=context)
+        base_kwargs = self._request_kwargs(model=model, context=context, principal=principal)
         usage_total = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
 
         for _ in range(max(1, self.settings.max_iterations)):

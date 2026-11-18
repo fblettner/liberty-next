@@ -60,7 +60,7 @@ def _assistant(request: Request) -> AiAssistant:
 )
 async def tools(
     request: Request,
-    _: Annotated[Principal, Depends(require_permission(_AI_CHAT))],
+    principal: Annotated[Principal, Depends(require_permission(_AI_CHAT))],
 ) -> dict[str, Any]:
     """Diagnostic surface for the AI assistant. Returns:
 
@@ -82,7 +82,7 @@ async def tools(
     return {
         "available": assistant.available,
         "model": assistant.settings.model,
-        "tools": assistant.tool_catalog(),
+        "tools": assistant.tool_catalog(principal),
         "models": [{"id": m, "label": label_for(m)} for m in _allowed_models(assistant)],
         # assistant.settings is the AISettings ([ai] in app.toml): the operator's starters win over ai.toml's
         "starters": merged_starters(getattr(request.app.state, "ai_config", None), assistant.settings.starters, request_language(request)),
@@ -121,7 +121,7 @@ def _allowed_models(assistant: AiAssistant) -> list[str]:
 async def chat(
     body: ChatRequest,
     request: Request,
-    _: Annotated[Principal, Depends(require_permission(_AI_CHAT))],
+    principal: Annotated[Principal, Depends(require_permission(_AI_CHAT))],
 ) -> StreamingResponse:
     """Stream a chat completion as Server-Sent Events.
 
@@ -155,7 +155,7 @@ async def chat(
     api_messages = [{"role": m.role, "content": m.content} for m in body.messages]
 
     async def event_stream():
-        async for event in assistant.chat(api_messages, model=body.model, context=body.context):
+        async for event in assistant.chat(api_messages, model=body.model, context=body.context, principal=principal):
             yield f"data: {json.dumps(event.to_dict())}\n\n"
         yield "data: [DONE]\n\n"
 

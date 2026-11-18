@@ -1,5 +1,17 @@
 # Liberty Next — Release notes
 
+## 7.0.74 — unreleased
+
+- AI assistant: the tools answer for the signed-in user. **A change of behaviour**: until now `ai:chat` alone let the
+  assistant run every read query of the connectors it is allowed (the data scope applied, the permissions did not).
+  Each tool now checks what the screens check: `sql_query` needs `sql:<connector>:<query>`, `api_call`
+  `api:<connector>:<endpoint>`, the Data Explorer tools `explorer:<app>:<model>`; `list_connectors`,
+  `describe_instance`, `search_catalog` and the playbooks show only what the user can open (a screen by its read
+  query, a menu entry by the menu's own rule, a job by `job:<id>`) — an application with nothing for the user is
+  not named at all, and a refusal says the same for a query that exists and one that does not. The operations and
+  scaffolding tools are offered to superusers only. A user who had `ai:chat` without the `sql:` / `explorer:`
+  permissions of an application gets fewer answers from the assistant: grant them, as for the screens.
+
 ## 7.0.73 — unreleased
 
 - AI assistant: finding a query or a screen no longer means reading the whole catalogue. `list_connectors` lists the

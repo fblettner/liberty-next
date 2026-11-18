@@ -22,6 +22,34 @@ import typing
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from liberty.auth.principal import Principal, current_principal
+
+
+class ToolPermissionError(PermissionError):
+    """The signed-in user may not do what the tool was asked: the message goes back to the
+    model, which tells the user — it must not look for another way round."""
+
+
+def caller() -> Principal | None:
+    """The user the assistant is working for; None outside a request (nothing restricted)."""
+    return current_principal.get()
+
+
+def may(permission: str) -> bool:
+    """Whether the caller holds *permission* — always true outside a request."""
+    who = current_principal.get()
+    return who is None or who.has_permission(permission)
+
+
+def require(permission: str, what: str) -> None:
+    """Refuse when the caller lacks *permission*; *what* names the thing in the message."""
+    if not may(permission):
+        raise ToolPermissionError(
+            f"permission denied: the signed-in user has no access to {what} (missing {permission}). "
+            "Tell the user; do not try another query or tool to get the same data."
+        )
+
+
 _JSON_TYPES: dict[Any, dict[str, Any]] = {
     str: {"type": "string"},
     int: {"type": "integer"},
@@ -94,6 +122,7 @@ class Tool:
     func: Callable[..., Any]
     is_async: bool = False
     summary_keys: tuple[str, ...] = ()  # which input keys to surface in the UI indicator
+    superuser_only: bool = False        # configuration / operations tools: offered to and run for superusers only
 
     def definition(self) -> dict[str, Any]:
         """The ``tools[]`` entry for the Messages API request."""
@@ -116,6 +145,7 @@ def tool(
     name: str | None = None,
     description: str | None = None,
     summary_keys: tuple[str, ...] = (),
+    superuser_only: bool = False,
 ) -> Tool | Callable[[Callable[..., Any]], Tool]:
     """Turn a function into a :class:`Tool` (usable as ``@tool`` or ``@tool(...)``)."""
 
@@ -147,6 +177,7 @@ def tool(
             func=fn,
             is_async=inspect.iscoroutinefunction(fn),
             summary_keys=summary_keys,
+            superuser_only=superuser_only,
         )
 
     return build(func) if func is not None else build
@@ -175,14 +206,24 @@ class ToolRegistry:
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
 
-    def definitions(self) -> list[dict[str, Any]]:
-        return [t.definition() for t in self._tools.values()]
+    def offered(self, principal: Principal | None = None) -> list[Tool]:
+        """The tools *principal* is offered: all of them for a superuser (or outside a request),
+        the others without the superuser-only ones. Two stable lists, so the prompt cache holds."""
+        if principal is None or principal.is_superuser:
+            return list(self._tools.values())
+        return [t for t in self._tools.values() if not t.superuser_only]
+
+    def definitions(self, principal: Principal | None = None) -> list[dict[str, Any]]:
+        return [t.definition() for t in self.offered(principal)]
 
     async def execute(self, name: str, arguments: dict[str, Any]) -> tuple[str, bool]:
         """Run tool *name* with *arguments*; return (content_string, is_error)."""
         t = self.get(name)
         if t is None:
             return json.dumps({"error": f"unknown tool: {name}"}), True
+        who = current_principal.get()
+        if t.superuser_only and who is not None and not who.is_superuser:
+            return json.dumps({"error": f"permission denied: {name} is for administrators"}), True
         try:
             result = await t.run(arguments)
         except Exception as exc:  # surface to the model so it can adjust

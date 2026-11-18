@@ -22,6 +22,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from liberty.auth.authstore import AuthBackend
 from liberty.auth.oidc import OIDCClient
 from liberty.auth.principal import Principal
+from liberty.auth.principal import current_principal
 from liberty.auth.scope import current_scope, current_username
 from liberty.auth.tokens import ACCESS, TokenError, TokenService
 from liberty.connectors.api import current_pool
@@ -93,6 +94,7 @@ async def get_current_principal(
     # scope is passed; a background job has no request and stays unrestricted.
     current_scope.set(principal.data_scope)
     current_username.set(principal.username)
+    current_principal.set(principal)
     # A temporary password: nothing but the change (and who am I) until it's done — enforced here,
     # not only by the sign-in page, so the API can't be used with a password an admin handed out.
     if principal.must_change_password:

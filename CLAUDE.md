@@ -193,9 +193,10 @@ user attribute or literal, optional `exclude` / `connector`) are resolved at log
 `SQLConnector` to every SELECT as a `lib_rls` wrap (and to writes); a `dd` rule reaches every column
 carrying the item — hint `dd`, same name, or name minus the connector's `dd_prefix` (JDE: 2, `ABCO`
 → `CO`); the auth dependency publishes it in `liberty.auth.scope.current_scope` so code without
-principal plumbing is covered; jobs are unrestricted. Attributes come from `liberty-admin`, the
+principal plumbing is covered (`liberty.auth.principal.current_principal` likewise: the AI tools check the caller's
+permissions through `liberty.ai.tools.may` / `require`, and `AiAssistant.chat(principal=…)` sets both for the stream); jobs are unrestricted. Attributes come from `liberty-admin`, the
 Access API or `[oidc] attribute_claims`. Permission strings: `sql:{connector}:{query}`, `api:{connector}:{endpoint}`, `plugin:{ref}`,
-`ai:chat`, with colon-segment globs (`sql:nomasx1:*`, `*`); superusers bypass. The permission
+`ai:chat` (opens the chat only: each tool then needs the `sql:` / `api:` / `explorer:` / `job:` permission of what it touches; ops and scaffold tools are superuser-only), with colon-segment globs (`sql:nomasx1:*`, `*`); superusers bypass. The permission
 is checked **before** the connector lookup (no name enumeration). A mutating query needs both
 `writable = true` in TOML and the caller's permission. DB errors: non-superusers get the
 driver line + an `error_id`; superusers the full text; the statement and binds are logged

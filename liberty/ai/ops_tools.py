@@ -115,7 +115,7 @@ def build_ops_tools(state: Callable[[], Any]) -> list[Tool]:
         }
 
     return [
-        tool(jobs_status, summary_keys=("job_id",)),
-        tool(server_log, summary_keys=("level", "contains")),
-        tool(integrity_checks, summary_keys=("severity",)),
+        tool(jobs_status, summary_keys=("job_id",), superuser_only=True),
+        tool(server_log, summary_keys=("level", "contains"), superuser_only=True),
+        tool(integrity_checks, summary_keys=("severity",), superuser_only=True),
     ]

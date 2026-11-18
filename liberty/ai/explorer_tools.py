@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from liberty.ai.tools import Tool, tool
+from liberty.ai.tools import Tool, may, tool
 
 
 def build_explorer_tools(state: Callable[[], Any], *, allowed: list[str] | None = None) -> list[Tool]:
@@ -31,8 +31,9 @@ def build_explorer_tools(state: Callable[[], Any], *, allowed: list[str] | None 
     def _model(app: str, model: str) -> Any:
         explorer = getattr(state(), "explorer", None)
         m = explorer.get(app, model) if explorer is not None else None
-        if m is None or not _visible(app):
-            raise ValueError(f"no explorer model {app}/{model} (call explorer_models)")
+        # the same answer for "does not exist" and "not yours": no name enumeration
+        if m is None or not _visible(app) or not may(f"explorer:{app}:{model}"):
+            raise ValueError(f"no explorer model {app}/{model} available to the user (call explorer_models)")
         return m
 
     async def _view(app: str, model: str) -> Any:
@@ -52,7 +53,7 @@ def build_explorer_tools(state: Callable[[], Any], *, allowed: list[str] | None 
         explorer = getattr(state(), "explorer", None)
         out = []
         for a, mid, m in (explorer.items() if explorer is not None else []):
-            if not _visible(a) or (app and a != app):
+            if not _visible(a) or (app and a != app) or not may(f"explorer:{a}:{mid}"):
                 continue
             out.append({
                 "app": a, "model": mid, "label": m.label or mid, "description": m.description, "hub": m.hub,

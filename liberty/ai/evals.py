@@ -19,7 +19,8 @@ Run it by hand before and after a change to the prompt, the model or a tool — 
     python -m liberty.ai.evals cases.toml --only top-business-unit --out baseline.json
 
 The account decides what is measured: a superuser for the tools themselves, a restricted
-user for what the permissions and the scope let through. Exit code 0 when every case passes.
+user for what the permissions and the scope let through (cases written for one account go in
+their own folder — a folder is read without its sub-folders). Exit code 0 when every case passes.
 """
 
 from __future__ import annotations
@@ -58,6 +59,7 @@ class EvalCase(BaseModel):
     contains_any: list[str] = Field(default_factory=list, description="At least one text is in the answer.")
     not_contains: list[str] = Field(default_factory=list, description="None of these texts is in the answer.")
     figures: list[int] = Field(default_factory=list, description="Every whole number is in the answer, whatever its thousands separators.")
+    forbid_figures: list[int] = Field(default_factory=list, description="None of these whole numbers is in the answer (a figure the account must not see).")
     max_tool_calls: int | None = Field(default=None, description="The answer took at most this many tool calls.")
     allow_tool_errors: bool = Field(default=False, description="A tool call that failed does not fail the case.")
 
@@ -161,6 +163,9 @@ def check(case: EvalCase, outcome: Outcome) -> list[str]:
     for figure in case.figures:
         if not has_figure(outcome.text, figure):
             fails.append(f"answer lacks the figure {figure}")
+    for figure in case.forbid_figures:
+        if has_figure(outcome.text, figure):
+            fails.append(f"answer carries the figure {figure}")
     return fails
 
 

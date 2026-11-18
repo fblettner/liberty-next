@@ -12,6 +12,7 @@ segment position is a wildcard, and ``"*"`` alone (or :attr:`is_superuser`) mean
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 
@@ -125,3 +126,9 @@ class Principal:
             "scope": [list(g) for g in self.scope] or None,
             "must_change_password": self.must_change_password,
         }
+
+
+# The caller of the request being served, for code that has no principal plumbing (the AI
+# assistant's tools): set by the auth dependency next to ``current_scope`` / ``current_username``.
+# None outside a request — a job, a CLI — where nothing is restricted, like the data scope.
+current_principal: ContextVar[Principal | None] = ContextVar("liberty_principal", default=None)

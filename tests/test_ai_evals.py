@@ -73,6 +73,8 @@ def test_check_a_failed_tool_call_fails_unless_allowed() -> None:
 
 
 def test_check_texts_and_figures() -> None:
+    assert check(EvalCase(id="a", question="q", forbid_figures=[281796]), _ok("In all 281,796 units.")) == ["answer carries the figure 281796"]
+    assert check(EvalCase(id="a", question="q", forbid_figures=[281796]), _ok("Your company: 21,132 units.")) == []
     case = EvalCase(id="a", question="q", contains=["france"], contains_any=["pôle", "business unit"],
                     not_contains=["I cannot"], figures=[72696])
     assert check(case, _ok("The business unit France sold 72,696 units.")) == []
