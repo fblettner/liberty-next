@@ -444,6 +444,7 @@ def build_assistant(
             connectors,
             allowed=settings.allowed_connectors or None,
             include_api=settings.api_tool,
+            max_rows=settings.sql_max_rows,
         ))
     if settings.scaffold_tools:
         registry.add(*build_scaffold_tools(

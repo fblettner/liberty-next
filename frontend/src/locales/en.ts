@@ -2649,6 +2649,7 @@ const en = {
       logMaxMb: 'Size per file (MB)',
       logBackups: 'Files kept',
       aiExplorerTools: 'Data Explorer tools (aggregates on the Explorer models)',
+      aiSqlMaxRows: 'Rows per query, at most (the assistant’s own cap, not the pool’s)',
       oidcAttributeClaims: 'Attributes from claims (data scope: attribute → claim)',
       oidcClaimsAdd: 'Add an attribute',
       oidcSessionSecret: 'Session secret (the sign-in cookie; blank = the JWT secret — restart)',

@@ -88,6 +88,7 @@ thinking = false                 # enable adaptive thinking
 effort = ""                      # "" | low | medium | high | xhigh | max (sent only when set; ignored for haiku)
 request_timeout = 120
 connector_tools = true           # expose list_connectors + sql_query (read-only queries only)
+sql_max_rows = 200               # the most rows one sql_query call returns (the assistant's own cap, not the pool's)
 api_tool = false                 # expose api_call (off — API endpoints may have side effects)
 allowed_connectors = []          # restrict which connectors the assistant may use; empty = all
 web_fetch_domains = []           # e.g. ["docs.example.com"]; empty = web_fetch disabled

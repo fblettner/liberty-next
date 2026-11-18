@@ -360,6 +360,9 @@ class AISettings(BaseModel):
     # Tool exposure
     connector_tools: bool = True  # list_connectors + sql_query (read-only queries only)
     api_tool: bool = False  # api_call — off by default (API endpoints may have side effects)
+    # The most rows one sql_query call returns: the assistant's own cap, not the pool's ``max_rows``
+    # (sized for the grid, which streams). More rows exist → the result says ``truncated``.
+    sql_max_rows: int = Field(default=200, ge=1, le=10_000)
     # Tier 1 scaffolding tools — introspect_table + scaffold_crud_queries / dict_entries /
     # screen / menu_item. Each *write-capable* tool returns a Proposal envelope rather than
     # mutating files; the chat UI surfaces it as an Apply card that POSTs to

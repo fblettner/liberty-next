@@ -1,5 +1,23 @@
 # Liberty Next — Notes de version
 
+## 7.0.72 — non publiée
+
+- Assistant IA : un jeu d'évaluation. `python -m liberty.ai.evals <fichiers de cas>` joue des questions sur un serveur
+  en marche (le compte de `LIBERTY_E2E_USER` / `LIBERTY_E2E_PASSWORD` : les permissions et le périmètre de données
+  font donc partie de ce qui est mesuré) et vérifie chaque réponse : les outils appelés, les textes et les chiffres
+  qu'elle doit contenir, aucun appel d'outil en échec. Il donne le taux de réussite, les appels d'outils, les jetons
+  et la durée ; `--out` conserve les résultats complets comme référence. À lancer à la main avant et après un
+  changement du prompt, du modèle ou d'un outil ; les applications livrent leurs cas.
+- Assistant IA : enregistrer Paramètres → App ne retire plus une partie des outils de l'assistant. L'enregistrement
+  reconstruisait l'assistant sans les outils d'instance — `describe_instance`, les playbooks, l'Explorateur de
+  données et les outils d'exploitation — si bien que jusqu'au redémarrage ou rechargement suivant il ne répondait
+  qu'à partir des requêtes des connecteurs.
+- Assistant IA : `sql_query` a son propre plafond de lignes — `[ai] sql_max_rows` (200 par défaut, Paramètres → App →
+  IA). Il héritait du `max_rows` du pool, dimensionné pour la grille (lignes en flux) : sur un pool à 500 000, une
+  question pouvait lire une table entière dans un seul résultat d'outil. Au-delà du plafond le résultat indique
+  `truncated` et demande au modèle de ne pas compter ni additionner les lignes reçues ; le modèle peut en demander
+  moins avec `limit`.
+
 ## 7.0.71 — non publiée
 
 - Pools : `[connectors] pools_path` dans app.toml désigne un fichier local dont les `[pools.*]` remplacent les pools

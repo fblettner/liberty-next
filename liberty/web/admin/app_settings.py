@@ -51,7 +51,7 @@ _APP_SAFE_KEYS = {
 }
 _AI_SAFE_KEYS = {
     "enabled", "model", "max_tokens", "max_iterations", "system_prompt", "thinking",
-    "effort", "request_timeout", "connector_tools", "api_tool", "scaffold_tools", "ops_tools", "explorer_tools",
+    "effort", "request_timeout", "connector_tools", "sql_max_rows", "api_tool", "scaffold_tools", "ops_tools", "explorer_tools",
     "allowed_connectors", "web_fetch_domains", "web_fetch_max_uses", "allowed_models", "starters",
     "api_key",   # sensitive — encrypted on save, masked on GET
 }
@@ -350,6 +350,8 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
         new_ai = build_assistant(
             new_settings.ai, request.app.state.connectors,
             master_key=new_settings.crypto.master_key,
+            # without the state the instance tools (describe_instance, playbooks, explorer, ops) are dropped
+            state=lambda: request.app.state,
         )
         request.app.state.ai = new_ai
         if old_ai is not None and old_ai is not new_ai:

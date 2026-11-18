@@ -105,7 +105,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           (SSE; `/ai/tools` also lists the pickable models + starters), catalog.py (the model list),
                           appconfig.py (ai.toml: what the APPS ship — starters per app / screen, playbooks),
                           instance_tools.py (describe_instance, list_playbooks / load_playbook: read app.state at call time),
-                          ops_tools.py (jobs_status / server_log / integrity_checks — opt-in `[ai] ops_tools`)
+                          ops_tools.py (jobs_status / server_log / integrity_checks — opt-in `[ai] ops_tools`),
+                          evals.py (the evaluation set: cases in TOML, played against a live server, checked on tools / texts / figures)
   jobs/ (nomaflow)        schema.py (jobs.toml), registry, runner (state machine, retries,
                           cancel), scheduler (APScheduler, single process), recovery, retention,
                           missed.py (missed-schedule check: expected cron instants vs the run
@@ -331,6 +332,8 @@ python3.12 -m venv .venv && .venv/bin/pip install -c requirements.txt -e ".[dev]
 (cd frontend && npm ci && npm run lint && npm test && npm run build)   # eslint · vitest · tsc + vite
 (cd frontend && LIBERTY_E2E_USER=… LIBERTY_E2E_PASSWORD=… npm run e2e)  # Playwright on a LIVE server (frontend/e2e/README.md):
 #   the data screens' saves checked in the database — before / after any change to the grid or the record form
+LIBERTY_E2E_USER=… LIBERTY_E2E_PASSWORD=… .venv/bin/python -m liberty.ai.evals ../liberty-apps/tests/ai_eval   # the assistant's
+#   evaluation cases on a LIVE server (paid model calls, never in CI) — before / after any change to the prompt, the model or a tool
 # CLIs: liberty-next · liberty-connectors list|describe|run · liberty-admin init-db|create-user [--attribute k=v]|set-attributes|
 #       create-role [--scope RULE]|set-scope|list-roles|…|migrate [--dry-run]|record-upgrade
 #       liberty-ops status|doctor|start|stop|restart|logs|backup|restore|migrate|upgrade|rollback (Python installs; Docker twin = release/liberty)

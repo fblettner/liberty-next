@@ -21,6 +21,11 @@ from liberty.ai.tools import Tool, tool
 from liberty.connectors import APIConnector, ConnectorRegistry, SQLConnector, flatten_query_metas
 from liberty.connectors.api import current_pool
 from liberty.connectors.base import ConnectorError
+from liberty.connectors.sql import StreamDone, StreamMeta, StreamRows
+
+
+# The most rows one sql_query call returns unless ``[ai] sql_max_rows`` says otherwise.
+DEFAULT_SQL_MAX_ROWS = 200
 
 
 def build_connector_tools(
@@ -28,6 +33,7 @@ def build_connector_tools(
     *,
     allowed: list[str] | None = None,
     include_api: bool = False,
+    max_rows: int = DEFAULT_SQL_MAX_ROWS,
 ) -> list[Tool]:
     """Build the connector-backed tool set.
 
@@ -35,8 +41,12 @@ def build_connector_tools(
         connectors: the live registry.
         allowed: if non-empty, restrict to these connector names.
         include_api: also offer ``api_call`` (API endpoints may have side effects).
+        max_rows: the most rows ``sql_query`` returns (``[ai] sql_max_rows``) — its own cap, not
+            the pool's: a pool sized for the grid (500 000 rows, streamed) would otherwise be
+            read in full into one tool result.
     """
     allow = set(allowed or [])
+    row_cap = max(1, int(max_rows))
 
     def _visible(name: str) -> bool:
         return not allow or name in allow
@@ -95,24 +105,43 @@ def build_connector_tools(
                 out.append({"name": desc["name"], "type": "api", "endpoints": endpoints})
         return {"connectors": out}
 
-    async def sql_query(connector: str, query: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def sql_query(connector: str, query: str, params: dict[str, Any] | None = None, limit: int | None = None) -> dict[str, Any]:
         """Run a named, read-only SQL query on a configured SQL connector.
 
         Queries are predefined in the connector config; you only supply parameter
         values. Writable (data-mutating) queries are refused. Call list_connectors
         first to learn the connector + query names and which params they accept.
 
+        The result holds the first rows only (a capped number); "truncated": true means more
+        rows exist — the rows you got are then a sample, never a basis for a count or a total.
+
         Args:
             connector: connector name (from list_connectors).
             query: query name on that connector.
             params: optional {param: value} for the query's :bind parameters.
+            limit: fewer rows than the cap, when a few are enough (a sample, a lookup).
         """
         conn = _sql(connector)
         qdef = conn.get_query(query)  # raises QueryNotFoundError
         if qdef.writable:
             raise ConnectorError(f"query {connector}.{query} is writable and not available to the assistant")
-        result = await conn.execute(query, params or {})
-        return result.to_dict()
+        cap = row_cap if limit is None else max(1, min(int(limit), row_cap))
+        # The streaming path: a server-side cursor, closed once the cap is reached — execute()
+        # would have the driver fetch the whole result before the cap cuts it.
+        out: dict[str, Any] = {"connector": connector, "query": query, "columns": [], "rows": [], "row_count": 0, "truncated": False}
+        async for ev in conn.execute_stream(query, params or {}, max_rows=cap, chunk_size=min(cap, 500)):
+            if isinstance(ev, StreamMeta):
+                out["columns"] = [c.to_dict() for c in ev.columns]
+            elif isinstance(ev, StreamRows):
+                out["rows"].extend(ev.rows)
+            elif isinstance(ev, StreamDone):
+                out["row_count"], out["truncated"], out["duration_ms"] = ev.total, ev.truncated, round(ev.duration_ms, 3)
+        if out["truncated"]:
+            out["note"] = (
+                f"Only the first {out['row_count']} rows are returned; more exist. Do not count or add them up: "
+                "narrow the query with its params, or use the Data Explorer tools for a count, a total or a ranking."
+            )
+        return out
 
     async def api_call(endpoint: str, connector: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Call a named endpoint on a configured API connector.

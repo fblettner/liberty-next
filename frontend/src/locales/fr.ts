@@ -2642,6 +2642,7 @@ const fr: Resources = {
       logMaxMb: 'Taille par fichier (Mo)',
       logBackups: 'Fichiers gardés',
       aiExplorerTools: 'Outils de l’Explorateur de données (agrégats sur les modèles)',
+      aiSqlMaxRows: 'Lignes par requête, au plus (plafond propre à l’assistant, pas celui du pool)',
       oidcAttributeClaims: 'Attributs depuis les claims (périmètre : attribut → claim)',
       oidcClaimsAdd: 'Ajouter un attribut',
       oidcSessionSecret: 'Secret de session (le cookie de connexion ; vide = le secret JWT — redémarrage)',

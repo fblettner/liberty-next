@@ -1,5 +1,20 @@
 # Liberty Next — Release notes
 
+## 7.0.72 — unreleased
+
+- AI assistant: an evaluation set. `python -m liberty.ai.evals <case files>` plays questions against a live server
+  (the account of `LIBERTY_E2E_USER` / `LIBERTY_E2E_PASSWORD`, so the permissions and the data scope are part of what
+  is measured) and checks each answer: the tools called, texts and figures it must carry, no failed tool call. It
+  reports the pass rate, the tool calls, the tokens and the time, and `--out` keeps the full results as a baseline.
+  Run by hand before and after a change to the prompt, the model or a tool; the applications ship their cases.
+- AI assistant: saving Settings → App no longer removes part of the assistant's tools. The save rebuilt the assistant
+  without the instance tools — `describe_instance`, the playbooks, the Data Explorer and the operations tools — so
+  until the next restart or reload it answered from the connector queries alone.
+- AI assistant: `sql_query` has its own row cap — `[ai] sql_max_rows` (200 by default, Settings → App → AI). It
+  inherited the pool's `max_rows`, which is sized for the grid (rows streamed): on a pool at 500 000 one question could
+  read a whole table into a single tool result. Beyond the cap the result says `truncated` and tells the model not to
+  count or add up the rows it got; the model can ask for fewer with `limit`.
+
 ## 7.0.71 — unreleased
 
 - Pools: `[connectors] pools_path` in app.toml names a local file whose `[pools.*]` replace the same-named pools of

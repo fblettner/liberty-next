@@ -100,7 +100,7 @@ export const CONFIG_LABELS: Record<string, string> = {
   'ai.max_iterations': 'settings.app.aiMaxIter', 'ai.system_prompt': 'settings.app.aiSystemPrompt', 'ai.thinking': 'settings.app.aiThinking',
   'ai.effort': 'settings.app.aiEffort', 'ai.request_timeout': 'settings.app.aiTimeout', 'ai.connector_tools': 'settings.app.aiConnectorTools',
   'ai.api_tool': 'settings.app.aiApiTool', 'ai.scaffold_tools': 'settings.app.aiScaffoldTools', 'ai.ops_tools': 'settings.app.aiOpsTools',
-  'ai.explorer_tools': 'settings.app.aiExplorerTools', 'ai.allowed_connectors': 'settings.app.aiAllowedConnectors', 'ai.web_fetch_domains': 'settings.app.aiWebDomains',
+  'ai.explorer_tools': 'settings.app.aiExplorerTools', 'ai.sql_max_rows': 'settings.app.aiSqlMaxRows', 'ai.allowed_connectors': 'settings.app.aiAllowedConnectors', 'ai.web_fetch_domains': 'settings.app.aiWebDomains',
   'ai.web_fetch_max_uses': 'settings.app.aiWebMaxUses', 'ai.allowed_models': 'settings.app.aiAllowedModels', 'ai.starters': 'settings.app.aiStarters',
   'license.key': 'settings.app.licenseKey', 'crypto.master_key': 'developer.labels.masterKey',
   'notify.enabled': 'settings.app.notifyEnabled', 'notify.pool': 'settings.app.notifyPool', 'notify.smtp_host': 'settings.app.smtpHost',
