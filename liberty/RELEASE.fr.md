@@ -45,6 +45,21 @@
 - Paramètres → IA : un enregistrement ne supprime plus ce que la page n'affiche pas — les questions de démarrage par
   langue (`l.fr`) étaient perdues à chaque enregistrement, les groupes de questions d'un écran quand ses questions
   étaient modifiées.
+- La vue Synthèse de la grille fonctionne sur une requête Oracle : sa colonne de décompte s'appelle `_count`, nom
+  qu'Oracle refuse sans guillemets (ORA-00911) — toute synthèse sur un pool Oracle échouait. Le nom est désormais
+  entre guillemets dans le SQL généré.
+- Assistant IA : les conversations sont conservées pour l'utilisateur. Le volet de chat enregistre chaque
+  conversation sur le serveur (le stockage des vues enregistrées par utilisateur, un nouveau type `chat`) et non plus
+  seulement dans le navigateur : un bouton **historique** les liste — reprendre, supprimer — et elles suivent
+  l'utilisateur d'un appareil à l'autre. Ce qui est conservé est ce que l'utilisateur a vu (les questions et les
+  réponses) ; une conversation reprise relit ses données. 30 conversations par utilisateur au plus, les plus
+  anciennes supprimées.
+- Assistant IA : les **notes**. Demandez à l'assistant de retenir quelque chose pour les conversations suivantes —
+  une convention, une préférence, la définition d'un chiffre — et il propose une note sur une carte ; rien n'est
+  enregistré tant que l'utilisateur ne l'accepte pas. Les notes de l'utilisateur pour l'application de la page (et
+  celles valables pour toutes les applications) accompagnent ensuite ses questions. Elles sont privées,
+  listées et supprimées dans le même panneau que les conversations (type `ai_note` du stockage des vues
+  enregistrées).
 
 ## 7.0.76 — non publiée
 

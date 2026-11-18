@@ -93,6 +93,27 @@ async def tools(
     }
 
 
+NOTE_KIND = "ai_note"   # the user's notes in the saved-views store (liberty/web/views.py), keyed by application or "*"
+
+
+async def _notes(request: Request, username: str, app: str | None) -> list[str]:
+    """What *username* asked the assistant to remember: the notes for every application, then
+    those of the page's application. Best-effort — without the store, no notes."""
+    store = getattr(request.app.state, "user_views", None)
+    if store is None:
+        return []
+    out: list[str] = []
+    try:
+        for key in ("*", *([app] if app else [])):
+            for view in await store.list_views(username, NOTE_KIND, key):
+                text = str((view.get("payload") or {}).get("text") or "").strip()
+                if text:
+                    out.append(text)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("AI notes of %s could not be read (%s)", username, exc)
+    return out
+
+
 async def _record(request: Request, recorder: TurnRecorder) -> None:
     """Keep the turn in the usage record — best-effort: a store that is down is logged, never
     an error for the user."""
@@ -169,11 +190,13 @@ async def chat(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"model {body.model!r} is not allowed — see [ai] allowed_models")
     api_messages = [{"role": m.role, "content": m.content} for m in body.messages]
 
-    recorder = TurnRecorder(username=principal.username, model=body.model or assistant.settings.model, app=app_of(body.context))
+    app = app_of(body.context)
+    recorder = TurnRecorder(username=principal.username, model=body.model or assistant.settings.model, app=app)
+    notes = await _notes(request, principal.username, app)
 
     async def event_stream():
         try:
-            async for event in assistant.chat(api_messages, model=body.model, context=body.context, principal=principal):
+            async for event in assistant.chat(api_messages, model=body.model, context=body.context, principal=principal, notes=notes):
                 payload = event.to_dict()
                 recorder.observe(payload)
                 yield f"data: {json.dumps(payload)}\n\n"

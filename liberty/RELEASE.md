@@ -39,6 +39,18 @@
   (Settings → App → AI) switches them all off.
 - Settings → AI: a save no longer drops what the page does not show — the starters per language (`l.fr`) were lost on
   every save, a screen's starter groups when its questions were edited.
+- The grid's Summary view works on an Oracle query: its count column is named `_count`, which Oracle refuses
+  unquoted (ORA-00911) — every summary on an Oracle pool failed. The name is now quoted in the generated SQL.
+- AI assistant: the conversations are kept for the user. The chat drawer saves each conversation on the server (the
+  per-user saved-views store, a new kind `chat`) instead of only in the browser: a **history** button lists them —
+  resume, delete — and they follow the user from one device to another. What is kept is what the user saw (the
+  questions and the answers); a resumed conversation reads its data again. 30 conversations per user at most, the
+  oldest dropped.
+- AI assistant: **notes**. Ask the assistant to remember something for later conversations — a convention, a
+  preference, how a figure is defined — and it proposes a note on a card; nothing is saved until the user accepts
+  it. The user's notes for the page's application (and those for every application) then ride with their questions.
+  They are private to the user, listed and deleted in the same panel as the conversations (kind `ai_note` of the
+  saved-views store).
 
 ## 7.0.76 — unreleased
 

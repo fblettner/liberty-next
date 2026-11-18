@@ -136,7 +136,7 @@ def _dim_ref(name: str, bucket: str | None, owner: str, dialect: str) -> str:
 def _apply_aggregate_wrap(
     sql_text: str, dims: list[tuple[str, str | None]], dialect: str, *, count_alias: str = "_count",
 ) -> str:
-    """Wrap *sql_text* as ``SELECT <dims>, COUNT(*) AS _count FROM (<body>) lib_agg
+    """Wrap *sql_text* as ``SELECT <dims>, COUNT(*) AS "_count" FROM (<body>) lib_agg
     GROUP BY <dims> ORDER BY <dims>``. The inner ORDER BY is dropped (meaningless under
     aggregation)."""
     body, _order = _split_order_by(sql_text)
@@ -145,7 +145,9 @@ def _apply_aggregate_wrap(
         expr = _dim_ref(name, bucket, "lib_agg", dialect)
         selects.append(f"{expr} AS {name}")
         groups.append(expr)
-    select_list = ", ".join(selects + [f"COUNT(*) AS {count_alias}"])
+    # The alias is quoted: an identifier starting with an underscore is refused unquoted by
+    # Oracle (ORA-00911); quoted, the three dialects return the column as ``_count``.
+    select_list = ", ".join(selects + [f'COUNT(*) AS "{count_alias}"'])
     group_list = ", ".join(groups)
     return (
         f"SELECT {select_list}\nFROM (\n{body}\n) lib_agg\n"

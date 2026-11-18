@@ -1,4 +1,5 @@
-"""``/api/views`` — per-user saved views (grid formats, chart specs).
+"""``/api/views`` — per-user saved views (grid formats, chart specs, the assistant's
+conversations and notes).
 
 Durable replacement for the browser localStorage that used to hold a table's
 column layout: a view is stored per ``(username, kind, view_key)`` on the auth
@@ -25,7 +26,12 @@ _log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/views", tags=["views"])
 
 # Known view kinds. Extensible — add a kind here + a frontend producer.
-_KINDS = {"grid", "chart"}
+#   grid / chart — a table's saved format, a chart spec;
+#   chat         — the assistant's conversations (key ``conversations``, one document each: the
+#                  title, the application, the messages as the user saw them);
+#   ai_note      — what the user asked the assistant to remember (key = the application, or
+#                  ``*``): added to the context of their questions (liberty/ai/routes.py).
+_KINDS = {"grid", "chart", "chat", "ai_note"}
 
 
 class ViewBody(BaseModel):

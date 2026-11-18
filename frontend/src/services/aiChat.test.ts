@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { HISTORY_MAX, loadHistory, loadModel, pickStarterGroups, pickStarters, saveHistory, saveModel, trimHistory } from './aiChat'
+import {
+  CONVERSATIONS_MAX, HISTORY_MAX, currentConversationId, loadHistory, loadModel, newConversationId, overflow, pickStarterGroups, pickStarters,
+  saveHistory, saveModel, setCurrentConversationId, titleOf, trimHistory,
+} from './aiChat'
+import type { Conversation } from '../types/ai'
 import type { ChatMessage } from '../types/ai'
 
 const starters = { '*': ['What can you do?'], nomajde: ['Who has no role?'], 'nomajde/f0092': ['Users never logged in'] }
@@ -58,5 +62,30 @@ describe('pickStarterGroups — the page wins over the app', () => {
     expect(pickStarterGroups(groups, starters, 'nomajde', 'explorer')).toEqual([{ label: null, starters: ['Create an analysis'] }])
     expect(pickStarterGroups(groups, starters, 'nomajde', 'f0092')).toEqual([{ label: 'Users', starters: ['a', 'b'] }])
     expect(pickStarterGroups(groups, starters, 'other', null)).toEqual([])
+  })
+})
+
+describe('conversations', () => {
+  it('titles a conversation by its first question, on one line', () => {
+    expect(titleOf([{ role: 'user', content: '  Which business unit\n sold the most?  ' }, { role: 'assistant', content: 'France.' }])).toBe('Which business unit sold the most?')
+    expect(titleOf([{ role: 'user', content: 'x'.repeat(200) }]).length).toBe(60)
+    expect(titleOf([])).toBe('')
+  })
+  it('keeps the conversation of this device, a new one when there is none', () => {
+    localStorage.clear()
+    const id = currentConversationId()
+    expect(id).toMatch(/^c-/)
+    expect(currentConversationId()).toBe(id)
+    const other = newConversationId()
+    expect(other).not.toBe(id)
+    setCurrentConversationId(other)
+    expect(currentConversationId()).toBe(other)
+  })
+  it('drops the oldest beyond the cap', () => {
+    const all: Conversation[] = Array.from({ length: CONVERSATIONS_MAX + 2 }, (_, i) => ({
+      id: `c${i}`, title: `t${i}`, app: null, messages: [], updated_at: `2026-11-${String(i + 1).padStart(2, '0')}T10:00:00`,
+    }))
+    expect(overflow(all).map((c) => c.id).sort()).toEqual(['c0', 'c1'])
+    expect(overflow(all.slice(0, 5))).toEqual([])
   })
 })

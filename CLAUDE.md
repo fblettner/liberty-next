@@ -128,7 +128,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
   reports/                registry (plugin + operator Jinja templates), render (markdown → PDF)
   changesets/             change packages: capture writes, lifecycle, compaction, apply bundle
   versioning/             config snapshot history (.versions/) + upgrade journal
-  userviews/              DB-backed saved grid / chart views (shared + per user)
+  userviews/              DB-backed saved grid / chart views (shared + per user); also the assistant's conversations
+                          (kind `chat`) and the user's notes (kind `ai_note`, read by ai/routes.py into each turn)
   presets.py              the Screen Assistant's table presets (config/presets/**.toml): the catalogue loader
                           shared by the assistant endpoint and the explorer (a model may derive from a preset; a
                           preset with `app` + `explorer = true` ships its model by default, built at first use)

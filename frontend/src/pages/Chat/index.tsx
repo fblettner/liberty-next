@@ -2,11 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
-import { Send, ArrowRight, Check, X, FileEdit, AlertTriangle, Square, Plus, Sparkles, ChevronRight, ChevronDown } from 'lucide-react'
+import { Send, ArrowRight, Check, X, FileEdit, AlertTriangle, Square, Plus, Sparkles, ChevronRight, ChevronDown, History, StickyNote, Trash2 } from 'lucide-react'
 import { ApiError, api, streamSSE } from '../../api/client'
-import type { AiInfo, AiModel, ChatEvent, ChatMessage, Proposal, StarterGroup } from '../../types/ai'
+import type { AiInfo, AiModel, AiNote, ChatEvent, ChatMessage, Conversation, Proposal, StarterGroup } from '../../types/ai'
 import { getPageContext, renderPageContext, subscribePageContext, summarizePageContext, type PageContext } from '../../services/aiContext'
-import { loadHistory, loadModel, pickStarterGroups, saveHistory, saveModel, trimHistory } from '../../services/aiChat'
+import {
+  currentConversationId, deleteConversation, deleteNote, listConversations, listNotes, loadHistory, loadModel, newConversationId, overflow,
+  pickStarterGroups, saveConversation, saveHistory, saveModel, saveNote, setCurrentConversationId, trimHistory,
+} from '../../services/aiChat'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { Button, Banner, SearchSelect, SpinnerRing, Mono, Tag } from '../../common'
 import { Markdown } from '../../common/Markdown'
@@ -175,6 +178,22 @@ const PayloadPre = styled.pre`
 
 
 
+const PanelBox = styled.div`
+  flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;
+  & .head { font-size: ${fontSize.micro}; color: ${colors.text.muted}; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 6px; }
+  & .empty { color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 4px 2px; }
+`
+const PanelRow = styled.div<{ $active?: boolean }>`
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: ${radius.md};
+  border: 1px solid ${(p) => (p.$active ? colors.blue.border : colors.border)}; background: ${(p) => (p.$active ? colors.blue.bg : colors.bg.input)};
+  font-size: ${fontSize.sm}; color: ${colors.text.primary}; min-width: 0;
+  & .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  & .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .note { white-space: normal; }
+  & .meta { font-size: ${fontSize.micro}; color: ${colors.text.muted}; }
+  & button.open { all: unset; cursor: pointer; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+`
+
 /** One fold of consecutive tool entries. */
 function ToolGroup({ items, t }: { items: Extract<Entry, { kind: 'tool' }>[]; t: (k: string, o?: Record<string, unknown>) => string }) {
   const [open, setOpen] = useState(false)
@@ -239,6 +258,12 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
   useEffect(() => () => abortRef.current?.abort(), [])
   const [error, setError] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  // The conversation is also kept for the user on the server (services/aiChat): the history
+  // panel lists them — resume, delete — next to the notes the user accepted.
+  const conversationRef = useRef<string>(currentConversationId())
+  const [panel, setPanel] = useState(false)
+  const [conversations, setConversations] = useState<Conversation[]>([])
+  const [notes, setNotes] = useState<AiNote[]>([])
   // The model picked on this device — only offered when the operator allowed more than one;
   // a pick that is no longer allowed falls back to the configured model.
   const [pickedModel, setPickedModel] = useState<string | null>(loadModel)
@@ -275,6 +300,35 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
   }, [entries])
+
+  const noteApp = onPage?.app ?? currentApp ?? null
+  const loadPanel = () => {
+    listConversations().then(setConversations).catch(() => setConversations([]))
+    listNotes(noteApp).then(setNotes).catch(() => setNotes([]))
+  }
+  const openPanel = () => { if (!panel) loadPanel(); setPanel((v) => !v) }
+  // Keep the conversation on the server after a turn; beyond the cap the oldest ones go.
+  const persist = () => {
+    void saveConversation(conversationRef.current, historyRef.current, noteApp)
+      .then(listConversations)
+      .then((all) => { setConversations(all); return Promise.all(overflow(all).map((c) => deleteConversation(c.id))) })
+      .catch(() => undefined)          // the store is down: the conversation stays on this device
+  }
+  const resume = (c: Conversation) => {
+    conversationRef.current = c.id
+    setCurrentConversationId(c.id)
+    historyRef.current = trimHistory(c.messages)
+    saveHistory(historyRef.current)
+    setEntries(entriesOf(historyRef.current))
+    setFollowups([]); setHeading(null); setError(null); setPanel(false)
+  }
+  const dropConversation = (c: Conversation) => {
+    void deleteConversation(c.id).then(() => setConversations((all) => all.filter((x) => x.id !== c.id))).catch(() => undefined)
+    if (c.id === conversationRef.current) reset()
+  }
+  const dropNote = (n: AiNote) => {
+    void deleteNote(n).then(() => setNotes((all) => all.filter((x) => !(x.id === n.id && x.app === n.app)))).catch(() => undefined)
+  }
 
   // One turn: the user text goes to the history (and, when ``show``, to the transcript), the
   // stream fills the assistant bubble. ``show = false`` is the control-plane turn sent after
@@ -347,6 +401,7 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
     } finally {
       historyRef.current = trimHistory([...historyRef.current, { role: 'assistant', content: assistantText }])
       saveHistory(historyRef.current)
+      persist()
       if (abortRef.current === controller) abortRef.current = null
       setBusy(false)
     }
@@ -366,6 +421,18 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
 
   async function applyProposal(toolName: string, proposal: Proposal) {
     updateProposal(proposal, { state: 'applying', error: undefined })
+    if (proposal.kind === 'note') {
+      // A note is the user's own (their saved views), not configuration: saved here, no further turn.
+      try {
+        const p = proposal.payload as { text?: string; app?: string }
+        await saveNote(p.app || '*', p.text || proposal.summary)
+        updateProposal(proposal, { state: 'applied' })
+        if (panel) loadPanel()
+      } catch (e) {
+        updateProposal(proposal, { state: 'error', error: e instanceof ApiError ? e.message : String(e) })
+      }
+      return
+    }
     try {
       const r = await api.post<{ applied: boolean; kind: string; summary: string }>(
         '/admin/config/apply-proposal',
@@ -385,10 +452,13 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
 
   function skipProposal(toolName: string, proposal: Proposal) {
     updateProposal(proposal, { state: 'skipped' })
+    if (proposal.kind === 'note') return      // declined: nothing to tell the assistant
     void runTurn(`Skipped: ${toolName}. Do not retry this step; either move on or wait for new instructions.`, false)
   }
 
   function reset() {
+    conversationRef.current = newConversationId()
+    setCurrentConversationId(conversationRef.current)
     historyRef.current = []
     saveHistory([])
     setEntries([])
@@ -408,7 +478,8 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
             <SearchSelect value={model} options={models.map((m) => ({ value: m.id, label: m.label }))} onChange={(v) => { if (v) pickModel(v) }} disabled={busy} />
           </div>
         )}
-        <IconBtn type="button" onClick={reset} title={t('chat.newConversation')} disabled={busy || entries.length === 0}><Plus size={14} /></IconBtn>
+        <IconBtn type="button" onClick={openPanel} title={t('chat.history')} disabled={busy} style={panel ? { color: colors.blue.main } : undefined}><History size={14} /></IconBtn>
+        <IconBtn type="button" onClick={() => { reset(); setPanel(false) }} title={t('chat.newConversation')} disabled={busy || entries.length === 0}><Plus size={14} /></IconBtn>
         {onClose && <IconBtn type="button" onClick={onClose} title={t('common.close')}><X size={14} /></IconBtn>}
       </Header>
       {available === false && <Unavailable>{t('chat.unavailable')}</Unavailable>}
@@ -425,7 +496,33 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
           </ContextBar>
         )
       })()}
-      <Messages ref={scrollRef}>
+      {panel && (
+        <PanelBox>
+          <div className="head">{t('chat.conversations')}</div>
+          {conversations.length === 0 && <div className="empty">{t('chat.noConversations')}</div>}
+          {conversations.map((c) => (
+            <PanelRow key={c.id} $active={c.id === conversationRef.current}>
+              <button type="button" className="open" onClick={() => resume(c)} title={t('chat.resume')}>
+                <span className="title">{c.title}</span>
+                <span className="meta">{[c.app, c.updated_at ? new Date(c.updated_at).toLocaleString() : null].filter(Boolean).join(' · ')}</span>
+              </button>
+              <IconBtn type="button" onClick={() => dropConversation(c)} title={t('common.delete')} style={{ width: 24, height: 24, border: 0 }}><Trash2 size={12} /></IconBtn>
+            </PanelRow>
+          ))}
+          <div className="head"><StickyNote size={11} /> {t('chat.notes')}</div>
+          {notes.length === 0 && <div className="empty">{t('chat.noNotes')}</div>}
+          {notes.map((n) => (
+            <PanelRow key={`${n.app}/${n.id}`}>
+              <span className="text">
+                <span className="note">{n.text}</span>
+                <span className="meta">{n.app === '*' ? t('chat.noteEverywhere') : n.app}</span>
+              </span>
+              <IconBtn type="button" onClick={() => dropNote(n)} title={t('common.delete')} style={{ width: 24, height: 24, border: 0 }}><Trash2 size={12} /></IconBtn>
+            </PanelRow>
+          ))}
+        </PanelBox>
+      )}
+      <Messages ref={scrollRef} style={panel ? { display: 'none' } : undefined}>
         {entries.length === 0 && <Bubble $role="assistant">{t('chat.greeting')}</Bubble>}
         {foldTools(entries).map((e, i) =>
           e.kind === 'tools' ? (

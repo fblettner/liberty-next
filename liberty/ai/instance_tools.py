@@ -15,6 +15,8 @@ from liberty.ai.tools import Tool, caller, may, tool
 
 # The most results one search_catalog call returns.
 SEARCH_MAX_RESULTS = 40
+# One note the assistant keeps for a user (remember_note).
+NOTE_MAX_CHARS = 300
 
 
 def build_instance_tools(state: Callable[[], Any], *, allowed: list[str] | None = None) -> list[Tool]:
@@ -223,7 +225,33 @@ def build_instance_tools(state: Callable[[], Any], *, allowed: list[str] | None 
             raise KeyError(f"no playbook {app}/{id} — call list_playbooks for the available ones")
         return {"app": app, "id": id, "title": pb.title, "body": pb.body}
 
+    def remember_note(text: str, app: str | None = None) -> dict[str, Any]:
+        """Propose a note to keep for the user: something they told you about how they work or
+        how to read their data, that should hold in their later conversations (a convention,
+        a preference, a definition — "a conflict means a conflict line", "always show amounts
+        in EUR"). Nothing is saved until the user accepts the card. One fact per note, written
+        so that it is clear on its own; never data, a figure of the day or a secret.
+
+        Args:
+            text: the note, one or two sentences.
+            app: the application it is about (the page's application); leave out for every application.
+        """
+        from liberty.ai.proposal import Proposal, wrap
+
+        note = " ".join(str(text or "").split())
+        if not note:
+            raise ValueError("an empty note")
+        if len(note) > NOTE_MAX_CHARS:
+            raise ValueError(f"a note is at most {NOTE_MAX_CHARS} characters — keep one fact, shorter")
+        scope = app if app and _visible(app) else "*"
+        return wrap(
+            Proposal(kind="note", summary=note, target_path="your notes", payload={"text": note, "app": scope},
+                     app=None if scope == "*" else scope),
+            message="Proposed to the user, who accepts or declines it on the card. Do not repeat the note; go on with their question.",
+        )
+
     return [
+        tool(remember_note, chat_only=True, read_only=False),
         tool(describe_instance, summary_keys=("app",)),
         tool(search_catalog, summary_keys=("query",)),
         tool(list_playbooks),

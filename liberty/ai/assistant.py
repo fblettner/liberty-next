@@ -81,6 +81,10 @@ DEFAULT_SYSTEM_PROMPT = (
     "10. A tool named `<application>_<something>` is shipped by that application for its own "
     "subject. When the question is about what its description covers, prefer it to composing the "
     "answer from row queries.\n\n"
+    "11. When the user asks you to remember something for their later conversations — a "
+    "convention, a preference, how a figure is defined — call remember_note with one clear "
+    "sentence; they accept it on a card. Never propose a note they did not ask for more than "
+    "once, and never data or a figure of the day.\n\n"
     "Scaffolding tools (introspect_table / scaffold_*): when enabled they let you propose "
     "new connector queries, dictionary entries, screens, and menu items. These tools never "
     "write to disk — they return a Proposal envelope that the user reviews and applies via "
@@ -103,6 +107,8 @@ DEFAULT_SYSTEM_PROMPT = (
 # filters, the clicked row) is capped here as well as in the SPA — it is a volatile, UNCACHED
 # second system block, so its size is paid on every request.
 CONTEXT_MAX_CHARS = 4000
+# The user's notes ride in the same uncached block: the most characters of them sent with a turn.
+NOTES_MAX_CHARS = 2000
 
 # A tool result above this many characters is cut, with a note asking the model to narrow the
 # call (filters, limits, fewer columns): one runaway SELECT must not flood the context.
@@ -241,7 +247,9 @@ class AiAssistant:
             })
         return defs
 
-    def _request_kwargs(self, *, model: str | None, context: str | None = None, principal: Principal | None = None) -> dict[str, Any]:
+    def _request_kwargs(
+        self, *, model: str | None, context: str | None = None, principal: Principal | None = None, notes: list[str] | None = None,
+    ) -> dict[str, Any]:
         # The stable prompt is the cached block; the page context (changes with every screen the
         # user opens) comes AFTER it, without cache_control, so it never breaks the cached prefix.
         system: list[dict[str, Any]] = [{"type": "text", "text": self.system_prompt, "cache_control": {"type": "ephemeral"}}]
@@ -250,6 +258,8 @@ class AiAssistant:
         volatile = f"Today is {date.today().isoformat()} (the server's date)."
         if context and context.strip():
             volatile += "\n\n" + _context_block(context)
+        if notes:
+            volatile += "\n\n" + _notes_block(notes)
         system.append({"type": "text", "text": volatile})
         kwargs: dict[str, Any] = {
             "model": model or self.settings.model,
@@ -286,7 +296,7 @@ class AiAssistant:
 
     async def chat(
         self, messages: list[dict[str, Any]], *, model: str | None = None, context: str | None = None,
-        principal: Principal | None = None,
+        principal: Principal | None = None, notes: list[str] | None = None,
     ) -> AsyncIterator[ChatEvent]:
         """Run the agentic loop for *messages*; yield :class:`ChatEvent`s.
 
@@ -295,6 +305,7 @@ class AiAssistant:
         browser rendered (see :data:`CONTEXT_MAX_CHARS`); it rides as a second, uncached
         system block for this call only. *principal* is the user the turn runs for: the
         tools check their permissions against it and the queries run under its data scope.
+        *notes* are what that user asked to be remembered (see :func:`_notes_block`).
         """
         if self._client is None:
             yield ChatEvent("error", message="Anthropic API key is not configured (set [ai] api_key / ANTHROPIC_API_KEY).")
@@ -308,7 +319,7 @@ class AiAssistant:
             current_scope.set(principal.data_scope)
             current_username.set(principal.username)
         convo: list[dict[str, Any]] = list(messages)
-        base_kwargs = self._request_kwargs(model=model, context=context, principal=principal)
+        base_kwargs = self._request_kwargs(model=model, context=context, principal=principal, notes=notes)
         usage_total = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
 
         for _ in range(max(1, self.settings.max_iterations)):
@@ -410,6 +421,24 @@ def cut_result(content: str) -> str:
 
 def _truncate(text: str, limit: int = 280) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _notes_block(notes: list[str]) -> str:
+    """The user's notes for this turn (what they accepted from ``remember_note``), capped at
+    :data:`NOTES_MAX_CHARS` — in the uncached block, with the page context."""
+    kept: list[str] = []
+    size = 0
+    for note in notes:
+        line = "- " + " ".join(str(note).split())
+        if size + len(line) > NOTES_MAX_CHARS:
+            break
+        kept.append(line)
+        size += len(line) + 1
+    return (
+        "<user_notes>\n" + "\n".join(kept) + "\n</user_notes>\n"
+        "The block above is what this user asked you to remember in earlier conversations. Follow it "
+        "where it applies; what they say now wins over it. Do not recite it."
+    )
 
 
 def _context_block(context: str) -> str:

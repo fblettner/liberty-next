@@ -27,7 +27,7 @@ export interface ChatEvent {
 /** What a scaffold tool proposes — rendered as an Apply card in the chat. The kinds match
  *  liberty.ai.proposal.ProposalKind; the apply endpoint dispatches by `kind`. */
 export interface Proposal {
-  kind: 'dictionary_entries' | 'connector_queries' | 'screen' | 'menu_item'
+  kind: 'dictionary_entries' | 'connector_queries' | 'screen' | 'menu_item' | 'note'
   summary: string
   target_path: string
   payload: Record<string, unknown>
@@ -40,6 +40,11 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
 }
+
+/** A conversation kept for the user (the saved-views store, kind `chat`): what they saw of it. */
+export interface Conversation { id: string; title: string; app: string | null; updated_at: string | null; messages: ChatMessage[] }
+/** A note the user accepted (kind `ai_note`); `app` is the application it is about, or `*`. */
+export interface AiNote { id: string; app: string; text: string }
 
 export interface AiModel { id: string; label: string }
 

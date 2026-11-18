@@ -23,6 +23,7 @@ ProposalKind = Literal[
     "connector_queries",   # add/update queries on a SQL connector in connectors.toml
     "screen",              # add/replace a screen in screens.toml
     "menu_item",           # append a menu item to a [menus.<app>] tree
+    "note",                # a note the assistant keeps for the user (their own saved views, kind ai_note) — not configuration
 ]
 
 

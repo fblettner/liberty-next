@@ -2336,7 +2336,7 @@ def test_aggregate_wrap_sql_shapes() -> None:
     from liberty.connectors.sql import _apply_aggregate_wrap, _apply_aggregate_detail_wrap
     sql = "SELECT seg, ts FROM t ORDER BY id DESC"
     agg = _apply_aggregate_wrap(sql, [("seg", None), ("ts", "day")], "postgres")
-    assert "COUNT(*) AS _count" in agg
+    assert 'COUNT(*) AS "_count"' in agg          # quoted: Oracle refuses an unquoted leading underscore
     assert "DATE_TRUNC('day', lib_agg.ts)::date AS ts" in agg
     assert "GROUP BY lib_agg.seg, DATE_TRUNC('day', lib_agg.ts)::date" in agg
     det = _apply_aggregate_detail_wrap(sql, [("seg", None, "g0"), ("ts", "day", "g1")], "postgres")
