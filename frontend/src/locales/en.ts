@@ -438,6 +438,8 @@ const en = {
     tokenCreate: 'Create a token',
     tokenValue: 'Your token — the connector’s request header: Authorization: Bearer <token>',
     tokenOnce: 'Copy it now: it is shown once and not stored. It expires on {{date}}.',
+    extensionHint: 'For a server that is not on the internet: open the file with Claude Desktop and paste a token in its settings.',
+    extensionDownload: 'Claude Desktop extension',
     tokenEnds: 'A token also ends when your account is deactivated or loses the permission, and when you change your password — do that if a token leaks.',
     copy: 'Copy',
     copied: 'Copied.',

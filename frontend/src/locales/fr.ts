@@ -440,6 +440,8 @@ const fr: Resources = {
     tokenCreate: 'Créer un jeton',
     tokenValue: 'Votre jeton — l’en-tête de requête du connecteur : Authorization: Bearer <jeton>',
     tokenOnce: 'Copiez-le maintenant : il n’est affiché qu’une fois et n’est pas conservé. Il expire le {{date}}.',
+    extensionHint: 'Pour un serveur qui n’est pas sur Internet : ouvrez le fichier avec Claude Desktop et collez un jeton dans ses réglages.',
+    extensionDownload: 'Extension Claude Desktop',
     tokenEnds: 'Un jeton prend aussi fin quand votre compte est désactivé ou perd la permission, et quand vous changez de mot de passe — faites-le si un jeton a fuité.',
     copy: 'Copier',
     copied: 'Copié.',

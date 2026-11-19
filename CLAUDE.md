@@ -122,6 +122,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           answer / rows; TurnRecorder fed by the chat route; read by web/ai_usage.py = /admin/ai-usage, Monitoring → AI usage),
                           mcp_server.py (the /mcp endpoint, `[ai] mcp_enabled`: the official `mcp` package's low-level server + stateless Streamable HTTP manager
                           over ToolRegistry.offered / execute; the caller = a personal access token, `auth/routes.principal_from_personal_token`),
+                          mcp_extension.py + mcpb/ (the Claude Desktop extension `liberty.mcpb`, zipped at `GET /auth/mcp/extension`: manifest + a
+                          Node stdio bridge posting to /mcp with a personal token — for a server not reachable from the internet),
                           attachments.py (a file attached to a question: image / PDF as base64 blocks, xlsx / csv through the file_load reader and
                           text files as text; `POST /ai/attachments`, `[ai] attachment_max_mb`; the chat route accepts text / image / document parts only),
                           evals.py (the evaluation set: cases in TOML, played against a live server, checked on tools / texts / figures)

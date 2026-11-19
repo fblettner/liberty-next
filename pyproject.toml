@@ -113,6 +113,7 @@ include = ["liberty*"]
 
 [tool.setuptools.package-data]
 "liberty.licensing" = ["public.pem"]
+"liberty.ai" = ["mcpb/manifest.json", "mcpb/server/index.js", "mcpb/icon.png"]   # the Claude Desktop extension, zipped at download
 "liberty" = ["RELEASE.md", "RELEASE.fr.md"]   # release notes shipped with the wheel (served at /admin/release-notes)
 
 # ── ruff: the lint baseline (A5, 2026-10-26). Chosen from a measurement, not aspiration:

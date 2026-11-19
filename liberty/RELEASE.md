@@ -29,6 +29,15 @@
   that reason; values taken from a query (a lookup) are named by `screen_form` for the assistant to check, not
   verified by the server.
 
+- **MCP: a Claude Desktop extension, for a server that is not on the internet.** A custom connector is called
+  from Anthropic's servers and so needs a public address. The profile's Access tokens tab now offers
+  **Download the extension** (`liberty.mcpb`): opened with Claude Desktop, it runs a small bridge on the user's
+  own computer that relays Claude's messages to `/mcp` with the user's personal access token — the server only
+  has to be reachable from that computer (an internal address, a VPN). The file is built at download with the
+  server's address filled in and carries no secret: the user pastes a token created in the same tab; a switch
+  accepts a self-signed or company certificate. Nothing to install (Claude Desktop brings Node). The same rights
+  as any MCP access: `mcp:use`, the user's permissions and data scope. `GET /auth/mcp/extension`.
+
 ## 7.0.79 — unreleased
 
 - **MCP endpoint: sign in instead of pasting a token (OAuth).** A client given only the address of `/mcp` — a

@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 
 from authlib.integrations.starlette_client import OAuthError
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from liberty.auth.authstore import AuthBackend, UserRecord
@@ -503,6 +503,36 @@ async def create_personal_token(
     issued = tokens.personal_token(subject=user.id, password_fingerprint=_password_fingerprint(user.password_hash), ttl=days * 86400)
     _log.info("personal access token issued for %s (%d days)", user.username, days)
     return PersonalToken(token=issued.token, expires_at=issued.expires_at, days=days)
+
+
+@router.get(
+    "/mcp/extension",
+    summary="Download the Claude Desktop extension",
+    responses={
+        200: {"content": {"application/zip": {}}, "description": "`liberty.mcpb` — open it with Claude Desktop."},
+        403: {"description": "The caller lacks `mcp:use`."},
+        404: {"description": "The MCP endpoint is off (`[ai] mcp_enabled`)."},
+    },
+)
+async def mcp_extension(
+    request: Request,
+    principal: Annotated[Principal, Depends(require_permission(PERSONAL_TOKEN_PERMISSION))],
+    url: str | None = None,
+) -> Response:
+    """The extension that connects Claude Desktop to this server from the user's own machine —
+    for a server that is not reachable from the internet. `url` is the address of `/mcp` as the
+    user's browser sees it, pre-filled in the extension; the user pastes a personal access token
+    (`POST /auth/tokens`). It carries no secret."""
+    from liberty import __version__
+    from liberty.ai.mcp_extension import FILE_NAME, build_extension
+
+    settings = getattr(request.app.state.settings, "ai", None)
+    if settings is None or not settings.enabled or not settings.mcp_enabled:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="The MCP endpoint is disabled ([ai] mcp_enabled = false)")
+    return Response(
+        build_extension(url, __version__), media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{FILE_NAME}"', "Cache-Control": "no-store"},
+    )
 
 
 # -- OIDC ------------------------------------------------------------------- #

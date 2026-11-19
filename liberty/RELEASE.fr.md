@@ -33,6 +33,16 @@
   avec cette raison ; les valeurs issues d'une requête (une liste de recherche) sont indiquées par `screen_form`
   pour que l'assistant les vérifie, non contrôlées par le serveur.
 
+- **MCP : une extension Claude Desktop, pour un serveur qui n'est pas sur Internet.** Un connecteur personnalisé
+  est appelé depuis les serveurs d'Anthropic et exige donc une adresse publique. L'onglet Jetons d'accès du profil
+  propose désormais **Télécharger l'extension** (`liberty.mcpb`) : ouverte avec Claude Desktop, elle exécute sur
+  l'ordinateur de l'utilisateur une petite passerelle qui relaie les messages de Claude vers `/mcp` avec le jeton
+  d'accès personnel de l'utilisateur — le serveur n'a qu'à être joignable depuis cet ordinateur (une adresse
+  interne, un VPN). Le fichier est construit au téléchargement avec l'adresse du serveur renseignée et ne contient
+  aucun secret : l'utilisateur y colle un jeton créé dans le même onglet ; une option accepte un certificat
+  auto-signé ou d'entreprise. Rien à installer (Claude Desktop fournit Node). Les mêmes droits que tout accès
+  MCP : `mcp:use`, les permissions et le périmètre de données de l'utilisateur. `GET /auth/mcp/extension`.
+
 ## 7.0.79 — non publiée
 
 - **Point d'accès MCP : se connecter au lieu de coller un jeton (OAuth).** Un client à qui l'on ne donne que

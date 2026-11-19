@@ -87,7 +87,8 @@ model picker, a conversation that stays; every question is recorded for the
 administrators (who, model, tokens, tools — never the question, the answer or a row).
 The same tools are served over **MCP** (`/mcp`): Claude Desktop, claude.ai or Claude Code
 connect by signing the user in to Liberty (OAuth — give the client the address only) or with
-a personal access token, and act with that user's rights.
+a personal access token, and act with that user's rights; for a server that is not on the
+internet, a downloadable Claude Desktop extension connects from the user's own computer.
 
 **Access.** Local users or OpenID Connect (any provider), roles with colon-glob
 permissions, superusers, and **row-level data scope**: a role's rules on a dictionary

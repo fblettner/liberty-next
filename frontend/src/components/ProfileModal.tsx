@@ -10,9 +10,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { User, Shield, KeyRound, Copy, X } from 'lucide-react'
+import { User, Shield, KeyRound, Copy, Download, X } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
-import { api, ApiError, resolveApiPath } from '../api/client'
+import { api, apiDownload, ApiError, resolveApiPath } from '../api/client'
 import { hasPermission } from '../pages/Settings/Access/permissions'
 import { Overlay, Modal, ModalBody, ModalFooter, Button, Tag, FieldLabel, Input, PasswordInput, Banner } from '../common'
 import { colors, fontSize, fonts, radius } from '../theme'
@@ -125,6 +125,15 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
   const mayToken = !!user && (user.is_superuser || hasPermission(user.permissions ?? [], 'mcp:use'))
   const mcpUrl = new URL(resolveApiPath('/mcp'), window.location.origin).href
 
+  const downloadExtension = async () => {
+    setError(null)
+    try {
+      await apiDownload(`/auth/mcp/extension?url=${encodeURIComponent(mcpUrl)}`, 'liberty.mcpb')
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    }
+  }
+
   const createToken = async () => {
     setBusy(true); setError(null); setStatus(null)
     try {
@@ -218,6 +227,13 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
                 </Field>
               )}
               <Note>{t('profile.tokenEnds')}</Note>
+              {/* Claude Desktop from this machine, for a server that is not on the internet: the file holds
+                  this address and no secret; the token is pasted in the extension's settings. */}
+              <div>
+                <Button $size="sm" $variant="ghost" disabled={busy} title={t('profile.extensionHint')} onClick={() => void downloadExtension()}>
+                  <Download size={13} /> {t('profile.extensionDownload')}
+                </Button>
+              </div>
             </>
           ) : tab === 'profile' ? (
             <>

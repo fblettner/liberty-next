@@ -1,0 +1,53 @@
+{
+  "manifest_version": "0.3",
+  "name": "liberty-next",
+  "display_name": "Liberty Next",
+  "version": "{{version}}",
+  "description": "Use your Liberty Next applications from Claude: screens, dashboards, Data Explorer analyses and playbooks, under your own account.",
+  "author": {
+    "name": "NOMANA-IT",
+    "url": "https://nomana-it.fr"
+  },
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": {
+        "LIBERTY_URL": "${user_config.server_url}",
+        "LIBERTY_TOKEN": "${user_config.token}",
+        "LIBERTY_INSECURE": "${user_config.internal_certificate}"
+      }
+    }
+  },
+  "tools_generated": true,
+  "user_config": {
+    "server_url": {
+      "type": "string",
+      "title": "Liberty address",
+      "description": "The address of your Liberty server, ending with /mcp.",
+      "default": "{{url}}",
+      "required": true
+    },
+    "token": {
+      "type": "string",
+      "title": "Personal access token",
+      "description": "Created in Liberty: your profile, tab Access tokens.",
+      "sensitive": true,
+      "required": true
+    },
+    "internal_certificate": {
+      "type": "boolean",
+      "title": "Accept an internal certificate",
+      "description": "Turn on only when your Liberty server uses a self-signed or company certificate.",
+      "default": false
+    }
+  },
+  "compatibility": {
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
+}
