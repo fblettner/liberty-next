@@ -186,7 +186,29 @@ async def test_max_iterations_cap() -> None:
     )
     events = await _collect(a)
     assert events[-1].type == "error" and "iteration" in events[-1].message
-    assert a._client.messages._i == 2  # exactly max_iterations API calls
+    # max_iterations rounds, then one closing request without tools — which found nothing to say here
+    assert a._client.messages._i == 3
+    assert a._client.messages.calls[-1]["tool_choice"] == {"type": "none"} and "tool_choice" not in a._client.messages.calls[0]
+
+
+@pytest.mark.asyncio
+async def test_the_round_limit_ends_on_an_answer_not_on_nothing() -> None:
+    """The rounds are used up: one more request, tools off, says where the work stands — the
+    user gets an answer for what the rounds cost (it ended on "(no response)")."""
+    @tool
+    def loop_tool() -> str:
+        return "again"
+
+    again = ([], _msg([_tool_block("t", "loop_tool", {})], "tool_use"))
+    closing = ([_text_delta("Done so far: A. "), _text_delta("Left: B.")], _msg([_text_block("Done so far: A. Left: B.")], "end_turn"))
+    a = _assistant([again, again, closing], tools=ToolRegistry().add(loop_tool), max_iterations=2)
+    events = await _collect(a)
+    assert [e.type for e in events][-3:] == ["token", "token", "done"] and events[-1].stop_reason == "tool_cap"
+    last = a._client.messages.calls[-1]
+    assert last["tool_choice"] == {"type": "none"}
+    # the closing instruction rides after the last tool results, in the same user message
+    tail = last["messages"][-1]
+    assert tail["role"] == "user" and tail["content"][0]["type"] == "tool_result" and "tool rounds" in tail["content"][-1]["text"]
 
 
 @pytest.mark.asyncio

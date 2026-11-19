@@ -10,6 +10,10 @@ import { Banner, Button, Centered, SearchSelect, type SearchSelectOption } from 
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { average, cachedShare, formatDuration, formatTokens, getUsage, tokensIn, type Turn, type UsageFigures, type UsageResponse } from '../../services/aiUsage'
 
+// The page's content scrolls in the page frame, a flex column: without this the panels below
+// (overflow: hidden, so no minimum height) were squeezed to fit — the tools list cut, the latest
+// questions pushed out of sight — instead of the frame scrolling.
+const Root = styled.div`flex-shrink: 0;`
 const Bar = styled.div`display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;`
 const Spacer = styled.div`flex: 1;`
 const Note = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.micro};`
@@ -79,10 +83,10 @@ export default function AiUsage() {
       <th className="num">{t('aiUsage.toolCalls')}</th>
     </>
   )
-  const outcome = (turn: Turn) => (turn.error ? t('aiUsage.failed') : turn.stop_reason === 'abandoned' ? t('aiUsage.abandoned') : turn.stop_reason === 'end_turn' ? t('aiUsage.answered') : turn.stop_reason ?? '')
+  const outcome = (turn: Turn) => (turn.error ? t('aiUsage.failed') : turn.stop_reason === 'abandoned' ? t('aiUsage.abandoned') : turn.stop_reason === 'end_turn' ? t('aiUsage.answered') : turn.stop_reason === 'tool_cap' ? t('aiUsage.toolCap') : turn.stop_reason ?? '')
 
   return (
-    <>
+    <Root>
       <Bar>
         <div style={{ width: 170 }}><SearchSelect value={String(days)} onChange={(v) => setDays(Number(v) || 30)} options={periodOpts} /></div>
         {user && <Button $variant="ghost" $size="sm" onClick={() => setUser(null)}><X size={13} /> {t('aiUsage.turnsOf', { user })}</Button>}
@@ -189,6 +193,6 @@ export default function AiUsage() {
           )}
         </>
       )}
-    </>
+    </Root>
   )
 }

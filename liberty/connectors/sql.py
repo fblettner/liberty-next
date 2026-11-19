@@ -1085,6 +1085,15 @@ class SQLConnector:
         # :meth:`for_pool` (from the ``X-Liberty-Pool`` header / a job's ``source_pool``).
         self.allowed_pools: frozenset[str] = frozenset([config.pool, *config.pools])
 
+    def _reserved_words(self) -> frozenset[str]:
+        """The reserved words of this pool's database (lower-cased), from SQLAlchemy's own
+        dialect — a result column named like one must be quoted when a wrap refers to it."""
+        try:
+            words = self._pools.engine(self.pool_name).dialect.identifier_preparer.reserved_words
+        except Exception:  # noqa: BLE001 — no engine / an engine without a preparer: nothing to quote
+            return frozenset()
+        return frozenset(str(w).lower() for w in words)
+
     def _resolve_dialect(self) -> str:
         if self._dialect is None:
             self._dialect = self._pools.dialect(self.pool_name)  # may raise UnknownPoolError
@@ -1374,11 +1383,13 @@ class SQLConnector:
             return None
 
         columns = hints
+        probed: dict[str, str] | None = None
         if any(carrier(hints, item) is None for item in items):
             probed = await self._discover_columns(query_name, sql_text, qdef, params)
             columns = {**hints, **{k: v for k, v in probed.items() if k not in hints}}
         dialect = self._resolve_dialect()
         trim_text = self._pools.trim_strings(self.pool_name)
+        reserved = self._reserved_words()
         preds: list[str] = []
         typed: dict[str, Any] = {}
         for (item, kind), (_i, value) in wanted.items():
@@ -1388,7 +1399,15 @@ class SQLConnector:
             fmt = self._effective_format(col, column_hints, dict_scope)
             is_text = not fmt or fmt.lower() in _TEXT_FORMATS
             bind = f"LIB_DD_{col.upper()}_{kind.upper()}"
-            col_ref = f"TRIM(lib_dd.{col})" if (trim_text and is_text) else f"lib_dd.{col}"
+            ref = col
+            if col.lower() in reserved:
+                # A column named like a reserved word (``ULUSER "USER"``) exists only quoted: an
+                # unquoted ``lib_dd.USER`` is a syntax error (ORA-01747). Refer to it quoted, by the
+                # exact name the database gives it (a hint may spell it in another case).
+                if probed is None:
+                    probed = await self._discover_columns(query_name, sql_text, qdef, params)
+                ref = '"' + probed.get(col.lower(), col).replace('"', '""') + '"'
+            col_ref = f"TRIM(lib_dd.{ref})" if (trim_text and is_text) else f"lib_dd.{ref}"
             bind_ref = f"CAST(:{bind} AS {_filter_sql_type(None, dialect)})" if is_text else f":{bind}"
             op = {"eq": "=", "from": ">=", "to": "<="}[kind]
             preds.append(f"{col_ref} {op} {bind_ref}")

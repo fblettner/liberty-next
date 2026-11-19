@@ -25,9 +25,9 @@
   and after, or the action with the screen's confirmation and what it runs) and nothing happens until Apply;
   over MCP the client (Claude) asks its user before calling a tool that is not read-only. As in the screen, a
   save, its related tables and its hooks are separate statements: a hook or a step that fails leaves what ran
-  before, and the answer says so. Not yet: a form that runs actions when it opens (`on_load`) is refused with
-  that reason; values taken from a query (a lookup) are named by `screen_form` for the assistant to check, not
-  verified by the server.
+  before, and the answer says so. A value taken from a query (a lookup) is checked against its list the way the grid's
+  import checks it — the rule and the parameters that apply to that record, a list that cannot be read refused.
+  Not yet: a form that runs actions when it opens (`on_load`) is refused with that reason.
 
 - **MCP: a Claude Desktop extension, for a server that is not on the internet.** A custom connector is called
   from Anthropic's servers and so needs a public address. The profile's Access tokens tab now offers
@@ -37,6 +37,21 @@
   server's address filled in and carries no secret: the user pastes a token created in the same tab; a switch
   accepts a self-signed or company certificate. Nothing to install (Claude Desktop brings Node). The same rights
   as any MCP access: `mcp:use`, the user's permissions and data scope. `GET /auth/mcp/extension`.
+
+- A filter given by column or dictionary item (the assistant's `sql_query` `filters`, a dashboard's filter) failed
+  on a result column named like a reserved word — `ULUSER "USER"` on JD Edwards: ORA-01747. The column is now
+  referred to quoted, by the name the database gives it.
+- `screen_write` on a screen that is a tab of another record's form (Role Relationships under a user): the column
+  linking it to the parent — hidden and locked in the form, which seeds it — must now be given on an insert and is
+  accepted; before, giving it was refused and leaving it out wrote a record belonging to nobody. A record whose
+  key holds a blank part can be named (the blank part given as an empty string), so it can be changed or deleted.
+- AI assistant: a question that used all its tool rounds (`[ai] max_iterations`, 8 by default) ended on "no
+  response" and an error — nothing for what the rounds had cost. It now ends on one closing answer, asked with the
+  tools switched off: what was done, what was found, what is left, and that the user can ask to continue.
+  Monitoring → AI usage shows such a turn as "Round limit". A procedure that writes several records needs more
+  rounds than a question: raise `max_iterations` (Administer → App → AI Assistant) where the write tools are on.
+ on a window too short for the whole page, the panels were squeezed instead of the page
+  scrolling — the tools list cut, the latest questions out of sight unless the browser was zoomed out.
 
 ## 7.0.79 — unreleased
 

@@ -29,9 +29,10 @@
   exécute) et rien ne se passe avant Appliquer ; en MCP le client (Claude) demande à son utilisateur avant
   d'appeler un outil qui n'est pas en lecture seule. Comme dans l'écran, une sauvegarde, ses tables liées et ses
   actions sont des instructions séparées : une action ou une étape qui échoue laisse ce qui a été fait avant, et
-  la réponse le dit. Pas encore : un formulaire qui exécute des actions à son ouverture (`on_load`) est refusé
-  avec cette raison ; les valeurs issues d'une requête (une liste de recherche) sont indiquées par `screen_form`
-  pour que l'assistant les vérifie, non contrôlées par le serveur.
+  la réponse le dit. Une valeur issue d'une requête (une liste de recherche) est contrôlée par rapport à
+  sa liste comme le fait l'import de la grille — la règle et les paramètres qui s'appliquent à cet enregistrement,
+  une liste illisible étant refusée. Pas encore : un formulaire qui exécute des actions à son ouverture
+  (`on_load`) est refusé avec cette raison.
 
 - **MCP : une extension Claude Desktop, pour un serveur qui n'est pas sur Internet.** Un connecteur personnalisé
   est appelé depuis les serveurs d'Anthropic et exige donc une adresse publique. L'onglet Jetons d'accès du profil
@@ -42,6 +43,23 @@
   aucun secret : l'utilisateur y colle un jeton créé dans le même onglet ; une option accepte un certificat
   auto-signé ou d'entreprise. Rien à installer (Claude Desktop fournit Node). Les mêmes droits que tout accès
   MCP : `mcp:use`, les permissions et le périmètre de données de l'utilisateur. `GET /auth/mcp/extension`.
+
+- Un filtre donné par colonne ou par élément du dictionnaire (les `filters` de `sql_query` de l'assistant, le filtre
+  d'un tableau de bord) échouait sur une colonne de résultat nommée comme un mot réservé — `ULUSER "USER"` sur
+  JD Edwards : ORA-01747. La colonne est maintenant désignée entre guillemets, sous le nom que la base lui donne.
+- `screen_write` sur un écran qui est un onglet du formulaire d'un autre enregistrement (Relations de rôles sous un
+  utilisateur) : la colonne qui le relie au parent — masquée et verrouillée dans le formulaire, qui la renseigne —
+  doit maintenant être fournie à l'insertion et est acceptée ; auparavant, la fournir était refusé et l'omettre
+  écrivait un enregistrement n'appartenant à personne. Un enregistrement dont la clé contient une partie vide peut
+  être désigné (la partie vide donnée comme chaîne vide), donc modifié ou supprimé.
+- Assistant IA : une question qui avait utilisé tous ses tours d'outils (`[ai] max_iterations`, 8 par défaut) se
+  terminait sur « pas de réponse » et une erreur — rien pour ce que les tours avaient coûté. Elle se termine
+  maintenant sur une réponse de clôture, demandée outils désactivés : ce qui a été fait, ce qui a été trouvé, ce
+  qui reste, et que l'utilisateur peut demander de continuer. Supervision → Usage de l'IA affiche un tel tour comme
+  « Limite de tours ». Une procédure qui écrit plusieurs enregistrements demande plus de tours qu'une question :
+  augmentez `max_iterations` (Administrer → App → Assistant IA) là où les outils d'écriture sont activés.
+ dans une fenêtre trop basse pour toute la page, les panneaux étaient écrasés au lieu
+  que la page défile — la liste des outils coupée, les dernières questions invisibles sauf à dézoomer le navigateur.
 
 ## 7.0.79 — non publiée
 

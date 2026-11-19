@@ -14,7 +14,9 @@ module is their twin, line for line where it matters:
   table, the data scope, the change package, the notification rules — nothing is written again;
 * the field rules are evaluated on the fields the screen route serves
   (:func:`liberty.web.screens._resolve_screen_field`), so a value the form would not let a user
-  enter (a disabled field, a code outside its list, a missing required field) is refused here.
+  enter (a disabled field, a code outside its list, a missing required field) is refused here —
+  a list being an enum or a LOOKUP, whose rows are read as the form reads them and checked as
+  the grid's import checks them.
 
 After the write the screen's save hooks run (the form's ``on_save``, then ``on_insert`` /
 ``on_update`` / ``on_delete``), on the server, through :mod:`liberty.screens.actions` — as the
@@ -118,10 +120,16 @@ def field_state(field: Mapping[str, Any], values: Mapping[str, Any], mode: str) 
 
 def active_rule(field: Mapping[str, Any], values: Mapping[str, Any]) -> dict[str, Any] | None:
     """The field's rule for these values: the first ``rules_when`` that holds, else the base rule."""
+    return active_rule_and_binds(field, values)[0]
+
+
+def active_rule_and_binds(field: Mapping[str, Any], values: Mapping[str, Any]) -> tuple[dict[str, Any] | None, list[Any]]:
+    """The rule for these values with ITS lookup binds — a conditional rule (``rules_when``)
+    carries its own, the base rule the field's (``activeRulesWhen`` in the form)."""
     for rw in field.get("rules_when") or []:
         if eval_conditions([{"field": rw.get("field"), "value": rw.get("value")}], values):
-            return rw.get("rule")
-    return field.get("rule")
+            return rw.get("rule"), list(rw.get("lookup_param_binds") or [])
+    return field.get("rule"), list(field.get("lookup_param_binds") or [])
 
 
 def with_upper(row: Mapping[str, Any]) -> Row:
@@ -149,12 +157,14 @@ def resolve_bind_list(binds: Any, values: Mapping[str, Any]) -> Row:
     ``#…#`` built-ins left to the server's own rules."""
     out: Row = {}
     for b in binds or []:
-        if b.value is not None and b.value != "":
-            out[b.param] = str(b.value)
-        elif b.source and not b.source.startswith("#"):
-            v = value_for(b.source, values)
+        get = b.get if isinstance(b, Mapping) else (lambda k, _b=b: getattr(_b, k, None))     # a model, or its wire dict
+        value, source = get("value"), get("source")
+        if value is not None and value != "":
+            out[get("param")] = str(value)
+        elif source and not source.startswith("#"):
+            v = value_for(source, values)
             if v is not None and str(v) != "":
-                out[b.param] = str(v)
+                out[get("param")] = str(v)
     return out
 
 
@@ -192,6 +202,23 @@ def form_field_names(screen: Screen) -> set[str] | None:
     if not tabs:
         return None
     return {f.name.lower() for t in tabs for f in (getattr(t, "fields", None) or [])}
+
+
+def parent_links(ctx: WriteContext, app: str, screen: Screen) -> dict[str, str]:
+    """The columns of *screen* that a parent record gives when the screen is a tab of another
+    screen's form: ``{column (lower): "app/parent.SOURCE"}``, from the tab's ``param_binds``. In
+    the form such a column is not typed — often hidden and disabled — the parent's value is
+    seeded into it on Add. Here nobody seeds it: the caller must give it."""
+    out: dict[str, str] = {}
+    for sid, parent in ((ctx.screens.screens.get(app) if ctx.screens is not None else None) or {}).items():
+        for tab in (parent.dialog.tabs if parent.dialog else []):
+            target = getattr(tab, "screen", None) or getattr(tab, "form_screen", None)
+            if target != screen.id or getattr(tab, "connector", None) not in (None, "", app):
+                continue
+            for b in getattr(tab, "param_binds", None) or []:
+                if b.source and not b.source.startswith("#"):
+                    out.setdefault(b.param.lower(), f"{app}/{sid}.{b.source}")
+    return out
 
 
 def is_password(field: Mapping[str, Any] | None) -> bool:
@@ -278,9 +305,12 @@ async def read_row(ctx: WriteContext, app: str, screen: Screen, key: Mapping[str
     key_columns = screen.effective_key_columns()
     if not key_columns:
         raise ScreenWriteError(f"the screen {app}/{screen.id} declares no key column: a record cannot be identified — do it in the screen")
-    missing = [k for k in key_columns if _empty(value_for(k, key))]
-    if missing:
-        raise ScreenWriteError(f"the key needs a value for {', '.join(missing)} (the key columns are {', '.join(key_columns)})")
+    # every key column is named; one that is blank in the record is given as "" (JDE keys often hold blanks)
+    missing = [k for k in key_columns if not _has(k, key)]
+    if missing or all(_empty(value_for(k, key)) for k in key_columns):
+        raise ScreenWriteError(
+            f"the key needs {', '.join(missing) or 'at least one value'} (the key columns are {', '.join(key_columns)}; "
+            'a part that is blank in the record is given as an empty string "")')
     # Narrow in SQL with the dictionary binds a dashboard filter uses (typed, TRIMmed like the
     # scope wrap). The connector binds an item on the FIRST column carrying it: a key column
     # that is not that first carrier (two columns of the result share its item) is left to the
@@ -293,6 +323,9 @@ async def read_row(ctx: WriteContext, app: str, screen: Screen, key: Mapping[str
     request: Row = dict(params or {})
     unfiltered: list[str] = []
     for k in key_columns:
+        if _empty(value_for(k, key)):
+            unfiltered.append(k)                # a blank part cannot narrow the read: matched below
+            continue
         item = _as_item(k, dd_of)
         first = next((h.name for h in screen.columns if item.lower() in column_items(h.name.lower(), dd_of, prefix)), k)
         if first.lower() == k.lower():
@@ -394,7 +427,8 @@ def _normalise(name: str, value: Any, rule: Mapping[str, Any] | None, label: str
         true_v, false_v = rule.get("true_value", "Y"), rule.get("false_value")
         if isinstance(value, bool):
             return true_v if value else false_v
-        if _same(value, true_v) or (false_v is not None and _same(value, false_v)):
+        # only a complete yes/no (both stored values known) can be checked — as the import does
+        if false_v is None or _same(value, true_v) or _same(value, false_v):
             return value
         raise ScreenWriteError(f"{label} ({name}) is a yes/no field: {true_v!r} or {false_v!r}")
     if kind == "enum":
@@ -404,6 +438,56 @@ def _normalise(name: str, value: Any, rule: Mapping[str, Any] | None, label: str
                 return a
         raise ScreenWriteError(f"{label} ({name}): {value!r} is not one of its values — {', '.join(repr(a) for a in allowed)}")
     return value
+
+
+async def lookup_codes(ctx: WriteContext, rule: Mapping[str, Any], params: Mapping[str, Any]) -> set[str]:
+    """The values a LOOKUP rule accepts for these parameters, trimmed — read the way the form and
+    the import read them (``fetchLookup`` in ``services/lookups.ts``): the lookup's query run with
+    the parameters, on each of its sources, as the caller; then the rows kept where a column named
+    like a parameter holds that parameter's value."""
+    wanted = {str(k): str(v).strip() for k, v in params.items() if v is not None and str(v) != ""}
+    sources = rule.get("sources") if len(rule.get("sources") or []) > 1 else [{"connector": rule.get("connector"), "query": rule.get("query")}]
+    codes: set[str] = set()
+    for src in sources:
+        _require(ctx, src["connector"], src["query"])
+        resp = await _run(ctx, src["connector"], src["query"], dict(wanted))
+        for row in resp.get("rows") or []:
+            if any(_has(k, row) and ("" if value_for(k, row) is None else str(value_for(k, row))).strip() != want for k, want in wanted.items()):
+                continue
+            v = value_for(str(rule.get("value")), row)
+            if v is not None:
+                codes.add(str(v).strip())
+    return codes
+
+
+async def _check_lookups(
+    ctx: WriteContext, fields: Mapping[str, Mapping[str, Any]], given: Mapping[str, Any], form: Mapping[str, Any],
+) -> None:
+    """Each given value of a LOOKUP field against its list — the check the grid's import makes
+    (``validateImportRow``): the rule that applies to THIS record with its own binds, the value
+    compared trimmed, an empty value or an empty list let through, a list that cannot be read
+    refused rather than passed."""
+    cache: dict[str, set[str]] = {}
+    for name, value in given.items():
+        f = fields.get(str(name).lower())
+        if f is None or _empty(value) or str(value).strip() == "":
+            continue
+        rule, binds = active_rule_and_binds(f, form)
+        if not rule or rule.get("kind") != "lookup":
+            continue
+        params = {**(rule.get("params") or {}), **resolve_bind_list(binds, form)}
+        shown = str(f.get("label") or name)
+        key = json.dumps([rule.get("connector"), rule.get("query"), rule.get("value"), rule.get("sources"), params], sort_keys=True, default=str)
+        if key not in cache:
+            try:
+                cache[key] = await lookup_codes(ctx, rule, params)
+            except ScreenWriteError as exc:
+                raise ScreenWriteError(f"{shown} ({name}): its list of values could not be read — {exc}") from exc
+        codes = cache[key]
+        if codes and str(value).strip() not in codes:
+            raise ScreenWriteError(
+                f"{shown} ({name}): {value!r} is not a value of its list ({rule.get('connector')}.{rule.get('query')}"
+                + (f", {', '.join(f'{k}={v}' for k, v in params.items())}" if params else "") + ") — read the list with sql_query and use one of its values")
 
 
 async def save_row(
@@ -497,6 +581,14 @@ async def save_row(
         if not changed:
             break
 
+    # a tab of another record's form: the parent's value is seeded into the link column on Add —
+    # here it is given, and it must be (a row without it belongs to no parent)
+    links = parent_links(ctx, app, screen) if mode == "add" else {}
+    orphan = [f"{label(c)} ({canonical(c)}) — the link to {src}" for c, src in links.items()
+              if c.upper() in writable and _empty(value_for(c, form))]
+    if orphan:
+        raise ScreenWriteError(f"a new record of {app}/{screen_id} belongs to a parent record: give {'; '.join(orphan)}")
+
     # each given value against its field, as the form would let it be entered
     for name in list(given):
         f = fields.get(name.lower())
@@ -506,10 +598,13 @@ async def save_row(
         before = value_for(name, seeded)
         if mode == "edit" and not state["visible"]:
             raise ScreenWriteError(f"{label(name)} ({name}) does not apply to this record (the screen hides it): it cannot be set")
-        if state["disabled"] and not _same(given[name], before):
+        if name.lower() in links:
+            pass                                # the parent's value: locked in the form, given here
+        elif state["disabled"] and not _same(given[name], before):
             raise ScreenWriteError(f"{label(name)} ({name}) cannot be changed on this screen" + (" when adding" if mode == "add" else ""))
         given[name] = _normalise(name, given[name], active_rule(f, form), label(name))
     form = overlay_ci(form, given)
+    await _check_lookups(ctx, fields, given, form)
 
     missing = [f"{label(f['name'])} ({f['name']})" for low, f in fields.items()
                if (form_names is None or low in form_names)

@@ -33,6 +33,15 @@ from liberty.auth.scope import current_scope, current_username
 from liberty.config import AISettings
 from liberty.connectors import ConnectorRegistry
 
+# A turn that used all its tool rounds (``[ai] max_iterations``) and was closed by one answer
+# without tools — the ``done`` event's stop reason, recorded as the turn's outcome.
+STOP_TOOL_CAP = "tool_cap"
+_WRAP_UP = (
+    "You have used all the tool rounds allowed for one question, and no further tool call is possible in this "
+    "answer. Answer now with what you have: what you did, what you found, and what is left to do. If something "
+    "is unfinished, say so plainly and tell the user they can ask you to continue."
+)
+
 DEFAULT_SYSTEM_PROMPT = (
     "You are the Liberty assistant — a connector-driven low-code framework. Users "
     "configure SQL queries and HTTP endpoints (\"connectors\") in TOML; you help them "
@@ -401,7 +410,39 @@ class AiAssistant:
                 })
             convo.append({"role": "user", "content": results})
 
-        yield ChatEvent("error", message=f"Reached the {self.settings.max_iterations}-iteration tool cap without a final answer.", usage=dict(usage_total))
+        # The round limit is reached with the last tool results unanswered: the user would get
+        # nothing for what the rounds cost. One closing request with the tools switched off
+        # (``tool_choice: none``) lets the model say where it got to; only if that fails does the
+        # turn end on the bare limit error.
+        capped = f"Reached the {self.settings.max_iterations}-iteration tool cap without a final answer."
+        if convo and convo[-1].get("role") == "user" and isinstance(convo[-1].get("content"), list):
+            convo[-1]["content"].append({"type": "text", "text": _WRAP_UP})      # after the tool results, as the API wants
+        else:
+            convo.append({"role": "user", "content": _WRAP_UP})
+        closing_kwargs = {**base_kwargs, **({"tool_choice": {"type": "none"}} if base_kwargs.get("tools") else {})}
+        splitter = _FollowupSplitter()
+        try:
+            async with self._client.messages.stream(messages=convo, **closing_kwargs) as stream:
+                async for event in stream:
+                    delta = getattr(event, "delta", None) if getattr(event, "type", None) == "content_block_delta" else None
+                    if getattr(delta, "type", None) == "text_delta" and getattr(delta, "text", None):
+                        shown = splitter.feed(delta.text)
+                        if shown:
+                            yield ChatEvent("token", text=shown)
+                final = await stream.get_final_message()
+        except Exception:  # noqa: BLE001 — the closing answer is a courtesy: its failure is the limit's error
+            yield ChatEvent("error", message=capped, usage=dict(usage_total))
+            return
+        rest, followups = splitter.finish()
+        if rest:
+            yield ChatEvent("token", text=rest)
+        if followups:
+            yield ChatEvent("followups", data={"questions": followups})
+        self._accumulate(usage_total, getattr(final, "usage", None))
+        if not any(getattr(b, "type", None) == "text" and getattr(b, "text", "") for b in getattr(final, "content", None) or []):
+            yield ChatEvent("error", message=capped, usage=dict(usage_total))
+            return
+        yield ChatEvent("done", stop_reason=STOP_TOOL_CAP, usage=dict(usage_total))
 
     @staticmethod
     def _accumulate(total: dict[str, int], usage: Any) -> None:

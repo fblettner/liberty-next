@@ -250,6 +250,7 @@ const fr: Resources = {
     answered: 'Répondu',
     failed: 'Échec',
     abandoned: 'Abandonné',
+    toolCap: 'Limite de tours',
     chars: '{{n}} caractères',
   },
   serverLog: {

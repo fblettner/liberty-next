@@ -248,6 +248,7 @@ const en = {
     answered: 'Answered',
     failed: 'Failed',
     abandoned: 'Abandoned',
+    toolCap: 'Round limit',
     chars: '{{n}} characters',
   },
   serverLog: {

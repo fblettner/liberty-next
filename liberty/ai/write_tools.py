@@ -31,7 +31,7 @@ from liberty.connectors.api import current_pool
 from liberty.screens.actions import ChainDeps, check_inputs, does_something, entity_key, fill_text, outline, run_chain
 from liberty.screens.save import (
     ScreenWriteError, WriteContext, _binds_of, connector_of, delete_row, field_state, find_screen, form_field_names,
-    is_password, masked, operations, read_row, resolved_fields, save_hooks, save_row, value_for,
+    is_password, masked, operations, parent_links, read_row, resolved_fields, save_hooks, save_row, value_for,
 )
 
 _log = logging.getLogger(__name__)
@@ -145,9 +145,11 @@ def build_write_tools(state: Callable[[], Any]) -> list[Tool]:
         Gives the operations open to the signed-in user (and why one is not), the key columns
         that identify a record, and each column the screen writes: its label, whether it is
         required, whether it can be changed, its default, and the values it accepts (a list of
-        codes, yes/no, or the query that lists them — check a value with sql_query on that query
-        before writing it). A screen's tabs that are other screens (`related_screens`) are
-        written through those screens. `actions` are what the screen offers beyond a save — a
+        codes, yes/no, or the query that lists them — read it with sql_query to pick a value: a
+        value outside the list is refused when you write). A screen's tabs that are other screens (`related_screens`) are
+        written through those screens; a column with `link_to_parent` is the parent record's key,
+        to give on an insert (the form fills it by itself; a row without it belongs to nobody).
+        `actions` are what the screen offers beyond a save — a
         row menu's "Validate" / "Close", a button — run with screen_action: when the screen has
         an action for what the user asks, use it rather than writing the column yourself.
         `a_save_also_runs` is what the screen runs by itself after an insert, update or delete.
@@ -172,6 +174,7 @@ def build_write_tools(state: Callable[[], Any]) -> list[Tool]:
         except ScreenWriteError as exc:
             raise ValueError(str(exc)) from exc
         keys = [k.upper() for k in sc.effective_key_columns()]
+        links = parent_links(ctx, app, sc)
         on_form = form_field_names(sc)
         out_fields: list[dict[str, Any]] = []
         for name in sorted(writes | set(keys)):
@@ -186,6 +189,12 @@ def build_write_tools(state: Callable[[], Any]) -> list[Tool]:
             if name not in writes:
                 entry["written"] = False
             add, edit = field_state(f, {}, "add"), field_state(f, {}, "edit")
+            link = links.get(name.lower())
+            if link:
+                # a tab of another record's form: the form seeds the parent's value, here it is given
+                entry["link_to_parent"] = link
+                entry["required_on"] = "insert"
+                add = {**add, "disabled": False}
             if f.get("required"):
                 entry["required"] = True
             if add["disabled"] and edit["disabled"]:
@@ -194,7 +203,7 @@ def build_write_tools(state: Callable[[], Any]) -> list[Tool]:
                 entry["read_only_on"] = "insert"
             elif edit["disabled"]:
                 entry["read_only_on"] = "update"
-            if f.get("hidden") and not f.get("visible_when"):
+            if f.get("hidden") and not f.get("visible_when") and not link:
                 entry["hidden"] = True
             if on_form is not None and name.lower() not in on_form:
                 entry["on_form"] = False
@@ -258,7 +267,7 @@ def build_write_tools(state: Callable[[], Any]) -> list[Tool]:
             screen: the screen id.
             operation: insert, update or delete.
             values: {column: value} to set — every column of a new record, only the changed ones of an update; not used by a delete.
-            key: {key column: value} of the record to update or delete.
+            key: {key column: value} of the record to update or delete — every key column; a part that is blank in the record is "".
             params: {param: value} of the screen's read query, when it needs some (a tab of another record: the parent's key).
             inputs: {name: value} asked by an action the screen runs after the save (screen_form: a_save_also_runs → needs).
         """

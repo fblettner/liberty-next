@@ -34,16 +34,24 @@ pool = "default"
 
 [[connectors.shop.queries]]
 name = "customers_get"
-sql = "SELECT c.id AS ID, c.name AS NAME, c.status AS STATUS, c.kind AS KIND, c.vat AS VAT, c.secret AS SECRET, e.cust_id AS CUST_ID, e.phone AS PHONE FROM customer c LEFT JOIN customer_extra e ON e.cust_id = c.id ORDER BY c.id"
+sql = "SELECT c.id AS ID, c.name AS NAME, c.status AS STATUS, c.kind AS KIND, c.sub AS SUB, c.vat AS VAT, c.secret AS SECRET, e.cust_id AS CUST_ID, e.phone AS PHONE FROM customer c LEFT JOIN customer_extra e ON e.cust_id = c.id ORDER BY c.id"
+
+[[connectors.shop.queries]]
+name = "kinds_get"
+sql = "SELECT code AS CODE, label AS LABEL FROM kind ORDER BY code"
+
+[[connectors.shop.queries]]
+name = "subs_get"
+sql = "SELECT code AS CODE, kind AS KIND FROM sub ORDER BY code"
 
 [[connectors.shop.queries]]
 name = "customers_post"
-sql = "INSERT INTO customer (id, name, status, kind, vat, secret) VALUES (:ID, :NAME, :STATUS, :KIND, :VAT, :SECRET)"
+sql = "INSERT INTO customer (id, name, status, kind, sub, vat, secret) VALUES (:ID, :NAME, :STATUS, :KIND, :SUB, :VAT, :SECRET)"
 writable = true
 
 [[connectors.shop.queries]]
 name = "customers_put"
-sql = "UPDATE customer SET id = :ID, name = :NAME, status = :STATUS, kind = :KIND, vat = :VAT WHERE id = :ID_ORIGINAL"
+sql = "UPDATE customer SET id = :ID, name = :NAME, status = :STATUS, kind = :KIND, sub = :SUB, vat = :VAT WHERE id = :ID_ORIGINAL"
 writable = true
 
 [[connectors.shop.queries]]
@@ -69,6 +77,14 @@ sql = "SELECT status AS STATUS, name AS NAME FROM customer WHERE id = :ID"
 name = "log_post"
 sql = "INSERT INTO log (cust_id, who, what) VALUES (:CUST_ID, :WHO, :WHAT)"
 writable = true
+
+[[connectors.shop.queries]]
+name = "extras_get"
+sql = "SELECT cust_id AS CUST_ID, phone AS PHONE FROM customer_extra ORDER BY cust_id"
+
+[[connectors.shop.queries]]
+name = "kinds_reserved"
+sql = 'SELECT code AS "ORDER", label AS LABEL FROM kind'
 
 [[connectors.shop.queries]]
 name = "extra_post"
@@ -113,6 +129,14 @@ default = "A"
 
 [[screens.shop.customers.columns]]
 name = "KIND"
+rules = "LOOKUP"
+rules_values = "KINDS"
+
+[[screens.shop.customers.columns]]
+name = "SUB"
+rules = "LOOKUP"
+rules_values = "SUBS"
+lookup_param_binds = [{ param = "KIND", source = "KIND" }]
 
 [[screens.shop.customers.columns]]
 name = "VAT"
@@ -134,6 +158,16 @@ insert_query = "extra_post"
 update_query = "extra_put"
 delete_query = "extra_delete"
 key_columns = ["CUST_ID"]
+param_binds = [{ param = "CUST_ID", source = "ID" }]
+
+# a tab of the customer's form that is another screen: its link column is hidden and locked there
+[screens.shop.customers.dialog]
+title = "Customer"
+
+[[screens.shop.customers.dialog.tabs]]
+id = "phones"
+label = "Phones"
+screen = "extras"
 param_binds = [{ param = "CUST_ID", source = "ID" }]
 
 # the row menu: a confirmed change, a condition on what a query read, a shared action, a prompt, a drill
@@ -191,6 +225,22 @@ label = "Open the orders"
 type = "navigate"
 to = "customers_get"
 
+[screens.shop.extras]
+label = "Phones"
+read_query = "extras_get"
+insert_query = "extra_post"
+delete_query = "extra_delete"
+
+[[screens.shop.extras.columns]]
+name = "CUST_ID"
+key = true
+hidden = true
+disabled = true
+
+[[screens.shop.extras.columns]]
+name = "PHONE"
+key = true
+
 # a screen whose save runs actions: a hook after the insert and after the delete
 [screens.shop.hooked]
 label = "With save actions"
@@ -232,6 +282,18 @@ param_binds = [{ param = "CUST_ID", source = "INPUT.cust" }, { param = "WHO", so
 DICTIONARY = """
 default_language = "en"
 
+[lookups.KINDS]
+query = "kinds_get"
+connector = "shop"
+value = "CODE"
+label = "LABEL"
+
+[lookups.SUBS]
+query = "subs_get"
+connector = "shop"
+value = "CODE"
+label = "CODE"
+
 [enums.STATUS]
 label = "Status"
 values = [{ value = "A", label = "Active" }, { value = "I", label = "Inactive" }, { value = "X", label = "Archived" }]
@@ -250,10 +312,14 @@ def _app(tmp_path, *, write_tools: bool = True):
         db = AuthDatabase(pools, "default")
         await db.create_schema()
         async with pools.engine("default").begin() as conn:
-            await conn.execute(text("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT, status TEXT, kind TEXT, vat TEXT, secret TEXT)"))
+            await conn.execute(text("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT, status TEXT, kind TEXT, sub TEXT, vat TEXT, secret TEXT)"))
+            await conn.execute(text("CREATE TABLE kind (code TEXT, label TEXT)"))
+            await conn.execute(text("CREATE TABLE sub (code TEXT, kind TEXT)"))
+            await conn.execute(text("INSERT INTO kind VALUES ('B ','Business'),('P','Person')"))        # 'B ' padded, as a JDE code reads back
+            await conn.execute(text("INSERT INTO sub VALUES ('B1','B'),('B2','B'),('P1','P')"))
             await conn.execute(text("CREATE TABLE customer_extra (cust_id INTEGER PRIMARY KEY, phone TEXT)"))
             await conn.execute(text("CREATE TABLE log (cust_id INTEGER, who TEXT, what TEXT)"))
-            await conn.execute(text("INSERT INTO customer VALUES (1,'Acme','A','B','FR1','s3cret'),(2,'Bolt','A','P',NULL,NULL),(3,'Old','X','P',NULL,NULL)"))
+            await conn.execute(text("INSERT INTO customer VALUES (1,'Acme','A','B',NULL,'FR1','s3cret'),(2,'Bolt','A','P',NULL,NULL,NULL),(3,'Old','X','P',NULL,NULL,NULL)"))
             await conn.execute(text("INSERT INTO customer_extra VALUES (1,'0101')"))
         async with db.session() as s:
             svc = AuthService(s)
@@ -307,7 +373,7 @@ def test_an_update_changes_only_what_is_given(app) -> None:
         out = r.json()
         assert out["written"] is True and out["rowcount"] == 1
         assert out["key"] == {"ID": 2} and out["values"] == {"NAME": "Bolt Ltd"} and out["before"] == {"NAME": "Bolt"}
-        assert _rows(client, "id = 2") == [{"id": 2, "name": "Bolt Ltd", "status": "A", "kind": "P", "vat": None, "secret": None}]
+        assert _rows(client, "id = 2") == [{"id": 2, "name": "Bolt Ltd", "status": "A", "kind": "P", "sub": None, "vat": None, "secret": None}]
         # the other records are untouched, and a stored secret is never overwritten by the row that was read
         assert _rows(client, "id = 1")[0]["secret"] == "s3cret" and _rows(client, "id = 1")[0]["name"] == "Acme"
         r = _write(client, "writer", operation="update", key={"ID": 1}, values={"NAME": "Acme SA"})
@@ -329,7 +395,7 @@ def test_an_insert_takes_the_defaults_and_writes_the_related_table(app) -> None:
         r = _write(client, "writer", operation="insert", values={"ID": 10, "NAME": "New", "KIND": "P", "PHONE": "0606"})
         assert r.status_code == 200, r.text
         assert r.json()["values"]["STATUS"] == "A" and r.json()["related_tables"] == ["extra"]        # the column's default
-        assert _rows(client, "id = 10") == [{"id": 10, "name": "New", "status": "A", "kind": "P", "vat": None, "secret": None}]
+        assert _rows(client, "id = 10") == [{"id": 10, "name": "New", "status": "A", "kind": "P", "sub": None, "vat": None, "secret": None}]
         assert _rows(client, "cust_id = 10", "customer_extra") == [{"cust_id": 10, "phone": "0606"}]   # linked by the group's bind
         # an update of the related column: the row exists (1) → updated; it does not (2) → inserted
         assert _write(client, "writer", operation="update", key={"ID": 1}, values={"PHONE": "0102"}).status_code == 200
@@ -552,3 +618,54 @@ def test_screen_action_proposes_in_the_chat_and_runs_over_mcp(app) -> None:
         out, err = _tool(client, "writer", "screen_action", {**args, "action": "rename"}, channel="mcp")
         assert err and "NEW_NAME" in out["error"]
         assert "screen_action" in {t.name for t in app.state.ai.tools.offered(_principal(client, "writer"))}
+
+
+def test_a_lookup_value_is_checked_against_its_list(app) -> None:
+    """A code taken from a query: the list is read as the form reads it and checked as the import
+    checks it — trimmed, with the parameters that apply to THIS record."""
+    with TestClient(app) as client:
+        assert _refused(_write(client, "writer", operation="update", key={"ID": 2}, values={"KIND": "ZZ"}), "not a value of its list", "shop.kinds_get")
+        assert _rows(client, "id = 2")[0]["kind"] == "P"
+        # a padded code of the list is the code ('B ' in the table)
+        assert _write(client, "writer", operation="update", key={"ID": 2}, values={"KIND": "B", "VAT": "FR2"}).status_code == 200
+        # a list narrowed by another column of the record: B1 belongs to B, P1 does not
+        assert _write(client, "writer", operation="update", key={"ID": 2}, values={"SUB": "B1"}).status_code == 200
+        assert _refused(_write(client, "writer", operation="update", key={"ID": 2}, values={"SUB": "P1"}), "not a value of its list", "KIND=B")
+        # … following the value given in the same write
+        assert _write(client, "writer", operation="update", key={"ID": 2}, values={"KIND": "P", "SUB": "P1"}).status_code == 200
+        assert _rows(client, "id = 2")[0]["sub"] == "P1"
+        # an insert is checked too; a list the caller may not read refuses the write rather than passing it
+        assert _refused(_write(client, "writer", operation="insert", values={"ID": 30, "NAME": "N", "KIND": "nope"}), "not a value of its list")
+        r = _save(client, "halfway", "customers", operation="insert", values={"ID": 31, "NAME": "N", "KIND": "P"})
+        assert r.status_code == 409 and "could not be read" in r.json()["detail"] and "sql:shop:kinds_get" in r.json()["detail"]
+        assert _rows(client, "id in (30, 31)") == []
+
+
+def test_a_tab_screen_takes_its_parent_link_and_a_blank_key_part_names_a_record(app) -> None:
+    """Found on JDE (Role Relationships under a user): the tab's link column is hidden and locked
+    in the form, which seeds it from the parent — written from here it must be given, never left
+    blank; and a record whose key holds a blank is still a record (updated, deleted)."""
+    with TestClient(app) as client:
+        def extras(**body):
+            return client.post("/ai/screen-write", json={"app": "shop", "screen": "extras", **body}, headers=_h(client, "writer"))
+        r = extras(operation="insert", values={"PHONE": "0707"})                       # no parent: refused, not written blank
+        assert r.status_code == 409 and "belongs to a parent record" in r.json()["detail"] and "shop/customers.ID" in r.json()["detail"]
+        assert len(_rows(client, table="customer_extra")) == 1
+        assert extras(operation="insert", values={"CUST_ID": 2, "PHONE": ""}).status_code == 200   # given, although locked in the form
+        form, _err = _tool(client, "writer", "screen_form", {"app": "shop", "screen": "extras"})
+        link = {f["name"]: f for f in form["fields"]}["CUST_ID"]
+        assert link["link_to_parent"] == "shop/customers.ID" and link["required_on"] == "insert" and "hidden" not in link and "read_only" not in link
+        # the record whose key holds a blank: every key column named, the blank one as ""
+        r = extras(operation="delete", key={"CUST_ID": 2})
+        assert r.status_code == 409 and "PHONE" in r.json()["detail"] and "empty string" in r.json()["detail"]
+        assert extras(operation="delete", key={"CUST_ID": 2, "PHONE": ""}).status_code == 200
+        assert _rows(client, table="customer_extra") == [{"cust_id": 1, "phone": "0101"}]
+
+
+def test_a_filter_on_a_column_named_like_a_reserved_word(app) -> None:
+    """A query that aliases a column to a reserved word (`ULUSER "USER"` on JDE) could not be
+    filtered: the wrap referred to it unquoted (ORA-01747)."""
+    with TestClient(app) as client:
+        out, err = _tool(client, "writer", "sql_query", {"connector": "shop", "query": "kinds_reserved", "filters": {"ORDER": "P"}})
+        assert not err, out
+        assert out["row_count"] == 1 and out["rows"][0]["LABEL"] == "Person"
