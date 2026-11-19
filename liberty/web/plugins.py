@@ -81,6 +81,15 @@ async def run_plugin(
     if not isinstance(params, dict):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="`params` must be an object")
 
+    return await run_plugin_callable(request.app.state, principal, connectors, ref, params, body.get("_change_context"))
+
+
+async def run_plugin_callable(
+    state: Any, principal: Any, connectors: Any, ref: str, params: dict[str, Any], action_ctx: Any = None,
+) -> dict[str, Any]:
+    """Run the plugin callable *ref* for *principal* — the route's body, also what a ``call_plugin``
+    step does when a screen action runs on the server (:mod:`liberty.screens.actions`): the
+    ``plugin:<ref>`` permission, the allow-list, the change-package capture. Raises HTTPException."""
     require_permission(principal, f"plugin:{ref}")
 
     # Refuse anything not discovered under plugins/ — bounds the callable to real plugin entry
@@ -89,11 +98,11 @@ async def run_plugin(
     if ref not in known:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Unknown plugin callable: {ref}")
 
-    settings = getattr(request.app.state, "settings", None)
+    settings = getattr(state, "settings", None)
     # The change-package DB — injected for callables that declare a ``changesets`` param (e.g. a
     # batch re-merge that reads the active draft package's touched roles). Only injected when the
     # callable asks for it and it's available (the invoker skips None).
-    changesets_db = getattr(request.app.state, "changesets_db", None)
+    changesets_db = getattr(state, "changesets_db", None)
     ctx = RunContext(
         run_id=f"action:{principal.username}",
         job_id="__action__",
@@ -115,9 +124,8 @@ async def run_plugin(
     # screen CAPTURES every call (so the package shows it for review); the action's ``change_replay``
     # opt-in — threaded in the tag as ``replay`` — decides whether APPLY re-runs the callable on the
     # target (a plugin's side effects can't be drift-checked). Best-effort — never fails the call.
-    action_ctx = body.get("_change_context")
-    changesets = getattr(request.app.state, "changesets_db", None)
-    screens = getattr(request.app.state, "screens", None)
+    changesets = getattr(state, "changesets_db", None)
+    screens = getattr(state, "screens", None)
     a_screen = None
     if changesets is not None and isinstance(action_ctx, dict) and screens is not None:
         a_app, a_id = action_ctx.get("app"), action_ctx.get("screen")

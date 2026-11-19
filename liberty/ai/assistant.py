@@ -27,6 +27,7 @@ from liberty.ai.instance_tools import build_instance_tools
 from liberty.ai.ops_tools import build_ops_tools
 from liberty.ai.scaffold_tools import build_scaffold_tools
 from liberty.ai.tools import ToolRegistry
+from liberty.ai.write_tools import build_write_tools
 from liberty.auth.principal import Principal, current_principal
 from liberty.auth.scope import current_scope, current_username
 from liberty.config import AISettings
@@ -45,8 +46,11 @@ DEFAULT_SYSTEM_PROMPT = (
     "A screen's query is on the screen's connector, which is not always its application's name. "
     "To find a record or the rows of one value in a large table, pass `filters` to sql_query "
     "instead of reading the table.\n"
-    "2. SQL access is read-only — there is no tool to mutate data. If the user asks you to "
-    "change something, explain that you can only read.\n"
+    "2. sql_query is read-only. Data changes only through a screen, when the tools are offered "
+    "to you: screen_form first, then screen_action when the screen has an action for what the "
+    "user asks (\"Close\", \"Validate\"…), else screen_write for one record. Only for what the "
+    "user asked: say what you are about to do, one record at a time, and when it is refused give "
+    "the reason instead of trying another way. Without these tools, explain that you can only read.\n"
     "3. If a tool fails, tell the user the tool name, the input you tried, and the error "
     "message that came back so they can debug.\n"
     "4. Be concise and reply in the user's language.\n"
@@ -522,6 +526,8 @@ def build_assistant(
             registry.add(*build_explorer_tools(state, allowed=settings.allowed_connectors or None))
         if settings.ops_tools:
             registry.add(*build_ops_tools(state))
+        if settings.write_tools:
+            registry.add(*build_write_tools(state))
         if settings.app_tools:
             # read at call time: a reload of ai.toml is seen without rebuilding the assistant
             registry.provider = app_tools_provider(state, allowed=settings.allowed_connectors or None)

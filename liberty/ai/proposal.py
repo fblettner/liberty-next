@@ -23,6 +23,8 @@ ProposalKind = Literal[
     "connector_queries",   # add/update queries on a SQL connector in connectors.toml
     "screen",              # add/replace a screen in screens.toml
     "menu_item",           # append a menu item to a [menus.<app>] tree
+    "screen_action",       # one action of a screen run on a record (liberty.ai.write_tools) — applied by POST /ai/screen-action
+    "screen_write",        # one record added / changed / deleted through its screen (liberty.ai.write_tools) — applied by POST /ai/screen-write
     "note",                # a note the assistant keeps for the user (their own saved views, kind ai_note) — not configuration
 ]
 

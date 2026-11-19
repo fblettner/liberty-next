@@ -159,6 +159,102 @@ async def _record(request: Request, recorder: TurnRecorder) -> None:
         _log.warning("AI usage: the turn of %s could not be recorded (%s)", recorder.username, exc)
 
 
+class ScreenWriteRequest(BaseModel):
+    """One record written through its screen — what the chat's card applies."""
+
+    app: str = Field(min_length=1)
+    screen: str = Field(min_length=1)
+    operation: Literal["insert", "update", "delete"]
+    values: dict[str, Any] = Field(default_factory=dict)
+    key: dict[str, Any] = Field(default_factory=dict)
+    params: dict[str, Any] = Field(default_factory=dict)
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    dry_run: bool = False
+
+
+class ScreenActionRequest(BaseModel):
+    """One action of a screen run on a record — what the chat's card applies."""
+
+    app: str = Field(min_length=1)
+    screen: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+    key: dict[str, Any] = Field(default_factory=dict)
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    params: dict[str, Any] = Field(default_factory=dict)
+    dry_run: bool = False
+
+
+def _write_context(request: Request, principal: Principal) -> Any:
+    from liberty.ai.write_tools import write_context
+    from liberty.connectors.api import current_pool
+
+    settings = request.app.state.settings.ai
+    if not settings.enabled or not settings.write_tools:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="The assistant's write tools are off ([ai] write_tools)")
+    return write_context(request.app.state, principal, language=request_language(request), pool=current_pool.get())
+
+
+def _refusal(exc: Exception) -> HTTPException:
+    text = str(exc)
+    return HTTPException(status.HTTP_403_FORBIDDEN if text.startswith("permission denied") else status.HTTP_409_CONFLICT, detail=text)
+
+
+@router.post(
+    "/screen-action",
+    summary="Run a screen's action",
+    responses={
+        403: {"description": "Caller lacks ``ai:write``, or may not open the screen."},
+        404: {"description": "The write tools are off (``[ai] write_tools``)."},
+        409: {"description": "The action cannot run (unknown, a value it asks is missing, the record is not found)."},
+    },
+)
+async def screen_action(
+    body: ScreenActionRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_permission("ai:write"))],
+) -> dict[str, Any]:
+    """Apply what the assistant's `screen_action` tool proposed in the chat: run one action of a
+    screen (a row menu's "Close", a button) on a record, with the screen's own steps — each one
+    under its own permission. A step that fails is in the answer (`ok`, `error`), not a status."""
+    from liberty.ai.write_tools import perform_action
+    from liberty.screens.save import ScreenWriteError
+
+    ctx = _write_context(request, principal)
+    try:
+        return await perform_action(ctx, app=body.app, screen=body.screen, action=body.action, key=body.key,
+                                    inputs=body.inputs, params=body.params, dry_run=body.dry_run)
+    except ScreenWriteError as exc:
+        raise _refusal(exc) from exc
+
+
+@router.post(
+    "/screen-write",
+    summary="Write a record through its screen",
+    responses={
+        403: {"description": "Caller lacks ``ai:write``, or the permission of a query the write runs."},
+        404: {"description": "The write tools are off (``[ai] write_tools``)."},
+        409: {"description": "The screen refuses the write (a required field, a value outside its list, a read-only record…)."},
+    },
+)
+async def screen_write(
+    body: ScreenWriteRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_permission("ai:write"))],
+) -> dict[str, Any]:
+    """Apply what the assistant's `screen_write` tool proposed in the chat: add, change or delete
+    one record through its screen — the screen's own queries, the form's rules, the audit table,
+    the data scope. Everything is checked again here; `dry_run` checks without writing."""
+    from liberty.ai.write_tools import perform
+    from liberty.screens.save import ScreenWriteError
+
+    ctx = _write_context(request, principal)
+    try:
+        return await perform(ctx, app=body.app, screen=body.screen, operation=body.operation, values=body.values,
+                             key=body.key, params=body.params, inputs=body.inputs, dry_run=body.dry_run)
+    except ScreenWriteError as exc:
+        raise _refusal(exc) from exc
+
+
 def _allowed_models(assistant: AiAssistant) -> list[str]:
     out = [assistant.settings.model]
     for m in assistant.settings.allowed_models:

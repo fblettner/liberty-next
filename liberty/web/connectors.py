@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 
 from liberty.auth.dependencies import CurrentPrincipal
+from liberty.auth.principal import Principal
 from liberty.connectors import ConnectorRegistry
 from liberty.auth.scope import DataScope, ScopeDeniedError
 from liberty.connectors.base import ConnectorError, detect_statement_type
@@ -1045,6 +1046,19 @@ async def http_call(
     ``error`` so the SPA can render the failure inline without distinguishing transport
     errors from application errors. Liberty-level errors (unknown connector, unknown
     endpoint, missing permission) DO raise as 4xx so an integrator sees them clearly."""
+    return await call_http(
+        request.app.state, principal, connectors, screens, connector, endpoint, _params_from_body(body),
+        body.get("_change_context") if isinstance(body, dict) else None,
+    )
+
+
+async def call_http(
+    state: Any, principal: Principal, connectors: ConnectorRegistry, screens: ScreensFile | None,
+    connector: str, endpoint: str, call_params: dict[str, Any], action_context: Any = None,
+) -> dict[str, Any]:
+    """Call *connector*'s *endpoint* for *principal* — the route's body, also what a ``call_api``
+    step does when a screen action runs on the server (:mod:`liberty.screens.actions`): the
+    ``api:<connector>:<endpoint>`` permission and the change-package capture. Raises HTTPException."""
     require_permission(principal, f"api:{connector}:{endpoint}")
     try:
         conn = connectors.api(connector)  # UnknownConnectorError if missing / wrong type
@@ -1053,15 +1067,13 @@ async def http_call(
         raise http_for_connector_error(exc) from exc
     # APIConnector.call never raises — a failed upstream call comes back as a
     # structured ApiResult with success=False; surface it as-is (HTTP 200).
-    call_params = _params_from_body(body)
     result = await conn.call(endpoint, call_params)
     # Change-package capture for a call_api action fired from a change-tracked screen. A tracked
     # screen CAPTURES every call (so the package shows it for review); the action's ``change_replay``
     # opt-in — threaded in the tag as ``replay`` — decides whether APPLY actually re-fires it (an
     # external call's side effects can't be drift-checked). Only a SUCCESSFUL upstream call is
     # captured (a failed one didn't change anything). Best-effort.
-    action_context = body.get("_change_context") if isinstance(body, dict) else None
-    changesets = getattr(request.app.state, "changesets_db", None)
+    changesets = getattr(state, "changesets_db", None)
     action_screen = _resolve_action_screen(screens, action_context) if changesets is not None else None
     if action_screen is not None and getattr(action_screen, "change_tracked", False) and getattr(result, "success", True):
         from liberty.changesets.capture import capture_invocation

@@ -63,6 +63,7 @@ interface AiSection {
   api_tool: boolean
   scaffold_tools: boolean
   ops_tools: boolean
+  write_tools: boolean
   explorer_tools: boolean
   app_tools: boolean
   mcp_enabled: boolean
@@ -210,7 +211,7 @@ const DEFAULTS: {
   ai: {
     enabled: true, model: 'claude-opus-4-8', max_tokens: 8192, max_iterations: 8, system_prompt: '',
     thinking: false, effort: '', request_timeout: 120,
-    connector_tools: true, sql_max_rows: 200, usage_retention_days: 90, api_tool: false, scaffold_tools: false, ops_tools: false, explorer_tools: true, app_tools: true, mcp_enabled: false, mcp_token_max_days: 366, attachment_max_mb: 10, allowed_connectors: [],
+    connector_tools: true, sql_max_rows: 200, usage_retention_days: 90, api_tool: false, scaffold_tools: false, ops_tools: false, write_tools: false, explorer_tools: true, app_tools: true, mcp_enabled: false, mcp_token_max_days: 366, attachment_max_mb: 10, allowed_connectors: [],
     web_fetch_domains: [], web_fetch_max_uses: 5, allowed_models: [], starters: {}, api_key: '',
   },
   license: { key: '', usage_url: 'https://nomalms.nomana-it.fr/api/usage' },
@@ -739,6 +740,8 @@ export default function AppBuilder() {
               checked={ai.scaffold_tools} onChange={(c) => setAi({ ...ai, scaffold_tools: c })} />
             <Checkbox label={t('settings.app.aiOpsTools')}
               checked={ai.ops_tools} onChange={(c) => setAi({ ...ai, ops_tools: c })} />
+            <Checkbox label={t('settings.app.aiWriteTools')}
+              checked={ai.write_tools} onChange={(c) => setAi({ ...ai, write_tools: c })} />
             <Checkbox label={t('settings.app.aiExplorerTools')}
               checked={ai.explorer_tools} onChange={(c) => setAi({ ...ai, explorer_tools: c })} />
             <Checkbox label={t('settings.app.aiAppTools')}

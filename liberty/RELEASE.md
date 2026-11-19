@@ -1,5 +1,34 @@
 # Liberty Next — Release notes
 
+## 7.0.80 — unreleased
+
+- **AI assistant: write through a screen.** Three new tools, off by default: `screen_form` (what a screen lets its
+  user add, change, delete and run: the key, each column with its label, whether it is required or locked, its
+  default and the values it accepts, and the screen's actions), `screen_write` (add, change or delete ONE record)
+  and `screen_action` (run ONE action of the screen — a row menu's "Validate" / "Close", a toolbar's or a form
+  tab's button). Nothing is done by another path than the screen's own:
+  - a record is read first through the screen's read query, the form's rules are applied — a missing required
+    column, a value outside its list, a column or a record the screen holds read-only (`editable_when`), a column
+    that does not apply to the record are refused with the reason — and each statement runs through the function
+    behind the screen's save: dictionary rules, sequences, the related 1:1 tables, the audit table, the data
+    scope, the change package, the notification rules;
+  - the screen's save hooks (`on_insert` / `on_update` / `on_delete`, the form's `on_save`) and its actions run
+    on the server as the browser runs them — `run_query`, `call_api`, `call_plugin`, shared actions
+    (`call_action`), `chain` / `if` / `loop` / `return`, binds from the record, a previous step or a built-in
+    (`#LOGIN_USER#`…) — each step under its own permission and with the change-package capture of the screen.
+    A `confirm` is the user's (below) and its message is shown; a `notify` message is returned; a value an
+    action prompts for is given up front (missing and required: nothing runs); what only a browser does
+    (`navigate`, `open_url`, `refresh`) is noted, and an action made of nothing else is not offered.
+  Three locks, all needed: `[ai] write_tools` (Administer → App → AI Assistant), the new permission `ai:write`
+  (Access → a role → Other → AI) and the permission of each query, endpoint or plugin that runs, as in the
+  screen. **Who confirms:** in the Liberty chat the tools only propose — the user gets a card (the record before
+  and after, or the action with the screen's confirmation and what it runs) and nothing happens until Apply;
+  over MCP the client (Claude) asks its user before calling a tool that is not read-only. As in the screen, a
+  save, its related tables and its hooks are separate statements: a hook or a step that fails leaves what ran
+  before, and the answer says so. Not yet: a form that runs actions when it opens (`on_load`) is refused with
+  that reason; values taken from a query (a lookup) are named by `screen_form` for the assistant to check, not
+  verified by the server.
+
 ## 7.0.79 — unreleased
 
 - **MCP endpoint: sign in instead of pasting a token (OAuth).** A client given only the address of `/mcp` — a

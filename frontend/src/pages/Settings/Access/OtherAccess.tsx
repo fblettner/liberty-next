@@ -61,6 +61,8 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
       { value: 'ai:chat', label: t('settings.access.aiChat'), mono: 'ai:chat' },
       // a personal access token + the /mcp endpoint: the assistant's tools from an external client (Claude)
       { value: 'mcp:use', label: t('settings.access.mcpUse'), mono: 'mcp:use' },
+      // the assistant adds / changes / deletes a record through its screen ([ai] write_tools), on top of the screen's own permissions
+      { value: 'ai:write', label: t('settings.access.aiWrite'), mono: 'ai:write' },
     ]
     return []
   }, [type, sqlConns, apiConns, dashboardIds, jobIds, t])

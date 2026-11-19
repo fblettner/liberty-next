@@ -460,6 +460,41 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
       }
       return
     }
+    if (proposal.kind === 'screen_write' || proposal.kind === 'screen_action') {
+      // One record, or one action, through its screen: the server checks everything again and does it
+      // (the screen's own queries, rules and steps). A refusal stays on the card; the assistant is told
+      // what happened — a step that failed included.
+      try {
+        const p = proposal.payload
+        let outcome: string
+        if (proposal.kind === 'screen_write') {
+          const r = await api.post<{ written?: boolean; rowcount?: number; note?: string; assigned?: Record<string, unknown>; actions?: { ok?: boolean; error?: string; errors?: string[] } }>(
+            '/ai/screen-write',
+            { app: p.app, screen: p.screen, operation: p.operation, values: p.values ?? {}, key: p.key ?? {}, params: p.params ?? {}, inputs: p.inputs ?? {} },
+          )
+          const assigned = r.assigned && Object.keys(r.assigned).length ? ` Assigned by the server: ${JSON.stringify(r.assigned)}.` : ''
+          const hooks = r.actions && r.actions.ok === false
+            ? ` BUT an action the screen runs after the save failed: ${r.actions.error ?? (r.actions.errors ?? []).join('; ')}. Tell the user.`
+            : ''
+          outcome = `${r.written ? `${r.rowcount ?? 0} row(s) written` : (r.note ?? 'nothing written')}.${assigned}${hooks}`
+          if (hooks) { updateProposal(proposal, { state: 'error', error: r.actions?.error ?? (r.actions?.errors ?? []).join('; ') }) } else updateProposal(proposal, { state: 'applied' })
+        } else {
+          const r = await api.post<{ ok?: boolean; error?: string; errors?: string[]; messages?: string[]; steps?: string[] }>(
+            '/ai/screen-action',
+            { app: p.app, screen: p.screen, action: p.action, key: p.key ?? {}, inputs: p.inputs ?? {}, params: p.params ?? {} },
+          )
+          const failed = r.ok === false ? (r.error ?? (r.errors ?? []).join('; ')) : ''
+          updateProposal(proposal, failed ? { state: 'error', error: failed } : { state: 'applied' })
+          outcome = failed
+            ? `FAILED: ${failed}. Steps that ran before: ${(r.steps ?? []).join('; ') || 'none'}. Tell the user exactly this.`
+            : `done. ${(r.messages ?? []).join(' ')}`.trim()
+        }
+        await runTurn(`Applied: ${toolName} (${proposal.summary}) — ${outcome} Continue with the next step.`, false)
+      } catch (e) {
+        updateProposal(proposal, { state: 'error', error: e instanceof ApiError ? e.message : String(e) })
+      }
+      return
+    }
     try {
       const r = await api.post<{ applied: boolean; kind: string; summary: string }>(
         '/admin/config/apply-proposal',

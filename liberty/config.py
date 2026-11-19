@@ -376,6 +376,10 @@ class AISettings(BaseModel):
     # Off by default: the log tail can carry what the server logged; enable for an install
     # whose chat users are administrators.
     ops_tools: bool = False
+    # Write tools — screen_form / screen_write (liberty.ai.write_tools): the assistant adds, changes
+    # or deletes a record through its screen, for a user who holds `ai:write` and the screen's own
+    # permissions. In the chat the user applies a card; over MCP the client asks. Off by default.
+    write_tools: bool = False
     # The audit and usage record (ly2_ai_call: who, model, tokens, tools — never the question, the
     # answer or a row): turns older than this many days are dropped; 0 keeps them all.
     usage_retention_days: int = Field(default=90, ge=0)

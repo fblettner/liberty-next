@@ -1,5 +1,38 @@
 # Liberty Next — Notes de version
 
+## 7.0.80 — non publiée
+
+- **Assistant IA : écrire par un écran.** Trois nouveaux outils, désactivés par défaut : `screen_form` (ce qu'un
+  écran laisse ajouter, modifier, supprimer et lancer : la clé, chaque colonne avec son libellé, si elle est
+  obligatoire ou verrouillée, sa valeur par défaut et les valeurs qu'elle accepte, et les actions de l'écran),
+  `screen_write` (ajouter, modifier ou supprimer UN enregistrement) et `screen_action` (lancer UNE action de
+  l'écran — « Valider » / « Clôturer » du menu de ligne, un bouton de la barre d'outils ou d'un onglet du
+  formulaire). Rien n'est fait par un autre chemin que celui de l'écran :
+  - un enregistrement est d'abord lu par la requête de lecture de l'écran, les règles du formulaire sont
+    appliquées — une colonne obligatoire vide, une valeur hors de sa liste, une colonne ou un enregistrement que
+    l'écran tient en lecture seule (`editable_when`), une colonne qui ne s'applique pas à l'enregistrement sont
+    refusées avec la raison — et chaque instruction passe par la fonction de la sauvegarde de l'écran : règles du
+    dictionnaire, séquences, tables liées 1:1, table d'audit, périmètre de données, paquet de modifications,
+    règles de notification ;
+  - les actions de sauvegarde de l'écran (`on_insert` / `on_update` / `on_delete`, `on_save` du formulaire) et
+    ses actions s'exécutent sur le serveur comme le navigateur les exécute — `run_query`, `call_api`,
+    `call_plugin`, actions partagées (`call_action`), `chain` / `if` / `loop` / `return`, paramètres pris dans
+    l'enregistrement, une étape précédente ou une valeur intégrée (`#LOGIN_USER#`…) — chaque étape sous sa propre
+    permission et avec la capture du paquet de modifications de l'écran. Un `confirm` revient à l'utilisateur
+    (ci-dessous) et son message est affiché ; le message d'un `notify` est renvoyé ; une valeur demandée par une
+    action est fournie d'avance (absente et obligatoire : rien ne s'exécute) ; ce que seul un navigateur fait
+    (`navigate`, `open_url`, `refresh`) est signalé, et une action qui ne fait que cela n'est pas proposée.
+  Trois verrous, tous nécessaires : `[ai] write_tools` (Administrer → App → Assistant IA), la nouvelle permission
+  `ai:write` (Accès → un rôle → Autres → IA) et la permission de chaque requête, point d'accès ou plugin exécuté,
+  comme dans l'écran. **Qui confirme :** dans le chat Liberty les outils ne font que proposer — l'utilisateur
+  reçoit une carte (l'enregistrement avant et après, ou l'action avec la confirmation de l'écran et ce qu'elle
+  exécute) et rien ne se passe avant Appliquer ; en MCP le client (Claude) demande à son utilisateur avant
+  d'appeler un outil qui n'est pas en lecture seule. Comme dans l'écran, une sauvegarde, ses tables liées et ses
+  actions sont des instructions séparées : une action ou une étape qui échoue laisse ce qui a été fait avant, et
+  la réponse le dit. Pas encore : un formulaire qui exécute des actions à son ouverture (`on_load`) est refusé
+  avec cette raison ; les valeurs issues d'une requête (une liste de recherche) sont indiquées par `screen_form`
+  pour que l'assistant les vérifie, non contrôlées par le serveur.
+
 ## 7.0.79 — non publiée
 
 - **Point d'accès MCP : se connecter au lieu de coller un jeton (OAuth).** Un client à qui l'on ne donne que

@@ -27,6 +27,7 @@ from typing import Any, AsyncIterator, Callable
 
 from liberty.ai.assistant import _truncate, cut_result
 from liberty.ai.usage import CHANNEL_MCP, TurnRecorder
+from liberty.ai.tools import current_channel
 from liberty.auth.principal import Principal, current_principal
 from liberty.auth.scope import current_scope, current_username
 from liberty.auth.tokens import TokenError
@@ -97,6 +98,7 @@ def build_server(state: Callable[[], Any]) -> Any:
         current_principal.set(who)
         current_scope.set(who.data_scope)
         current_username.set(who.username)
+        current_channel.set("mcp")            # a tool that saves writes here: the client asked its user
         reg = registry()
         name, arguments = params.name, dict(params.arguments or {})
         tool = reg.get(name)

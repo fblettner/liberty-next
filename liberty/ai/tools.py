@@ -19,6 +19,7 @@ import json
 import re
 import types
 import typing
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -28,6 +29,12 @@ from liberty.auth.principal import Principal, current_principal
 class ToolPermissionError(PermissionError):
     """The signed-in user may not do what the tool was asked: the message goes back to the
     model, which tells the user — it must not look for another way round."""
+
+
+# Where the assistant runs for this call: "chat" (the Liberty chat: a tool that saves a record
+# proposes it, the user applies the card) or "mcp" (an external client, which asks its own user
+# before a tool that is not read-only). Set by the MCP endpoint; the chat is the default.
+current_channel: ContextVar[str] = ContextVar("liberty_ai_channel", default="chat")
 
 
 def caller() -> Principal | None:
@@ -180,6 +187,7 @@ def tool(
     superuser_only: bool = False,
     chat_only: bool = False,
     read_only: bool = True,
+    permission: str | None = None,
 ) -> Tool | Callable[[Callable[..., Any]], Tool]:
     """Turn a function into a :class:`Tool` (usable as ``@tool`` or ``@tool(...)``)."""
 
@@ -195,6 +203,7 @@ def tool(
             superuser_only=superuser_only,
             chat_only=chat_only,
             read_only=read_only,
+            permission=permission,
         )
 
     return build(func) if func is not None else build

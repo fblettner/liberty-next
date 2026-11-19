@@ -99,7 +99,7 @@ export const CONFIG_LABELS: Record<string, string> = {
   'ai.enabled': 'settings.app.aiEnabled', 'ai.api_key': 'settings.app.aiApiKey', 'ai.model': 'settings.app.aiModel', 'ai.max_tokens': 'settings.app.aiMaxTokens',
   'ai.max_iterations': 'settings.app.aiMaxIter', 'ai.system_prompt': 'settings.app.aiSystemPrompt', 'ai.thinking': 'settings.app.aiThinking',
   'ai.effort': 'settings.app.aiEffort', 'ai.request_timeout': 'settings.app.aiTimeout', 'ai.connector_tools': 'settings.app.aiConnectorTools',
-  'ai.api_tool': 'settings.app.aiApiTool', 'ai.scaffold_tools': 'settings.app.aiScaffoldTools', 'ai.ops_tools': 'settings.app.aiOpsTools',
+  'ai.api_tool': 'settings.app.aiApiTool', 'ai.scaffold_tools': 'settings.app.aiScaffoldTools', 'ai.ops_tools': 'settings.app.aiOpsTools', 'ai.write_tools': 'settings.app.aiWriteTools',
   'ai.explorer_tools': 'settings.app.aiExplorerTools', 'ai.app_tools': 'settings.app.aiAppTools', 'ai.mcp_enabled': 'settings.app.aiMcpEnabled', 'ai.attachment_max_mb': 'settings.app.aiAttachmentMaxMb', 'ai.mcp_token_max_days': 'settings.app.aiMcpTokenDays', 'ai.sql_max_rows': 'settings.app.aiSqlMaxRows', 'ai.usage_retention_days': 'settings.app.aiUsageRetention', 'ai.allowed_connectors': 'settings.app.aiAllowedConnectors', 'ai.web_fetch_domains': 'settings.app.aiWebDomains',
   'ai.web_fetch_max_uses': 'settings.app.aiWebMaxUses', 'ai.allowed_models': 'settings.app.aiAllowedModels', 'ai.starters': 'settings.app.aiStarters',
   'license.key': 'settings.app.licenseKey', 'license.usage_url': 'settings.app.usageUrl', 'crypto.master_key': 'developer.labels.masterKey',

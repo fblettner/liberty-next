@@ -97,6 +97,10 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           refresh with rotation), throttle.py (login throttle), principal.py
                           (colon-glob permissions), oidc.py, dependencies.py, routes.py;
                           models.py / db.py / service.py = the DB backend's ly2_* tables
+  screens/save.py         a screen's row saved on the server: the twin of the browser's saveScreenRow.ts + the form's field rules,
+                          every statement through web/connectors._run_sql, then the save hooks (the assistant's screen_write)
+  screens/actions.py      a screen's actions run on the server: the twin of the browser's actionRunner.ts (chain / if / loop / binds /
+                          built-ins), each step through the code behind its route (_run_sql, call_http, run_plugin_callable)
   screens/config.py       Screen = the business object: columns (ColumnHint), dialog (tabs:
                           form | nested_form | nested_table), actions / row_menu / lifecycle
                           hooks (the Action union incl. chain / if / loop / return), export
@@ -109,6 +113,9 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           connector_tools.py = list_connectors [connector / search; an overview on a large install] + sql_query [own row cap;
                           runs through web/connectors.select_events like a screen's read; `filters` = the dictionary binds]),
                           ops_tools.py (jobs_status / server_log / integrity_checks — opt-in `[ai] ops_tools`),
+                          write_tools.py (screen_form / screen_write / screen_action — opt-in `[ai] write_tools`, permission `ai:write`: one record
+                          through its screen via screens/save.py, one of its actions via screens/actions.py; proposes a card in the chat
+                          (`POST /ai/screen-write` / `/ai/screen-action` apply it), does it over MCP — `tools.current_channel`),
                           app_tools.py (the tools the APPS ship: `[ai.<app>.tools.<id>]` = a plugin `j_` function offered as `<app>_<id>`,
                           allow-listed like call_plugin, permission `plugin:<callable>`, framework objects injected; a ToolRegistry provider read at call time),
                           usage.py (the audit and usage record: ly2_ai_call, one row per turn — who, model, tokens, tools, never the question /
