@@ -32,6 +32,7 @@ describe('aiUsage helpers', () => {
     expect(formatCost(312.4)).toBe('$312')
     expect(formatCost(null)).toBe('—')
     expect(formatCost(undefined)).toBe('—')
+    expect(formatCost(38.2, 'fr').replace(/\s/g, ' ')).toBe('38,20 $')
   })
   it('shows a run of MCP tool calls as one line', () => {
     const turn = (id: string, channel: string, username: string, at: string): Turn => ({

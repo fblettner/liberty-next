@@ -93,12 +93,13 @@ export function average(total: number, count: number): number {
 }
 
 /** An estimated cost in USD: $0.004, $1.25, $312 — a dash when it cannot be estimated. */
-export function formatCost(cost: number | null | undefined): string {
+export function formatCost(cost: number | null | undefined, language = 'en'): string {
   if (cost == null) return '—'
-  if (cost === 0) return '$0'
-  if (cost < 0.01) return '$' + cost.toFixed(3)
-  if (cost < 100) return '$' + cost.toFixed(2)
-  return '$' + String(Math.round(cost))
+  const digits = cost === 0 || cost >= 100 ? 0 : cost < 0.01 ? 3 : 2
+  // US dollars (the model prices'), written the reader's way: $38.20, 38,20 $
+  return new Intl.NumberFormat(language, {
+    style: 'currency', currency: 'USD', currencyDisplay: 'narrowSymbol', minimumFractionDigits: digits, maximumFractionDigits: digits,
+  }).format(cost)
 }
 
 /** One line of the latest activity: a turn, or a run of MCP tool calls shown as one. */

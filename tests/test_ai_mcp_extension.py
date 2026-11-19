@@ -181,3 +181,15 @@ def test_the_bridge_sends_a_file_of_the_chosen_folder(tmp_path) -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_the_settings_are_in_french_for_a_french_profile() -> None:
+    def manifest(language: str | None) -> dict:
+        return json.loads(zipfile.ZipFile(io.BytesIO(build_extension("https://liberty.intra/mcp", "7.0.83", "Test", language))).read("manifest.json"))
+
+    fr, en = manifest("fr-FR"), manifest("en")
+    assert fr["user_config"]["server_url"]["title"] == "Adresse de Liberty" and en["user_config"]["server_url"]["title"] == "Liberty address"
+    assert fr["user_config"]["files_folder"]["description"].startswith("Facultatif.") and fr["description"].startswith("Utilisez")
+    # only the texts change: same name, same settings
+    assert fr["name"] == en["name"] and set(fr["user_config"]) == set(en["user_config"])
+    assert all(fr["user_config"][k]["title"] != en["user_config"][k]["title"] for k in en["user_config"])

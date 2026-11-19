@@ -587,7 +587,9 @@ export default function ChangePackagesBuilder() {
                 : ''
               // The action that produced this batch (e.g. "import security") — shown in place of a
               // bare count so the group reads as "what happened", not "how many rows".
-              const action = entries[0]?.source_action ?? ''
+              const source = entries[0]?.source_action ?? ''
+              // the assistant's writes carry a fixed label (liberty/ai/write_tools.ORIGIN), shown in the reader's language
+              const action = source === 'AI assistant' ? t('settings.changes.byAssistant') : source
               const draftPkg = detail?.status === 'draft'
               const groupIds = entries.map((e) => e.id)
               const groupLabel = `${entity}${keyLabel ? ` · ${keyLabel}` : ''}`

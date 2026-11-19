@@ -90,7 +90,7 @@ export default function AiUsage() {
       <td className="num">{formatTokens(tokensIn(f))}</td>
       <td className="num">{cachedShare(f)} %</td>
       <td className="num">{formatTokens(f.output_tokens)}</td>
-      <td className="num">{formatCost(f.cost)}</td>
+      <td className="num">{formatCost(f.cost, i18n.language)}</td>
     </>
   )
   const figureHead = (
@@ -128,7 +128,7 @@ export default function AiUsage() {
             <Tile><div className="v">{s.totals.turns}</div><div className="l">{t('aiUsage.turns')}</div></Tile>
             <Tile><div className="v">{s.by_user.length}</div><div className="l">{t('aiUsage.users')}</div></Tile>
             <Tile>
-              <div className="v">{formatCost(s.totals.cost)}</div>
+              <div className="v">{formatCost(s.totals.cost, i18n.language)}</div>
               <div className="l">{t('aiUsage.costNote')}{s.unpriced && s.unpriced.length > 0 ? ` · ${t('aiUsage.unpriced', { models: s.unpriced.join(', ') })}` : ''}</div>
             </Tile>
             <Tile><div className="v">{formatTokens(tokensIn(s.totals))}</div><div className="l">{t('aiUsage.tokensIn')} · {t('aiUsage.cachedShare', { pct: cachedShare(s.totals) })}</div></Tile>
@@ -176,7 +176,7 @@ export default function AiUsage() {
                         <td className="name">{channelLabel(c.channel)}</td>
                         <td className="num">{c.turns}</td><td className="num">{c.tool_calls}</td>
                         <td className={`num${c.tool_errors + c.errors ? ' bad' : ''}`}>{c.tool_errors + c.errors}</td>
-                        <td className="num">{c.channel === 'chat' ? formatCost(c.cost) : '—'}</td>
+                        <td className="num">{c.channel === 'chat' ? formatCost(c.cost, i18n.language) : '—'}</td>
                       </tr>
                     ))}</tbody>
                   </T></Scroll>

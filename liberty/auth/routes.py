@@ -538,7 +538,7 @@ async def mcp_extension(
     # Liberty servers install side by side in Claude Desktop instead of replacing one another
     environment = getattr(request.app.state.settings.app, "environment", "") or ""
     return Response(
-        build_extension(url, __version__, environment), media_type="application/zip",
+        build_extension(url, __version__, environment, request.headers.get("x-liberty-lang")), media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{instance_names(url, environment)[2]}"', "Cache-Control": "no-store"},
     )
 

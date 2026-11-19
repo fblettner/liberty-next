@@ -59,10 +59,29 @@ def _version(release: str | None) -> str:
     return ".".join(str(int(g)) for g in m.groups()) if m else "1.0.0"
 
 
-def build_extension(address: str | None, release: str | None, environment: str | None = None) -> bytes:
+# The extension's own texts (its description and settings) in French, by their English wording
+# in the manifest — what Claude Desktop shows; the tools' texts come from the server.
+FRENCH: tuple[tuple[str, str], ...] = (
+    ("Use your Liberty Next applications from Claude: screens, dashboards, Data Explorer analyses and playbooks, under your own account.",
+     "Utilisez vos applications Liberty Next depuis Claude : écrans, tableaux de bord, analyses du Data Explorer et procédures, sous votre propre compte."),
+    ("Liberty address", "Adresse de Liberty"),
+    ("The address of your Liberty server, ending with /mcp.", "L'adresse de votre serveur Liberty, terminée par /mcp."),
+    ("Personal access token", "Jeton d'accès personnel"),
+    ("Created in Liberty: your profile, tab Access tokens.", "Créé dans Liberty : votre profil, onglet Jetons d'accès."),
+    ("Files folder", "Dossier de fichiers"),
+    ("Optional. Claude can send Liberty the spreadsheets and delimited files of this folder, and of no other, for a job that loads a file, when you ask it to.",
+     "Facultatif. Claude peut envoyer à Liberty les classeurs et les fichiers délimités de ce dossier, et d'aucun autre, pour une tâche qui charge un fichier, lorsque vous le lui demandez."),
+    ("Accept an internal certificate", "Accepter un certificat interne"),
+    ("Turn on only when your Liberty server uses a self-signed or company certificate.",
+     "À activer uniquement si votre serveur Liberty utilise un certificat auto-signé ou d'entreprise."),
+)
+
+
+def build_extension(address: str | None, release: str | None, environment: str | None = None, language: str | None = None) -> bytes:
     """The extension for this server: *address* is where the user's machine reaches ``/mcp``
     (pre-filled in the extension's settings; anything that is not an http(s) address is left
-    blank for the user to type); *environment* names the instance with the address's host."""
+    blank for the user to type); *environment* names the instance with the address's host;
+    *language* is the user's (``fr…`` → the extension's settings in French)."""
     import json
 
     url = (address or "").strip()
@@ -74,6 +93,9 @@ def build_extension(address: str | None, release: str | None, environment: str |
         .replace("{{version}}", _version(release)).replace("{{url}}", url)
         .replace("{{name}}", name).replace("{{display_name}}", json.dumps(display, ensure_ascii=False)[1:-1])
     )
+    if (language or "").lower().startswith("fr"):
+        for english, french in FRENCH:
+            manifest = manifest.replace(json.dumps(english), json.dumps(french, ensure_ascii=False))
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("manifest.json", manifest)

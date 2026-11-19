@@ -1,6 +1,17 @@
 # Liberty Next — Notes de version
 
-## 7.0.82 — non publiée
+## 7.0.83 — non publiée
+
+- **Corrections d'affichage après la passe de documentation.** Les réglages de l'extension Claude Desktop
+  (adresse, jeton, dossier de fichiers, certificat) et sa description sont en français quand le profil est en
+  français au téléchargement. Surveillance → Usage de l'IA : le coût estimé suit la langue (`38,20 $` en
+  français) et la liste s'intitule *Dernière activité* (elle contient aussi les cartes appliquées et les appels
+  MCP). Un paquet de modifications affiche « Assistant IA » pour les écritures de l'assistant. Le réglage
+  *Outils d'écriture* et la permission `ai:write` disent qu'ils couvrent aussi les actions d'un écran et le
+  lancement d'une tâche. L'onglet Jetons d'accès dit ce que fait **Mettre fin à l'accès** pour un client
+  connecté par authentification. Dans ces notes, chaque version publiée porte sa date au lieu de « non publiée ».
+
+## 7.0.82 — 2026-11-19
 
 - **Assistant IA : plusieurs enregistrements sur une seule carte — `screen_write_many`.** « Crée ces cinq
   utilisateurs », « passe ces douze lignes au statut validé » : l'assistant propose une carte qui liste tous
@@ -49,7 +60,7 @@
   s'exécute au dépôt. Téléchargez de nouveau l'extension pour obtenir le réglage. Pas pour le connecteur par
   connexion, qui n'a pas accès au disque de l'utilisateur. Tracé comme les
   autres modifications (canal `apply`) ; en MCP, il faut `[ai] mcp_changes`.
-- **Supervision → Usage de l'IA, refondu.**
+- **Surveillance → Usage de l'IA, refondu.**
   - *Coût* : une estimation au prix public (USD) sur la période, par utilisateur, par jour et par modèle — un
     modèle sans prix connu est écarté et nommé. Les prix sont ceux de la version (`liberty/ai/catalog.py`).
   - *Canaux distincts des modèles* : un outil appelé en MCP et une carte appliquée apparaissaient comme des
@@ -92,11 +103,11 @@
 - **Ce que l'assistant a modifié est tracé.** Une carte appliquée (un enregistrement écrit, une action lancée) est
   conservée dans le registre d'usage sous le canal `apply` : qui, l'écran, l'opération ou l'action, la clé de
   l'enregistrement, et la raison en cas de refus — jamais les valeurs. Avec les lignes MCP des mêmes outils (qui
-  portent maintenant aussi la clé de l'enregistrement), Supervision → Usage de l'IA liste toute modification faite
+  portent maintenant aussi la clé de l'enregistrement), Surveillance → Usage de l'IA liste toute modification faite
   par l'assistant. Sur un écran suivi, le paquet de modifications nomme ces entrées « AI assistant », comme il
   nomme celles d'une action.
 
-## 7.0.81 — non publiée
+## 7.0.81 — 2026-11-19
 
 - **Assistant IA : les données sensibles ne sont pas envoyées.** Une installation décide de ce qui est sensible et
   Liberty le tient hors de portée de l'assistant — dans le chat comme en MCP.
@@ -135,7 +146,7 @@
 - Supervision → Rétention : le même écrasement que celui de l'Usage de l'IA dans une fenêtre basse — la liste
   garde sa hauteur et la page défile.
 
-## 7.0.80 — non publiée
+## 7.0.80 — 2026-11-19
 
 - **Assistant IA : écrire par un écran.** Trois nouveaux outils, désactivés par défaut : `screen_form` (ce qu'un
   écran laisse ajouter, modifier, supprimer et lancer : la clé, chaque colonne avec son libellé, si elle est
@@ -190,13 +201,13 @@
 - Assistant IA : une question qui avait utilisé tous ses tours d'outils (`[ai] max_iterations`, 8 par défaut) se
   terminait sur « pas de réponse » et une erreur — rien pour ce que les tours avaient coûté. Elle se termine
   maintenant sur une réponse de clôture, demandée outils désactivés : ce qui a été fait, ce qui a été trouvé, ce
-  qui reste, et que l'utilisateur peut demander de continuer. Supervision → Usage de l'IA affiche un tel tour comme
+  qui reste, et que l'utilisateur peut demander de continuer. Surveillance → Usage de l'IA affiche un tel tour comme
   « Limite de tours ». Une procédure qui écrit plusieurs enregistrements demande plus de tours qu'une question :
   augmentez `max_iterations` (Administrer → App → Assistant IA) là où les outils d'écriture sont activés.
  dans une fenêtre trop basse pour toute la page, les panneaux étaient écrasés au lieu
   que la page défile — la liste des outils coupée, les dernières questions invisibles sauf à dézoomer le navigateur.
 
-## 7.0.79 — non publiée
+## 7.0.79 — 2026-11-19
 
 - **Point d'accès MCP : se connecter au lieu de coller un jeton (OAuth).** Un client à qui l'on ne donne que
   l'adresse de `/mcp` — un connecteur personnalisé dans Claude Desktop ou claude.ai — trouve désormais la connexion
@@ -212,7 +223,7 @@
   Derrière un proxy, renseignez `[app] public_url` (Administrer → App) avec l'adresse à laquelle les utilisateurs
   joignent le serveur : les adresses publiées par la connexion sont construites dessus.
 
-## 7.0.78 — non publiée
+## 7.0.78 — 2026-11-18
 
 - **Rapport d'usage de la licence.** Une installation sous licence signale une fois par jour à l'outil de gestion des
   licences quel environnement elle est, sa version — celle du framework (`liberty-next`) et, quand les applications
@@ -248,13 +259,13 @@
   avec la barre finale. Les adresses de découverte OAuth (`/.well-known/oauth-protected-resource`,
   `oauth-authorization-server`) répondent maintenant un simple 404 au lieu de la page.
 
-## 7.0.77 — non publiée
+## 7.0.77 — 2026-11-18
 
 - **Point d'accès MCP** (`/mcp`) — les outils de l'assistant depuis un client externe : Claude Desktop, claude.ai ou
   Claude Code atteignent une installation Liberty par un connecteur personnalisé et agissent en tant qu'utilisateur
   Liberty. Rien des outils n'est réécrit : le client se voit proposer ce que l'utilisateur a dans le chat, un appel
   passe par les mêmes contrôles de permission et le même périmètre de données, et chaque appel figure dans
-  l'enregistrement d'usage (Supervision → Usage de l'IA) sous le canal `mcp`. Les outils dont le résultat est une
+  l'enregistrement d'usage (Surveillance → Usage de l'IA) sous le canal `mcp`. Les outils dont le résultat est une
   carte du chat Liberty (les propositions de génération) ne sont pas proposés ; un outil qui enregistre quelque
   chose le signale au client. Désactivé par défaut : `[ai] mcp_enabled` (Paramètres → App → IA, appliqué sans
   redémarrage). Nécessite le nouvel extra `mcp` — le paquet officiel `mcp` — inclus dans `liberty-next[all]` et
@@ -309,7 +320,7 @@
   listées et supprimées dans le même panneau que les conversations (type `ai_note` du stockage des vues
   enregistrées).
 
-## 7.0.76 — non publiée
+## 7.0.76 — 2026-11-18
 
 - Menus : une application est listée pour ce que l'utilisateur peut y ouvrir. **Un changement de comportement pour
   les utilisateurs restreints** : une entrée de tableau de bord était affichée dès que le tableau de bord existait et
@@ -332,7 +343,7 @@
   s'il a échoué et pourquoi, sa taille et sa durée. **Jamais la question, la réponse ni une ligne renvoyée par un
   outil.** Une question abandonnée en cours de route est enregistrée avec ce qui s'était passé ; un stockage en
   panne n'interrompt jamais une conversation.
-- **Supervision → Usage de l'IA** (super-utilisateurs) : la période en chiffres — questions, utilisateurs, jetons
+- **Surveillance → Usage de l'IA** (super-utilisateurs) : la période en chiffres — questions, utilisateurs, jetons
   avec la part lue depuis le cache, appels d'outils et échecs, durée moyenne — par utilisateur, jour, modèle et
   outil, et les dernières questions avec leurs appels d'outils (un clic sur un utilisateur les restreint).
   `GET /admin/ai-usage`.
@@ -391,13 +402,13 @@
 - `./start.sh` charge `config/app-dev.toml` quand il existe et que `LIBERTY_APP_CONFIG` n'est pas défini — les
   réglages propres d'un développeur (ignorés par git), le `config/app.toml` commité reste tel que livré.
 
-## 7.0.70 — non publiée
+## 7.0.70 — 2026-10-30
 
 - nomaflow : le détail d'une exécution a un bouton **Retour** — vers la page d'où elle a été ouverte (la liste des
   tâches par le statut d'une tâche, la liste des exécutions, une exécution parente) ; ouverte depuis un lien, vers la
   liste des tâches.
 
-## 7.0.69 — non publiée
+## 7.0.69 — 2026-10-30
 
 - Comptes : un nouveau mot de passe à la première connexion. Un compte créé — ou réinitialisé par un administrateur —
   avec un mot de passe temporaire (« Demander un nouveau mot de passe à la prochaine connexion » dans Paramètres →
@@ -423,7 +434,7 @@
   à jour le serveur gardait les plugins et la configuration chargés avant, jusqu'à un `./liberty restart` manuel. Une
   première installation (le conteneur créé par ce même `up -d`) n'est pas redémarrée deux fois.
 
-## 7.0.68 — non publiée
+## 7.0.68 — 2026-10-29
 
 - nomaflow : une étape peut laisser le job continuer quand elle échoue — `continue_on_failure = true` (sur l'étape, ou
   pour toutes les étapes avec les `step_defaults` du job ; une case à cocher dans l'éditeur d'étape). Après ses
@@ -450,7 +461,7 @@
   appels AIS. « Reset the password of {ULUSER} on #POOL#? ». (`/api/connectors` donne le nom du pool par défaut de
   chaque connecteur SQL avec ses noms de pools.)
 
-## 7.0.67 — non publiée
+## 7.0.67 — 2026-10-29
 
 - Formulaire : un champ date-heure (format `datetime` / `timestamp`) se modifie avec son jour et son heure — le
   sélecteur de date et un champ heure (`hh:mm` ou `hh:mm:ss`) — au lieu du seul jour, qui l'enregistrait à minuit
@@ -537,7 +548,7 @@
   `useActionPrompt.tsx`, et les éditeurs partagent leur cadre, leur barre d'outils et leur ligne vide
   (`common/builderShell.ts`).
 
-## 7.0.66 — non publiée
+## 7.0.66 — 2026-10-29
 
 - Référence développeur → Impact : chaque entité de la configuration (pools, connecteurs, requêtes, endpoints API,
   éléments du dictionnaire, écrans, éléments de menu, graphiques, tableaux de bord, actions partagées, modèles
@@ -582,7 +593,7 @@
   détail (le bloc rétrécissait quand le détail défilait) ; de même pour la liste d'erreurs de l'import Excel de la
   grille.
 
-## 7.0.65 — non publiée
+## 7.0.65 — 2026-10-29
 
 - Référence développeur (une nouvelle page dans la barre latérale, superutilisateur ; de la
   documentation, rien ne s'y modifie) : chaque paramètre de app.toml, lu depuis le code en cours
@@ -721,7 +732,7 @@
   gardent maintenant leur texte tel qu'il est sur disque (commentaires, `${…}`, `step_defaults`), et le job modifié
   retrouve ses références `${…}` là où la valeur correspond encore.
 
-## 7.0.64 — non publiée
+## 7.0.64 — 2026-10-28
 
 - Paquets et déploiement : un import peut être prévisualisé (`/admin/import-package?dry_run=true`) :
   le plan liste chaque élément — nouveau, modifié (avec ses champs avant / après), identique,
@@ -774,7 +785,7 @@
   indiquent où est la base. Nouvelles commandes `liberty-admin set-default-pool` et
   `retarget-pools`.
 
-## 7.0.63 — non publiée
+## 7.0.63 — 2026-10-28
 
 - Supervision → Journal du serveur : le journal du serveur est désormais conservé sur disque — un
   fichier JSON-lines à rotation par taille (`[app] log_file`, par défaut
@@ -831,7 +842,7 @@
 - Supervision, Paramètres → Paquet et Paramètres → Accès choisissent leurs vues dans une rangée de
   cartes — une icône, le nom et une ligne sur l'usage de la vue — au lieu de simples onglets.
 
-## 7.0.62 — non publiée
+## 7.0.62 — 2026-10-28
 
 - nomaflow : le classeur / CSV téléversé pour une exécution peut être retéléchargé — sous l'étape
   `file_load` du détail d'exécution, et sur la page de tâche de l'utilisateur (« Fichier
@@ -847,7 +858,7 @@
   Rétention ; le balayage indique les fichiers et octets supprimés. L'enregistrement de la
   politique de rétention n'échoue plus sur un champ vide.
 
-## 7.0.61 — non publiée
+## 7.0.61 — 2026-10-28
 
 - Tâches : une étape de rapport de plugin (`report:<scope>:<id>`) reçoit les paramètres de la
   tâche et les paramètres utilisateur de l'exécution par-dessus ses propres `params`, typés selon
@@ -924,7 +935,7 @@
   colonnes. Un formulaire dans l'éditeur d'étapes.
 - nomaflow : sur la page de tâche d'un utilisateur, le bouton Exécuter est aligné sur les champs.
 
-## 7.0.60 — non publiée
+## 7.0.60 — 2026-10-28
 
 **Explorateur de données : modèles fournis par les préréglages, entrées de dictionnaire en un clic**
 - Un préréglage de l'assistant écran portant `app` + `explorer = true` fournit un modèle
@@ -1033,7 +1044,7 @@
 - Tableaux de bord : l'étiquette d'une ligne de liste se place sur la ligne du titre, la ligne
   reste sur deux hauteurs.
 
-## 7.0.59 — non publiée
+## 7.0.59 — 2026-10-28
 
 **Corrections issues de la revue de documentation (27/10/2026)**
 - Dialogue : un champ `required`, ou un `required_when` vérifié, bloque désormais l'enregistrement

@@ -1,6 +1,16 @@
 # Liberty Next — Release notes
 
-## 7.0.82 — unreleased
+## 7.0.83 — unreleased
+
+- **Display fixes after the documentation pass.** The Claude Desktop extension's settings (address, token, files
+  folder, certificate) and its description are in French when the profile is in French at download. Monitoring →
+  AI usage: the estimated cost follows the language (`38,20 $` in French) and the list is titled *Latest
+  activity* (it also holds applied cards and MCP calls). A change package shows the assistant's writes as
+  "Assistant IA" in French. The *Write tools* setting and the `ai:write` permission say they also cover a
+  screen's actions and running a job. The Access tokens tab says what **End access** does for a client
+  connected by sign-in. In these notes, every released version carries its date instead of "unreleased".
+
+## 7.0.82 — 2026-11-19
 
 - **AI assistant: several records on one card — `screen_write_many`.** "Create these five users", "set the
   status of these twelve lines": the assistant proposes one card listing every record (up to 50, of one screen)
@@ -85,7 +95,7 @@
   record's key too), Monitoring → AI usage lists every change made through the assistant. On a change-tracked
   screen, the change package names those entries "AI assistant", as it names an action's.
 
-## 7.0.81 — unreleased
+## 7.0.81 — 2026-11-19
 
 - **AI assistant: sensitive data is not sent.** An installation decides what is sensitive and Liberty keeps it
   from the assistant — in the chat and through MCP alike.
@@ -122,7 +132,7 @@
 - Monitoring → Retention: the same squeezing as AI usage had on a short window — the list now keeps its height
   and the page scrolls.
 
-## 7.0.80 — unreleased
+## 7.0.80 — 2026-11-19
 
 - **AI assistant: write through a screen.** Three new tools, off by default: `screen_form` (what a screen lets its
   user add, change, delete and run: the key, each column with its label, whether it is required or locked, its
@@ -175,7 +185,7 @@
  on a window too short for the whole page, the panels were squeezed instead of the page
   scrolling — the tools list cut, the latest questions out of sight unless the browser was zoomed out.
 
-## 7.0.79 — unreleased
+## 7.0.79 — 2026-11-19
 
 - **MCP endpoint: sign in instead of pasting a token (OAuth).** A client given only the address of `/mcp` — a
   custom connector in Claude Desktop or claude.ai — now finds the sign-in by itself: the browser opens Liberty,
@@ -189,7 +199,7 @@
   pasted as a request header keeps working (Claude Code, scripts). Behind a proxy, set `[app] public_url`
   (Administer → App) to the address users reach the server at: the addresses the sign-in publishes are built on it.
 
-## 7.0.78 — unreleased
+## 7.0.78 — 2026-11-18
 
 - **Licence usage report.** A licensed installation tells the licence management tool, once a day, which
   environment it is, its version — the framework's (`liberty-next`) and, when the applications are installed, theirs
@@ -220,7 +230,7 @@
   connector `https://<server>/mcp/` with the trailing slash. The OAuth discovery addresses
   (`/.well-known/oauth-protected-resource`, `oauth-authorization-server`) now answer a plain 404 instead of the page.
 
-## 7.0.77 — unreleased
+## 7.0.77 — 2026-11-18
 
 - **MCP endpoint** (`/mcp`) — the assistant's tools from an external client: Claude Desktop, claude.ai or Claude Code
   reach a Liberty installation through a custom connector and act as a Liberty user. Nothing of the tools is written
@@ -272,7 +282,7 @@
   They are private to the user, listed and deleted in the same panel as the conversations (kind `ai_note` of the
   saved-views store).
 
-## 7.0.76 — unreleased
+## 7.0.76 — 2026-11-18
 
 - Menus: an application is listed for what the user may open in it. **A change of behaviour for restricted users**:
   a dashboard entry was shown as soon as the dashboard existed and the Data Explorer page to everyone, so a user with
@@ -342,12 +352,12 @@
 - `./start.sh` loads `config/app-dev.toml` when it exists and `LIBERTY_APP_CONFIG` isn't set — a developer's own
   settings (gitignored), so the committed `config/app.toml` stays as shipped.
 
-## 7.0.70 — unreleased
+## 7.0.70 — 2026-10-30
 
 - nomaflow: the run detail has a **Back** button — to the page the run was opened from (the jobs list through a job's
   status, the runs list, a parent run); opened from a link, to the jobs list.
 
-## 7.0.69 — unreleased
+## 7.0.69 — 2026-10-30
 
 - Accounts: a new password at the first sign-in. An account created — or reset by an administrator — with a temporary
   password ("Ask for a new password at the next sign-in" in Settings → Access, on by default for a new user;
@@ -369,7 +379,7 @@
   the server kept the plugins and configuration it had loaded before, until a manual `./liberty restart`. A fresh
   install (the container created by that same `up -d`) is not restarted twice.
 
-## 7.0.68 — unreleased
+## 7.0.68 — 2026-10-29
 
 - nomaflow: a step can let the job go on when it fails — `continue_on_failure = true` (on the step, or for every step
   with the job's `step_defaults`; a checkbox in the step editor). After its retries the step is recorded failed, the
@@ -393,7 +403,7 @@
   screen's connector has it, else that connector's own pool — the one its AIS calls go to. "Reset the password of
   {ULUSER} on #POOL#?". (`/api/connectors` gives each SQL connector's default pool name along with its pool names.)
 
-## 7.0.67 — unreleased
+## 7.0.67 — 2026-10-29
 
 - Record form: a date-time field (format `datetime` / `timestamp`) edits its day and its time — the date picker and a
   time field (`hh:mm` or `hh:mm:ss`) — instead of the day only, which saved it at midnight (`common/DateTimePicker`).
@@ -465,7 +475,7 @@
   header mapping, rule validation, lookup return-fill) the hook `useImport.ts`; the record form's row lock is the
   hook `useRecordLock.ts`; the action prompt (`prompt_fields`), copied in both, is one hook `useActionPrompt.tsx`, and the builders share their page frame, toolbar and empty line (`common/builderShell.ts`).
 
-## 7.0.66 — unreleased
+## 7.0.66 — 2026-10-29
 
 - Developer reference → Impact: every configuration entity (pools, connectors, queries, API endpoints, dictionary
   items, screens, menu items, charts, dashboards, shared actions, Explorer models, jobs, notification rules, AI
@@ -503,7 +513,7 @@
 - Developer reference → API: a route's request / response example is no longer squeezed to one line in its detail
   (the block shrank when the detail scrolled); the same for the error list of the grid's Excel import.
 
-## 7.0.65 — unreleased
+## 7.0.65 — 2026-10-29
 
 - Developer reference (a new page in the sidebar, superuser; documentation, nothing is edited there):
   every setting of app.toml, read from the running code — sections on the left with what is not in
@@ -619,7 +629,7 @@
   `/srv/…`) landed in every other job of the file; the unchanged jobs now keep their text as it is on disk (comments,
   `${…}`, `step_defaults`), and the edited job gets its `${…}` references back where the value still matches.
 
-## 7.0.64 — unreleased
+## 7.0.64 — 2026-10-28
 
 - Package & Deploy: an import can be previewed (`/admin/import-package?dry_run=true`): the plan
   lists every entity — new, changed (with its fields before / after), identical, kept (`override
@@ -664,7 +674,7 @@
   `status`, `doctor` and `backup` show where the database is. New `liberty-admin set-default-pool`
   and `retarget-pools`.
 
-## 7.0.63 — unreleased
+## 7.0.63 — 2026-10-28
 
 - Monitoring → Server log: the server log is now kept on disk — a size-rotated JSON-lines file
   (`[app] log_file`, default `<config dir>/.logs/liberty.log`; `log_file_max_mb` 10,
@@ -715,7 +725,7 @@
 - Monitoring, Settings → Package and Settings → Access pick their views from a row of cards — an
   icon, the name and one line on what the view is for — instead of plain tabs.
 
-## 7.0.62 — unreleased
+## 7.0.62 — 2026-10-28
 
 - nomaflow: the spreadsheet / CSV uploaded for a run can be downloaded again — under the
   `file_load` step on Run detail, and on the user's job page ("File loaded"). Uploads are kept in
@@ -729,7 +739,7 @@
   sweep reports the files and bytes deleted. Saving the retention policy no longer fails on a
   blank field.
 
-## 7.0.61 — unreleased
+## 7.0.61 — 2026-10-28
 
 - Jobs: a plugin report step (`report:<scope>:<id>`) takes the run's job params and user
   parameters on top of its own `params`, typed by the report's declared parameters.
@@ -792,7 +802,7 @@
   labels. A form in the step editor.
 - nomaflow: on a user's job page, the Run button lines up with the fields.
 
-## 7.0.60 — unreleased
+## 7.0.60 — 2026-10-28
 
 **Data Explorer: models shipped by the presets, dictionary entries in one click**
 - A Screen Assistant preset carrying `app` + `explorer = true` ships a Data Explorer model by
@@ -885,7 +895,7 @@
   row-menu actions in the field; a wrong id is refused at load.
 - Dashboards: a list row's tag sits on the title line, so a row stays two lines high.
 
-## 7.0.59 — unreleased
+## 7.0.59 — 2026-10-28
 
 **Fixes from the documentation review (2026-10-27)**
 - Dialog: a `required` field, or a `required_when` that holds, now blocks Save when empty (the
