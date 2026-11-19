@@ -38,6 +38,7 @@ _log = logging.getLogger(__name__)
 
 WRITE_PERMISSION = "ai:write"
 OPERATIONS = ("insert", "update", "delete")
+ORIGIN = "AI assistant"       # how a change package names the entries the assistant wrote
 ENUM_MAX = 60                 # the most values of a list shown by screen_form
 
 
@@ -47,7 +48,7 @@ def write_context(state: Any, principal: Any, *, language: str | None = None, po
         connectors=state.connectors, screens=getattr(state, "screens", None), principal=principal,
         changesets=getattr(state, "changesets_db", None),
         notify_ctx=(getattr(state, "notification_rules", None), getattr(state, "notify", None)),
-        language=language, pool=pool, state=state, hide_sensitive=hides_sensitive(state),
+        language=language, pool=pool, state=state, hide_sensitive=hides_sensitive(state), origin=ORIGIN,
     )
 
 
@@ -337,6 +338,7 @@ def build_write_tools(state: Callable[[], Any]) -> list[Tool]:
 
     return [
         tool(screen_form, summary_keys=("app", "screen"), permission=WRITE_PERMISSION),
-        tool(screen_write, summary_keys=("operation", "app", "screen"), permission=WRITE_PERMISSION, read_only=False),
-        tool(screen_action, summary_keys=("action", "app", "screen"), permission=WRITE_PERMISSION, read_only=False),
+        # the record's key is in the summary: the usage record says WHICH record the assistant changed
+        tool(screen_write, summary_keys=("operation", "app", "screen", "key"), permission=WRITE_PERMISSION, read_only=False),
+        tool(screen_action, summary_keys=("action", "app", "screen", "key"), permission=WRITE_PERMISSION, read_only=False),
     ]

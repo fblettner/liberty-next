@@ -2745,6 +2745,7 @@ const en = {
       aiAppTools: 'The applications’ tools (what each app ships under AI → Tools)',
       aiMcpHint: 'MCP — the same tools for an external client (Claude Desktop, claude.ai, Claude Code): each user signs in to Liberty when the client asks (give the client the address of /mcp only), or pastes a personal access token (their profile → Access tokens); permission mcp:use either way. They get their own permissions and data scope.',
       aiMcpEnabled: 'MCP endpoint (/mcp)',
+      aiMcpChanges: 'Allow changes over MCP (a tool that saves — a record through its screen, an action, a saved analysis — is offered to an external client; in the chat the user applies a card, here the only gate is the client’s own approval)',
       aiMcpTokenDays: 'Personal access token: longest life (days)',
       aiSqlMaxRows: 'Rows per query, at most (the assistant’s own cap, not the pool’s)',
       aiUsageRetention: 'Usage record kept (days; 0 = without limit)',

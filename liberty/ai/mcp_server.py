@@ -84,12 +84,18 @@ def build_server(state: Callable[[], Any]) -> Any:
             raise RuntimeError("the assistant is disabled on this server ([ai] enabled = false)")
         return assistant.tools
 
+    def changes_allowed() -> bool:
+        """``[ai] mcp_changes`` — read at each request: a tool that saves is offered and run over
+        MCP only with it."""
+        return bool(getattr(getattr(getattr(state(), "settings", None), "ai", None), "mcp_changes", False))
+
     async def on_list_tools(ctx: Any, params: Any) -> Any:
         who = _caller(ctx)
+        saves = changes_allowed()
         return types.ListToolsResult(tools=[
             types.Tool(name=t.name, description=t.description, input_schema=t.input_schema,
                        annotations=types.ToolAnnotations(read_only_hint=t.read_only))
-            for t in registry().offered(who) if not t.chat_only
+            for t in registry().offered(who) if not t.chat_only and (t.read_only or saves)
         ])
 
     async def on_call_tool(ctx: Any, params: Any) -> Any:
@@ -106,6 +112,11 @@ def build_server(state: Callable[[], Any]) -> Any:
         recorder.observe({"type": "tool_call", "name": name, "summary": tool.summarize(arguments) if tool is not None else name})
         if tool is None or tool.chat_only or tool not in reg.offered(who):
             content, is_error = json.dumps({"error": f"unknown tool: {name}"}), True      # the same answer for "not yours"
+        elif not tool.read_only and not changes_allowed():
+            content, is_error = json.dumps({"error": (
+                f"{name} changes something, and changes over MCP are off on this server: an administrator decided that "
+                "changes are not made from an external client. Tell the user so, and that they can make the change "
+                "themselves in Liberty. Do not make it for them another way (a browser, another tool).")}), True
         else:
             content, is_error = await reg.execute(name, arguments)
         full_size = len(content)

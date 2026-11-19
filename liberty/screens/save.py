@@ -59,6 +59,7 @@ class WriteContext:
     language: str | None = None
     pool: str | None = None             # the environment picked for the page (X-Liberty-Pool)
     state: Any = None                   # the application state (shared actions, settings) — the save hooks' steps
+    origin: str | None = None           # who writes when it is not the screen: named on a change package's entries
     hide_sensitive: bool = False        # leave the data flagged sensitive out of what is shown back ([ai] hide_sensitive)
 
 
@@ -282,6 +283,7 @@ async def _run(ctx: WriteContext, connector: str, query: str, params: Row, *, ac
             ctx.connectors, connector, query, params, language=ctx.language, user=ctx.principal.username,
             scope=ctx.principal.data_scope, verbose_errors=ctx.principal.is_superuser, screens=ctx.screens,
             changesets=ctx.changesets, pool=ctx.pool, notify_ctx=ctx.notify_ctx, action_context=action_context,
+            origin=ctx.origin,
         )
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, default=str)

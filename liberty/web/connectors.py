@@ -277,6 +277,7 @@ async def _run_sql(
     scope: DataScope | None = None,
     verbose_errors: bool = False,
     notify_ctx: tuple[Any, Any] | None = None,
+    origin: str | None = None,
 ) -> dict[str, Any]:
     """Run *query* on *connector* with *params*. When a matching :class:`Screen` is found,
     thread its per-screen behaviour (column hints, ``audit_table``, ``max_rows``, dictionary
@@ -420,6 +421,9 @@ async def _run_sql(
                 key_columns=cap_keys, read_query=cap_read_query,
                 entity=getattr(screen, "change_entity", None), change_tracked=True,
                 post_apply_ids=list(getattr(screen, "post_apply", None) or []),
+                # who made the write when it was not the screen itself (the AI assistant): the
+                # package groups and names its entries by it, as it does for an action
+                source_action=origin,
             )
         except Exception as exc:  # noqa: BLE001 — capture must never fail a committed write
             _log.error(

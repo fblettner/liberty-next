@@ -11,6 +11,18 @@
   the instance the user names, and say which instance an answer or a change concerns") — read when the server
   starts. An extension installed before this release keeps working; download it again to get its own name.
 
+- **MCP: changes need their own switch — `[ai] mcp_changes`, off by default.** In the Liberty chat a change is a
+  card the user applies; over MCP the only gate is the client's own approval, which its user can set to "always
+  allow". A tool that saves something — a record through its screen, an action, **and a saved Explorer analysis
+  or dashboard** — is now offered to an external client, and run for it, only when an administrator allows it
+  (Administer → App → AI Assistant → "Allow changes over MCP"; read at each request). **On upgrade:** a Claude
+  client that saved analyses over MCP no longer can until the switch is on; reading is unchanged.
+- **What the assistant changed is on record.** An applied card (a record written, an action run) is kept in the
+  usage record under the channel `apply`: who, the screen, the operation or action, the record's key, and the
+  reason when it was refused — never the values. With the MCP rows of the same tools (which now carry the
+  record's key too), Monitoring → AI usage lists every change made through the assistant. On a change-tracked
+  screen, the change package names those entries "AI assistant", as it names an action's.
+
 ## 7.0.81 — unreleased
 
 - **AI assistant: sensitive data is not sent.** An installation decides what is sensitive and Liberty keeps it

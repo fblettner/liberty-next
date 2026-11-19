@@ -851,3 +851,29 @@ def test_sensitive_data_is_not_given_to_the_assistant(tmp_path) -> None:
         out, err = _tool(client, "writer", "sql_query", {"connector": "shop", "query": "customers_get"})
         assert not err and "hidden_columns" not in out and out["rows"][0]["NAME"] == "Acme" and "sensitive" not in json.dumps(out["columns"])
         assert _write(client, "writer", operation="update", key={"ID": 2}, values={"NAME": "Zed"}, dry_run=True).json()["before"] == {"NAME": "Bolt"}
+
+
+def test_what_the_assistant_wrote_is_on_record(app) -> None:
+    """An applied card is kept in the usage record (channel `apply`): who, which screen, which
+    record — the turn that proposed it only recorded a proposal. A check that wrote nothing is not."""
+    from sqlalchemy import select
+
+    from liberty.ai.usage import AiCall
+
+    def applied(client) -> list[dict]:
+        async def go():
+            async with client.app.state.ai_usage.session() as s:
+                return [r.to_dict() for r in (await s.execute(select(AiCall).where(AiCall.channel == "apply").order_by(AiCall.at))).scalars()]
+        return client.portal.call(go)
+
+    with TestClient(app) as client:
+        _write(client, "writer", operation="update", key={"ID": 2}, values={"NAME": "Zed"}, dry_run=True)       # a check: not a change
+        assert applied(client) == []
+        assert _write(client, "writer", operation="update", key={"ID": 2}, values={"NAME": "Zed"}).status_code == 200
+        assert _write(client, "writer", operation="update", key={"ID": 2}, values={"STATUS": "ZZ"}).status_code == 409    # refused
+        assert _act(client, "writer", "block", key={"ID": 1}).json()["ok"] is True
+        rows = applied(client)
+        assert [(r["username"], r["app"], r["tools"][0]["name"], r["tools"][0]["ok"]) for r in rows] == [
+            ("writer", "shop", "screen_write", True), ("writer", "shop", "screen_write", False), ("writer", "shop", "screen_action", True)]
+        assert "operation=update" in rows[0]["tools"][0]["input"] and "'ID': 2" in rows[0]["tools"][0]["input"] and "Zed" not in json.dumps(rows[0])
+        assert "not one of its values" in rows[1]["tools"][0]["error"] and "action=block" in rows[2]["tools"][0]["input"]

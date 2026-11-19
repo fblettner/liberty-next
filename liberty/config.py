@@ -395,6 +395,11 @@ class AISettings(BaseModel):
     # through a personal access token — pasted, or obtained by the OAuth sign-in (liberty.auth.oauth).
     # Off by default; needs the `mcp` extra.
     mcp_enabled: bool = False
+    # Changes over MCP — a tool that saves something (a record through its screen, an action, a
+    # saved analysis) is offered to an external client only with this. Off by default: in the
+    # Liberty chat the user applies a card; over MCP the only gate is the client's own approval,
+    # which its user can set to "always allow". The tools themselves still need their own switches.
+    mcp_changes: bool = False
     # the longest life of a personal access token, and how long an OAuth consent lasts
     mcp_token_max_days: int = Field(default=366, ge=1)
     # Files attached to a question (liberty.ai.attachments): an image, a PDF, a spreadsheet or a text

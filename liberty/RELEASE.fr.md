@@ -12,6 +12,21 @@
   une réponse ou une modification concerne ») — lu au démarrage du serveur. Une extension installée avant cette
   version continue de fonctionner ; téléchargez-la de nouveau pour qu'elle porte son propre nom.
 
+- **MCP : les modifications ont leur propre interrupteur — `[ai] mcp_changes`, désactivé par défaut.** Dans le chat
+  Liberty une modification est une carte que l'utilisateur applique ; en MCP le seul garde-fou est l'approbation du
+  client, que son utilisateur peut régler sur « toujours autoriser ». Un outil qui enregistre quelque chose — un
+  enregistrement par son écran, une action, **et une analyse ou un tableau de bord sauvegardé de l'Explorateur** —
+  n'est désormais proposé à un client externe, et exécuté pour lui, que si un administrateur l'autorise
+  (Administrer → App → Assistant IA → « Autoriser les modifications en MCP » ; lu à chaque requête). **À la mise à
+  jour :** un client Claude qui sauvegardait des analyses en MCP ne le peut plus tant que l'interrupteur est
+  désactivé ; la lecture ne change pas.
+- **Ce que l'assistant a modifié est tracé.** Une carte appliquée (un enregistrement écrit, une action lancée) est
+  conservée dans le registre d'usage sous le canal `apply` : qui, l'écran, l'opération ou l'action, la clé de
+  l'enregistrement, et la raison en cas de refus — jamais les valeurs. Avec les lignes MCP des mêmes outils (qui
+  portent maintenant aussi la clé de l'enregistrement), Supervision → Usage de l'IA liste toute modification faite
+  par l'assistant. Sur un écran suivi, le paquet de modifications nomme ces entrées « AI assistant », comme il
+  nomme celles d'une action.
+
 ## 7.0.81 — non publiée
 
 - **Assistant IA : les données sensibles ne sont pas envoyées.** Une installation décide de ce qui est sensible et

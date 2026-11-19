@@ -31,6 +31,10 @@ from liberty.schema_sync import SchemaChange, sync_tables
 
 CHANNEL_CHAT = "chat"
 CHANNEL_MCP = "mcp"
+# A card of the chat applied by the user (`POST /ai/screen-write` / `/ai/screen-action`): the write
+# itself — the turn that proposed it only recorded a proposal. With the MCP rows of the same tools,
+# this is the list of what was changed through the assistant, by whom and on which record.
+CHANNEL_APPLY = "apply"
 
 _SUMMARY_MAX = 200     # a tool's input summary, as kept
 _ERROR_MAX = 300

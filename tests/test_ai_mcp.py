@@ -26,7 +26,7 @@ pytest.importorskip("mcp")
 HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
 
 
-def _app(tmp_path, *, mcp_enabled: bool = True, static_dir: str = "", environment: str = ""):
+def _app(tmp_path, *, mcp_enabled: bool = True, static_dir: str = "", environment: str = "", mcp_changes: bool = True):
     db_url = f"sqlite+aiosqlite:///{tmp_path / 'auth.db'}"
     conn_toml = tmp_path / "connectors.toml"
     conn_toml.write_text(f'[pools.default]\nurl = "{db_url}"\n')
@@ -46,7 +46,7 @@ def _app(tmp_path, *, mcp_enabled: bool = True, static_dir: str = "", environmen
     return create_app(Settings(
         app=AppSettings(static_dir=static_dir, environment=environment), connectors=ConnectorSettings(config_path=Path(conn_toml)),
         auth=AuthSettings(backend="db", jwt_secret="mcp-endpoint-test-secret-0123456789abcdef", pool="default"),
-        ai=AISettings(enabled=True, api_key="", config_path=tmp_path / "ai.toml", mcp_enabled=mcp_enabled),
+        ai=AISettings(enabled=True, api_key="", config_path=tmp_path / "ai.toml", mcp_enabled=mcp_enabled, mcp_changes=mcp_changes),
     ))
 
 
@@ -188,3 +188,20 @@ def test_the_server_says_which_instance_it_is(tmp_path) -> None:
         client.app.state.ai = AiAssistant(AISettings(enabled=True), client=None, tools=_tools({}))
         out = _rpc(client, _token(client, "bob", "bobpw-123"), "initialize", INIT).json()["result"]
         assert out["serverInfo"]["title"] == "Liberty Next" and out["instructions"].startswith("Liberty Next —")
+
+
+def test_a_tool_that_saves_needs_changes_over_mcp(tmp_path) -> None:
+    """[ai] mcp_changes, off by default: over MCP the only gate before a change is the client's
+    own approval, so a tool that saves is neither offered nor run until the server allows it."""
+    with TestClient(_app(tmp_path, mcp_changes=False)) as client:
+        client.app.state.ai = AiAssistant(AISettings(enabled=True), client=None, tools=_tools({}))
+        token = _token(client, "bob", "bobpw-123")
+        names = [t["name"] for t in _rpc(client, token, "tools/list").json()["result"]["tools"]]
+        assert names == ["lookup", "shop_stock"]                                    # save_it is not offered
+        out = _rpc(client, token, "tools/call", {"name": "save_it", "arguments": {}}).json()["result"]
+        assert out["isError"] is True and "changes over MCP are off" in out["content"][0]["text"]
+        # read at each request: allowed without a restart
+        client.app.state.settings.ai.mcp_changes = True
+        assert "save_it" in [t["name"] for t in _rpc(client, token, "tools/list").json()["result"]["tools"]]
+        out = _rpc(client, token, "tools/call", {"name": "save_it", "arguments": {}}).json()["result"]
+        assert out["isError"] is False and out["content"][0]["text"] == "saved"

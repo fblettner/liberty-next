@@ -2738,6 +2738,7 @@ const fr: Resources = {
       aiAppTools: 'Les outils des applications (ce que chaque application livre sous IA → Outils)',
       aiMcpHint: 'MCP — les mêmes outils pour un client externe (Claude Desktop, claude.ai, Claude Code) : chaque utilisateur se connecte à Liberty quand le client le demande (ne donner au client que l’adresse de /mcp), ou colle un jeton d’accès personnel (son profil → Jetons d’accès) ; permission mcp:use dans les deux cas. Il obtient ses propres permissions et son périmètre de données.',
       aiMcpEnabled: 'Point d’accès MCP (/mcp)',
+      aiMcpChanges: 'Autoriser les modifications en MCP (un outil qui enregistre — un enregistrement par son écran, une action, une analyse sauvegardée — est proposé à un client externe ; dans le chat l’utilisateur applique une carte, ici le seul garde-fou est l’approbation du client)',
       aiMcpTokenDays: 'Jeton d’accès personnel : durée maximale (jours)',
       aiSqlMaxRows: 'Lignes par requête, au plus (plafond propre à l’assistant, pas celui du pool)',
       aiUsageRetention: 'Enregistrement d’usage conservé (jours ; 0 = sans limite)',

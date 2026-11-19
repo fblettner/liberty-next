@@ -198,6 +198,24 @@ def _write_context(request: Request, principal: Principal) -> Any:
     return write_context(request.app.state, principal, language=request_language(request), pool=current_pool.get())
 
 
+async def _record_applied(
+    request: Request, principal: Principal, tool_name: str, app: str, what: str, skipped: bool, *, error: str | None = None,
+) -> None:
+    """Keep an applied card in the usage record (channel ``apply``): who changed what through
+    the assistant, on which record — the turn that proposed it recorded a proposal only. A check
+    that wrote nothing (a dry run, a record that already held the values: *skipped*) is not a
+    change and is not kept; a refused apply is, with the reason."""
+    from liberty.ai.usage import CHANNEL_APPLY
+
+    if skipped:
+        return
+    recorder = TurnRecorder(username=principal.username, model="apply", channel=CHANNEL_APPLY, app=app)
+    recorder.observe({"type": "tool_call", "name": tool_name, "summary": what})
+    recorder.observe({"type": "tool_result", "name": tool_name, "ok": error is None, "summary": error or "applied"})
+    recorder.observe({"type": "done", "stop_reason": "end_turn", "usage": {}})
+    await _record(request, recorder)
+
+
 def _refusal(exc: Exception) -> HTTPException:
     text = str(exc)
     return HTTPException(status.HTTP_403_FORBIDDEN if text.startswith("permission denied") else status.HTTP_409_CONFLICT, detail=text)
@@ -224,11 +242,16 @@ async def screen_action(
     from liberty.screens.save import ScreenWriteError
 
     ctx = _write_context(request, principal)
+    what = f"action={body.action} app={body.app} screen={body.screen} key={body.key}"
     try:
-        return await perform_action(ctx, app=body.app, screen=body.screen, action=body.action, key=body.key,
-                                    inputs=body.inputs, params=body.params, dry_run=body.dry_run)
+        out = await perform_action(ctx, app=body.app, screen=body.screen, action=body.action, key=body.key,
+                                   inputs=body.inputs, params=body.params, dry_run=body.dry_run)
     except ScreenWriteError as exc:
+        await _record_applied(request, principal, "screen_action", body.app, what, body.dry_run, error=str(exc))
         raise _refusal(exc) from exc
+    failed = None if out.get("ok", True) else str(out.get("error") or "; ".join(out.get("errors") or []))
+    await _record_applied(request, principal, "screen_action", body.app, what, body.dry_run, error=failed)
+    return out
 
 
 @router.post(
@@ -252,11 +275,17 @@ async def screen_write(
     from liberty.screens.save import ScreenWriteError
 
     ctx = _write_context(request, principal)
+    what = f"operation={body.operation} app={body.app} screen={body.screen} key={body.key}"
     try:
-        return await perform(ctx, app=body.app, screen=body.screen, operation=body.operation, values=body.values,
-                             key=body.key, params=body.params, inputs=body.inputs, dry_run=body.dry_run)
+        out = await perform(ctx, app=body.app, screen=body.screen, operation=body.operation, values=body.values,
+                            key=body.key, params=body.params, inputs=body.inputs, dry_run=body.dry_run)
     except ScreenWriteError as exc:
+        await _record_applied(request, principal, "screen_write", body.app, what, body.dry_run, error=str(exc))
         raise _refusal(exc) from exc
+    if out.get("assigned"):
+        what += f" assigned={out['assigned']}"          # the key the server gave a new record
+    await _record_applied(request, principal, "screen_write", body.app, what, body.dry_run or not out.get("written"))
+    return out
 
 
 def _allowed_models(assistant: AiAssistant) -> list[str]:
