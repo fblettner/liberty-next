@@ -67,7 +67,14 @@ def test_api_reference_reads_access_from_the_code(env) -> None:  # noqa: F811
     assert public == {"/health", "/ready", "/info", "/api/theme", "/manifest.webmanifest",
                       "/auth/login", "/auth/refresh", "/auth/oidc/login", "/auth/oidc/callback",
                       # the password reset by mail (always the same answer; the link is a signed one-shot)
-                      "/auth/forgot-password", "/auth/reset-password"}
+                      "/auth/forgot-password", "/auth/reset-password",
+                      # the OAuth sign-in of the MCP endpoint: discovery, registration, the token exchange
+                      # (the consent itself — /oauth/client, /oauth/approve — is a signed-in user's)
+                      "/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/{rest:path}",
+                      "/.well-known/oauth-authorization-server", "/.well-known/oauth-authorization-server/{rest:path}",
+                      "/.well-known/openid-configuration", "/.well-known/openid-configuration/{rest:path}",
+                      "/oauth/register", "/oauth/token"}
+    assert by[("POST", "/oauth/approve")]["permissions"] == ["mcp:use"] and by[("GET", "/oauth/client")]["access"] == "signed-in"
     sql = by[("GET", "/api/sql/{connector}/{query}")]
     assert sql["access"] == "permission" and sql["permissions"] == ["sql:{connector}:{query}"] and sql["file"] == "liberty/web/connectors.py"
     assert by[("POST", "/admin/reload")]["access"] == "superuser"

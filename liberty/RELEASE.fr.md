@@ -1,5 +1,21 @@
 # Liberty Next — Notes de version
 
+## 7.0.79 — non publiée
+
+- **Point d'accès MCP : se connecter au lieu de coller un jeton (OAuth).** Un client à qui l'on ne donne que
+  l'adresse de `/mcp` — un connecteur personnalisé dans Claude Desktop ou claude.ai — trouve désormais la connexion
+  par lui-même : le navigateur ouvre Liberty, l'utilisateur se connecte comme d'habitude (mot de passe ou SSO) et
+  autorise le client sur une page de consentement ; rien à créer, rien à coller. Liberty est son propre serveur
+  d'autorisation (OAuth 2.1 tel que la spécification MCP le décrit : découverte sous `/.well-known/`,
+  enregistrement du client, code d'autorisation avec PKCE, jeton de rafraîchissement tournant), et rien n'est
+  stocké : l'enregistrement du client, le code et le jeton de rafraîchissement sont des jetons signés. L'accès est
+  le même qu'avec un jeton collé — les permissions et le périmètre de données de l'utilisateur, relus à chaque
+  appel, permission `mcp:use` — et prend fin de la même façon : changement de mot de passe, compte désactivé ou
+  perte de `mcp:use`. Le consentement dure `[ai] mcp_token_max_days` ; ensuite l'utilisateur autorise de nouveau
+  le client. Un jeton d'accès personnel collé en en-tête de requête fonctionne toujours (Claude Code, scripts).
+  Derrière un proxy, renseignez `[app] public_url` (Administrer → App) avec l'adresse à laquelle les utilisateurs
+  joignent le serveur : les adresses publiées par la connexion sont construites dessus.
+
 ## 7.0.78 — non publiée
 
 - **Rapport d'usage de la licence.** Une installation sous licence signale une fois par jour à l'outil de gestion des

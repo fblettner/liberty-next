@@ -258,7 +258,7 @@ def _access(route: Any) -> tuple[str, list[str]]:
 
 
 _CATEGORIES: dict[str, str] = {
-    "auth": "Access", "access": "Access",
+    "auth": "Access", "oauth": "Access", "access": "Access",
     "connectors": "Workspace", "screens": "Workspace", "menus": "Workspace", "charts": "Workspace",
     "dashboards": "Workspace", "actions": "Workspace", "export": "Workspace", "views": "Workspace",
     "theme": "Workspace", "license": "Workspace", "dictgen": "Workspace",

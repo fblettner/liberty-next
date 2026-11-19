@@ -170,7 +170,8 @@ class AppSettings(BaseModel):
     # so the shipped screens carry no customer address; each install sets its own here (App editor).
     external_urls: dict[str, str] = Field(default_factory=dict)
     # The address users reach this server at (``https://liberty.example.com`` — with the base path
-    # when there is one): what a password-reset mail links to. Blank = the browser's origin.
+    # when there is one): what a password-reset mail links to, and what the OAuth sign-in of the MCP
+    # endpoint publishes its addresses on. Blank = the browser's origin / the request's address.
     public_url: str = ""
 
     @field_validator("external_urls")
@@ -379,9 +380,11 @@ class AISettings(BaseModel):
     # answer or a row): turns older than this many days are dropped; 0 keeps them all.
     usage_retention_days: int = Field(default=90, ge=0)
     # The MCP endpoint (/mcp): the same tools, for an external client (Claude) acting as a user
-    # through a personal access token. Off by default; needs the `mcp` extra.
+    # through a personal access token — pasted, or obtained by the OAuth sign-in (liberty.auth.oauth).
+    # Off by default; needs the `mcp` extra.
     mcp_enabled: bool = False
-    mcp_token_max_days: int = Field(default=366, ge=1)   # the longest life of a personal access token
+    # the longest life of a personal access token, and how long an OAuth consent lasts
+    mcp_token_max_days: int = Field(default=366, ge=1)
     # Files attached to a question (liberty.ai.attachments): an image, a PDF, a spreadsheet or a text
     # file the assistant READS — the most megabytes of one upload; 0 = no attachment at all.
     attachment_max_mb: int = Field(default=10, ge=0, le=30)

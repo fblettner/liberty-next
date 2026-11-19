@@ -453,11 +453,11 @@ def principal_for(user: UserRecord) -> Principal:
     )
 
 
-async def principal_from_personal_token(token: str, tokens: TokenService, backend: AuthBackend) -> Principal:
-    """The caller behind a personal access token, re-read from the store as ``/auth/refresh``
-    does: a deactivated account, a changed role or data scope, a password change (the token is
-    bound to the hash it was issued for) apply at the next call. Raises :class:`TokenError`."""
-    claims = tokens.decode(token, expected_type=PERSONAL)
+async def account_for_personal_claims(claims: dict, backend: AuthBackend) -> UserRecord:
+    """The account behind the claims of a personal access token (or of the OAuth code / refresh
+    token that leads to one), re-read from the store as ``/auth/refresh`` does: a deactivated
+    account, a password change (the token is bound to the hash it was issued for), a lost
+    ``mcp:use`` apply at the next call. Raises :class:`TokenError`."""
     user = await backend.get_by_id(str(claims.get("sub")))
     if user is None or not user.is_active:
         raise TokenError("the account is inactive or gone")
@@ -465,10 +465,16 @@ async def principal_from_personal_token(token: str, tokens: TokenService, backen
         raise TokenError("the token was ended by a password change")
     if user.must_change_password and user.provider == "local":
         raise TokenError("the account must change its password first")
-    principal = principal_for(user)
-    if not principal.has_permission(PERSONAL_TOKEN_PERMISSION):
+    if not principal_for(user).has_permission(PERSONAL_TOKEN_PERMISSION):
         raise TokenError(f"the account no longer holds {PERSONAL_TOKEN_PERMISSION}")
-    return principal
+    return user
+
+
+async def principal_from_personal_token(token: str, tokens: TokenService, backend: AuthBackend) -> Principal:
+    """The caller behind a personal access token — the user as they are now (roles, data scope),
+    see :func:`account_for_personal_claims`. Raises :class:`TokenError`."""
+    claims = tokens.decode(token, expected_type=PERSONAL)
+    return principal_for(await account_for_personal_claims(claims, backend))
 
 
 @router.post(

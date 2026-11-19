@@ -60,6 +60,13 @@ RESET_TTL = 3600
 # fingerprint of the password hash it was issued for: the user is re-read at every call (roles,
 # data scope, active), and a password change ends every personal token of the account.
 PERSONAL = "personal"
+# The OAuth sign-in of the MCP endpoint (``liberty.auth.oauth``), kept without a table: a
+# registered client IS its signed ``client_id`` (it carries the redirect addresses), an
+# authorization code is a one-minute single-use token bound to the PKCE challenge, and the
+# refresh token carries the user, the password fingerprint and the day the consent ends.
+OAUTH_CLIENT = "oauth_client"
+OAUTH_CODE = "oauth_code"
+OAUTH_REFRESH = "oauth_refresh"
 
 
 class TokenError(Exception):
@@ -160,6 +167,11 @@ class TokenService:
         """A personal access token valid *ttl* seconds (see :data:`PERSONAL`)."""
         return self._encode({"sub": subject, "pwf": password_fingerprint}, ttl, PERSONAL)
 
+    def mint(self, typ: str, claims: dict, ttl: int) -> IssuedToken:
+        """A signed token of kind *typ* — the OAuth kinds (:data:`OAUTH_CLIENT` …), whose claims
+        belong to :mod:`liberty.auth.oauth`."""
+        return self._encode(claims, ttl, typ)
+
     def reset_token(self, *, subject: str, password_fingerprint: str) -> IssuedToken:
         """A password-reset link's token (see :data:`RESET`)."""
         return self._encode({"sub": subject, "pwf": password_fingerprint}, RESET_TTL, RESET)
@@ -205,6 +217,18 @@ class TokenService:
             if now - consumed_at > self.config.refresh_reuse_grace:
                 raise TokenError("refresh token already used")
             return  # inside the grace — a second tab racing the same token
+        self._consumed[jti] = (now, int(claims.get("exp") or 0))
+
+    def consume_once(self, claims: dict) -> None:
+        """Mark the token behind *claims* as used; raise :class:`TokenError` when it already was.
+        No grace: an authorization code is exchanged once."""
+        jti = claims.get("jti")
+        if not jti:
+            raise TokenError("token missing required claim 'jti'")
+        now = time.monotonic()
+        self._gc(now)
+        if jti in self._consumed:
+            raise TokenError("already used")
         self._consumed[jti] = (now, int(claims.get("exp") or 0))
 
     def _gc(self, now: float) -> None:

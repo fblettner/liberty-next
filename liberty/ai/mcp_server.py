@@ -8,8 +8,9 @@ channel. The protocol is the official ``mcp`` package's (the ``mcp`` extra): its
 server with our two handlers, served by its Streamable HTTP session manager in stateless mode
 (one process, no session to keep).
 
-The caller is a **personal access token** (``POST /auth/tokens``, permission ``mcp:use``) in the
-``Authorization: Bearer`` header — what a Claude custom connector sends as a request header.
+The caller is a **personal access token** (permission ``mcp:use``) in the ``Authorization:
+Bearer`` header: pasted by the user (``POST /auth/tokens``) or obtained by the client through
+the OAuth sign-in (:mod:`liberty.auth.oauth` — the user signs in to Liberty and allows it).
 The account is re-read at every request (:func:`liberty.auth.routes.principal_from_personal_token`),
 so the client holds the user's rights of the moment, never more.
 
@@ -156,29 +157,23 @@ def install(app: Any) -> None:
     A mount alone answers ``/mcp/`` only: without the application's page mounted at ``/`` the
     router redirects ``/mcp`` to it, with it the bare path fell to the page (a 405 on the POST),
     so the endpoint was unreachable on a real server (7.0.77). Must be called before the page
-    is mounted. The OAuth discovery addresses answer a plain 404: this server signs in with a
-    token in the request header, and the page's HTML there would read as broken metadata."""
-    from starlette.responses import JSONResponse
+    is mounted. The OAuth discovery addresses and the sign-in are :mod:`liberty.auth.oauth`'s."""
     from starlette.routing import Mount, Route
 
     serve = _Asgi(endpoint(app))
-
-    async def no_oauth(_request: Any) -> Any:
-        return JSONResponse({"detail": "This server has no OAuth sign-in: send a personal access token as Authorization: Bearer"}, status_code=404)
-
     app.router.routes.extend([
         Route("/mcp", endpoint=serve, methods=["GET", "POST", "DELETE"], name="mcp"),
         Mount("/mcp", app=serve, name="mcp-sub"),
-        Route("/.well-known/oauth-protected-resource", endpoint=no_oauth, methods=["GET"]),
-        Route("/.well-known/oauth-protected-resource/{rest:path}", endpoint=no_oauth, methods=["GET"]),
-        Route("/.well-known/oauth-authorization-server", endpoint=no_oauth, methods=["GET"]),
-        Route("/.well-known/oauth-authorization-server/{rest:path}", endpoint=no_oauth, methods=["GET"]),
     ])
 
 
 def endpoint(app: Any) -> Any:
-    """The ASGI app behind ``/mcp``: the switch, the personal access token, then the package's
-    session manager."""
+    """The ASGI app behind ``/mcp``: the switch, the caller's token — a personal access token,
+    pasted by the user or obtained through the OAuth sign-in — then the package's session
+    manager. A 401 names the OAuth metadata, which is how a client finds the sign-in."""
+    from starlette.requests import Request
+
+    from liberty.auth.oauth import challenge
     from liberty.auth.routes import principal_from_personal_token
 
     async def reply(send: Any, status: int, detail: str, headers: list[tuple[bytes, bytes]] | None = None) -> None:
@@ -201,12 +196,14 @@ def endpoint(app: Any) -> Any:
             return
         auth = next((v.decode("latin-1") for k, v in scope.get("headers", []) if k == b"authorization"), "")
         if not auth.lower().startswith("bearer "):
-            await reply(send, 401, "A personal access token is required (Authorization: Bearer …)", [(b"www-authenticate", b"Bearer")])
+            await reply(send, 401, "Sign in (OAuth) or send a personal access token (Authorization: Bearer …)",
+                        [(b"www-authenticate", challenge(Request(scope)).encode())])
             return
         try:
             who = await principal_from_personal_token(auth[7:].strip(), state.token_service, state.auth_backend)
         except TokenError as exc:
-            await reply(send, 401, f"Invalid personal access token: {exc}", [(b"www-authenticate", b"Bearer")])
+            await reply(send, 401, f"Invalid access token: {exc}",
+                        [(b"www-authenticate", challenge(Request(scope), error="invalid_token").encode())])
             return
         scope[SCOPE_KEY] = who
         await manager.handle_request(scope, receive, send)

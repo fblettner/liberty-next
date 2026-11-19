@@ -131,7 +131,7 @@ def test_the_endpoint_needs_a_personal_token(tmp_path) -> None:
         app.state.ai = AiAssistant(AISettings(enabled=True), client=None, tools=_tools({}))
         body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
         none = client.post("/mcp", json=body, headers=HEADERS)
-        assert none.status_code == 401 and none.headers["www-authenticate"] == "Bearer"
+        assert none.status_code == 401 and none.headers["www-authenticate"].startswith("Bearer resource_metadata=")
         access = client.post("/auth/login", json={"username": "bob", "password": "bobpw-123"}).json()["access_token"]
         assert client.post("/mcp", json=body, headers={**HEADERS, "Authorization": f"Bearer {access}"}).status_code == 401   # a session token is not one
         token = _token(client, "bob", "bobpw-123")
@@ -166,10 +166,10 @@ def test_the_bare_path_reaches_the_endpoint_when_the_page_is_served(tmp_path) ->
         body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
         for path in ("/mcp", "/mcp/"):
             none = client.post(path, json=body, headers=HEADERS)
-            assert none.status_code == 401 and none.headers["www-authenticate"] == "Bearer", (path, none.status_code)
+            assert none.status_code == 401 and none.headers["www-authenticate"].startswith("Bearer resource_metadata="), (path, none.status_code)
             ok = client.post(path, json=body, headers={**HEADERS, "Authorization": f"Bearer {token}"})
             assert ok.status_code == 200 and [t["name"] for t in ok.json()["result"]["tools"]] == ["lookup", "save_it", "shop_stock"], path
-        # no OAuth here: the discovery addresses say so instead of serving the page
+        # the OAuth discovery addresses answer the metadata, never the page (tests/test_auth_oauth.py)
         for path in ("/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-authorization-server"):
             r = client.get(path)
-            assert r.status_code == 404 and "personal access token" in r.json()["detail"], path
+            assert r.status_code == 200 and r.headers["content-type"].startswith("application/json"), path

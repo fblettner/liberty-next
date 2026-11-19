@@ -86,7 +86,8 @@ Data Explorer models. Starter questions per app and screen, follow-up suggestion
 model picker, a conversation that stays; every question is recorded for the
 administrators (who, model, tokens, tools — never the question, the answer or a row).
 The same tools are served over **MCP** (`/mcp`): Claude Desktop, claude.ai or Claude Code
-connect with a user's personal access token and act with that user's rights.
+connect by signing the user in to Liberty (OAuth — give the client the address only) or with
+a personal access token, and act with that user's rights.
 
 **Access.** Local users or OpenID Connect (any provider), roles with colon-glob
 permissions, superusers, and **row-level data scope**: a role's rules on a dictionary

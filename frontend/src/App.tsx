@@ -8,6 +8,7 @@ import Login from "./pages/Login";
 import ChangePasswordRequired from "./pages/Login/ChangePasswordRequired";
 import ResetPassword from "./pages/Login/ResetPassword";
 import OidcCallback from "./pages/OidcCallback";
+import OAuthAuthorize from "./pages/OAuthAuthorize";
 import { useTabs, type TabKind } from "./tabs/TabsContext";
 import { useWorkspace } from "./workspace/WorkspaceContext";
 import { settingsRedirect } from "./services/libertyMenu";
@@ -88,6 +89,8 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/oidc/callback" element={<OidcCallback />} />
+      {/* the consent page of the OAuth sign-in (an external client through the MCP endpoint): outside the Layout */}
+      <Route path="/oauth/authorize" element={<OAuthAuthorize />} />
       <Route
         path="/"
         element={

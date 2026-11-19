@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../../auth/AuthContext'
 import { Centered } from '../../common'
+import { takePendingAuthorize } from '../../services/oauthConsent'
 
 /**
  * Landing route for the OIDC flow. The backend's /auth/oidc/callback redirects
@@ -25,7 +26,8 @@ export default function OidcCallback() {
       return
     }
     setTokens({ access_token: access, refresh_token: refresh })
-      .then(() => navigate('/', { replace: true }))
+      // back to the consent page of an OAuth sign-in, when that is where the user came from
+      .then(() => navigate(takePendingAuthorize() ?? '/', { replace: true }))
       .catch((e) => setError(String(e)))
   }, [setTokens, navigate, t])
 

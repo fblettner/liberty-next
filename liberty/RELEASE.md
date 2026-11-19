@@ -1,5 +1,19 @@
 # Liberty Next — Release notes
 
+## 7.0.79 — unreleased
+
+- **MCP endpoint: sign in instead of pasting a token (OAuth).** A client given only the address of `/mcp` — a
+  custom connector in Claude Desktop or claude.ai — now finds the sign-in by itself: the browser opens Liberty,
+  the user signs in the usual way (password or SSO) and allows the client on a consent page; nothing to create,
+  nothing to paste. Liberty is its own authorization server (OAuth 2.1 as the MCP specification lays it out:
+  discovery under `/.well-known/`, client registration, authorization code with PKCE, rotating refresh token),
+  and nothing is stored: the client's registration, the code and the refresh token are signed tokens. The access
+  is the same as with a pasted token — the user's permissions and data scope, re-read at every call, permission
+  `mcp:use` — and ends the same way: a password change, a deactivated account or the loss of `mcp:use`. The
+  consent lasts `[ai] mcp_token_max_days`; after that the user allows the client again. A personal access token
+  pasted as a request header keeps working (Claude Code, scripts). Behind a proxy, set `[app] public_url`
+  (Administer → App) to the address users reach the server at: the addresses the sign-in publishes are built on it.
+
 ## 7.0.78 — unreleased
 
 - **Licence usage report.** A licensed installation tells the licence management tool, once a day, which

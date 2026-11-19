@@ -21,6 +21,7 @@ from liberty.ai.routes import router as ai_router
 from liberty.web.ai_usage import router as ai_usage_router
 from liberty.auth.authstore import build_auth_backend
 from liberty.auth.oidc import build_oidc
+from liberty.auth.oauth import router as oauth_router
 from liberty.auth.routes import router as auth_router
 from liberty.auth.dependencies import OptionalPrincipal
 from liberty.auth.tokens import MIN_SECRET_BYTES, TokenConfig, TokenService
@@ -721,6 +722,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(status_code=503, content={"detail": str(exc)})
 
     app.include_router(auth_router)
+    app.include_router(oauth_router)
     app.include_router(connectors_router)
     app.include_router(menus_router)
     app.include_router(screens_router)
