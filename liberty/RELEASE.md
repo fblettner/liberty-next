@@ -1,5 +1,16 @@
 # Liberty Next — Release notes
 
+## 7.0.82 — unreleased
+
+- **MCP: several Liberty servers in one Claude Desktop.** Claude Desktop tells extensions apart by their name,
+  and every Liberty extension had the same one: installing the extension of a second server (production and
+  test, another customer) replaced the first. The extension is now named after its instance — the host of its
+  address and the installation's environment (`[app] environment`, Administer → App): "Liberty Next – Test ·
+  liberty-test.acme.com" — so they install side by side; the downloaded file carries the same name. The server
+  also says which instance it is, in its title and at the top of its instructions to Claude ("use the tools of
+  the instance the user names, and say which instance an answer or a change concerns") — read when the server
+  starts. An extension installed before this release keeps working; download it again to get its own name.
+
 ## 7.0.81 — unreleased
 
 - **AI assistant: sensitive data is not sent.** An installation decides what is sensitive and Liberty keeps it

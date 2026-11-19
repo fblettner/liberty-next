@@ -10,6 +10,11 @@ has to be reachable from that machine — an internal address, a VPN.
 The file is a zip built at download: the manifest with this server's address and version filled
 in, the bridge (Node's own modules, nothing to install) and the icon. The user opens it, pastes
 a token created in their profile, and that is all.
+
+Claude Desktop tells extensions apart by their manifest ``name``: with one fixed name, the
+extension of a second Liberty server would replace the first. So the name carries the instance —
+its host and its environment (``[app] environment``) — and the extensions of several servers
+(production, test, another customer) install side by side, each shown under its own label.
 """
 
 from __future__ import annotations
@@ -23,6 +28,27 @@ FILE_NAME = "liberty.mcpb"
 _ADDRESS = re.compile(r"https?://[^\s\"\\]+")
 
 
+def instance_names(address: str | None, environment: str | None) -> tuple[str, str, str]:
+    """``(name, display name, file name)`` of the extension of the instance at *address* in
+    *environment*: ``liberty-next-<host>-<environment>``, "Liberty Next – <environment> · <host>",
+    ``liberty-<host>-<environment>.mcpb`` — the plain names when neither is known."""
+    from urllib.parse import urlsplit
+
+    host = ""
+    url = (address or "").strip()
+    if _ADDRESS.fullmatch(url):
+        parts = urlsplit(url)
+        host = (parts.hostname or "") + (f":{parts.port}" if parts.port else "")
+    env = re.sub(r'[\\"\x00-\x1f\x7f]', "", environment or "").strip()
+    slug = re.sub(r"[^a-z0-9]+", "-", f"{host}{'-' + env if env else ''}".lower()).strip("-")
+    label = " · ".join(x for x in (env, host) if x)
+    return (
+        f"liberty-next-{slug}" if slug else "liberty-next",
+        f"Liberty Next – {label}" if label else "Liberty Next",
+        f"liberty-{slug}.mcpb" if slug else FILE_NAME,
+    )
+
+
 def _resource(name: str) -> bytes:
     return resources.files("liberty.ai").joinpath("mcpb", *name.split("/")).read_bytes()
 
@@ -33,14 +59,21 @@ def _version(release: str | None) -> str:
     return ".".join(str(int(g)) for g in m.groups()) if m else "1.0.0"
 
 
-def build_extension(address: str | None, release: str | None) -> bytes:
+def build_extension(address: str | None, release: str | None, environment: str | None = None) -> bytes:
     """The extension for this server: *address* is where the user's machine reaches ``/mcp``
     (pre-filled in the extension's settings; anything that is not an http(s) address is left
-    blank for the user to type)."""
+    blank for the user to type); *environment* names the instance with the address's host."""
+    import json
+
     url = (address or "").strip()
     if not _ADDRESS.fullmatch(url):
         url = ""
-    manifest = _resource("manifest.json").decode("utf-8").replace("{{version}}", _version(release)).replace("{{url}}", url)
+    name, display, _file = instance_names(url, environment)
+    manifest = (
+        _resource("manifest.json").decode("utf-8")
+        .replace("{{version}}", _version(release)).replace("{{url}}", url)
+        .replace("{{name}}", name).replace("{{display_name}}", json.dumps(display, ensure_ascii=False)[1:-1])
+    )
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("manifest.json", manifest)

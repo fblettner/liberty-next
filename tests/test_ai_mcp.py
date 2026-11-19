@@ -26,7 +26,7 @@ pytest.importorskip("mcp")
 HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
 
 
-def _app(tmp_path, *, mcp_enabled: bool = True, static_dir: str = ""):
+def _app(tmp_path, *, mcp_enabled: bool = True, static_dir: str = "", environment: str = ""):
     db_url = f"sqlite+aiosqlite:///{tmp_path / 'auth.db'}"
     conn_toml = tmp_path / "connectors.toml"
     conn_toml.write_text(f'[pools.default]\nurl = "{db_url}"\n')
@@ -44,7 +44,7 @@ def _app(tmp_path, *, mcp_enabled: bool = True, static_dir: str = ""):
 
     asyncio.run(seed())
     return create_app(Settings(
-        app=AppSettings(static_dir=static_dir), connectors=ConnectorSettings(config_path=Path(conn_toml)),
+        app=AppSettings(static_dir=static_dir, environment=environment), connectors=ConnectorSettings(config_path=Path(conn_toml)),
         auth=AuthSettings(backend="db", jwt_secret="mcp-endpoint-test-secret-0123456789abcdef", pool="default"),
         ai=AISettings(enabled=True, api_key="", config_path=tmp_path / "ai.toml", mcp_enabled=mcp_enabled),
     ))
@@ -173,3 +173,18 @@ def test_the_bare_path_reaches_the_endpoint_when_the_page_is_served(tmp_path) ->
         for path in ("/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-authorization-server"):
             r = client.get(path)
             assert r.status_code == 200 and r.headers["content-type"].startswith("application/json"), path
+
+
+def test_the_server_says_which_instance_it_is(tmp_path) -> None:
+    """Several Liberty instances may be connected to one Claude: each names itself — its
+    `[app] environment` — in its title and at the top of its instructions."""
+    with TestClient(_app(tmp_path, environment="Test")) as client:
+        client.app.state.ai = AiAssistant(AISettings(enabled=True), client=None, tools=_tools({}))
+        out = _rpc(client, _token(client, "bob", "bobpw-123"), "initialize", INIT).json()["result"]
+        assert out["serverInfo"]["title"] == "Liberty Next – Test"
+        assert out["instructions"].startswith('This is the Liberty Next instance "Test".') and "describe_instance" in out["instructions"]
+    (tmp_path / "plain").mkdir()
+    with TestClient(_app(tmp_path / "plain")) as client:
+        client.app.state.ai = AiAssistant(AISettings(enabled=True), client=None, tools=_tools({}))
+        out = _rpc(client, _token(client, "bob", "bobpw-123"), "initialize", INIT).json()["result"]
+        assert out["serverInfo"]["title"] == "Liberty Next" and out["instructions"].startswith("Liberty Next —")

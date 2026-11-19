@@ -522,16 +522,20 @@ async def mcp_extension(
     """The extension that connects Claude Desktop to this server from the user's own machine —
     for a server that is not reachable from the internet. `url` is the address of `/mcp` as the
     user's browser sees it, pre-filled in the extension; the user pastes a personal access token
-    (`POST /auth/tokens`). It carries no secret."""
+    (`POST /auth/tokens`). It carries no secret. Each instance has its own extension: the name
+    carries the address's host and the installation's environment."""
     from liberty import __version__
-    from liberty.ai.mcp_extension import FILE_NAME, build_extension
+    from liberty.ai.mcp_extension import build_extension, instance_names
 
     settings = getattr(request.app.state.settings, "ai", None)
     if settings is None or not settings.enabled or not settings.mcp_enabled:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="The MCP endpoint is disabled ([ai] mcp_enabled = false)")
+    # named after the instance (its host and `[app] environment`): the extensions of several
+    # Liberty servers install side by side in Claude Desktop instead of replacing one another
+    environment = getattr(request.app.state.settings.app, "environment", "") or ""
     return Response(
-        build_extension(url, __version__), media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{FILE_NAME}"', "Cache-Control": "no-store"},
+        build_extension(url, __version__, environment), media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{instance_names(url, environment)[2]}"', "Cache-Control": "no-store"},
     )
 
 

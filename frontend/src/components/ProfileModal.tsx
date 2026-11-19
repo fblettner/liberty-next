@@ -128,7 +128,7 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
   const downloadExtension = async () => {
     setError(null)
     try {
-      await apiDownload(`/auth/mcp/extension?url=${encodeURIComponent(mcpUrl)}`, 'liberty.mcpb')
+      await apiDownload(`/auth/mcp/extension?url=${encodeURIComponent(mcpUrl)}`, `liberty-${window.location.hostname.replace(/[^A-Za-z0-9.-]/g, '')}.mcpb`)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
     }

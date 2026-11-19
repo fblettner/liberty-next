@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.3",
-  "name": "liberty-next",
-  "display_name": "Liberty Next",
+  "name": "{{name}}",
+  "display_name": "{{display_name}}",
   "version": "{{version}}",
   "description": "Use your Liberty Next applications from Claude: screens, dashboards, Data Explorer analyses and playbooks, under your own account.",
   "author": {

@@ -120,8 +120,16 @@ def build_server(state: Callable[[], Any]) -> Any:
                 _log.warning("AI usage: the MCP call of %s could not be recorded (%s)", who.username, exc)
         return types.CallToolResult(content=[types.TextContent(text=content)], is_error=is_error)
 
-    return Server("liberty-next", version=__version__, title="Liberty Next", instructions=INSTRUCTIONS,
-                  on_list_tools=on_list_tools, on_call_tool=on_call_tool)
+    # A user may connect several Liberty instances at once (production, test, another customer):
+    # the server says which one it is — `[app] environment`, read when the server is built (a
+    # change applies at the next start).
+    env = str(getattr(getattr(getattr(state(), "settings", None), "app", None), "environment", "") or "").strip()
+    which = (
+        f'This is the Liberty Next instance "{env}". When the user works with several instances, use the tools of the '
+        "one they name, and say which instance an answer or a change concerns.\n"
+    ) if env else ""
+    return Server("liberty-next", version=__version__, title=f"Liberty Next – {env}" if env else "Liberty Next",
+                  instructions=which + INSTRUCTIONS, on_list_tools=on_list_tools, on_call_tool=on_call_tool)
 
 
 @asynccontextmanager

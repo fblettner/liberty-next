@@ -1,5 +1,17 @@
 # Liberty Next — Notes de version
 
+## 7.0.82 — non publiée
+
+- **MCP : plusieurs serveurs Liberty dans un même Claude Desktop.** Claude Desktop distingue les extensions par
+  leur nom, et toutes les extensions Liberty portaient le même : installer l'extension d'un second serveur
+  (production et test, un autre client) remplaçait la première. L'extension porte désormais le nom de son
+  instance — l'hôte de son adresse et l'environnement de l'installation (`[app] environment`, Administrer →
+  App) : « Liberty Next – Test · liberty-test.acme.com » — elles s'installent donc côte à côte ; le fichier
+  téléchargé porte le même nom. Le serveur indique aussi de quelle instance il s'agit, dans son titre et en tête
+  de ses instructions à Claude (« utilise les outils de l'instance que l'utilisateur nomme, et dis quelle instance
+  une réponse ou une modification concerne ») — lu au démarrage du serveur. Une extension installée avant cette
+  version continue de fonctionner ; téléchargez-la de nouveau pour qu'elle porte son propre nom.
+
 ## 7.0.81 — non publiée
 
 - **Assistant IA : les données sensibles ne sont pas envoyées.** Une installation décide de ce qui est sensible et

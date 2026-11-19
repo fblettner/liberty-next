@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 from fastapi.testclient import TestClient
 
-from liberty.ai.mcp_extension import build_extension
+from liberty.ai.mcp_extension import build_extension, instance_names
 from tests.test_auth_oauth import _app, _login
 
 
@@ -23,6 +23,7 @@ def test_the_file_holds_the_manifest_the_bridge_and_the_icon() -> None:
     assert sorted(zf.namelist()) == ["icon.png", "manifest.json", "server/index.js"]
     manifest = json.loads(zf.read("manifest.json"))
     assert manifest["version"] == "7.0.80" and manifest["user_config"]["server_url"]["default"] == "https://liberty.intra:8443/app/mcp"
+    assert manifest["name"] == "liberty-next-liberty-intra-8443" and manifest["display_name"] == "Liberty Next – liberty.intra:8443"
     assert manifest["server"]["entry_point"] == "server/index.js" and manifest["user_config"]["token"]["sensitive"] is True
     assert set(manifest["server"]["mcp_config"]["env"]) == {"LIBERTY_URL", "LIBERTY_TOKEN", "LIBERTY_INSECURE"}
     assert zf.read("icon.png")[:4] == b"\x89PNG" and b"LIBERTY_TOKEN" in zf.read("server/index.js")
@@ -33,11 +34,31 @@ def test_the_file_holds_the_manifest_the_bridge_and_the_icon() -> None:
     assert json.loads(zipfile.ZipFile(io.BytesIO(build_extension(None, None))).read("manifest.json"))["version"] == "1.0.0"
 
 
+def test_each_instance_has_its_own_extension() -> None:
+    """Claude Desktop tells extensions apart by name: named after its host and environment, the
+    extension of a second server installs next to the first instead of replacing it."""
+    def manifest(address, environment):
+        return json.loads(zipfile.ZipFile(io.BytesIO(build_extension(address, "7.0.82", environment))).read("manifest.json"))
+
+    prod = manifest("https://liberty.acme.com/mcp", "Production")
+    test = manifest("https://liberty-test.acme.com/mcp", "Test")
+    assert prod["name"] == "liberty-next-liberty-acme-com-production" and prod["display_name"] == "Liberty Next – Production · liberty.acme.com"
+    assert test["name"] == "liberty-next-liberty-test-acme-com-test" and test["name"] != prod["name"]
+    # the same host, two environments (a base path each): still two extensions
+    assert manifest("https://host/a/mcp", "A")["name"] != manifest("https://host/b/mcp", "B")["name"]
+    # an environment's odd characters never break the manifest
+    odd = manifest("http://localhost:8000/mcp", 'Pré-prod "2" \\ x')
+    assert odd["name"] == "liberty-next-localhost-8000-pr-prod-2-x" and odd["display_name"] == "Liberty Next – Pré-prod 2  x · localhost:8000"
+    assert instance_names("http://localhost:8000/mcp", "Dev") == ("liberty-next-localhost-8000-dev", "Liberty Next – Dev · localhost:8000", "liberty-localhost-8000-dev.mcpb")
+    # nothing known: the plain names
+    assert instance_names(None, "") == ("liberty-next", "Liberty Next", "liberty.mcpb") and manifest(None, None)["name"] == "liberty-next"
+
+
 def test_the_download_is_for_who_may_use_mcp(tmp_path) -> None:
     with TestClient(_app(tmp_path)) as client:
         r = client.get("/auth/mcp/extension", params={"url": "http://liberty.local:8000/mcp"}, headers=_login(client, "bob", "bobpw-123"))
         assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
-        assert r.headers["content-disposition"] == 'attachment; filename="liberty.mcpb"'
+        assert r.headers["content-disposition"] == 'attachment; filename="liberty-liberty-local-8000.mcpb"'
         manifest = json.loads(zipfile.ZipFile(io.BytesIO(r.content)).read("manifest.json"))
         assert manifest["user_config"]["server_url"]["default"] == "http://liberty.local:8000/mcp"
         assert client.get("/auth/mcp/extension", headers=_login(client, "carol", "carolpw-123")).status_code == 403
