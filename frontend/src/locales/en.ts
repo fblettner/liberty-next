@@ -2804,6 +2804,7 @@ const en = {
       aiScaffoldTools: 'Scaffold tools (propose new queries / dictionary / screens / menu items — propose-only, never writes directly)',
       aiOpsTools: 'Operations tools (jobs status, the server log tail, the integrity checks — for installations whose chat users are administrators)',
       aiWriteTools: 'Write tools (the assistant adds, changes or deletes a record through its screen — for users holding ai:write and the screen’s own permissions; applied from a card in the chat, confirmed by the client over MCP)',
+      aiHideSensitive: 'Hide sensitive data from the assistant (the columns whose dictionary item or screen column you flag “sensitive” are not given to it, in the chat and over MCP — it does not cover what a user types or attaches, an unflagged free-text column, nor what an API endpoint or an application’s own tool returns)',
       aiAllowedConnectors: 'Allowed connectors (empty → all)',
       aiChatHint: 'The chat drawer — what users may pick and the questions it suggests.',
       aiAllowedModels: 'Models users may pick (empty → the model above only)',

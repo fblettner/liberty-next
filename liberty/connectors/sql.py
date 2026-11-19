@@ -27,7 +27,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Iterable
 
 _log = logging.getLogger(__name__)
 
@@ -875,6 +875,9 @@ class Column:
     # The related-table write-back group this column belongs to (``ColumnHint.group``). Surfaced so
     # the save path can split a row's writes per table; ``None`` ⇒ writes to the main table.
     group: str | None = None
+    # The column holds data flagged sensitive (its dictionary item, or the screen column): what
+    # reads for the AI assistant leave out where the installation hides sensitive data.
+    sensitive: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"name": self.name, "type": self.type}
@@ -920,6 +923,8 @@ class Column:
             d["format"] = self.format
         if self.decimals is not None:
             d["decimals"] = self.decimals
+        if self.sensitive:
+            d["sensitive"] = True
         if self.drill:
             d["drill"] = self.drill
         if self.wrap:
@@ -1251,6 +1256,41 @@ class SQLConnector:
                 return entry.format if (entry is not None and entry.format) else None
         entry = self._find_entry_any_case(name, dict_scope)
         return entry.format if (entry is not None and entry.format) else None
+
+    def sensitive_columns(
+        self, names: Iterable[str], column_hints: list[ColumnHint] | None, dict_scope: str | None,
+    ) -> set[str]:
+        """Which of the result columns *names* hold data flagged sensitive (returned as given).
+        The screen column's own ``sensitive`` decides when it is set; else the dictionary item the
+        column carries — found as the data scope finds its columns: the hint's ``dd``, the
+        column's name, or the name minus the connector's ``dd_prefix`` (``ABALPH`` → ``ALPH``)."""
+        prefix = self.config.dd_prefix
+        hints = {h.name.lower(): h for h in column_hints or []}
+        out: set[str] = set()
+        for name in names:
+            h = hints.get(str(name).lower())
+            if h is not None and h.sensitive is not None:
+                if h.sensitive:
+                    out.add(name)
+                continue
+            if h is not None and h.dd == "":
+                continue
+            if h is not None and h.dd:
+                items = [h.dd]
+            else:
+                items = [str(name)] + ([str(name)[prefix:]] if prefix and len(str(name)) > prefix else [])
+            for item in items:
+                entry = self._find_entry_any_case(item, dict_scope)
+                if entry is not None and getattr(entry, "sensitive", False):
+                    out.add(name)
+                    break
+        return out
+
+    def _flag_sensitive(self, columns: list[Column], column_hints: list[ColumnHint] | None, dict_scope: str | None) -> None:
+        flagged = self.sensitive_columns([c.name for c in columns], column_hints, dict_scope)
+        for c in columns:
+            if c.name in flagged:
+                c.sensitive = True
 
     def _find_entry_any_case(self, key: str, dict_scope: str | None) -> Any:
         """The dictionary entry for *key* as given, else upper-cased: a result column comes back
@@ -2287,6 +2327,7 @@ class SQLConnector:
                 columns = _apply_column_hints(
                     _columns_from_result(result), column_hints or [], self._dict, lang, connector=dict_scope,
                 )
+                self._flag_sensitive(columns, column_hints, dict_scope)
                 rows: list[dict[str, Any]] = []
                 truncated = False
                 for row in result.mappings():
@@ -2611,6 +2652,7 @@ class SQLConnector:
             columns = _apply_column_hints(
                 _columns_from_result(result), column_hints or [], self._dict, lang, connector=dict_scope,
             )
+            self._flag_sensitive(columns, column_hints, dict_scope)
             # JDE Julian date columns — same case-insensitive convention as execute().
             _jdedate_cols = {c.name for c in columns if (c.format or "").lower() == "jdedate"}
             _jdetime_cols = {c.name for c in columns if (c.format or "").lower() == "jdetime"}

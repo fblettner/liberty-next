@@ -51,7 +51,7 @@ _APP_SAFE_KEYS = {
 }
 _AI_SAFE_KEYS = {
     "enabled", "model", "max_tokens", "max_iterations", "system_prompt", "thinking",
-    "effort", "request_timeout", "connector_tools", "sql_max_rows", "usage_retention_days", "api_tool", "scaffold_tools", "ops_tools", "write_tools", "explorer_tools", "app_tools", "mcp_enabled", "mcp_token_max_days", "attachment_max_mb",
+    "effort", "request_timeout", "connector_tools", "sql_max_rows", "usage_retention_days", "api_tool", "scaffold_tools", "ops_tools", "write_tools", "hide_sensitive", "explorer_tools", "app_tools", "mcp_enabled", "mcp_token_max_days", "attachment_max_mb",
     "allowed_connectors", "web_fetch_domains", "web_fetch_max_uses", "allowed_models", "starters",
     "api_key",   # sensitive — encrypted on save, masked on GET
 }

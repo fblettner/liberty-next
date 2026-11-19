@@ -76,6 +76,9 @@ class ChainDeps:
     origin: str | None = None
     replay_override: bool | None = None
     stack: tuple[str, ...] = ()
+    # the record as it may be shown: what a confirm / notify message is filled from, when it
+    # differs from the record the steps bind (values flagged sensitive replaced by a marker)
+    display: Mapping[str, Any] | None = None
 
 
 # -- sources, binds, conditions (actionRunner.ts) --------------------------------- #
@@ -351,7 +354,7 @@ async def _run_one(a: Any, chain: Row, form: Mapping[str, Any], deps: ChainDeps,
                 chain["INPUT"] = {**chain["INPUT"], **_prompt_values(shared.prompt_fields, deps), **seed}
             child = ChainDeps(
                 ctx=deps.ctx, default_connector=deps.default_connector, inputs=deps.inputs, change_context=deps.change_context,
-                navigates=deps.navigates, origin=deps.origin, stack=(*deps.stack, a.ref),
+                navigates=deps.navigates, origin=deps.origin, stack=(*deps.stack, a.ref), display=deps.display,
                 replay_override=deps.replay_override if deps.replay_override is not None else bool(a.change_replay),
             )
             for step in shared.steps or []:
@@ -419,7 +422,7 @@ async def _run_one(a: Any, chain: Row, form: Mapping[str, Any], deps: ChainDeps,
             if a.bind_result:
                 _bind_rows(chain, a.id, resp.get("rows"), resp.get("first_row"))
         elif a.type == "notify":
-            result.messages.append(fill_text(a.message, chain, form, deps))
+            result.messages.append(fill_text(a.message, chain, deps.display if deps.display is not None else form, deps))
         elif a.type == "send_notification":
             from liberty.notify.events import fire_action_rule
 
@@ -437,7 +440,7 @@ async def _run_one(a: Any, chain: Row, form: Mapping[str, Any], deps: ChainDeps,
             if sent.get("errors"):
                 result.messages.append(f"{label}: {'; '.join(str(v) for v in sent['errors'].values())}")
         elif a.type == "confirm":
-            result.confirmed.append(fill_text(a.message, chain, form, deps))
+            result.confirmed.append(fill_text(a.message, chain, deps.display if deps.display is not None else form, deps))
         elif a.type == "refresh":
             pass
         elif a.type == "open_url":
@@ -468,7 +471,7 @@ async def run_chain(
         sub = ChainDeps(
             ctx=deps.ctx, default_connector=deps.default_connector, inputs=deps.inputs, change_context=deps.change_context,
             navigates=deps.navigates, origin=deps.origin or (getattr(a, "label", None) or a.id),
-            replay_override=deps.replay_override, stack=deps.stack,
+            replay_override=deps.replay_override, stack=deps.stack, display=deps.display,
         )
         if await _run_one(a, chain, form, sub, result):
             break

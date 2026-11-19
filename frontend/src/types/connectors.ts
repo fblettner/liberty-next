@@ -131,6 +131,9 @@ export type DisplayRule =
 export interface Column {
   name: string
   type: string | null
+  /** The column holds data the installation flags sensitive (its dictionary item or the screen
+   *  column): left out of what the AI assistant is given where `[ai] hide_sensitive` is on. */
+  sensitive?: boolean
   /** Optional display hints from the query's `columns` config (see ColumnHint on the backend). */
   label?: string
   hidden?: boolean

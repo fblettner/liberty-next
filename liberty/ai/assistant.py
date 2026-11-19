@@ -26,7 +26,7 @@ from liberty.ai.explorer_tools import build_explorer_tools
 from liberty.ai.instance_tools import build_instance_tools
 from liberty.ai.ops_tools import build_ops_tools
 from liberty.ai.scaffold_tools import build_scaffold_tools
-from liberty.ai.tools import ToolRegistry
+from liberty.ai.tools import ToolRegistry, hides_sensitive
 from liberty.ai.write_tools import build_write_tools
 from liberty.auth.principal import Principal, current_principal
 from liberty.auth.scope import current_scope, current_username
@@ -555,6 +555,7 @@ def build_assistant(
             include_api=settings.api_tool,
             max_rows=settings.sql_max_rows,
             screens=(lambda: getattr(state(), "screens", None)) if state is not None else None,
+            hide_sensitive=(lambda: hides_sensitive(state())) if state is not None else None,
         ))
     if settings.scaffold_tools:
         registry.add(*build_scaffold_tools(

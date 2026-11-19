@@ -69,6 +69,8 @@ export interface AiInfo {
   starter_groups?: Record<string, StarterGroup[]>
   /** Files attached to a question: the size limit (0 = off) and the extensions the picker offers. */
   attachments?: { max_mb: number; accept: string[] }
+  /** The installation keeps the data it flagged sensitive from the assistant: the page context leaves those columns out. */
+  hide_sensitive?: boolean
 }
 
 export interface StarterGroup { label: string | null; starters: string[] }

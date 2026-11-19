@@ -78,6 +78,7 @@ def build_connector_tools(
     include_api: bool = False,
     max_rows: int = DEFAULT_SQL_MAX_ROWS,
     screens: Callable[[], Any] | None = None,
+    hide_sensitive: Callable[[], bool] | None = None,
 ) -> list[Tool]:
     """Build the connector-backed tool set.
 
@@ -269,6 +270,20 @@ def build_connector_tools(
             raise ConnectorError(
                 f"filter {', '.join(missed)} matches no column of {connector}.{query} — it was not applied. "
                 f"The columns are: {', '.join(c['name'] for c in out['columns'])}"
+            )
+        # Sensitive data (``[ai] hide_sensitive``): the columns flagged by the installation never
+        # leave — dropped from the columns and from every row, and named so the model can say so.
+        hidden = [c["name"] for c in out["columns"] if c.get("sensitive")]
+        for c in out["columns"]:
+            c.pop("sensitive", None)
+        if hidden and hide_sensitive is not None and hide_sensitive():
+            gone = set(hidden)
+            out["columns"] = [c for c in out["columns"] if c["name"] not in gone]
+            out["rows"] = [{k: v for k, v in row.items() if k not in gone} for row in out["rows"]]
+            out["hidden_columns"] = hidden
+            out["hidden_note"] = (
+                "These columns hold data this installation marks as sensitive: their values are not given to you. "
+                "If the user asks for them, say so and point them to the screen; do not look for them another way."
             )
         if out["truncated"]:
             out["note"] = (

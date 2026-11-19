@@ -2,6 +2,24 @@
 
 ## 7.0.81 — unreleased
 
+- **AI assistant: sensitive data is not sent.** An installation decides what is sensitive and Liberty keeps it
+  from the assistant — in the chat and through MCP alike.
+  - *What is sensitive* is the installation's to say (nothing is flagged in what the applications ship): a new
+    **Sensitive** flag on a dictionary item (Dictionary → an entry → Rule) covers every column carrying the item,
+    on every screen, query and Explorer model — found as the data scope finds its columns (the screen column's
+    item, the column's name, the name minus the JDE prefix). The same flag on a screen column covers a column
+    without an item, or exempts one (`false`).
+  - *The switch* is `[ai] hide_sensitive` (Administer → App → AI Assistant), off by default.
+  - *What is then left out*: the flagged columns of the rows `sql_query` reads (the answer names the columns
+    hidden, so the assistant can say so); a record's values on a write or an action card ("before", the record of
+    a delete, the screen's confirmation and messages — the value the user asked to write is theirs and is
+    shown); the page context (the clicked row, the column list, a filter typed on such a column); in the
+    Explorer, a flagged field cannot be a row heading nor be read by `min` / `max` / `sum` — it can be counted,
+    and filtered on a value the user gives. The screens themselves are unchanged.
+  - *What it does not cover* — to know before relying on it: what a user types in a question or attaches; a
+    free-text column that is not flagged; what an API endpoint (`api_call`), an application's own tool or the
+    operations tools return, since Liberty does not know their columns.
+
 - AI assistant, writing through a screen:
   - **A record open in its form is not changed.** The form locks the record it shows; `screen_write` now refuses
     an update or a delete of a record somebody has open — the other user by name, or the user's own open form,

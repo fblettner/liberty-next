@@ -594,6 +594,15 @@ class ColumnHint(BaseModel):
             "this applies to the base rule."
         ),
     )
+    sensitive: bool | None = Field(
+        default=None,
+        json_schema_extra={"x_group": "General"},
+        description=(
+            "Whether this column holds sensitive data, for the AI assistant (``[ai] hide_sensitive``): "
+            "hidden from what the assistant is given when true. Blank → as the column's dictionary "
+            "item says; false → not sensitive here even if the item is."
+        ),
+    )
     group: str | None = Field(
         default=None,
         json_schema_extra={"x_group": "General", "x_enum_ref": "COLUMN_GROUPS"},

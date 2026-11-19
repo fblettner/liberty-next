@@ -26,12 +26,12 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
-from liberty.ai.tools import Tool, ToolPermissionError, caller, current_channel, tool
+from liberty.ai.tools import Tool, ToolPermissionError, caller, current_channel, hides_sensitive, tool
 from liberty.connectors.api import current_pool
 from liberty.screens.actions import ChainDeps, check_inputs, does_something, entity_key, fill_text, outline, run_chain
 from liberty.screens.save import (
     ScreenWriteError, WriteContext, _binds_of, connector_of, delete_row, field_state, find_screen, form_field_names,
-    is_password, masked, operations, parent_links, read_row, resolved_fields, save_hooks, save_row, value_for,
+    hidden_columns, is_password, masked, operations, parent_links, read_row, resolved_fields, save_hooks, save_row, value_for,
 )
 
 _log = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ def write_context(state: Any, principal: Any, *, language: str | None = None, po
         connectors=state.connectors, screens=getattr(state, "screens", None), principal=principal,
         changesets=getattr(state, "changesets_db", None),
         notify_ctx=(getattr(state, "notification_rules", None), getattr(state, "notify", None)),
-        language=language, pool=pool, state=state,
+        language=language, pool=pool, state=state, hide_sensitive=hides_sensitive(state),
     )
 
 
@@ -103,16 +103,18 @@ async def perform_action(
     check_inputs([act], ctx.state, inputs)
     # a form tab's button is a write hook of the form: its steps land in the change package of a tracked screen
     change = {"app": app, "screen": sc.id, "entity_key": entity_key(sc, row)} if (on == "form" and sc.change_tracked) else None
-    deps = ChainDeps(ctx=ctx, default_connector=connector, inputs=inputs or {}, change_context=change, navigates=True)
+    # what the screen's messages may show: the record without the values flagged sensitive
+    shown = masked(row, resolved_fields(ctx, app, sc), hidden_columns(ctx, app, sc, row)) if row else {}
+    deps = ChainDeps(ctx=ctx, default_connector=connector, inputs=inputs or {}, change_context=change, navigates=True, display=shown)
     plan = outline([act], ctx.state)
     preview: dict[str, Any] = {
         "action": act.id, "label": act.label or act.id, "screen": f"{app}/{screen}",
         **({"key": {k: value_for(k, row) for k in sc.effective_key_columns()}} if row else {}),
-        **({"confirms": [fill_text(m, {"INPUT": dict(inputs or {})}, row, deps) for m in plan["confirms"]]} if plan.get("confirms") else {}),
+        **({"confirms": [fill_text(m, {"INPUT": dict(inputs or {})}, shown, deps) for m in plan["confirms"]]} if plan.get("confirms") else {}),
         "does": plan.get("does", []),
     }
     if dry_run:
-        return {**preview, "ran": False, **({"record": masked(row, resolved_fields(ctx, app, sc))} if row else {})}
+        return {**preview, "ran": False, **({"record": shown} if row else {})}
     result = await run_chain([act], row, deps, initial_input=row if on == "form" else {})
     out = {k: v for k, v in preview.items() if k not in ("confirms", "does")}
     out.update({"ran": True, **result.to_dict()})

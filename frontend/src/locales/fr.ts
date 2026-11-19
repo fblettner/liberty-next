@@ -2797,6 +2797,7 @@ const fr: Resources = {
       aiScaffoldTools: 'Outils de construction (proposer des requêtes / entrées de dictionnaire / écrans / entrées de menu — proposition seulement, jamais d\'écriture directe)',
       aiOpsTools: 'Outils d\'exploitation (état des tâches, fin du journal du serveur, contrôles d\'intégrité — pour les installations dont les utilisateurs du chat sont administrateurs)',
       aiWriteTools: 'Outils d’écriture (l’assistant ajoute, modifie ou supprime un enregistrement par son écran — pour les utilisateurs ayant ai:write et les permissions de l’écran ; appliqué depuis une carte dans le chat, confirmé par le client en MCP)',
+      aiHideSensitive: 'Masquer les données sensibles à l’assistant (les colonnes dont l’élément du dictionnaire ou la colonne d’écran est marqué « sensible » ne lui sont pas transmises, dans le chat et en MCP — cela ne couvre ni ce qu’un utilisateur saisit ou joint, ni une colonne de texte libre non marquée, ni ce que renvoie un point d’accès API ou un outil propre à une application)',
       aiAllowedConnectors: 'Connecteurs autorisés (vide → tous)',
       aiChatHint: 'Le volet de chat — ce que les utilisateurs peuvent choisir et les questions proposées.',
       aiAllowedModels: 'Modèles au choix des utilisateurs (vide → le modèle ci-dessus seulement)',

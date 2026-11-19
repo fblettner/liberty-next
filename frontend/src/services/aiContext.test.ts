@@ -40,6 +40,24 @@ describe('aiContext', () => {
     expect(text).toContain('… (500 in all)')
   })
 
+  it('leaves the sensitive columns out when the installation hides them', () => {
+    const page: PageContext = { ...base, filters: { ...base.filters, ULAN8: '1001', ULAN8_op: 'eq', ULUGRP_from: 'A' }, sensitive: ['ULAN8', 'note'] }
+    const shown = renderPageContext(page)
+    expect(shown).toContain('ULAN8 = 1001')
+    expect(shown).toContain('"ULAN8":1001')
+    const hidden = renderPageContext(page, true)
+    expect(hidden).not.toContain('1001')
+    expect(hidden).not.toContain('ULAN8')
+    expect(hidden).not.toContain('NOTE')
+    expect(hidden).toContain('columns: ULUSER, ULUGRP')
+    expect(hidden).toContain('ULUSER startsWith JDE')
+    expect(hidden).toContain('ULUGRP_from = A')
+    expect(hidden).toContain('"ULUSER":"JDE"')
+    expect(hidden).toContain('hidden: 2 column(s)')
+    // nothing flagged: the same text either way
+    expect(renderPageContext(base, true)).toBe(renderPageContext(base))
+  })
+
   it('summarizes for the chip', () => {
     expect(summarizePageContext(base)).toEqual({ name: 'f0092', filters: 1, hasRow: true })
     expect(summarizePageContext({ ...base, screen: null, row: null, filters: {} })).toEqual({ name: 'f0092_get', filters: 0, hasRow: false })

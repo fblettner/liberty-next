@@ -481,6 +481,7 @@ export default function TableView({ connector, query, screenApp, screenId, embed
       path: location.pathname, app: screenApp ?? connector, kind: screenId ? 'screen' : 'sql', title: friendlyName,
       connector, query, screen: screen?.id ?? screenId ?? null, filters: summaryParams,
       rowCount: result?.rows.length, truncated: result?.truncated, columns: result?.columns.map((c) => c.name), row: currentRow,
+      sensitive: result?.columns.filter((c) => c.sensitive).map((c) => c.name),
     })
   }, [onThisTab, drill, location.pathname, screenApp, connector, query, screenId, screen, friendlyName, summaryParams, result, currentRow])
 

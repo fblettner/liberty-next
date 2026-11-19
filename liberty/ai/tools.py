@@ -37,6 +37,16 @@ class ToolPermissionError(PermissionError):
 current_channel: ContextVar[str] = ContextVar("liberty_ai_channel", default="chat")
 
 
+HIDDEN = "(hidden: sensitive)"          # what stands for a sensitive value in what the assistant is given
+
+
+def hides_sensitive(state: Any) -> bool:
+    """Whether this installation keeps the data it flagged sensitive out of what the assistant is
+    given (``[ai] hide_sensitive``) — read on the live state, so a change of the setting applies
+    at the next call."""
+    return bool(getattr(getattr(getattr(state, "settings", None), "ai", None), "hide_sensitive", False))
+
+
 def caller() -> Principal | None:
     """The user the assistant is working for; None outside a request (nothing restricted)."""
     return current_principal.get()

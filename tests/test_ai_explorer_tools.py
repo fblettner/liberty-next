@@ -17,8 +17,7 @@ from liberty.screens.config import Screen, ScreensFile
 from tests.test_explorer_engine import COMPANIES, MODEL, ROWS
 
 
-@pytest_asyncio.fixture
-async def tools(tmp_path):
+async def _state(tmp_path):
     url = f"sqlite+aiosqlite:///{tmp_path / 'x.db'}"
     cfg = ConnectorsFile.model_validate({
         "pools": {"default": {"url": url}},
@@ -43,9 +42,46 @@ async def tools(tmp_path):
     from liberty.userviews import UserViewStore
     uv = UserViewStore(registry.pools, "default")
     await uv.create_schema()
-    st = SimpleNamespace(connectors=registry, screens=screens, explorer=explorer, explorer_cache=ModelCache(), user_views=uv)
+    return SimpleNamespace(connectors=registry, screens=screens, explorer=explorer, explorer_cache=ModelCache(), user_views=uv)
+
+
+@pytest_asyncio.fixture
+async def tools(tmp_path):
+    st = await _state(tmp_path)
     yield {t.name: t for t in build_explorer_tools(lambda: st)}, {t.name: t for t in build_explorer_tools(lambda: st, allowed=["shop"])}
-    await registry.pools.dispose()
+    await st.connectors.pools.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_sensitive_field_is_counted_not_shown(tmp_path) -> None:
+    """Where the installation hides sensitive data ([ai] hide_sensitive), a field whose dictionary
+    item is flagged cannot be a row heading nor be read by min / max: its values would be the
+    answer. Counting it and filtering on a value the user gives stay possible."""
+    from liberty.connectors.dictionary import DictionaryEntry
+
+    st = await _state(tmp_path)
+    st.connectors.dictionary.entries["NAME"] = DictionaryEntry(label="Company name", sensitive=True)
+    st.settings = SimpleNamespace(ai=SimpleNamespace(hide_sensitive=True))
+    t = {x.name: x for x in build_explorer_tools(lambda: st)}
+    try:
+        fields = {f["key"]: f for e in (await t["explorer_fields"].func("shop", "sales"))["entities"] for f in e["fields"]}
+        assert "sensitive" in fields["company.NAME"] and "sensitive" not in fields["company.REGION"]
+        with pytest.raises(ValueError, match="company.NAME: marked sensitive"):
+            await t["explorer_query"].func("shop", "sales", rows=[{"field": "company.NAME"}], measures=[{"field": "sales.QTY", "agg": "sum"}])
+        with pytest.raises(ValueError, match="marked sensitive"):
+            await t["explorer_query"].func("shop", "sales", measures=[{"field": "company.NAME", "agg": "max"}])
+        # counted, and used as a filter on a value the user gave; another heading is as before
+        r = await t["explorer_query"].func("shop", "sales", measures=[{"field": "company.NAME", "agg": "count_distinct"}])
+        assert r["rows"] and all("NAME" not in str(k) or isinstance(v, (int, float)) for row in r["rows"] for k, v in row.items())
+        r = await t["explorer_query"].func("shop", "sales", rows=[{"field": "company.REGION"}], measures=[{"field": "sales.QTY", "agg": "sum"}],
+                                           filters={"company.NAME": COMPANIES[0][1]})
+        assert len(r["rows"]) == 1
+        # the installation does not hide: the field is a heading like any other
+        st.settings.ai.hide_sensitive = False
+        r = await t["explorer_query"].func("shop", "sales", rows=[{"field": "company.NAME"}], measures=[{"field": "sales.QTY", "agg": "sum"}])
+        assert len(r["rows"]) > 1
+    finally:
+        await st.connectors.pools.dispose()
 
 
 @pytest.mark.asyncio

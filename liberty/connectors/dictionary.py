@@ -123,6 +123,16 @@ class DictionaryEntry(BaseModel):
         ),
         json_schema_extra={"x_group": "Rule"},
     )
+    sensitive: bool = Field(
+        default=False,
+        description=(
+            "The item holds sensitive data (a person's name, an e-mail, a bank identifier…). Where "
+            "the installation hides sensitive data from the AI assistant (``[ai] hide_sensitive``), "
+            "every column carrying this item is left out of what the assistant is given — in the "
+            "chat and through MCP. It changes nothing in the screens themselves."
+        ),
+        json_schema_extra={"x_group": "Rule"},
+    )
     lookup_params: dict[str, str] = Field(
         default_factory=dict,
         title="Lookup params",

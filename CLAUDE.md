@@ -113,6 +113,9 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           connector_tools.py = list_connectors [connector / search; an overview on a large install] + sql_query [own row cap;
                           runs through web/connectors.select_events like a screen's read; `filters` = the dictionary binds]),
                           ops_tools.py (jobs_status / server_log / integrity_checks — opt-in `[ai] ops_tools`),
+                          sensitive data: `[ai] hide_sensitive` + `sensitive` on a dictionary item / screen column → `SQLConnector.sensitive_columns`,
+                          `Column.sensitive`; left out of sql_query rows, write / action cards, the Explorer's headings (`tools.hides_sensitive`) and the
+                          page context (services/aiContext `withoutSensitive`); not what a user types, an API result or an app's own tool,
                           write_tools.py (screen_form / screen_write / screen_action — opt-in `[ai] write_tools`, permission `ai:write`: one record
                           through its screen via screens/save.py, one of its actions via screens/actions.py; proposes a card in the chat
                           (`POST /ai/screen-write` / `/ai/screen-action` apply it), does it over MCP — `tools.current_channel`),

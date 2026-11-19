@@ -96,6 +96,7 @@ class ExplorerField:
     rule: dict[str, Any] | None = None   # enum / lookup / boolean, the wire shape the grid uses
     dd: str | None = None
     hidden: bool = False
+    sensitive: bool = False         # flagged by its dictionary item / screen column (the AI assistant's hiding)
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"key": self.key, "entity": self.entity, "name": self.name, "label": self.label, "type": self.type, "kind": self.kind}
@@ -111,6 +112,8 @@ class ExplorerField:
             d["dd"] = self.dd
         if self.hidden:
             d["hidden"] = True
+        if self.sensitive:
+            d["sensitive"] = True
         return d
 
 
@@ -196,6 +199,7 @@ def fields_from_columns(
         out.append(ExplorerField(
             key=f"{entity.id}.{up}", entity=entity.id, name=up, label=col.label or up, type=tc,
             kind=kind, aggregate=agg, format=col.format, decimals=col.decimals, rule=col.rule, dd=col.dd, hidden=(up in hidden or col.hidden),
+            sensitive=bool(getattr(col, "sensitive", False)),
         ))
     if entity.default_date and entity.default_date.upper() not in names:
         warnings.append(f"{entity.id}: default_date {entity.default_date!r} is not a column of {entity.query!r}")

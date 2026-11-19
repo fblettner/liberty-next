@@ -162,6 +162,7 @@ lookup_param_binds = [{ param = "KIND", source = "KIND" }]
 [[screens.shop.customers.columns]]
 name = "VAT"
 label = "VAT number"
+sensitive = true
 visible_when = [{ field = "KIND", value = "B" }]
 required_when = [{ field = "KIND", value = "B" }]
 
@@ -331,6 +332,9 @@ param_binds = [{ param = "CUST_ID", source = "INPUT.cust" }, { param = "WHO", so
 DICTIONARY = """
 default_language = "en"
 
+[entries.NAME]
+sensitive = true
+
 [lookups.KINDS]
 query = "kinds_get"
 connector = "shop"
@@ -349,7 +353,7 @@ values = [{ value = "A", label = "Active" }, { value = "I", label = "Inactive" }
 """
 
 
-def _app(tmp_path, *, write_tools: bool = True):
+def _app(tmp_path, *, write_tools: bool = True, hide_sensitive: bool = False):
     db_url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
     (tmp_path / "connectors.toml").write_text(CONNECTORS.format(db_url=db_url))
     (tmp_path / "screens.toml").write_text(textwrap.dedent(SCREENS))
@@ -388,7 +392,7 @@ def _app(tmp_path, *, write_tools: bool = True):
         screens=ScreenSettings(config_path=Path(tmp_path / "screens.toml")),
         actions=ActionSettings(config_path=Path(tmp_path / "actions.toml")),
         auth=AuthSettings(backend="db", jwt_secret="write-tools-test-secret-0123456789abcdef", pool="default"),
-        ai=AISettings(enabled=True, api_key="", config_path=tmp_path / "ai.toml", write_tools=write_tools, mcp_enabled=True),
+        ai=AISettings(enabled=True, api_key="", config_path=tmp_path / "ai.toml", write_tools=write_tools, mcp_enabled=True, hide_sensitive=hide_sensitive),
     ))
 
 
@@ -802,3 +806,48 @@ def test_a_record_open_in_its_form_is_not_changed_from_here(app) -> None:
         locks.release(room, sid="tab-2")
         assert _write(client, "writer", operation="update", key={"ID": 2}, values={"NAME": "Bolt 3"}).status_code == 200
         assert _rows(client, "id = 2")[0]["name"] == "Bolt 3"
+
+
+def test_sensitive_data_is_not_given_to_the_assistant(tmp_path) -> None:
+    """[ai] hide_sensitive: what the installation flagged — a dictionary item (NAME), a screen
+    column (VAT) — is left out of everything the tools hand to the model. The screens are
+    unchanged, and without the setting nothing is hidden."""
+    hidden = "(hidden: sensitive)"
+    app = _app(tmp_path, hide_sensitive=True)
+    with TestClient(app) as client:
+        # the screen's own route: everything, the columns flagged for the page
+        grid = client.get("/api/sql/shop/customers_get", headers=_h(client, "writer")).json()
+        flagged = {c["name"] for c in grid["columns"] if c.get("sensitive")}
+        assert flagged == {"NAME", "VAT"} and grid["rows"][0]["NAME"] == "Acme"
+        assert client.get("/ai/tools", headers=_h(client, "writer")).json()["hide_sensitive"] is True
+
+        # rows read: the columns are gone, and named; a filter on a value the user gave still applies
+        out, err = _tool(client, "writer", "sql_query", {"connector": "shop", "query": "customers_get"})
+        assert not err, out
+        assert out["hidden_columns"] == ["NAME", "VAT"] and "sensitive" in out["hidden_note"]
+        assert not ({"NAME", "VAT"} & {c["name"] for c in out["columns"]}) and all("NAME" not in r and "VAT" not in r for r in out["rows"])
+        assert "Acme" not in json.dumps(out) and "FR1" not in json.dumps(out) and out["rows"][0]["KIND"] == "B"
+        out, err = _tool(client, "writer", "sql_query", {"connector": "shop", "query": "customers_get", "filters": {"NAME": "Bolt"}})
+        assert not err and [r["ID"] for r in out["rows"]] == [2] and "NAME" not in out["rows"][0]
+
+        # a write: what the user asked is theirs, what the record held is not shown
+        args = {"app": "shop", "screen": "customers", "operation": "update", "key": {"ID": 2}, "values": {"NAME": "Bolt Ltd", "KIND": "P"}}
+        out, err = _tool(client, "writer", "screen_write", {**args, "values": {"NAME": "Bolt Ltd", "STATUS": "I"}})
+        assert not err, out
+        preview = out["proposal"]["payload"]["preview"]
+        assert preview["values"] == {"NAME": "Bolt Ltd", "STATUS": "I"} and preview["before"] == {"NAME": hidden, "STATUS": "A"}
+        assert "'Bolt'" not in out["proposal"]["summary"] and hidden in out["proposal"]["summary"]
+        rec = _write(client, "writer", operation="delete", key={"ID": 1}, dry_run=True).json()["record"]
+        assert rec["NAME"] == hidden and rec["VAT"] == hidden and rec["STATUS"] == "A" and rec["SECRET"] not in ("s3cret", hidden)
+
+        # an action: the screen's messages are filled without the hidden values, the steps still bind them
+        out, err = _tool(client, "writer", "screen_action", {"app": "shop", "screen": "customers", "action": "block", "key": {"ID": 2}})
+        assert not err and out["proposal"]["notes"][0] == f"Block {hidden} on behalf of writer?" and "Bolt" not in json.dumps(out)
+        ran = _act(client, "writer", "block", key={"ID": 2}).json()
+        assert ran["ok"] is True and ran["messages"] == [f"{hidden} is blocked."] and _rows(client, "id = 2")[0]["status"] == "I"
+
+    (tmp_path / "shown").mkdir()
+    with TestClient(_app(tmp_path / "shown")) as client:                    # the setting off: as before
+        out, err = _tool(client, "writer", "sql_query", {"connector": "shop", "query": "customers_get"})
+        assert not err and "hidden_columns" not in out and out["rows"][0]["NAME"] == "Acme" and "sensitive" not in json.dumps(out["columns"])
+        assert _write(client, "writer", operation="update", key={"ID": 2}, values={"NAME": "Zed"}, dry_run=True).json()["before"] == {"NAME": "Bolt"}

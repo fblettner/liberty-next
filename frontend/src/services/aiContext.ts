@@ -20,6 +20,9 @@ export interface PageContext {
   rowCount?: number
   truncated?: boolean
   columns?: string[]
+  /** The columns the installation flags sensitive: left out of the text (their names counted, never
+   *  their values) when the assistant must not be given sensitive data. */
+  sensitive?: string[]
   /** The row the user last clicked (or opened the row menu on). */
   row?: Record<string, unknown> | null
   /** An Explorer page: the model and the analysis on the canvas (its entity, rows, measures, period). */
@@ -65,8 +68,26 @@ function clipCell(v: unknown): unknown {
   return v
 }
 
-/** The text sent to the assistant: one line per fact, capped at CONTEXT_MAX_CHARS. */
-export function renderPageContext(c: PageContext): string {
+/** *c* without what its sensitive columns hold: gone from the column list and the clicked row, and a
+ *  filter typed on one of them dropped too (its value is data the user gave the screen, not the
+ *  assistant). */
+export function withoutSensitive(c: PageContext): PageContext {
+  const gone = new Set((c.sensitive ?? []).map((n) => n.toLowerCase()))
+  if (gone.size === 0) return c
+  const of = (k: string) => k.replace(/_(op|from|to)$/, '').toLowerCase()
+  return {
+    ...c,
+    columns: c.columns?.filter((n) => !gone.has(n.toLowerCase())),
+    row: c.row ? Object.fromEntries(Object.entries(c.row).filter(([k]) => !gone.has(k.toLowerCase()))) : c.row,
+    filters: c.filters ? Object.fromEntries(Object.entries(c.filters).filter(([k]) => !gone.has(of(k)))) : c.filters,
+  }
+}
+
+/** The text sent to the assistant: one line per fact, capped at CONTEXT_MAX_CHARS. With
+ *  *hideSensitive* (the installation's `[ai] hide_sensitive`) the sensitive columns are left out. */
+export function renderPageContext(page: PageContext, hideSensitive = false): string {
+  const c = hideSensitive ? withoutSensitive(page) : page
+  const hiddenCount = hideSensitive ? (page.sensitive ?? []).length : 0
   const lines: string[] = []
   lines.push(`app: ${c.app || c.connector}`)
   if (c.kind === 'explorer' && c.explorer) {
@@ -84,6 +105,7 @@ export function renderPageContext(c: PageContext): string {
   if (c.columns && c.columns.length) {
     lines.push(`columns: ${c.columns.slice(0, MAX_COLUMNS).join(', ')}${c.columns.length > MAX_COLUMNS ? `, … (${c.columns.length} in all)` : ''}`)
   }
+  if (hiddenCount) lines.push(`hidden: ${hiddenCount} column(s) this installation marks as sensitive — their values are not given to you`)
   if (c.row) {
     const clipped: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(c.row)) clipped[k] = clipCell(v)

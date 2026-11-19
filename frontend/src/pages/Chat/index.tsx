@@ -288,7 +288,10 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
   const [droppedPath, setDroppedPath] = useState<string | null>(null)
   useEffect(() => subscribePageContext(setPageCtx), [])
   const liveCtx = pageCtx && pageCtx.path === location.pathname && droppedPath !== pageCtx.path ? pageCtx : null
-  const contextText = () => { const c = getPageContext(); return c && c.path === location.pathname && droppedPath !== c.path ? renderPageContext(c) : undefined }
+  // The installation's `[ai] hide_sensitive`: hidden until the server says otherwise, so nothing
+  // sensitive can leave in a context rendered before the answer arrives.
+  const hideSensitiveRef = useRef(true)
+  const contextText = () => { const c = getPageContext(); return c && c.path === location.pathname && droppedPath !== c.path ? renderPageContext(c, hideSensitiveRef.current) : undefined }
   // Starters follow the page: its app + screen, else the workspace's app, else "everywhere".
   const onPage = pageCtx && pageCtx.path === location.pathname ? pageCtx : null
   const groups = useMemo(() => pickStarterGroups(starterGroups, starters, onPage?.app ?? currentApp, onPage?.screen ?? null), [starterGroups, starters, onPage, currentApp])
@@ -307,6 +310,7 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
         setStarters(r.starters ?? {})
         setStarterGroups(r.starter_groups ?? {})
         setAttachInfo(r.attachments ?? { max_mb: 0, accept: [] })
+        hideSensitiveRef.current = r.hide_sensitive !== false
       })
       .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
   }, [])

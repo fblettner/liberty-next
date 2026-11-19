@@ -39,6 +39,7 @@ from liberty.screens.config import Screen, ScreensFile
 Row = dict[str, Any]
 _ORIGINAL = "_ORIGINAL"
 MASK = "••••••"
+HIDDEN = "(hidden: sensitive)"       # a value the installation flags sensitive, in what is shown back
 READ_CAP = 500                 # the most rows read to find the one record a key names
 
 
@@ -58,6 +59,7 @@ class WriteContext:
     language: str | None = None
     pool: str | None = None             # the environment picked for the page (X-Liberty-Pool)
     state: Any = None                   # the application state (shared actions, settings) — the save hooks' steps
+    hide_sensitive: bool = False        # leave the data flagged sensitive out of what is shown back ([ai] hide_sensitive)
 
 
 # -- the form's helpers (dialogHelpers.ts) ------------------------------------- #
@@ -360,9 +362,32 @@ async def read_row(ctx: WriteContext, app: str, screen: Screen, key: Mapping[str
     return json.loads(json.dumps(found[0], default=str))      # as the NDJSON stream hands it to the form
 
 
-def masked(row: Mapping[str, Any], fields: Mapping[str, Mapping[str, Any]]) -> Row:
-    """*row* without its secrets — what may be shown back."""
-    return {k: (MASK if is_password(fields.get(str(k).lower())) and not _empty(v) else v) for k, v in row.items()}
+def masked(row: Mapping[str, Any], fields: Mapping[str, Mapping[str, Any]], hidden: set[str] | None = None) -> Row:
+    """*row* without its secrets — what may be shown back: a password masked, and a column the
+    installation flags sensitive (*hidden*, lower-cased names) replaced by a marker."""
+    out: Row = {}
+    for k, v in row.items():
+        if _empty(v):
+            out[k] = v
+        elif is_password(fields.get(str(k).lower())):
+            out[k] = MASK
+        elif hidden and str(k).lower() in hidden:
+            out[k] = HIDDEN
+        else:
+            out[k] = v
+    return out
+
+
+def hidden_columns(ctx: WriteContext, app: str, screen: Screen, names: Any) -> set[str]:
+    """The columns of *names* (lower-cased) whose values are not to be shown back: flagged
+    sensitive by the screen column or its dictionary item, where the installation hides them."""
+    if not ctx.hide_sensitive:
+        return set()
+    try:
+        conn = ctx.connectors.sql(connector_of(screen, app))
+    except ConnectorError:
+        return set()
+    return {str(n).lower() for n in conn.sensitive_columns(list(names), list(screen.columns), app)}
 
 
 def _refuse_if_open(ctx: WriteContext, app: str, screen: Screen, row: Mapping[str, Any]) -> None:
@@ -686,7 +711,7 @@ async def save_row(
         "operation": operation, "screen": f"{app}/{screen_id}",
         **({"key": {k: value_for(k, saved) for k in screen.effective_key_columns()}} if mode == "edit" else {}),
         "values": masked(sent, fields),
-        **({"before": masked({k: value_for(k, saved) for k in sent}, fields)} if mode == "edit" else {}),
+        **({"before": masked({k: value_for(k, saved) for k in sent}, fields, hidden_columns(ctx, app, screen, sent))} if mode == "edit" else {}),
         **({"related_tables": [g.id for g, _q, _e in plan]} if plan else {}),
         **_hooks_preview(ctx, screen, operation, inputs),
     }
@@ -766,7 +791,7 @@ async def delete_row(
     preview = {
         "operation": "delete", "screen": f"{app}/{screen_id}",
         "key": {k: value_for(k, row) for k in screen.effective_key_columns()},
-        "record": masked(row, fields),
+        "record": masked(row, fields, hidden_columns(ctx, app, screen, row)),
         **({"related_tables": [g.id for g in plan]} if plan else {}),
         **_hooks_preview(ctx, screen, "delete", inputs),
     }

@@ -382,6 +382,12 @@ class AISettings(BaseModel):
     # or deletes a record through its screen, for a user who holds `ai:write` and the screen's own
     # permissions. In the chat the user applies a card; over MCP the client asks. Off by default.
     write_tools: bool = False
+    # Sensitive data — the columns whose dictionary item (or screen column) is flagged `sensitive`
+    # are left out of what the assistant is given: rows read, a record's values, the page context,
+    # the Explorer's row headings. Chat and MCP alike. Off by default; the installation flags its
+    # own items (none is shipped). It does not cover what a user types or attaches, an unflagged
+    # free-text column, nor what an API endpoint or an application's own tool returns.
+    hide_sensitive: bool = False
     # The audit and usage record (ly2_ai_call: who, model, tokens, tools — never the question, the
     # answer or a row): turns older than this many days are dropped; 0 keeps them all.
     usage_retention_days: int = Field(default=90, ge=0)

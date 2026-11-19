@@ -2,6 +2,25 @@
 
 ## 7.0.81 — non publiée
 
+- **Assistant IA : les données sensibles ne sont pas envoyées.** Une installation décide de ce qui est sensible et
+  Liberty le tient hors de portée de l'assistant — dans le chat comme en MCP.
+  - *Ce qui est sensible* revient à l'installation (rien n'est marqué dans ce que livrent les applications) : une
+    nouvelle option **Sensible** sur un élément du dictionnaire (Dictionnaire → une entrée → Règle) couvre toute
+    colonne portant l'élément, sur chaque écran, requête et modèle de l'Explorateur — trouvée comme le périmètre
+    de données trouve ses colonnes (l'élément de la colonne d'écran, le nom de la colonne, le nom sans le préfixe
+    JDE). La même option sur une colonne d'écran couvre une colonne sans élément, ou en exempte une (`false`).
+  - *L'interrupteur* est `[ai] hide_sensitive` (Administrer → App → Assistant IA), désactivé par défaut.
+  - *Ce qui est alors écarté* : les colonnes marquées des lignes lues par `sql_query` (la réponse nomme les
+    colonnes masquées, pour que l'assistant puisse le dire) ; les valeurs d'un enregistrement sur la carte d'une
+    écriture ou d'une action (« avant », l'enregistrement d'une suppression, la confirmation et les messages de
+    l'écran — la valeur que l'utilisateur a demandé d'écrire est la sienne et s'affiche) ; le contexte de page
+    (la ligne cliquée, la liste des colonnes, un filtre saisi sur une telle colonne) ; dans l'Explorateur, un
+    champ marqué ne peut être ni un en-tête de ligne ni lu par `min` / `max` / `sum` — il peut être compté, et
+    filtré sur une valeur donnée par l'utilisateur. Les écrans eux-mêmes ne changent pas.
+  - *Ce que cela ne couvre pas* — à savoir avant de s'y fier : ce qu'un utilisateur saisit dans une question ou
+    joint ; une colonne de texte libre non marquée ; ce que renvoient un point d'accès API (`api_call`), un outil
+    propre à une application ou les outils d'exploitation, dont Liberty ne connaît pas les colonnes.
+
 - Assistant IA, écriture par un écran :
   - **Un enregistrement ouvert dans son formulaire n'est pas modifié.** Le formulaire verrouille l'enregistrement
     qu'il affiche ; `screen_write` refuse désormais la modification ou la suppression d'un enregistrement que

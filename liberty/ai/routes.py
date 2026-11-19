@@ -23,6 +23,7 @@ from liberty.ai.attachments import AttachmentError, accepted, check_content, to_
 from liberty.web.deps import request_language
 from liberty.ai.assistant import AiAssistant
 from liberty.ai.catalog import label_for
+from liberty.ai.tools import hides_sensitive
 from liberty.ai.usage import TurnRecorder, app_of
 from liberty.auth.dependencies import require_permission
 from liberty.auth.principal import Principal
@@ -93,6 +94,9 @@ async def tools(
         "starter_groups": (getattr(request.app.state, "ai_config", None) or AiFile()).starter_groups(request_language(request)),
         # files attached to a question: the size limit (0 = off) and the extensions the picker offers
         "attachments": {"max_mb": assistant.settings.attachment_max_mb, "accept": accepted() if assistant.settings.attachment_max_mb > 0 else []},
+        # the installation keeps the data it flagged sensitive from the assistant: the chat leaves those
+        # columns out of the page context it sends (the tools do the same on their side)
+        "hide_sensitive": hides_sensitive(request.app.state),
     }
 
 
