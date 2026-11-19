@@ -140,6 +140,25 @@ async def build_ai_usage(settings: Settings, connectors: ConnectorRegistry) -> A
         return None
 
 
+async def build_oauth_grants(settings: Settings, connectors: ConnectorRegistry) -> Any | None:
+    """The clients connected through the OAuth sign-in, on the auth pool — ``None`` when the
+    assistant is off or the pool is unusable (logged; the sign-in then works without the list of
+    connected clients)."""
+    auth = getattr(settings, "auth", None)
+    ai = getattr(settings, "ai", None)
+    if auth is None or ai is None or not ai.enabled:
+        return None
+    try:
+        from liberty.auth.oauth_grants import OAuthGrantStore
+
+        store = OAuthGrantStore(connectors.pools, auth.pool)
+        journal_schema(settings, await store.create_schema())
+        return store
+    except Exception as exc:  # noqa: BLE001 — never let this list take the app down
+        _log.warning("OAuth grants store on pool %r unusable (%s) — connected clients are not listed", auth.pool, exc)
+        return None
+
+
 async def build_notifications(settings: Settings, connectors: ConnectorRegistry) -> Any | None:
     """The notification inbox store on ``[notify] pool`` — ``None`` when disabled or the pool is
     unusable (logged; the bell then shows nothing, the dispatcher's portal channel reports it)."""
@@ -337,6 +356,13 @@ async def _rebind_pool_holders(app: Any, settings: Settings, new: ConnectorRegis
             state.ai_usage.rebind(new.pools)
         else:
             state.ai_usage = await build_ai_usage(settings, new)
+
+    # The clients connected by the OAuth sign-in — same policy.
+    if hasattr(state, "oauth_grants"):
+        if state.oauth_grants is not None:
+            state.oauth_grants.rebind(new.pools)
+        else:
+            state.oauth_grants = await build_oauth_grants(settings, new)
 
     # Notifications — the inbox store rebinds; the dispatcher reads the holders lazily.
     if hasattr(state, "notifications"):

@@ -177,6 +177,17 @@ class ScreenWriteRequest(BaseModel):
     dry_run: bool = False
 
 
+class ScreenWriteManyRequest(BaseModel):
+    """Several records of one screen written in one go — what the chat's card applies."""
+
+    app: str = Field(min_length=1)
+    screen: str = Field(min_length=1)
+    operation: Literal["insert", "update", "delete"]
+    records: list[dict[str, Any]] = Field(min_length=1)
+    params: dict[str, Any] = Field(default_factory=dict)
+    dry_run: bool = False
+
+
 class ScreenActionRequest(BaseModel):
     """One action of a screen run on a record — what the chat's card applies."""
 
@@ -263,6 +274,47 @@ async def job_run(
         await _record_applied(request, principal, "job_run", None, what, body.dry_run, error=str(exc))
         raise _refusal(exc) from exc
     await _record_applied(request, principal, "job_run", None, f"{what} run={out.get('run_id')}", body.dry_run)
+    return out
+
+
+@router.post(
+    "/screen-write-many",
+    summary="Write several records through their screen",
+    responses={
+        403: {"description": "Caller lacks ``ai:write``, or the permission of a query the write runs."},
+        404: {"description": "The write tools are off (``[ai] write_tools``)."},
+        409: {"description": "The screen refuses a record: nothing is written, each refusal is named."},
+    },
+)
+async def screen_write_many(
+    body: ScreenWriteManyRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_permission("ai:write"))],
+) -> dict[str, Any]:
+    """Apply what the assistant's `screen_write_many` tool proposed: several records of one
+    screen, one operation. All are checked before any is written; a statement that then fails
+    stops the list there (`stopped_at`, `error`) — the records before it stay written."""
+    from liberty.ai.write_tools import perform_many
+    from liberty.screens.save import ScreenWriteError
+
+    ctx = _write_context(request, principal)
+    try:
+        out = await perform_many(ctx, app=body.app, screen=body.screen, operation=body.operation, records=body.records,
+                                 params=body.params, dry_run=body.dry_run)
+    except ScreenWriteError as exc:
+        await _record_applied(request, principal, "screen_write", body.app,
+                              f"operation={body.operation} app={body.app} screen={body.screen} records={len(body.records)}", body.dry_run, error=str(exc))
+        raise _refusal(exc) from exc
+    if not body.dry_run:
+        # one line per record written — and one for the record the list stopped at
+        for i, r in enumerate(body.records[: int(out.get("written") or 0)]):
+            assigned = (out["records"][i] or {}).get("assigned")
+            await _record_applied(request, principal, "screen_write", body.app,
+                                  f"operation={body.operation} app={body.app} screen={body.screen} key={r.get('key') or assigned or {}}", False)
+        if out.get("stopped_at"):
+            await _record_applied(request, principal, "screen_write", body.app,
+                                  f"operation={body.operation} app={body.app} screen={body.screen} key={body.records[out['stopped_at'] - 1].get('key') or {}}",
+                                  False, error=str(out.get("error")))
     return out
 
 

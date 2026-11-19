@@ -95,7 +95,9 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
   auth/                   scope.py (row-level data scope: role rules → resolved per user → JWT
                           `scope` claim → SQLConnector wrap / write check), authstore.py (AuthBackend: toml | db), tokens.py (PyJWT access /
                           refresh with rotation), throttle.py (login throttle), principal.py
-                          (colon-glob permissions), oidc.py, dependencies.py, routes.py;
+                          (colon-glob permissions), oidc.py, dependencies.py, routes.py; oauth.py (the OAuth sign-in of the MCP
+                          endpoint, stateless) + oauth_grants.py (ly2_oauth_grant: the connected clients, listed and
+                          ended — `GET` / `DELETE /oauth/grants`);
                           models.py / db.py / service.py = the DB backend's ly2_* tables
   screens/save.py         a screen's row saved on the server: the twin of the browser's saveScreenRow.ts + the form's field rules,
                           every statement through web/connectors._run_sql, then the save hooks (the assistant's screen_write)
@@ -116,7 +118,7 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           sensitive data: `[ai] hide_sensitive` + `sensitive` on a dictionary item / screen column → `SQLConnector.sensitive_columns`,
                           `Column.sensitive`; left out of sql_query rows, write / action cards, the Explorer's headings (`tools.hides_sensitive`) and the
                           page context (services/aiContext `withoutSensitive`); not what a user types, an API result or an app's own tool,
-                          write_tools.py (job_form / job_run through web/jobs' user routes; screen_form / screen_write / screen_action — opt-in `[ai] write_tools`, permission `ai:write`: one record
+                          write_tools.py (job_form / job_run through web/jobs' user routes; screen_form / screen_write / screen_write_many (≤ 50 records, one card) / screen_action — opt-in `[ai] write_tools`, permission `ai:write`: one record
                           through its screen via screens/save.py, one of its actions via screens/actions.py; proposes a card in the chat
                           (`POST /ai/screen-write` / `/ai/screen-action` apply it), does it over MCP — `tools.current_channel`),
                           app_tools.py (the tools the APPS ship: `[ai.<app>.tools.<id>]` = a plugin `j_` function offered as `<app>_<id>`,

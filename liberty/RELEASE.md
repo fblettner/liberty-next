@@ -2,6 +2,20 @@
 
 ## 7.0.82 — unreleased
 
+- **AI assistant: several records on one card — `screen_write_many`.** "Create these five users", "set the
+  status of these twelve lines": the assistant proposes one card listing every record (up to 50, of one screen)
+  instead of one card each, and one Apply saves them in order, each exactly as `screen_write` does (rules,
+  lookups, hooks, audit, change package, the record lock). Every record is checked before the first is written:
+  if one is refused, nothing is written and the answer says which and why. Should a save still fail midway, it
+  stops there and says how many were written. Same switch and permissions as `screen_write`.
+- **MCP: the clients connected by sign-in are listed, and one can be ended.** A client that signed in through
+  OAuth (Claude Desktop, Claude Code, claude.ai) held tokens nobody could take back, short of changing the
+  password — which ended them all. Each consent is now a record (`ly2_oauth_grant`, on the auth pool: the
+  client's name, when it connected, its last use, the day it ends — never a token): Profile → Access tokens
+  lists yours with **End access**, refused from the client's next call (`GET /oauth/grants`,
+  `DELETE /oauth/grants/{id}`; a superuser sees everyone's with `?everyone=1`). A client connected before this
+  release keeps working until its access ends, and is not in the list; sign in again to see it.
+
 - **MCP: several Liberty servers in one Claude Desktop.** Claude Desktop tells extensions apart by their name,
   and every Liberty extension had the same one: installing the extension of a second server (production and
   test, another customer) replaced the first. The extension is now named after its instance — the host of its

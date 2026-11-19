@@ -930,3 +930,41 @@ def test_the_write_tools_follow_the_allowed_connectors(tmp_path) -> None:
     (tmp_path / "in").mkdir()
     with TestClient(_app(tmp_path / "in", allowed=["shop", "tiny"])) as client:
         assert _write(client, "writer", operation="update", key={"ID": 2}, values={"STATUS": "I"}).status_code == 200
+
+
+def test_several_records_on_one_card(app) -> None:
+    """screen_write_many: one operation over a list of records of one screen — all checked before
+    any is written, then written in order; one card in the chat, one line per record on record."""
+    def many(client, user, **body):
+        return client.post("/ai/screen-write-many", json={"app": "shop", "screen": "customers", **body}, headers=_h(client, user))
+
+    with TestClient(app) as client:
+        new = [{"values": {"ID": 50 + i, "NAME": f"Batch {i}", "KIND": "P"}} for i in range(3)]
+        # the tool proposes one card for the list
+        out, err = _tool(client, "writer", "screen_write_many", {"app": "shop", "screen": "customers", "operation": "insert", "records": new})
+        assert not err, out
+        p = out["proposal"]
+        assert p["kind"] == "screen_write_many" and p["summary"] == "Add 3 records — shop/customers" and len(p["notes"]) == 3
+        assert _rows(client, "id >= 50") == []
+        # one refused record refuses the whole list, and is named
+        r = many(client, "writer", operation="insert", records=[*new, {"values": {"ID": 60, "KIND": "P"}}, {"values": {"ID": 61, "NAME": "x", "STATUS": "ZZ"}}])
+        assert r.status_code == 409 and "2 of 5 records are refused, nothing was written" in r.json()["detail"]
+        assert "record 4:" in r.json()["detail"] and "record 5:" in r.json()["detail"] and _rows(client, "id >= 50") == []
+        # applied: all written
+        r = many(client, "writer", operation="insert", records=new)
+        assert r.status_code == 200 and r.json()["written"] == 3 and [x["id"] for x in _rows(client, "id >= 50")] == [50, 51, 52]
+        # an update and a delete of several records, by their keys
+        r = many(client, "writer", operation="update", records=[{"key": {"ID": 50}, "values": {"NAME": "B0"}}, {"key": {"ID": 51}, "values": {"NAME": "B1"}}])
+        assert r.json()["written"] == 2 and [x["name"] for x in _rows(client, "id in (50, 51)")] == ["B0", "B1"]
+        # a statement that fails at write time stops the list there: the ones before stay written
+        r = many(client, "writer", operation="insert", records=[{"values": {"ID": 70, "NAME": "ok", "KIND": "P"}}, {"values": {"ID": 50, "NAME": "dup", "KIND": "P"}}, {"values": {"ID": 71, "NAME": "never", "KIND": "P"}}])
+        out = r.json()
+        assert r.status_code == 200 and out["written"] == 1 and out["stopped_at"] == 2 and "records 1 to 1 are written" in out["note"]
+        assert [x["id"] for x in _rows(client, "id in (70, 71)")] == [70]
+        assert many(client, "writer", operation="delete", records=[{"key": {"ID": i}} for i in (50, 51, 52, 70)]).json()["written"] == 4
+        # limits and locks
+        assert many(client, "writer", operation="insert", records=[{"values": {"ID": 100 + i, "NAME": "n"}} for i in range(51)]).status_code == 409
+        assert many(client, "nowrite", operation="insert", records=new).status_code == 403
+        # over MCP the tool writes the list
+        out, err = _tool(client, "writer", "screen_write_many", {"app": "shop", "screen": "customers", "operation": "insert", "records": new}, channel="mcp")
+        assert not err and out["written"] == 3

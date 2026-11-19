@@ -482,6 +482,26 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
       }
       return
     }
+    if (proposal.kind === 'screen_write_many') {
+      // Several records of one screen on one card: all checked again, then written in order. A list
+      // that stops part-way stays on the card as an error, and the assistant is told how far it went.
+      try {
+        const p = proposal.payload
+        const r = await api.post<{ count?: number; written?: number; stopped_at?: number; error?: string }>(
+          '/ai/screen-write-many',
+          { app: p.app, screen: p.screen, operation: p.operation, records: p.records ?? [], params: p.params ?? {} },
+        )
+        const stopped = r.stopped_at != null
+        updateProposal(proposal, stopped ? { state: 'error', error: r.error ?? '' } : { state: 'applied' })
+        const outcome = stopped
+          ? 'STOPPED at record ' + String(r.stopped_at) + ' of ' + String(r.count ?? 0) + ': ' + (r.error ?? '') + '. The ' + String(r.written ?? 0) + ' record(s) before it are written, the following were not attempted. Tell the user exactly this.'
+          : String(r.written ?? 0) + ' record(s) written.'
+        await runTurn('Applied: ' + toolName + ' (' + proposal.summary + ') — ' + outcome + ' Continue with the next step.', false)
+      } catch (e) {
+        updateProposal(proposal, { state: 'error', error: e instanceof ApiError ? e.message : String(e) })
+      }
+      return
+    }
     if (proposal.kind === 'screen_write' || proposal.kind === 'screen_action') {
       // One record, or one action, through its screen: the server checks everything again and does it
       // (the screen's own queries, rules and steps). A refusal stays on the card; the assistant is told

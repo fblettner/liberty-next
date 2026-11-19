@@ -74,6 +74,52 @@ async def perform(
     return out
 
 
+MANY_MAX = 50                 # the most records one screen_write_many call takes
+
+
+async def perform_many(
+    ctx: WriteContext, *, app: str, screen: str, operation: str, records: list[dict[str, Any]],
+    params: dict[str, Any] | None = None, dry_run: bool = False,
+) -> dict[str, Any]:
+    """Several records of one screen, one operation — each written as ``perform`` writes one.
+
+    Checked first, all of them: a record the screen refuses stops the whole batch before anything
+    is written, and the answer names every refused record with its reason. Written then one after
+    the other; a statement that fails stops there — the records before it stay written, as in
+    the grid, and the answer says how far it went."""
+    if operation not in OPERATIONS:
+        raise ScreenWriteError("operation is insert, update or delete")
+    if not isinstance(records, list) or not records:
+        raise ScreenWriteError("give the records to write: a list of {values, key}")
+    if len(records) > MANY_MAX:
+        raise ScreenWriteError(f"{len(records)} records: at most {MANY_MAX} in one batch — for more, the grid's Excel import is the way")
+    items = [{"values": dict(r.get("values") or {}), "key": dict(r.get("key") or {})} for r in records if isinstance(r, dict)]
+    if len(items) != len(records):
+        raise ScreenWriteError("each record is an object {values, key}")
+
+    previews: list[dict[str, Any]] = []
+    refused: list[str] = []
+    for i, r in enumerate(items, start=1):
+        try:
+            previews.append(await perform(ctx, app=app, screen=screen, operation=operation, values=r["values"], key=r["key"], params=params, dry_run=True))
+        except ScreenWriteError as exc:
+            refused.append(f"record {i}: {exc}")
+    if refused:
+        raise ScreenWriteError(f"{len(refused)} of {len(items)} records are refused, nothing was written — " + " | ".join(refused))
+    if dry_run:
+        return {"operation": operation, "screen": f"{app}/{screen}", "count": len(items), "records": previews, "written": 0}
+
+    results: list[dict[str, Any]] = []
+    for i, r in enumerate(items, start=1):
+        try:
+            results.append(await perform(ctx, app=app, screen=screen, operation=operation, values=r["values"], key=r["key"], params=params))
+        except ScreenWriteError as exc:
+            return {"operation": operation, "screen": f"{app}/{screen}", "count": len(items), "written": len(results), "records": results,
+                    "stopped_at": i, "error": str(exc),
+                    "note": f"records 1 to {i - 1} are written, record {i} failed and the following were not attempted — tell the user exactly this"}
+    return {"operation": operation, "screen": f"{app}/{screen}", "count": len(items), "written": len(results), "records": results}
+
+
 def screen_actions(sc: Any, state: Any) -> list[tuple[str, Any]]:
     """The actions of a screen that run something on the server, each with what it runs on:
     ``record`` (the row menu, a form tab's button) or ``screen`` (the toolbar). A pure drill or
@@ -499,11 +545,51 @@ def build_write_tools(state: Callable[[], Any]) -> list[Tool]:
                     + (" and chooses the file there" if out.get("needs_files") else "") + ": nothing has started yet. Stop here and wait.",
         )
 
+    async def screen_write_many(
+        app: str, screen: str, operation: str, records: list[dict[str, Any]], params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Add, change or delete SEVERAL records of one screen in one go — the same operation for
+        all, each record written as screen_write writes one. Use it when the user asks for a list
+        (the roles of a user, the environments, a few codes): one card for the whole list instead
+        of one per record. For a single record use screen_write; beyond 50 records the screen's
+        Excel import is the way — say so.
+
+        Every record is checked first: if the screen refuses one, nothing is written and the
+        answer names each refused record with its reason. Then they are written in order; if a
+        statement fails, the ones before it stay written and the answer says where it stopped.
+
+        Args:
+            app: the application of the screen.
+            screen: the screen id.
+            operation: insert, update or delete — the same for every record.
+            records: [{values: {column: value}, key: {key column: value}}, …] — values for an insert or an update, key for an update or a delete.
+            params: {param: value} of the screen's read query, when it needs some.
+        """
+        ctx = _ctx()
+        proposing = current_channel.get() != "mcp"
+        try:
+            out = await perform_many(ctx, app=app, screen=screen, operation=operation, records=records, params=params, dry_run=proposing)
+        except ScreenWriteError as exc:
+            raise ValueError(str(exc)) from exc
+        if not proposing:
+            return out
+        from liberty.ai.proposal import Proposal, wrap
+
+        lines = [_summary(operation, app, screen, p).split(" — ", 1)[-1] for p in out["records"]]
+        verb = {"insert": "Add", "update": "Change", "delete": "Delete"}[operation]
+        return wrap(
+            Proposal(kind="screen_write_many", summary=f"{verb} {out['count']} records — {app}/{screen}", target_path=f"{app}/{screen}", app=app,
+                     payload={"app": app, "screen": screen, "operation": operation, "records": records, "params": params or {}, "preview": out},
+                     notes=lines[:20] + ([f"… and {len(lines) - 20} more"] if len(lines) > 20 else [])),
+            message="Checked and proposed to the user, who applies or skips the whole list on one card: nothing is written yet. Stop here and wait.",
+        )
+
     return [
         tool(job_form, summary_keys=("job",), permission=WRITE_PERMISSION),
         tool(job_run, summary_keys=("job", "params", "preset"), permission=WRITE_PERMISSION, read_only=False),
         tool(screen_form, summary_keys=("app", "screen"), permission=WRITE_PERMISSION),
         # the record's key is in the summary: the usage record says WHICH record the assistant changed
         tool(screen_write, summary_keys=("operation", "app", "screen", "key"), permission=WRITE_PERMISSION, read_only=False),
+        tool(screen_write_many, summary_keys=("operation", "app", "screen"), permission=WRITE_PERMISSION, read_only=False),
         tool(screen_action, summary_keys=("action", "app", "screen", "key"), permission=WRITE_PERMISSION, read_only=False),
     ]

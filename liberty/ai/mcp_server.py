@@ -222,7 +222,8 @@ def endpoint(app: Any) -> Any:
                         [(b"www-authenticate", challenge(Request(scope)).encode())])
             return
         try:
-            who = await principal_from_personal_token(auth[7:].strip(), state.token_service, state.auth_backend)
+            who = await principal_from_personal_token(auth[7:].strip(), state.token_service, state.auth_backend,
+                                                      getattr(state, "oauth_grants", None))
         except TokenError as exc:
             await reply(send, 401, f"Invalid access token: {exc}",
                         [(b"www-authenticate", challenge(Request(scope), error="invalid_token").encode())])

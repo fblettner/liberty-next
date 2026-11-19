@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from typing import Annotated
+from typing import Annotated, Any
 
 from urllib.parse import urlencode
 
@@ -470,10 +470,14 @@ async def account_for_personal_claims(claims: dict, backend: AuthBackend) -> Use
     return user
 
 
-async def principal_from_personal_token(token: str, tokens: TokenService, backend: AuthBackend) -> Principal:
+async def principal_from_personal_token(token: str, tokens: TokenService, backend: AuthBackend, grants: Any = None) -> Principal:
     """The caller behind a personal access token — the user as they are now (roles, data scope),
-    see :func:`account_for_personal_claims`. Raises :class:`TokenError`."""
+    see :func:`account_for_personal_claims`. A token obtained through the OAuth sign-in names
+    the consent it comes from (``gid``): with *grants* (:mod:`liberty.auth.oauth_grants`) it is
+    refused once the user ended that client's access. Raises :class:`TokenError`."""
     claims = tokens.decode(token, expected_type=PERSONAL)
+    if grants is not None and claims.get("gid") and not await grants.active(str(claims["gid"])):
+        raise TokenError("this client's access was ended by the user")
     return principal_for(await account_for_personal_claims(claims, backend))
 
 

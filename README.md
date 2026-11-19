@@ -80,7 +80,9 @@ you are looking at (the screen, its filters, the row you clicked), knows what th
 installation holds, queries your data read-only, follows the procedures the apps ship
 (playbooks), proposes new queries, dictionary items, screens and menu items that you
 apply with one click, and reads the server's jobs, log and integrity checks when the
-operator allows it. It answers for the signed-in user: each tool checks the permission
+operator allows it. Where the operator turns it on, it also changes data — a record
+through its screen, one of the screen's actions, a job run — proposed as a card you
+apply, with the screen's own rules; columns flagged sensitive are never sent. It answers for the signed-in user: each tool checks the permission
 the screens check, under the same row-level scope, and totals or rankings come from the
 Data Explorer models. Starter questions per app and screen, follow-up suggestions, a
 model picker, a conversation that stays; every question is recorded for the

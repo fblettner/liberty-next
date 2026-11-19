@@ -24,6 +24,7 @@ ProposalKind = Literal[
     "screen",              # add/replace a screen in screens.toml
     "menu_item",           # append a menu item to a [menus.<app>] tree
     "job_run",             # a nomaflow job run now for the user (liberty.ai.write_tools) — applied by POST /ai/job-run
+    "screen_write_many",   # several records of one screen, one operation (liberty.ai.write_tools) — applied by POST /ai/screen-write-many
     "screen_action",       # one action of a screen run on a record (liberty.ai.write_tools) — applied by POST /ai/screen-action
     "screen_write",        # one record added / changed / deleted through its screen (liberty.ai.write_tools) — applied by POST /ai/screen-write
     "note",                # a note the assistant keeps for the user (their own saved views, kind ai_note) — not configuration

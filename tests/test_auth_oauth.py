@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from liberty.auth.db import AuthDatabase
 from liberty.auth.routes import principal_from_personal_token
 from liberty.auth.service import AuthService
+from liberty.auth.tokens import TokenError
 from liberty.config import AISettings, AppSettings, AuthSettings, ConnectorSettings, Settings
 from liberty.connectors.config import PoolConfig
 from liberty.connectors.db import PoolRegistry
@@ -261,3 +262,37 @@ def test_the_authorize_address_is_the_applications_page(tmp_path) -> None:
     with TestClient(served, follow_redirects=False) as client:
         r = client.get("/oauth/authorize", params={"response_type": "code", "client_id": "x"})
         assert r.status_code == 200 and "the page" in r.text
+
+
+def test_a_user_sees_the_connected_clients_and_ends_one(app) -> None:
+    """The one thing of the sign-in that is stored: the consent of a user to a client, so it can
+    be listed and ended without changing the password — which would end every client."""
+    with TestClient(app) as client:
+        bob = _login(client, "bob", "bobpw-123")
+        claude, other = _register(client, name="Claude"), _register(client, name="Another")
+        first = _exchange(client, claude, _code(client, bob, claude)).json()
+        second = _exchange(client, other, _code(client, bob, other)).json()
+        who = lambda tok: asyncio.run(principal_from_personal_token(tok, app.state.token_service, app.state.auth_backend, app.state.oauth_grants))   # noqa: E731
+        assert who(first["access_token"]).username == "bob"
+
+        listed = client.get("/oauth/grants", headers=bob).json()
+        assert listed["available"] is True and sorted(g["client_name"] for g in listed["grants"]) == ["Another", "Claude"]
+        g = next(x for x in listed["grants"] if x["client_name"] == "Claude")
+        assert g["username"] == "bob" and g["expires_at"] > g["created_at"]
+
+        # another user neither sees nor ends it
+        carol = _login(client, "carol", "carolpw-123")
+        assert client.get("/oauth/grants", headers=carol).json()["grants"] == []
+        assert client.delete(f"/oauth/grants/{g['id']}", headers=carol).status_code == 404
+
+        # ended: the access token is refused at the next call, the refresh at its next use — the other client goes on
+        assert client.delete(f"/oauth/grants/{g['id']}", headers=bob).json() == {"revoked": True}
+        with pytest.raises(TokenError, match="ended by the user"):
+            who(first["access_token"])
+        assert _refresh(client, claude, first["refresh_token"]).json()["error"] == "invalid_grant"
+        assert who(second["access_token"]).username == "bob" and _refresh(client, other, second["refresh_token"]).status_code == 200
+        assert [x["client_name"] for x in client.get("/oauth/grants", headers=bob).json()["grants"]] == ["Another"]
+        assert client.delete(f"/oauth/grants/{g['id']}", headers=bob).status_code == 404          # already ended
+        # a token the user pasted (no sign-in) names no consent and is not concerned
+        pasted = client.post("/auth/tokens", json={"days": 1}, headers=bob).json()["token"]
+        assert who(pasted).username == "bob"

@@ -44,7 +44,7 @@ from liberty.auth.authstore import AuthBackend, UserRecord
 from liberty.auth.dependencies import CurrentPrincipal, get_auth_backend, get_token_service, require_permission
 from liberty.auth.principal import Principal
 from liberty.auth.routes import PERSONAL_TOKEN_PERMISSION, _password_fingerprint, account_for_personal_claims
-from liberty.auth.tokens import OAUTH_CLIENT, OAUTH_CODE, OAUTH_REFRESH, TokenError, TokenService
+from liberty.auth.tokens import OAUTH_CLIENT, OAUTH_CODE, OAUTH_REFRESH, PERSONAL, TokenError, TokenService
 
 router = APIRouter(tags=["oauth"])
 _log = logging.getLogger("liberty.auth")
@@ -276,15 +276,17 @@ def _pkce_matches(verifier: str, challenge_: str) -> bool:
     return hmac.compare_digest(digest, challenge_)
 
 
-def _grant(request: Request, tokens: TokenService, user: UserRecord, client_tag: str, deadline: int) -> JSONResponse:
+def _grant(request: Request, tokens: TokenService, user: UserRecord, client_tag: str, deadline: int, grant_id: str | None = None) -> JSONResponse:
     """The token answer: a personal access token of at most one hour and the next refresh
-    token, neither living past *deadline* — the day the consent ends."""
+    token, neither living past *deadline* — the day the consent ends. Both name the consent
+    they come from (*grant_id*, when the grants are stored): ending it ends them."""
     left = deadline - int(time.time())
     if left <= 0:
         return _oauth_error("invalid_grant", "the authorization has ended: sign in again")
     fingerprint = _password_fingerprint(user.password_hash)
-    access = tokens.personal_token(subject=user.id, password_fingerprint=fingerprint, ttl=min(ACCESS_TTL, left))
-    refresh = tokens.mint(OAUTH_REFRESH, {"sub": user.id, "pwf": fingerprint, "cid": client_tag, "dl": deadline}, left)
+    gid = {"gid": grant_id} if grant_id else {}
+    access = tokens.mint(PERSONAL, {"sub": user.id, "pwf": fingerprint, **gid}, min(ACCESS_TTL, left))
+    refresh = tokens.mint(OAUTH_REFRESH, {"sub": user.id, "pwf": fingerprint, "cid": client_tag, "dl": deadline, **gid}, left)
     return JSONResponse({
         "access_token": access.token, "token_type": "Bearer", "expires_in": access.expires_in,
         "refresh_token": refresh.token, "scope": SCOPE,
@@ -302,9 +304,11 @@ async def token(
     form = {k: v[0] for k, v in parse_qs((await request.body()).decode("utf-8", "replace")).items()}
     client_id = form.get("client_id", "")
     try:
-        _client(tokens, client_id)
+        client = _client(tokens, client_id)
     except TokenError as exc:
         return _oauth_error("invalid_client", f"unknown client: {exc}", 401)
+    grants = getattr(request.app.state, "oauth_grants", None)
+    grant_id: str | None = None
     tag = _client_tag(client_id)
     grant = form.get("grant_type", "")
     try:
@@ -318,11 +322,20 @@ async def token(
             user = await account_for_personal_claims(claims, backend)
             days = max(1, int(getattr(request.app.state.settings.ai, "mcp_token_max_days", 366) or 366))
             deadline = int(time.time()) + days * 86400
+            if grants is not None:
+                # the consent, kept so its user can see the client and end its access
+                try:
+                    grant_id = await grants.create(user_id=user.id, username=user.username, client_name=client["name"], expires_at=deadline)
+                except Exception as exc:  # noqa: BLE001 — the list is a convenience: the sign-in goes on without it
+                    _log.warning("OAuth: the grant of %s could not be stored (%s) — the client will not be listed", user.username, exc)
             _log.info("OAuth: access issued to %s through the sign-in (%d days)", user.username, days)
         elif grant == "refresh_token":
             claims = tokens.decode(form.get("refresh_token", ""), expected_type=OAUTH_REFRESH)
             if claims.get("cid") != tag:
                 raise TokenError("the refresh token was issued to another client")
+            grant_id = str(claims["gid"]) if claims.get("gid") else None
+            if grant_id and grants is not None and not await grants.active(grant_id, touch=True):
+                raise TokenError("this client's access was ended by the user")
             user = await account_for_personal_claims(claims, backend)
             tokens.consume_refresh(claims)
             deadline = int(claims.get("dl") or 0)
@@ -330,4 +343,29 @@ async def token(
             return _oauth_error("unsupported_grant_type", "authorization_code or refresh_token")
     except TokenError as exc:
         return _oauth_error("invalid_grant", str(exc))
-    return _grant(request, tokens, user, tag, deadline)
+    return _grant(request, tokens, user, tag, deadline, grant_id)
+
+
+# -- the clients a user connected ------------------------------------------------ #
+
+
+@router.get("/oauth/grants", summary="List my connected clients", dependencies=[Enabled])
+async def list_grants(request: Request, principal: CurrentPrincipal, everyone: bool = False) -> dict[str, Any]:
+    """The clients the caller connected through the sign-in and that still have access — each
+    with when it was connected, last used and the day its consent ends. An administrator may ask
+    for every user's (`everyone`)."""
+    grants = getattr(request.app.state, "oauth_grants", None)
+    if grants is None:
+        return {"grants": [], "available": False}
+    return {"grants": await grants.list_for(None if (everyone and principal.is_superuser) else principal.id), "available": True}
+
+
+@router.delete("/oauth/grants/{grant_id}", summary="End a client's access", dependencies=[Enabled])
+async def revoke_grant(grant_id: str, request: Request, principal: CurrentPrincipal) -> dict[str, Any]:
+    """End the access of one connected client: its refresh token is refused at its next use and
+    its access token at the next call. The caller's own client — any user's for an administrator."""
+    grants = getattr(request.app.state, "oauth_grants", None)
+    if grants is None or not await grants.revoke(grant_id, user_id=None if principal.is_superuser else principal.id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No such connected client")
+    _log.info("OAuth: %s ended the access of the client %s", principal.username, grant_id)
+    return {"revoked": True}

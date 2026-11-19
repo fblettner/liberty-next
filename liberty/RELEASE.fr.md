@@ -2,6 +2,24 @@
 
 ## 7.0.82 — non publiée
 
+- **Assistant IA : plusieurs enregistrements sur une seule carte — `screen_write_many`.** « Crée ces cinq
+  utilisateurs », « passe ces douze lignes au statut validé » : l'assistant propose une carte qui liste tous
+  les enregistrements (50 au plus, d'un même écran) au lieu d'une carte par enregistrement, et un seul
+  Appliquer les enregistre dans l'ordre, chacun exactement comme `screen_write` (règles, listes de valeurs,
+  hooks, audit, paquet de modifications, verrou d'enregistrement). Tous les enregistrements sont contrôlés avant
+  d'écrire le premier : si l'un est refusé, rien n'est écrit et la réponse dit lequel et pourquoi. Si une
+  écriture échoue malgré tout en cours de route, le traitement s'arrête là et indique combien sont écrits.
+  Même option et mêmes permissions que `screen_write`.
+- **MCP : les clients connectés par authentification sont listés, et l'on peut mettre fin à l'un d'eux.** Un
+  client connecté par OAuth (Claude Desktop, Claude Code, claude.ai) détenait des jetons que personne ne
+  pouvait reprendre, sauf à changer le mot de passe — ce qui les terminait tous. Chaque consentement est
+  désormais enregistré (`ly2_oauth_grant`, sur le pool d'authentification : le nom du client, la date de
+  connexion, le dernier usage, le jour de fin — jamais un jeton) : Profil → Jetons d'accès liste les vôtres
+  avec **Mettre fin à l'accès**, refusé dès l'appel suivant du client (`GET /oauth/grants`,
+  `DELETE /oauth/grants/{id}` ; un super-utilisateur voit ceux de tous avec `?everyone=1`). Un client connecté
+  avant cette version continue de fonctionner jusqu'à la fin de son accès, sans figurer dans la liste ; se
+  reconnecter pour l'y voir.
+
 - **MCP : plusieurs serveurs Liberty dans un même Claude Desktop.** Claude Desktop distingue les extensions par
   leur nom, et toutes les extensions Liberty portaient le même : installer l'extension d'un second serveur
   (production et test, un autre client) remplaçait la première. L'extension porte désormais le nom de son

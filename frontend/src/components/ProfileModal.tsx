@@ -125,6 +125,25 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
   const mayToken = !!user && (user.is_superuser || hasPermission(user.permissions ?? [], 'mcp:use'))
   const mcpUrl = new URL(resolveApiPath('/mcp'), window.location.origin).href
 
+  // The clients connected through the sign-in (Claude by OAuth): listed so one can be ended
+  // without changing the password, which would end them all.
+  const [grants, setGrants] = useState<{ id: string; client_name: string; last_used_at: number | null; created_at: number }[]>([])
+  const loadGrants = useCallback(() => {
+    api.get<{ grants: { id: string; client_name: string; last_used_at: number | null; created_at: number }[] }>('/oauth/grants')
+      .then((r) => setGrants(r.grants ?? []))
+      .catch(() => setGrants([]))          // the MCP endpoint is off, or the list is not kept: nothing to show
+  }, [])
+  useEffect(() => { if (mayToken) loadGrants() }, [mayToken, loadGrants])
+  const endGrant = async (id: string) => {
+    setError(null)
+    try {
+      await api.del(`/oauth/grants/${encodeURIComponent(id)}`)
+      loadGrants()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    }
+  }
+
   const downloadExtension = async () => {
     setError(null)
     try {
@@ -227,6 +246,17 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
                 </Field>
               )}
               <Note>{t('profile.tokenEnds')}</Note>
+              {grants.length > 0 && (
+                <Field>
+                  <FieldLabel>{t('profile.clientsTitle')}</FieldLabel>
+                  {grants.map((g) => (
+                    <ReadRow key={g.id}>
+                      <span className="k">{g.client_name} · {t('profile.clientLastUsed', { date: new Date((g.last_used_at ?? g.created_at) * 1000).toLocaleDateString() })}</span>
+                      <span className="v"><Button $size="sm" $variant="ghost" onClick={() => void endGrant(g.id)}>{t('profile.clientRevoke')}</Button></span>
+                    </ReadRow>
+                  ))}
+                </Field>
+              )}
               {/* Claude Desktop from this machine, for a server that is not on the internet: the file holds
                   this address and no secret; the token is pasted in the extension's settings. */}
               <div>

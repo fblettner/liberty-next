@@ -27,7 +27,7 @@ export interface ChatEvent {
 /** What a scaffold tool proposes — rendered as an Apply card in the chat. The kinds match
  *  liberty.ai.proposal.ProposalKind; the apply endpoint dispatches by `kind`. */
 export interface Proposal {
-  kind: 'dictionary_entries' | 'connector_queries' | 'screen' | 'menu_item' | 'note' | 'screen_write' | 'screen_action' | 'job_run'
+  kind: 'dictionary_entries' | 'connector_queries' | 'screen' | 'menu_item' | 'note' | 'screen_write' | 'screen_write_many' | 'screen_action' | 'job_run'
   summary: string
   target_path: string
   payload: Record<string, unknown>
