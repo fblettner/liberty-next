@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Callable
 
@@ -227,6 +228,67 @@ def endpoint(app: Any) -> Any:
                         [(b"www-authenticate", challenge(Request(scope), error="invalid_token").encode())])
             return
         scope[SCOPE_KEY] = who
+        if scope.get("method") == "POST" and str(scope.get("path") or "").rstrip("/").endswith("/files"):
+            await receive_file(scope, receive, send, who)
+            return
         await manager.handle_request(scope, receive, send)
+
+    async def receive_file(scope: Any, receive: Any, send: Any, who: Principal) -> None:
+        """``POST /mcp/files?job=<id>&filename=<name>`` — the body is a file the Claude Desktop
+        extension read from the folder its user chose, for a job that loads one. It lands in the
+        job's own upload area, as the job page's upload does (the same kinds of file, the same
+        size limit); nothing runs — ``job_run`` then names it. The caller needs what running the
+        job needs, and the server must allow changes over MCP."""
+        from urllib.parse import parse_qs
+
+        from liberty.jobs.files import UPLOAD_SUFFIXES, upload_target
+
+        state = app.state
+        ai = state.settings.ai
+        q = {k: v[0] for k, v in parse_qs((scope.get("query_string") or b"").decode("latin-1")).items()}
+        job_id, filename = (q.get("job") or "").strip(), (q.get("filename") or "").strip()
+        if not getattr(ai, "write_tools", False) or not getattr(ai, "mcp_changes", False):
+            await reply(send, 403, "Changes over MCP are off on this server: a file cannot be sent from an external client.")
+            return
+        if not who.has_permission("ai:write") or not who.has_permission(f"job:{job_id}"):
+            await reply(send, 403, f"The signed-in user may not run the job {job_id or '(none)'} (ai:write and job:{job_id}).")
+            return
+        comps = getattr(state, "jobs", None)
+        try:
+            job = comps.registry.get(job_id) if comps is not None else None
+        except Exception:  # noqa: BLE001 — an unknown job
+            job = None
+        from liberty.web.jobs import _upload_steps
+        if job is None or not _upload_steps(job):
+            await reply(send, 404, f"The job {job_id or '(none)'} takes no file.")
+            return
+        suffix = Path(filename).suffix.lower()
+        if not filename or suffix not in UPLOAD_SUFFIXES:
+            await reply(send, 400, f"Unsupported file type {suffix or '(none)'}: {', '.join(sorted(UPLOAD_SUFFIXES))}.")
+            return
+        limit = state.settings.jobs.max_upload_mb * 1024 * 1024
+        target = upload_target(state.settings, job_id, filename)
+        size, more = 0, True
+        with target.open("wb") as fh:
+            while more:
+                message = await receive()
+                if message["type"] != "http.request":
+                    break
+                chunk = message.get("body", b"")
+                size += len(chunk)
+                if size > limit:
+                    fh.close()
+                    target.unlink(missing_ok=True)
+                    await reply(send, 413, f"The file exceeds {state.settings.jobs.max_upload_mb} MB.")
+                    return
+                fh.write(chunk)
+                more = message.get("more_body", False)
+        _log.info("MCP upload job=%s by=%s file=%s size=%d", job_id, who.username, target.name, size)
+        steps = [u["step"] for u in _upload_steps(job)]
+        body = json.dumps({"job": job_id, "file": target.name, "size": size, "steps_that_take_a_file": steps,
+                           "next": f"job_run with files = {{\"{steps[0]}\": \"{target.name}\"}}"}).encode()
+        await send({"type": "http.response.start", "status": 200,
+                    "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
 
     return serve

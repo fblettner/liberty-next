@@ -27,14 +27,17 @@ async def get_usage(
     request: Request, _: Superuser,
     days: Annotated[int, Query(ge=1, le=366)] = 30,
     username: str | None = None,
+    channel: Annotated[str | None, Query(pattern="^(chat|mcp|apply)$")] = None,
+    failed: bool = False,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> dict[str, Any]:
-    """``summary`` — totals and the breakdowns per user, day, model and tool over the last
-    *days*; ``recent`` — the latest turns (*username* narrows them), each with its tool calls.
-    ``retention_days`` is ``[ai] usage_retention_days``."""
+    """``summary`` — totals and the breakdowns per user, day, model, channel and tool over the
+    last *days*, an estimated cost at list price, and the changes made through the assistant;
+    ``recent`` — the latest turns (*username*, *channel* and *failed* narrow them), each with its
+    tool calls. ``retention_days`` is ``[ai] usage_retention_days``."""
     store = _store(request)
     return {
         "summary": await store.summary(days=days),
-        "recent": await store.recent(days=days, limit=limit, username=username),
+        "recent": await store.recent(days=days, limit=limit, username=username, channel=channel, failed=failed),
         "retention_days": int(getattr(request.app.state.settings.ai, "usage_retention_days", 0) or 0),
     }

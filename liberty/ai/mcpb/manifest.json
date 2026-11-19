@@ -18,7 +18,8 @@
       "env": {
         "LIBERTY_URL": "${user_config.server_url}",
         "LIBERTY_TOKEN": "${user_config.token}",
-        "LIBERTY_INSECURE": "${user_config.internal_certificate}"
+        "LIBERTY_INSECURE": "${user_config.internal_certificate}",
+        "LIBERTY_FOLDER": "${user_config.files_folder}"
       }
     }
   },
@@ -37,6 +38,12 @@
       "description": "Created in Liberty: your profile, tab Access tokens.",
       "sensitive": true,
       "required": true
+    },
+    "files_folder": {
+      "type": "directory",
+      "title": "Files folder",
+      "description": "Optional. Claude can send Liberty the spreadsheets and delimited files of this folder, and of no other, for a job that loads a file, when you ask it to.",
+      "required": false
     },
     "internal_certificate": {
       "type": "boolean",

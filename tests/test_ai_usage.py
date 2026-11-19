@@ -223,3 +223,45 @@ def test_a_store_that_fails_never_breaks_the_chat(app) -> None:
         app.state.ai_usage = Broken()
         r = client.post("/ai/chat", json={"messages": [{"role": "user", "content": "hi"}]}, headers=_h(client, "bob", "bobpw-123"))
         assert r.status_code == 200 and r.text.rstrip().endswith("data: [DONE]")
+
+
+@pytest.mark.asyncio
+async def test_the_summary_tells_channels_cost_and_changes(tmp_path) -> None:
+    """A model is what answered a question of the chat: an MCP tool call and an applied card are
+    counted per channel, not as models. The cost is an estimate at list price; the changes are
+    the cards applied and the saving tools called over MCP."""
+    from liberty.ai.catalog import estimate_cost, price_of
+
+    pools = PoolRegistry({"default": PoolConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'u.db'}")})
+    store = AiUsageStore(pools, "default")
+    await store.create_schema()
+    try:
+        usage = {"input_tokens": 1_000_000, "output_tokens": 100_000, "cache_read_input_tokens": 2_000_000, "cache_creation_input_tokens": 0}
+        await store.record(_turn(TurnRecorder(username="bob", model="claude-opus-5-5", app="shop"), tools=[("sql_query", True)], usage=usage))
+        await store.record(_turn(TurnRecorder(username="bob", model="claude-opus-5-5"), tools=[("screen_write", True)]))          # a proposal in the chat: not a change
+        await store.record(_turn(TurnRecorder(username="bob", model="some-unlisted-model"), usage={"input_tokens": 500, "output_tokens": 5}))
+        await store.record(_turn(TurnRecorder(username="ann", model="mcp", channel="mcp"), tools=[("sql_query", True)]))
+        await store.record(_turn(TurnRecorder(username="ann", model="mcp", channel="mcp"), tools=[("screen_write", False)]))
+        await store.record(_turn(TurnRecorder(username="bob", model="apply", channel="apply", app="shop"), tools=[("job_run", True)]))
+
+        s = await store.summary(days=7)
+        # the models: the chat's only
+        assert [m["model"] for m in s["by_model"]] == ["claude-opus-5-5", "some-unlisted-model"]
+        assert {c["channel"]: c["turns"] for c in s["by_channel"]} == {"chat": 3, "mcp": 2, "apply": 1}
+        # the estimate: 1 M input at $4, 2 M read from the cache at $0.20, 0.1 M output at $20
+        assert price_of("claude-haiku-4-5-20251001") == (1.0, 5.0, 0.10) and price_of("nope") is None
+        assert estimate_cost("claude-opus-5-5", input_tokens=1_000_000, output_tokens=100_000, cache_read_tokens=2_000_000, cache_creation_tokens=0) == pytest.approx(6.4)
+        by_model = {m["model"]: m for m in s["by_model"]}
+        assert by_model["claude-opus-5-5"]["cost"] == pytest.approx(6.4) and by_model["some-unlisted-model"]["cost"] is None
+        assert s["totals"]["cost"] == pytest.approx(6.4) and s["unpriced"] == ["some-unlisted-model"]
+        assert {c["channel"]: c["cost"] for c in s["by_channel"]}["mcp"] == 0
+        # the changes, newest first: the card applied, the saving tool over MCP — not the chat's proposal, not a read
+        assert [(c["username"], c["channel"], c["tool"], c["ok"]) for c in s["changes"]] == [("bob", "apply", "job_run", True), ("ann", "mcp", "screen_write", False)]
+        assert s["changes"][1]["error"] and s["changes"][0]["app"] == "shop"
+
+        # the latest turns narrow to a channel, or to the failures
+        assert {r["channel"] for r in await store.recent(days=7, channel="mcp")} == {"mcp"}
+        failed = await store.recent(days=7, failed=True)
+        assert len(failed) == 1 and failed[0]["username"] == "ann" and failed[0]["tool_errors"] == 1
+    finally:
+        await pools.dispose()

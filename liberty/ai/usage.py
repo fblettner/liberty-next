@@ -35,6 +35,9 @@ CHANNEL_MCP = "mcp"
 # itself — the turn that proposed it only recorded a proposal. With the MCP rows of the same tools,
 # this is the list of what was changed through the assistant, by whom and on which record.
 CHANNEL_APPLY = "apply"
+# The tools that save something: called over MCP they ARE the change (in the chat they propose).
+CHANGE_TOOLS = frozenset({"screen_write", "screen_action", "job_run", "explorer_save_analysis", "explorer_save_dashboard"})
+CHANGES_MAX = 200       # the most changes the summary lists (the newest)
 
 _SUMMARY_MAX = 200     # a tool's input summary, as kept
 _ERROR_MAX = 300
@@ -197,27 +200,45 @@ class AiUsageStore:
                 await s.rollback()
             return n
 
-    async def recent(self, *, days: int, limit: int = 100, username: str | None = None) -> list[dict[str, Any]]:
+    async def recent(
+        self, *, days: int, limit: int = 100, username: str | None = None, channel: str | None = None, failed: bool = False,
+    ) -> list[dict[str, Any]]:
+        """The latest turns, newest first — narrowed to a user, a channel, or the ones with a
+        failure (the turn itself, or one of its tool calls)."""
         stmt = select(AiCall).where(AiCall.at >= _utcnow() - timedelta(days=days))
         if username:
             stmt = stmt.where(AiCall.username == username)
+        if channel:
+            stmt = stmt.where(AiCall.channel == channel)
+        if failed:
+            stmt = stmt.where((AiCall.tool_errors > 0) | (AiCall.error.is_not(None)))
         stmt = stmt.order_by(AiCall.at.desc()).limit(max(1, min(limit, 500)))
         async with self.session() as s:
             return [r.to_dict() for r in (await s.execute(stmt)).scalars().all()]
 
     async def summary(self, *, days: int) -> dict[str, Any]:
-        """The period in figures: totals, per user, per day, per model, per tool. Aggregated
-        here, not in SQL: the per-tool figures live in a JSON column and the day is the
-        server's date — the same code on every database. A period is a few thousand rows."""
+        """The period in figures: totals, per user, per day, per model, per channel, per tool,
+        and what was changed through the assistant. Aggregated here, not in SQL: the per-tool
+        figures live in a JSON column and the day is the server's date — the same code on every
+        database. A period is a few thousand rows.
+
+        A *model* is what answered a question of the chat: the rows of the other channels (a tool
+        called over MCP, a card applied) carry no model and no tokens — they are counted per
+        channel, not as models. ``cost`` is an estimate at list price (:mod:`liberty.ai.catalog`),
+        None in a bucket holding a model without a listed price (``unpriced`` names them)."""
+        from liberty.ai.catalog import estimate_cost
+
         since = _utcnow() - timedelta(days=days)
         async with self.session() as s:
-            rows = (await s.execute(select(AiCall).where(AiCall.at >= since))).scalars().all()
+            rows = (await s.execute(select(AiCall).where(AiCall.at >= since).order_by(AiCall.at.desc()))).scalars().all()
 
-        def bucket() -> dict[str, int]:
+        def bucket() -> dict[str, Any]:
             return {"turns": 0, "input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0, "cache_creation_tokens": 0,
-                    "tool_calls": 0, "tool_errors": 0, "errors": 0, "duration_ms": 0}
+                    "tool_calls": 0, "tool_errors": 0, "errors": 0, "duration_ms": 0, "cost": 0.0}
 
-        def add(b: dict[str, int], r: AiCall) -> None:
+        unpriced: set[str] = set()
+
+        def add(b: dict[str, Any], r: AiCall, cost: float | None) -> None:
             b["turns"] += 1
             b["input_tokens"] += r.input_tokens
             b["output_tokens"] += r.output_tokens
@@ -227,31 +248,61 @@ class AiUsageStore:
             b["tool_errors"] += r.tool_errors
             b["errors"] += 1 if r.error else 0
             b["duration_ms"] += r.duration_ms
+            if cost is None:
+                b["unpriced"] = True
+            else:
+                b["cost"] += cost
 
         totals = bucket()
-        by_user: dict[str, dict[str, int]] = {}
-        by_day: dict[str, dict[str, int]] = {}
-        by_model: dict[str, dict[str, int]] = {}
+        by_user: dict[str, dict[str, Any]] = {}
+        by_day: dict[str, dict[str, Any]] = {}
+        by_model: dict[str, dict[str, Any]] = {}
+        by_channel: dict[str, dict[str, Any]] = {}
         by_tool: dict[str, dict[str, int]] = {}
+        changes: list[dict[str, Any]] = []
         for r in rows:
-            add(totals, r)
-            add(by_user.setdefault(r.username, bucket()), r)
-            add(by_day.setdefault(r.at.date().isoformat() if r.at else "", bucket()), r)
-            add(by_model.setdefault(r.model, bucket()), r)
+            chat = r.channel == CHANNEL_CHAT
+            tokens = r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_creation_tokens
+            cost: float | None = 0.0
+            if chat and tokens:
+                cost = estimate_cost(r.model, input_tokens=r.input_tokens, output_tokens=r.output_tokens,
+                                     cache_read_tokens=r.cache_read_tokens, cache_creation_tokens=r.cache_creation_tokens)
+                if cost is None:
+                    unpriced.add(r.model)
+            add(totals, r, cost)
+            add(by_user.setdefault(r.username, bucket()), r, cost)
+            add(by_day.setdefault(r.at.date().isoformat() if r.at else "", bucket()), r, cost)
+            add(by_channel.setdefault(r.channel or CHANNEL_CHAT, bucket()), r, cost)
+            if chat:
+                add(by_model.setdefault(r.model, bucket()), r, cost)
             for call in r.tools or []:
-                t = by_tool.setdefault(str(call.get("name") or ""), {"calls": 0, "errors": 0, "ms": 0, "chars": 0})
+                name = str(call.get("name") or "")
+                t = by_tool.setdefault(name, {"calls": 0, "errors": 0, "ms": 0, "chars": 0})
                 t["calls"] += 1
                 t["errors"] += 1 if call.get("ok") is False else 0
                 t["ms"] += int(call.get("ms") or 0)
                 t["chars"] += int(call.get("chars") or 0)
+                # a change made through the assistant: a card the user applied, or a tool that
+                # saves called over MCP (in the chat such a call only proposes)
+                if len(changes) < CHANGES_MAX and (r.channel == CHANNEL_APPLY or (r.channel == CHANNEL_MCP and name in CHANGE_TOOLS)):
+                    changes.append({"at": r.at.isoformat() if r.at else None, "username": r.username, "channel": r.channel, "app": r.app,
+                                    "tool": name, "what": str(call.get("input") or ""), "ok": call.get("ok"),
+                                    **({"error": call["error"]} if call.get("error") else {})})
 
-        def listed(d: dict[str, dict[str, int]], key: str, order: str, *, reverse: bool = True) -> list[dict[str, Any]]:
-            return [{key: k, **v} for k, v in sorted(d.items(), key=lambda kv: kv[1][order] if order in kv[1] else kv[0], reverse=reverse)]
+        def finish(b: dict[str, Any]) -> dict[str, Any]:
+            return {**b, "cost": None if b.pop("unpriced", False) and not b["cost"] else round(b["cost"], 4)}
+
+        def listed(d: dict[str, dict[str, Any]], key: str, order: str, *, reverse: bool = True) -> list[dict[str, Any]]:
+            return [{key: k, **(finish(v) if "cost" in v else v)}
+                    for k, v in sorted(d.items(), key=lambda kv: kv[1][order] if order in kv[1] else kv[0], reverse=reverse)]
 
         return {
-            "days": days, "totals": totals,
+            "days": days, "totals": finish(totals),
             "by_user": listed(by_user, "username", "input_tokens"),
-            "by_day": [{"day": k, **v} for k, v in sorted(by_day.items())],
+            "by_day": [{"day": k, **finish(v)} for k, v in sorted(by_day.items())],
             "by_model": listed(by_model, "model", "input_tokens"),
+            "by_channel": listed(by_channel, "channel", "turns"),
             "by_tool": listed(by_tool, "name", "calls"),
+            "changes": changes,
+            "unpriced": sorted(unpriced),
         }

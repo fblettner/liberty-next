@@ -20,9 +20,28 @@
   l'exécution est mise en file et se poursuit en arrière-plan, et `job_form` la suit. Une tâche qui
   charge un fichier apporté par l'utilisateur le demande **sur la carte** : un sélecteur par étape de fichier, les
   types de fichier acceptés par le dépôt de la tâche ; Appliquer envoie le fichier par le dépôt de la tâche et
-  lance la tâche avec — le fichier ne passe jamais par le modèle. Depuis un autre client (MCP), une telle tâche
-  ne peut pas encore recevoir son fichier. Tracé comme les
+  lance la tâche avec — le fichier ne passe jamais par le modèle. Depuis Claude Desktop, le fichier vient
+  du dossier de l'extension (ci-dessous).
+- **Extension Claude Desktop : envoyer un fichier pour une tâche.** Un nouveau réglage facultatif de l'extension,
+  **Dossier de fichiers** : avec lui l'extension propose deux outils qui s'exécutent sur l'ordinateur de
+  l'utilisateur — `local_files` (les classeurs et fichiers délimités de ce dossier, et d'aucun autre) et
+  `send_file` (l'un d'eux vers Liberty, pour une tâche) — et `job_run` nomme ensuite le fichier. Le fichier arrive
+  dans la zone de dépôt de la tâche (`POST /mcp/files`, le jeton personnel ; les mêmes types de fichier et la
+  même limite de taille que la page de la tâche ; `ai:write`, `job:<id>` et `[ai] mcp_changes`). Rien ne
+  s'exécute au dépôt. Téléchargez de nouveau l'extension pour obtenir le réglage. Pas pour le connecteur par
+  connexion, qui n'a pas accès au disque de l'utilisateur. Tracé comme les
   autres modifications (canal `apply`) ; en MCP, il faut `[ai] mcp_changes`.
+- **Supervision → Usage de l'IA, refondu.**
+  - *Coût* : une estimation au prix public (USD) sur la période, par utilisateur, par jour et par modèle — un
+    modèle sans prix connu est écarté et nommé. Les prix sont ceux de la version (`liberty/ai/catalog.py`).
+  - *Canaux distincts des modèles* : un outil appelé en MCP et une carte appliquée apparaissaient comme des
+    modèles nommés « mcp » et « apply ». « Par modèle » contient désormais ce qui a répondu aux questions du chat,
+    et un nouveau panneau « Par canal » compte le chat, les clients externes et les cartes appliquées.
+  - *Modifications faites par l'assistant* : un panneau les liste — qui, quand, par quel canal, quoi (l'écran,
+    l'opération, la clé de l'enregistrement, la tâche) et la raison d'un refus.
+  - *Dernière activité* : une série d'appels d'outils MCP d'un même utilisateur tient en une ligne (c'était une
+    ligne par appel), ses appels s'affichant à l'ouverture ; un filtre par canal et « échecs seulement ».
+  - Six panneaux sur deux colonnes, sans demi-ligne vide.
 - **Données sensibles, corrections** (trouvées en rédigeant la documentation) :
   - les messages des actions qu'un écran exécute après une écriture (`on_insert`…) étaient remplis avec les
     valeurs sensibles ; ils sont masqués comme ceux d'une action ;

@@ -26,7 +26,7 @@ from liberty.main import create_app
 from tests import test_web_jobs as jobs_fixture
 
 
-def _app(tmp_path, *, write_tools: bool = True):
+def _app(tmp_path, *, write_tools: bool = True, mcp_changes: bool = True):
     db_url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
     (tmp_path / "connectors.toml").write_text(jobs_fixture._CONNECTORS_TOML.format(db_url=db_url))
     (tmp_path / "jobs.toml").write_text(jobs_fixture._JOBS_TOML)
@@ -36,8 +36,8 @@ def _app(tmp_path, *, write_tools: bool = True):
         pools = PoolRegistry({"default": PoolConfig(url=db_url)})
         async with AuthDatabase(pools, "default").session() as s:
             svc = AuthService(s)
-            await svc.get_or_create_role("runner", permissions=["ai:chat", "ai:write", "job:pick-app", "job:load-file"])
-            await svc.get_or_create_role("writer_only", permissions=["ai:chat", "ai:write"])
+            await svc.get_or_create_role("runner", permissions=["ai:chat", "ai:write", "mcp:use", "job:pick-app", "job:load-file"])
+            await svc.get_or_create_role("writer_only", permissions=["ai:chat", "ai:write", "mcp:use"])
             await svc.create_user("runner", password="runnerpw", roles=["runner"])
             await svc.create_user("writer_only", password="writer_onlypw", roles=["writer_only"])
         await pools.dispose()
@@ -48,7 +48,7 @@ def _app(tmp_path, *, write_tools: bool = True):
         menus=MenuSettings(config_path=tmp_path / "menus.toml"), screens=ScreenSettings(config_path=tmp_path / "screens.toml"),
         charts=ChartSettings(config_path=tmp_path / "charts.toml"), dashboards=DashboardSettings(config_path=tmp_path / "dashboards.toml"),
         auth=AuthSettings(backend="db", jwt_secret="job-tools-test-secret-0123456789abcdefgh", pool="default"),
-        ai=AISettings(enabled=True, api_key="", config_path=tmp_path / "ai.toml", write_tools=write_tools),
+        ai=AISettings(enabled=True, api_key="", config_path=tmp_path / "ai.toml", write_tools=write_tools, mcp_enabled=True, mcp_changes=mcp_changes),
         jobs=JobsSettings(config_path=Path(tmp_path / "jobs.toml"), pool="default"),
     ))
 
@@ -170,3 +170,41 @@ def test_the_job_tools_follow_the_write_switch(tmp_path) -> None:
     with TestClient(_app(tmp_path, write_tools=False)) as client:
         assert client.post("/ai/job-run", json={"job": "pick-app"}, headers=_h(client, "runner")).status_code == 404
         assert client.app.state.ai.tools.get("job_run") is None
+
+
+def test_a_file_sent_by_the_claude_desktop_extension(tmp_path) -> None:
+    """`POST /mcp/files`: the extension sends a file of the folder its user chose, with the user's
+    personal token; it lands in the job's upload area and `job_run` then names it. Nothing runs
+    on the upload; the caller needs what running the job needs; changes over MCP must be allowed."""
+    import pytest
+    pytest.importorskip("mcp")
+    content = b"code,name\nA,Alpha\n"
+    with TestClient(_app(tmp_path)) as client:
+        def token(user: str) -> dict[str, str]:
+            t = client.post("/auth/tokens", json={"days": 1}, headers=_h(client, user)).json()["token"]
+            return {"Authorization": f"Bearer {t}"}
+
+        send = lambda user, **q: client.post("/mcp/files", params=q, content=content, headers=token(user))   # noqa: E731
+        r = send("runner", job="load-file", filename="items.csv")
+        assert r.status_code == 200, r.text
+        out = r.json()
+        assert out["job"] == "load-file" and out["file"].endswith("-items.csv") and out["size"] == len(content) and out["steps_that_take_a_file"] == ["load"]
+        assert _tool(client, "runner", "job_form", {"job": "load-file"})[0]["last_runs"] == []            # nothing ran
+        # the run names the file by the name the upload returned
+        ran, err = _tool(client, "runner", "job_run", {"job": "load-file", "files": {"load": out["file"]}}, channel="mcp")
+        assert not err and ran["ran"] is True, ran
+        d = _wait(client, "runner", "load-file", ran["run_id"])
+        assert d["inputs"] == [{"step": "load", "name": "items.csv", "size": len(content)}]
+        # a name that is not a file of this job's uploads is refused, as on the job page
+        bad, err = _tool(client, "runner", "job_run", {"job": "load-file", "files": {"load": "nope.csv"}}, channel="mcp")
+        assert err and "upload the file first" in bad["error"]
+        # the refusals of the upload itself
+        assert send("runner", job="load-file", filename="x.exe").status_code == 400
+        assert send("runner", job="pick-app", filename="items.csv").status_code == 404                     # the job takes no file
+        assert send("writer_only", job="load-file", filename="items.csv").status_code == 403               # not allowed to run it
+        assert client.post("/mcp/files", params={"job": "load-file", "filename": "items.csv"}, content=content).status_code == 401
+    (tmp_path / "off").mkdir()
+    with TestClient(_app(tmp_path / "off", mcp_changes=False)) as client:
+        t = client.post("/auth/tokens", json={"days": 1}, headers=_h(client, "runner")).json()["token"]
+        r = client.post("/mcp/files", params={"job": "load-file", "filename": "items.csv"}, content=content, headers={"Authorization": f"Bearer {t}"})
+        assert r.status_code == 403 and "Changes over MCP are off" in r.json()["detail"]

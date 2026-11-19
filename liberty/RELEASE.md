@@ -18,8 +18,27 @@
   the chat it is a card; the run is queued and goes on in the background, and `job_form` follows it. A job that
   loads a file the user brings asks for it **on the card**: one picker per file step, the kinds of file the
   job's upload takes; Apply sends the file through the job's own upload and runs the job with it — the file
-  never goes through the model. From another client (MCP) such a job cannot be given its file yet. Recorded like the other
+  never goes through the model. From Claude Desktop the file comes from the
+  extension's folder (below).
+- **Claude Desktop extension: send a file for a job.** A new optional setting of the extension, **Files folder**:
+  with it the extension offers two tools that run on the user's own computer — `local_files` (the spreadsheets
+  and delimited files of that folder, and of no other) and `send_file` (one of them to Liberty, for a job) — and
+  `job_run` then names the file. The file lands in the job's own upload area (`POST /mcp/files`, the personal
+  token; the same kinds of file and size limit as the job page; `ai:write`, `job:<id>` and `[ai] mcp_changes`).
+  Nothing runs on the upload. Download the extension again to get the setting. Not for the connector by sign-in,
+  which has no access to the user's disk. Recorded like the other
   changes (the `apply` channel); over MCP it needs `[ai] mcp_changes`.
+- **Monitoring → AI usage, reworked.**
+  - *Cost*: an estimate at list price (USD) on the period, per user, per day and per model — a model without a
+    listed price is left out and named. The prices are those of the release (`liberty/ai/catalog.py`).
+  - *Channels apart from models*: a tool called over MCP and a card applied were listed as models named "mcp"
+    and "apply". "By model" now holds what answered the chat's questions, and a new "By channel" panel counts
+    the chat, the external clients and the applied cards.
+  - *Changes made through the assistant*: a panel lists them — who, when, by which channel, what (the screen,
+    the operation, the record's key, the job) and the reason of a refusal.
+  - *Latest activity*: a run of MCP tool calls by one user is one line (it was one line per call), its calls
+    shown when opened; a filter per channel and "failures only".
+  - Six panels in two columns, none leaving half a row empty.
 - **Sensitive data, corrections** (found while writing the documentation):
   - the messages of the actions a screen runs after a write (`on_insert`…) were filled with the sensitive values;
     they are masked like an action's;

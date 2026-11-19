@@ -175,6 +175,11 @@ async def perform_job_run(
     info = page["job"]
     needs = list(info.get("uploads") or [])
     files = {str(k): str(v) for k, v in (files or {}).items()}
+    # a bare name is a file of this job's upload area (what an upload from Claude Desktop returns)
+    from liberty.jobs.files import job_dir, safe_name
+    for step, value in list(files.items()):
+        if "/" not in value and "\\" not in value:
+            files[step] = str(job_dir(state.settings, job) / "uploads" / safe_name(value))
     stray = sorted(s for s in files if s not in {u["step"] for u in needs})
     if stray:
         raise ScreenWriteError(f"{', '.join(stray)}: not a step of the job {job} that takes a file")
@@ -197,7 +202,8 @@ async def perform_job_run(
     if lacking:
         raise ScreenWriteError(
             f"the job {job} needs a file for: {', '.join(lacking)} ({', '.join(sorted(UPLOAD_SUFFIXES))}). In the Liberty chat the user "
-            "chooses it on the card; from another client it cannot be sent yet — the user runs the job from its page in Liberty.")
+            "chooses it on the card. From Claude Desktop with the Liberty extension: local_files, then send_file, then job_run with "
+            "`files`. Without either, the user runs the job from its page in Liberty.")
     try:
         out = await user_run(job, _job_request(state), principal, {
             "params": dict(params or {}), **({"preset": preset} if preset else {}), **({"files": files} if files else {})})
@@ -469,7 +475,7 @@ def build_write_tools(state: Callable[[], Any]) -> list[Tool]:
             job: the job id.
             params: {name: value} among the parameters job_form lists; leave one out for the job's own default.
             preset: one of the job's presets (job_form → presets), applied under the params.
-            files: {step: uploaded file} for a step that loads a file — only a path an upload of this job returned; not used in the Liberty chat (the card asks).
+            files: {step: file name} for a step that loads a file — the name send_file returned for this job; not used in the Liberty chat (the card asks).
         """
         who = caller()
         if who is None:

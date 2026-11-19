@@ -25,7 +25,8 @@ def test_the_file_holds_the_manifest_the_bridge_and_the_icon() -> None:
     assert manifest["version"] == "7.0.80" and manifest["user_config"]["server_url"]["default"] == "https://liberty.intra:8443/app/mcp"
     assert manifest["name"] == "liberty-next-liberty-intra-8443" and manifest["display_name"] == "Liberty Next – liberty.intra:8443"
     assert manifest["server"]["entry_point"] == "server/index.js" and manifest["user_config"]["token"]["sensitive"] is True
-    assert set(manifest["server"]["mcp_config"]["env"]) == {"LIBERTY_URL", "LIBERTY_TOKEN", "LIBERTY_INSECURE"}
+    assert set(manifest["server"]["mcp_config"]["env"]) == {"LIBERTY_URL", "LIBERTY_TOKEN", "LIBERTY_INSECURE", "LIBERTY_FOLDER"}
+    assert manifest["user_config"]["files_folder"]["type"] == "directory" and manifest["user_config"]["files_folder"]["required"] is False
     assert zf.read("icon.png")[:4] == b"\x89PNG" and b"LIBERTY_TOKEN" in zf.read("server/index.js")
     # a development build has no release number; an address that is not one is left for the user to type
     for address in (None, "", "javascript:alert(1)", 'https://x" , "y', "ftp://x"):
@@ -74,12 +75,19 @@ class _Mcp(BaseHTTPRequestHandler):
     seen: list[dict] = []
 
     def do_POST(self) -> None:  # noqa: N802
-        message = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        raw = self.rfile.read(int(self.headers["Content-Length"]))
+        if self.path.split("?")[0].endswith("/files"):                 # a file sent by the extension
+            type(self).seen.append({"path": self.path, "auth": self.headers.get("Authorization"), "file": raw})
+            self._send(200, {"job": "load-file", "file": "20260101-000000-items.csv", "size": len(raw)})
+            return
+        message = json.loads(raw)
         type(self).seen.append({"path": self.path, "auth": self.headers.get("Authorization"), "message": message})
         if self.headers.get("Authorization") != "Bearer good":
             self._send(401, {"detail": "Invalid access token: token expired"})
         elif "id" not in message:
             self._send(202, None)
+        elif message["method"] == "tools/list":
+            self._send(200, {"jsonrpc": "2.0", "id": message["id"], "result": {"tools": [{"name": "job_run"}]}})
         else:
             self._send(200, {"jsonrpc": "2.0", "id": message["id"], "result": {"echo": message["method"]}})
 
@@ -95,12 +103,12 @@ class _Mcp(BaseHTTPRequestHandler):
         pass
 
 
-def _bridge(tmp_path, url: str, token: str, lines: list[dict]) -> tuple[list[dict], str]:
+def _bridge(tmp_path, url: str, token: str, lines: list[dict], folder: str = "") -> tuple[list[dict], str]:
     zipfile.ZipFile(io.BytesIO(build_extension(url, "7.0.80"))).extractall(tmp_path / "ext")
     run = subprocess.run(
         [shutil.which("node"), str(tmp_path / "ext" / "server" / "index.js")],
         input="".join(json.dumps(m) + "\n" for m in lines), capture_output=True, text=True, timeout=30,
-        env={"LIBERTY_URL": url, "LIBERTY_TOKEN": token, "LIBERTY_INSECURE": "false", "PATH": "/usr/bin:/bin"},
+        env={"LIBERTY_URL": url, "LIBERTY_TOKEN": token, "LIBERTY_INSECURE": "false", "LIBERTY_FOLDER": folder, "PATH": "/usr/bin:/bin"},
     )
     return [json.loads(line) for line in run.stdout.splitlines() if line.strip()], run.stderr
 
@@ -115,10 +123,10 @@ def test_the_bridge_relays_each_message_with_the_token(tmp_path) -> None:
         out, _err = _bridge(tmp_path, f"{base}/app", "good", [                           # the address without /mcp: added
             {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
-            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "describe_instance", "arguments": {}}},
         ])
         assert sorted(out, key=lambda m: m["id"]) == [
-            {"jsonrpc": "2.0", "id": 1, "result": {"echo": "initialize"}}, {"jsonrpc": "2.0", "id": 2, "result": {"echo": "tools/list"}}]
+            {"jsonrpc": "2.0", "id": 1, "result": {"echo": "initialize"}}, {"jsonrpc": "2.0", "id": 2, "result": {"echo": "tools/call"}}]
         assert {s["path"] for s in _Mcp.seen} == {"/app/mcp"} and {s["auth"] for s in _Mcp.seen} == {"Bearer good"} and len(_Mcp.seen) == 3
         # a refused token: an error the user can act on, with the server's reason
         out, _err = _bridge(tmp_path, f"{base}/mcp", "Bearer bad", [{"jsonrpc": "2.0", "id": 7, "method": "tools/list"}])
@@ -131,3 +139,45 @@ def test_the_bridge_relays_each_message_with_the_token(tmp_path) -> None:
         server.server_close()               # the port refuses from here on
     out, _err = _bridge(tmp_path, f"http://127.0.0.1:{server.server_port}/mcp", "good", [{"jsonrpc": "2.0", "id": 9, "method": "tools/list"}])
     assert "cannot be reached" in out[0]["error"]["message"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="the bridge runs on Node")
+def test_the_bridge_sends_a_file_of_the_chosen_folder(tmp_path) -> None:
+    """Only this program sees the user's disk: with a folder chosen in the extension's settings it
+    adds two tools — the folder's files, and send one to Liberty for a job — and reads no other
+    folder."""
+    folder = tmp_path / "files"
+    folder.mkdir()
+    (folder / "items.csv").write_bytes(b"code,name\nA,Alpha\n")
+    (folder / "notes.docx").write_bytes(b"not a file a job takes")
+    (tmp_path / "secret.csv").write_bytes(b"outside the folder")
+    server = HTTPServer(("127.0.0.1", 0), _Mcp)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/mcp"
+        call = lambda i, name, args: {"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": name, "arguments": args}}   # noqa: E731
+        _Mcp.seen = []
+        out, _err = _bridge(tmp_path, url, "good", [
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            call(2, "local_files", {}),
+            call(3, "send_file", {"job": "load-file", "file": "items.csv"}),
+            call(4, "send_file", {"job": "load-file", "file": "../secret.csv"}),
+            call(5, "send_file", {"job": "load-file", "file": "notes.docx"}),
+            call(6, "send_file", {"file": "items.csv"}),
+        ], folder=str(folder))
+        by = {m["id"]: m["result"] for m in out}
+        assert [t["name"] for t in by[1]["tools"]] == ["job_run", "local_files", "send_file"]          # the server's, then the two local ones
+        listed = json.loads(by[2]["content"][0]["text"])
+        assert [f["name"] for f in listed["files"]] == ["items.csv"]                                    # what a job takes, of this folder only
+        assert by[3]["isError"] is False and json.loads(by[3]["content"][0]["text"])["file"].endswith("items.csv")
+        sent = [x for x in _Mcp.seen if "file" in x]
+        assert len(sent) == 1 and sent[0]["file"] == b"code,name\nA,Alpha\n" and sent[0]["auth"] == "Bearer good"
+        assert sent[0]["path"] == "/mcp/files?job=load-file&filename=items.csv"
+        assert by[4]["isError"] is True and by[5]["isError"] is True and by[6]["isError"] is True      # outside, not a kind taken, no job
+        # no folder chosen: the two tools are not offered, and say why when called
+        out, _err = _bridge(tmp_path, url, "good", [{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, call(2, "local_files", {})])
+        by = {m["id"]: m["result"] for m in out}
+        assert [t["name"] for t in by[1]["tools"]] == ["job_run"] and by[2]["isError"] is True and "No files folder" in by[2]["content"][0]["text"]
+    finally:
+        server.shutdown()
+        server.server_close()
