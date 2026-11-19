@@ -1,5 +1,25 @@
 # Liberty Next — Notes de version
 
+## 7.0.81 — non publiée
+
+- Assistant IA, écriture par un écran :
+  - **Un enregistrement ouvert dans son formulaire n'est pas modifié.** Le formulaire verrouille l'enregistrement
+    qu'il affiche ; `screen_write` refuse désormais la modification ou la suppression d'un enregistrement que
+    quelqu'un a ouvert — l'autre utilisateur, nommé, ou le formulaire ouvert de l'utilisateur lui-même, qui
+    réécrirait sinon ses anciennes valeurs à sa prochaine sauvegarde. Dit sur la carte avant toute proposition.
+  - **Une valeur située loin dans une longue liste n'est plus refusée.** Une liste de recherche plus longue que
+    la limite de lignes de son pool revient coupée, comme dans le formulaire ; quand la valeur contrôlée n'est
+    pas dans la partie lue, la liste est relue restreinte à cette valeur avant de décider.
+- `[ai] max_iterations` — les tours d'outils qu'une question peut utiliser — vaut **15** par défaut (8 auparavant) :
+  une procédure qui écrit plusieurs enregistrements par ses écrans demande plus de tours qu'une question (créer un
+  utilisateur JDE : une dizaine d'appels d'outils). Une installation dont `app.toml` fixe la valeur garde la sienne.
+- Le filtre de colonne d'un écran et le périmètre de données d'un rôle sur une colonne de résultat nommée comme un
+  mot réservé (`ULUSER "USER"` sur JD Edwards) échouaient comme le filtre de l'assistant en 7.0.80 (ORA-01747, et
+  ORA-01745 pour le paramètre) : la colonne est maintenant désignée entre guillemets dans les trois enveloppes,
+  avec un nom de paramètre propre dans le filtre d'écran.
+- Supervision → Rétention : le même écrasement que celui de l'Usage de l'IA dans une fenêtre basse — la liste
+  garde sa hauteur et la page défile.
+
 ## 7.0.80 — non publiée
 
 - **Assistant IA : écrire par un écran.** Trois nouveaux outils, désactivés par défaut : `screen_form` (ce qu'un

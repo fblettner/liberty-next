@@ -185,7 +185,10 @@ def _filter_sql_type(fmt: str | None, dialect: str) -> str:
         return "VARCHAR2(20)" if dialect == "oracle" else "BOOLEAN"
     return "VARCHAR2(4000)" if dialect == "oracle" else "VARCHAR(4000)"
 
-def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str, *, trim_text: bool = False, bind: str | None = None) -> str:
+def _build_filter_predicate(
+    name: str, fmt: str | None, op: str, dialect: str, *, trim_text: bool = False, bind: str | None = None,
+    ref: str | None = None,
+) -> str:
     """One filter predicate against ``lib_flt.<name>`` for *op* using a bind named ``:<name>``
     (or *bind* — the range ops ``gte`` / ``lte`` / ``lt`` bind ``<name>_from`` / ``<name>_to``).
 
@@ -211,7 +214,10 @@ def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str, *
     reject the string ``"10"`` even though Postgres would have accepted it.
     """
     text_format = (fmt or "").lower() in _TEXT_FORMATS or fmt is None or fmt == ""
-    col_ref = f"TRIM(lib_flt.{name})" if (text_format and trim_text) else f"lib_flt.{name}"
+    # *ref* is how the column is written when its name cannot stand bare — a column named like a
+    # reserved word (``"USER"``), which also cannot name its bind: the caller gives *bind* too.
+    column = ref or name
+    col_ref = f"TRIM(lib_flt.{column})" if (text_format and trim_text) else f"lib_flt.{column}"
     b = bind or name
     if op in ("gte", "lte", "lt"):
         # A range bound (a dashboard / filter-panel period on a date column): typed like the
@@ -224,7 +230,7 @@ def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str, *
         # bind otherwise (Postgres needs the cast to know whether to compare as text vs
         # bytea vs jsonb on an untyped TEXT column when the param type isn't pinned). The
         # column side stays as-is so the planner is free to use an index.
-        pv = f"CAST(:{name} AS {_filter_sql_type(None, dialect)})"
+        pv = f"CAST(:{b} AS {_filter_sql_type(None, dialect)})"
         if op == "equals":
             return f"{col_ref} = {pv}"
         if op == "notEquals":
@@ -240,7 +246,7 @@ def _build_filter_predicate(name: str, fmt: str | None, op: str, dialect: str, *
     # bool. No SQL CAST — letting the driver send the proper type code is what makes the
     # column's native btree index apply, *and* avoids asyncpg's strict-type rejection of
     # a string value against an INTEGER-typed param.
-    return f"{col_ref} = :{name}"
+    return f"{col_ref} = :{b}"
 
 _WHERE_BIND_RE = re.compile(
     r"(?:"

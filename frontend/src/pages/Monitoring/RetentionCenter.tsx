@@ -11,7 +11,9 @@ import { formatBytes } from '../../services/serverLog'
 import { getRetention, policyText, runRetention, sizeText, type RunResult, type StoreStatus } from '../../services/retentionCenter'
 
 const Bar = styled.div`display: flex; justify-content: flex-end; margin-bottom: 10px;`
-const Table = styled.div`border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.card}; overflow: hidden;`
+const Table = styled.div`border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.card}; overflow: hidden;
+  /* in the page frame (a flex column) a panel that hides its overflow is squeezed to fit instead of the frame scrolling */
+  flex-shrink: 0;`
 const Row = styled.div`
   /* a fixed actions column: a row without buttons keeps the same column widths as the others */
   display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.4fr) minmax(160px, 1fr) 220px; gap: 14px; align-items: center;

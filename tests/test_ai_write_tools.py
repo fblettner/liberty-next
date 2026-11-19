@@ -32,6 +32,21 @@ url = "{db_url}"
 type = "sql"
 pool = "default"
 
+[connectors.svc]
+type = "api"
+base_url = "https://svc.test"
+
+[[connectors.svc.endpoints]]
+name = "notify"
+method = "POST"
+path = "/notify"
+body = '{{"who": "{{{{who}}}}"}}'
+
+[[connectors.svc.endpoints]]
+name = "boom"
+method = "GET"
+path = "/boom"
+
 [[connectors.shop.queries]]
 name = "customers_get"
 sql = "SELECT c.id AS ID, c.name AS NAME, c.status AS STATUS, c.kind AS KIND, c.sub AS SUB, c.vat AS VAT, c.secret AS SECRET, e.cust_id AS CUST_ID, e.phone AS PHONE FROM customer c LEFT JOIN customer_extra e ON e.cust_id = c.id ORDER BY c.id"
@@ -40,7 +55,13 @@ sql = "SELECT c.id AS ID, c.name AS NAME, c.status AS STATUS, c.kind AS KIND, c.
 name = "kinds_get"
 sql = "SELECT code AS CODE, label AS LABEL FROM kind ORDER BY code"
 
-[[connectors.shop.queries]]
+# a connector that returns two rows at most: the list of SUBS (three rows) comes back cut
+[connectors.tiny]
+type = "sql"
+pool = "default"
+max_rows = 2
+
+[[connectors.tiny.queries]]
 name = "subs_get"
 sql = "SELECT code AS CODE, kind AS KIND FROM sub ORDER BY code"
 
@@ -261,6 +282,34 @@ type = "run_query"
 query = "log_post"
 param_binds = [{ param = "CUST_ID", source = "ID" }, { param = "WHO", source = "#LOGIN_USER#" }, { param = "WHAT", value = "deleted" }]
 
+# actions whose steps call an API endpoint and a plugin, and use what they answer
+[[screens.shop.hooked.row_menu]]
+id = "ping"
+label = "Ping"
+type = "chain"
+steps = [
+  { id = "api", type = "call_api", connector = "svc", endpoint = "notify", bind_result = true, param_binds = [{ param = "who", source = "NAME" }] },
+  { id = "keep", type = "run_query", query = "customers_rename", param_binds = [{ param = "ID", source = "ID" }, { param = "NAME", source = "api.first_row.echo" }] },
+]
+
+[[screens.shop.hooked.row_menu]]
+id = "ping_fail"
+label = "Ping (fails)"
+type = "chain"
+steps = [
+  { id = "api", type = "call_api", connector = "svc", endpoint = "boom" },
+  { id = "never", type = "run_query", query = "customers_rename", param_binds = [{ param = "ID", source = "ID" }, { param = "NAME", value = "never" }] },
+]
+
+[[screens.shop.hooked.row_menu]]
+id = "stamp"
+label = "Stamp"
+type = "chain"
+steps = [
+  { id = "p", type = "call_plugin", callable = "wtplg.audit:j_stamp", bind_result = true, param_binds = [{ param = "cust", source = "ID" }, { param = "note", value = "from the menu" }] },
+  { id = "log", type = "run_query", query = "log_post", param_binds = [{ param = "CUST_ID", source = "p.first_row.cust" }, { param = "WHO", source = "#LOGIN_USER#" }, { param = "WHAT", source = "p.first_row.stamped" }] },
+]
+
 [[screens.shop.hooked.columns]]
 name = "ID"
 key = true
@@ -290,7 +339,7 @@ label = "LABEL"
 
 [lookups.SUBS]
 query = "subs_get"
-connector = "shop"
+connector = "tiny"
 value = "CODE"
 label = "CODE"
 
@@ -323,11 +372,12 @@ def _app(tmp_path, *, write_tools: bool = True):
             await conn.execute(text("INSERT INTO customer_extra VALUES (1,'0101')"))
         async with db.session() as s:
             svc = AuthService(s)
-            await svc.get_or_create_role("writer", permissions=["ai:chat", "ai:write", "mcp:use", "sql:shop:*"])
+            await svc.get_or_create_role("writer", permissions=["ai:chat", "ai:write", "mcp:use", "sql:shop:*", "sql:tiny:*"])
             await svc.get_or_create_role("reader", permissions=["ai:chat", "ai:write", "sql:shop:customers_get"])
             await svc.get_or_create_role("halfway", permissions=["ai:chat", "ai:write", "sql:shop:customers_get", "sql:shop:customers_post", "sql:shop:customers_one"])
             await svc.get_or_create_role("nowrite", permissions=["ai:chat", "sql:shop:*"])
-            for name in ("writer", "reader", "nowrite", "halfway"):
+            await svc.get_or_create_role("power", permissions=["ai:chat", "ai:write", "sql:shop:*", "api:svc:*", "plugin:*"])
+            for name in ("writer", "reader", "nowrite", "halfway", "power"):
                 await svc.create_user(name, password=f"{name}pw-123", roles=[name])
         await pools.dispose()
 
@@ -631,7 +681,10 @@ def test_a_lookup_value_is_checked_against_its_list(app) -> None:
         # a list narrowed by another column of the record: B1 belongs to B, P1 does not
         assert _write(client, "writer", operation="update", key={"ID": 2}, values={"SUB": "B1"}).status_code == 200
         assert _refused(_write(client, "writer", operation="update", key={"ID": 2}, values={"SUB": "P1"}), "not a value of its list", "KIND=B")
-        # … following the value given in the same write
+        # … following the value given in the same write. The list is longer than its connector's row
+        # cap (two rows: B1, B2): P1 is past the cut, and is found by a read narrowed to it
+        cut = client.get("/api/sql/tiny/subs_get", headers=_h(client, "writer")).json()
+        assert cut["truncated"] is True and [r["CODE"] for r in cut["rows"]] == ["B1", "B2"]
         assert _write(client, "writer", operation="update", key={"ID": 2}, values={"KIND": "P", "SUB": "P1"}).status_code == 200
         assert _rows(client, "id = 2")[0]["sub"] == "P1"
         # an insert is checked too; a list the caller may not read refuses the write rather than passing it
@@ -669,3 +722,83 @@ def test_a_filter_on_a_column_named_like_a_reserved_word(app) -> None:
         out, err = _tool(client, "writer", "sql_query", {"connector": "shop", "query": "kinds_reserved", "filters": {"ORDER": "P"}})
         assert not err, out
         assert out["row_count"] == 1 and out["rows"][0]["LABEL"] == "Person"
+
+
+_PLUGIN = '''
+async def j_stamp(*, connectors, cust: int, note: str = "") -> dict:
+    return {"cust": cust + 0, "stamped": f"stamped ({note})", "got_connectors": connectors is not None}
+'''
+
+
+def test_an_action_calls_an_api_and_a_plugin_and_uses_their_answers(tmp_path, monkeypatch) -> None:
+    """`call_api` and `call_plugin` steps run through the code behind their routes — the caller's
+    `api:` / `plugin:` permission, the plugins' allow-list, typed arguments — and a later step
+    binds what they answered."""
+    import httpx
+
+    (tmp_path / "config").mkdir()
+    pkg = tmp_path / "plugins" / "wtplg"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    (pkg / "audit.py").write_text(_PLUGIN)
+    monkeypatch.setenv("LIBERTY_APPS_DIR", str(tmp_path / "config"))      # the plugins live next to it
+    app = _app(tmp_path)
+    calls: list[tuple[str, str]] = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        calls.append((request.url.path, request.content.decode()))
+        if request.url.path == "/boom":
+            return httpx.Response(500, json={"err": "upstream"})
+        return httpx.Response(200, json={"echo": json.loads(request.content)["who"] + " (seen)"})
+
+    with TestClient(app) as client:
+        app.state.connectors.api("svc")._client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+
+        def act(user: str, action: str, **body):
+            return client.post("/ai/screen-action", json={"app": "shop", "screen": "hooked", "action": action, **body}, headers=_h(client, user))
+
+        # each step under its own permission: sql:shop:* alone runs neither the endpoint nor the plugin
+        out = act("writer", "ping", key={"ID": 2}).json()
+        assert out["ok"] is False and "api:svc:notify" in out["error"] and calls == []
+        out = act("writer", "stamp", key={"ID": 2}).json()
+        assert out["ok"] is False and "plugin:wtplg.audit:j_stamp" in out["error"]
+
+        # the endpoint is called with the record's value; the next step binds its answer
+        preview = act("power", "ping", key={"ID": 2}, dry_run=True).json()
+        assert preview["ran"] is False and preview["does"] == ["API svc.notify", "query <the screen connector>.customers_rename"] and calls == []
+        out = act("power", "ping", key={"ID": 2}).json()
+        assert out["ok"] is True and len(out["steps"]) == 2, out
+        assert calls == [("/notify", '{"who": "Bolt"}')] and _rows(client, "id = 2")[0]["name"] == "Bolt (seen)"
+        # an upstream failure stops the chain (the route answers 200 with success = false: not an exception)
+        out = act("power", "ping_fail", key={"ID": 2}).json()
+        assert out["ok"] is False and "500" in out["error"] and "steps" not in out
+        assert _rows(client, "id = 2")[0]["name"] == "Bolt (seen)"
+
+        # the plugin gets typed arguments and the connectors; the next step binds its answer
+        out = act("power", "stamp", key={"ID": 2}).json()
+        assert out["ok"] is True and len(out["steps"]) == 2, out
+        assert _rows(client, table="log") == [{"cust_id": 2, "who": "power", "what": "stamped (from the menu)"}]
+
+
+def test_a_record_open_in_its_form_is_not_changed_from_here(app) -> None:
+    """The form locks the record it shows (the Socket.IO room of the screen and the key): a write
+    from the assistant would be a second writer — and the open form would write its old values
+    back at its next Save."""
+    from liberty.sio import canonical_lock_key
+
+    with TestClient(app) as client:
+        locks = app.state.sio.locks
+        room = canonical_lock_key("shop", "customers", {"ID": 2})
+        locks.try_acquire(room, app="shop", screen="customers", key_values={"ID": 2}, sid="tab-1", user_id="u1", username="alice")
+        r = _write(client, "writer", operation="update", key={"ID": 2}, values={"NAME": "x"})
+        assert r.status_code == 409 and "alice has this record open" in r.json()["detail"]
+        assert _refused(_write(client, "writer", operation="delete", key={"ID": 2}), "alice has this record open")
+        assert _refused(_write(client, "writer", operation="update", key={"ID": 2}, values={"NAME": "x"}, dry_run=True), "open in its form")
+        assert _write(client, "writer", operation="update", key={"ID": 1}, values={"NAME": "Acme 2"}).status_code == 200   # another record
+        locks.release(room, sid="tab-1")
+        # the user's own open form counts too
+        locks.try_acquire(room, app="shop", screen="customers", key_values={"ID": 2}, sid="tab-2", user_id="u2", username="writer")
+        assert _refused(_write(client, "writer", operation="update", key={"ID": 2}, values={"NAME": "x"}), "you have this record open")
+        locks.release(room, sid="tab-2")
+        assert _write(client, "writer", operation="update", key={"ID": 2}, values={"NAME": "Bolt 3"}).status_code == 200
+        assert _rows(client, "id = 2")[0]["name"] == "Bolt 3"

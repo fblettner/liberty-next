@@ -356,7 +356,9 @@ class AISettings(BaseModel):
     api_key: str = ""  # ${ANTHROPIC_API_KEY}; empty → chat endpoint reports it unconfigured
     model: str = "claude-opus-4-8"
     max_tokens: int = 8192
-    max_iterations: int = 8  # safety cap on tool-use round trips
+    # safety cap on tool-use round trips: 15 since 7.0.81 (8 before) — a procedure that writes several
+    # records through its screens takes more rounds than a question; past it, one closing answer
+    max_iterations: int = 15
     system_prompt: str = ""  # empty → built-in default (see liberty.ai.assistant)
     thinking: bool = False  # enable adaptive thinking
     effort: str = ""  # "" | low | medium | high | xhigh | max — only sent when set

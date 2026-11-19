@@ -2593,3 +2593,31 @@ async def test_jdenumber_columns_scaled_on_read_and_in_filters(pools: PoolRegist
     assert [r["id"] for r in res.rows] == [1]
     res = await conn.execute("all", {"rpag_from": "1", "rpag_to": "2"}, column_hints=[ColumnHint(name="rpag", filter=True)])
     assert [r["id"] for r in res.rows] == [2]
+
+
+@pytest.mark.asyncio
+async def test_wraps_refer_to_a_reserved_word_column_quoted(pools: PoolRegistry) -> None:
+    """A result column named like a reserved word (``ULUSER "USER"`` on JD Edwards; ``"ORDER"``
+    here) exists only quoted, and cannot name a bind either: the screen filter wrap, the
+    dictionary-bind wrap and the data-scope wrap all referred to it bare (ORA-01747)."""
+    from liberty.auth.scope import DataScope
+
+    q = QueryDef(name="aliased", sql='SELECT id, name AS "ORDER", status FROM item')
+    conn = _connector(pools, q)
+    hints = [ColumnHint(name="ORDER", filter=True)]
+    # the screen's column filter: equals, the default contains, a range bound
+    rows = (await conn.execute("aliased", {"ORDER": "b", "ORDER_op": "equals"}, column_hints=hints)).rows
+    assert [r["ORDER"] for r in rows] == ["b"]
+    assert [r["ORDER"] for r in (await conn.execute("aliased", {"ORDER": "c"}, column_hints=hints)).rows] == ["c"]
+    assert [r["ORDER"] for r in (await conn.execute("aliased", {"ORDER_from": "b"}, column_hints=hints)).rows] == ["b", "c"]
+    # a dictionary bind (a dashboard's filter, the assistant's `filters`), with and without the hint
+    assert [r["ORDER"] for r in (await conn.execute("aliased", dd_binds={"ORDER": "a"}, column_hints=hints)).rows] == ["a"]
+    assert [r["ORDER"] for r in (await conn.execute("aliased", dd_binds={"ORDER": "a"})).rows] == ["a"]
+    # the data scope of the caller
+    scope = DataScope.from_claims([[{"column": "ORDER", "values": ["a", "c"]}]])
+    assert [r["ORDER"] for r in (await conn.execute("aliased", scope=scope)).rows] == ["a", "c"]
+    assert [r["ORDER"] for r in (await conn.execute("aliased", column_hints=hints, scope=scope)).rows] == ["a", "c"]
+    # a column that is not a reserved word is written as before
+    plain = QueryDef(name="plain", sql="SELECT id, name, status FROM item")
+    conn2 = _connector(pools, plain)
+    assert [r["name"] for r in (await conn2.execute("plain", {"name": "b"}, column_hints=[ColumnHint(name="name", filter=True)])).rows] == ["b"]

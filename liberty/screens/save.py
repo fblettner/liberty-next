@@ -365,6 +365,25 @@ def masked(row: Mapping[str, Any], fields: Mapping[str, Mapping[str, Any]]) -> R
     return {k: (MASK if is_password(fields.get(str(k).lower())) and not _empty(v) else v) for k, v in row.items()}
 
 
+def _refuse_if_open(ctx: WriteContext, app: str, screen: Screen, row: Mapping[str, Any]) -> None:
+    """Refuse to change a record somebody has open in its form. The form takes a lock on the
+    record (:mod:`liberty.sio`, the room named by the screen and the key) so two people do not
+    write over each other; a write from here would be the second person — and the open form,
+    still showing the old values, would write them back at its next Save. The user's own open
+    form counts too, for that reason."""
+    from liberty.sio import canonical_lock_key
+
+    locks = getattr(getattr(ctx.state, "sio", None), "locks", None)
+    keys = screen.effective_key_columns()
+    if locks is None or not keys:
+        return
+    held = locks.get(canonical_lock_key(app, screen.id, {k: value_for(k, row) for k in keys}))
+    if held is None:
+        return
+    who = "you have" if held.username == ctx.principal.username else f"{held.username} has"
+    raise ScreenWriteError(f"{who} this record open in its form ({app}/{screen.id}): it cannot be changed from here until the form is closed")
+
+
 # -- the save hooks ------------------------------------------------------------------ #
 
 
@@ -440,23 +459,40 @@ def _normalise(name: str, value: Any, rule: Mapping[str, Any] | None, label: str
     return value
 
 
-async def lookup_codes(ctx: WriteContext, rule: Mapping[str, Any], params: Mapping[str, Any]) -> set[str]:
+async def lookup_codes(
+    ctx: WriteContext, rule: Mapping[str, Any], params: Mapping[str, Any], value: Any = None,
+) -> set[str]:
     """The values a LOOKUP rule accepts for these parameters, trimmed — read the way the form and
     the import read them (``fetchLookup`` in ``services/lookups.ts``): the lookup's query run with
     the parameters, on each of its sources, as the caller; then the rows kept where a column named
-    like a parameter holds that parameter's value."""
+    like a parameter holds that parameter's value.
+
+    A list longer than the pool's row cap comes back cut, as it does in the form: *value* — the
+    one being checked — may then be past the cut. The source is read again narrowed to it (the
+    dictionary bind on the list's value column, the filter of ``sql_query``), so a valid value is
+    never refused for being far down a long list."""
+    from liberty.web.connectors import DD_PARAM_PREFIX
+
     wanted = {str(k): str(v).strip() for k, v in params.items() if v is not None and str(v) != ""}
+    value_col = str(rule.get("value"))
     sources = rule.get("sources") if len(rule.get("sources") or []) > 1 else [{"connector": rule.get("connector"), "query": rule.get("query")}]
     codes: set[str] = set()
+
+    def keep(rows: Any) -> None:
+        for row in rows or []:
+            if any(_has(k, row) and ("" if value_for(k, row) is None else str(value_for(k, row))).strip() != want for k, want in wanted.items()):
+                continue
+            v = value_for(value_col, row)
+            if v is not None:
+                codes.add(str(v).strip())
+
     for src in sources:
         _require(ctx, src["connector"], src["query"])
         resp = await _run(ctx, src["connector"], src["query"], dict(wanted))
-        for row in resp.get("rows") or []:
-            if any(_has(k, row) and ("" if value_for(k, row) is None else str(value_for(k, row))).strip() != want for k, want in wanted.items()):
-                continue
-            v = value_for(str(rule.get("value")), row)
-            if v is not None:
-                codes.add(str(v).strip())
+        keep(resp.get("rows"))
+        if resp.get("truncated") and not _empty(value) and str(value).strip() not in codes:
+            narrowed = await _run(ctx, src["connector"], src["query"], {**wanted, f"{DD_PARAM_PREFIX}{value_col}": str(value).strip()})
+            keep(narrowed.get("rows"))
     return codes
 
 
@@ -477,10 +513,10 @@ async def _check_lookups(
             continue
         params = {**(rule.get("params") or {}), **resolve_bind_list(binds, form)}
         shown = str(f.get("label") or name)
-        key = json.dumps([rule.get("connector"), rule.get("query"), rule.get("value"), rule.get("sources"), params], sort_keys=True, default=str)
+        key = json.dumps([rule.get("connector"), rule.get("query"), rule.get("value"), rule.get("sources"), params, str(value)], sort_keys=True, default=str)
         if key not in cache:
             try:
-                cache[key] = await lookup_codes(ctx, rule, params)
+                cache[key] = await lookup_codes(ctx, rule, params, value)
             except ScreenWriteError as exc:
                 raise ScreenWriteError(f"{shown} ({name}): its list of values could not be read — {exc}") from exc
         codes = cache[key]
@@ -525,6 +561,8 @@ async def save_row(
     saved: Row = await read_row(ctx, app, screen, key or {}, params) if mode == "edit" else {}
     if mode == "edit" and screen.is_row_editable(saved) is not True:
         raise ScreenWriteError(f"this record is read-only in {app}/{screen_id} ({', '.join(r.field for r in screen.editable_when)})")
+    if mode == "edit":
+        _refuse_if_open(ctx, app, screen, saved)
 
     # the values under the names the row / the screen use (the model may write them in any case)
     def canonical(name: str) -> str:
@@ -713,6 +751,7 @@ async def delete_row(
     row = await read_row(ctx, app, screen, key, params)
     if screen.is_row_editable(row) is not True:
         raise ScreenWriteError(f"this record is read-only in {app}/{screen_id} ({', '.join(r.field for r in screen.editable_when)})")
+    _refuse_if_open(ctx, app, screen, row)
 
     plan: list[Any] = []
     for g in screen.column_groups or []:

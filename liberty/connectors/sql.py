@@ -1308,8 +1308,12 @@ class SQLConnector:
             fmt = fmt_of(col)
             return not fmt or fmt.lower() in _TEXT_FORMATS
 
+        reserved = self._reserved_words()
+
         def col_ref(col: str) -> str:
-            return f"TRIM(lib_rls.{col})" if (trim_text and is_text(col)) else f"lib_rls.{col}"
+            # a column named like a reserved word exists only quoted (see _apply_dd_wrap)
+            ref = '"' + col.replace('"', '""') + '"' if col.lower() in reserved else col
+            return f"TRIM(lib_rls.{ref})" if (trim_text and is_text(col)) else f"lib_rls.{ref}"
 
         def bind_ref(bind: str, col: str) -> str:
             return f"CAST(:{bind} AS {_filter_sql_type(None, dialect)})" if is_text(col) else f":{bind}"
@@ -1551,8 +1555,16 @@ class SQLConnector:
         # Honour the pool's ``trim_strings`` on the filter's text columns too (JDE CHAR(N) is
         # blank-padded — without this a query that doesn't hand-TRIM its SELECT can't be filtered).
         trim_text = self._pools.trim_strings(self.pool_name)
-        preds = [_build_filter_predicate(name, fmt, op, dialect, trim_text=trim_text) for name, fmt, op, _ in active]
-        preds += [_build_filter_predicate(name, fmt, op, dialect, trim_text=trim_text, bind=bind) for name, bind, fmt, op, _ in ranges]
+        # A column named like a reserved word of the database (``ULUSER "USER"``) can be neither
+        # written bare nor name its bind (ORA-01747 / ORA-01745): quoted, with a bind of its own.
+        reserved = self._reserved_words()
+        quoted = {name: ('"' + name.replace('"', '""') + '"', f"LIB_FLT_{name.upper()}")
+                  for name in {a[0] for a in active} | {r[0] for r in ranges} if name.lower() in reserved}
+        preds = [_build_filter_predicate(name, fmt, op, dialect, trim_text=trim_text,
+                                         ref=quoted.get(name, (None, None))[0], bind=quoted.get(name, (None, None))[1])
+                 for name, fmt, op, _ in active]
+        preds += [_build_filter_predicate(name, fmt, op, dialect, trim_text=trim_text, bind=bind, ref=quoted.get(name, (None, None))[0])
+                  for name, bind, fmt, op, _ in ranges]
         body, order_clause = _split_order_by(sql_text)
         where_clause = " AND ".join(f"({p})" for p in preds)
         out = f"SELECT * FROM (\n{body}\n) lib_flt\nWHERE 1=1 AND {where_clause}"
@@ -1569,7 +1581,7 @@ class SQLConnector:
             # columns only — numbers / dates aren't space-padded.
             if trim_text and isinstance(coerced, str) and ((fmt or "").lower() in _TEXT_FORMATS or not fmt):
                 coerced = coerced.strip()
-            new_params[name] = coerced
+            new_params[quoted[name][1] if name in quoted else name] = coerced
         for _name, bind, _fmt, _op, coerced in ranges:
             new_params[bind] = coerced
         return out, new_params

@@ -1,5 +1,24 @@
 # Liberty Next — Release notes
 
+## 7.0.81 — unreleased
+
+- AI assistant, writing through a screen:
+  - **A record open in its form is not changed.** The form locks the record it shows; `screen_write` now refuses
+    an update or a delete of a record somebody has open — the other user by name, or the user's own open form,
+    which would otherwise write its old values back at its next Save. Said on the card before anything is
+    proposed.
+  - **A value far down a long list is no longer refused.** A lookup longer than its pool's row cap comes back
+    cut, as in the form; when the checked value is not in the part read, the list is read again narrowed to that
+    value before deciding.
+- `[ai] max_iterations` — the tool rounds one question may use — defaults to **15** (8 before): a procedure that
+  writes several records through its screens takes more rounds than a question (creating a JDE user: about
+  eleven tool calls). An installation whose `app.toml` sets the value keeps its own.
+- A screen's column filter and a role's data scope on a result column named like a reserved word (`ULUSER "USER"`
+  on JD Edwards) failed like the assistant's filter did in 7.0.80 (ORA-01747, and ORA-01745 for the bind): the
+  column is now referred to quoted in the three wraps, with a bind name of its own in the screen filter.
+- Monitoring → Retention: the same squeezing as AI usage had on a short window — the list now keeps its height
+  and the page scrolls.
+
 ## 7.0.80 — unreleased
 
 - **AI assistant: write through a screen.** Three new tools, off by default: `screen_form` (what a screen lets its

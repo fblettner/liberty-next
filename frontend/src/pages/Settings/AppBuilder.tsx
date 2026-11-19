@@ -209,7 +209,7 @@ const DEFAULTS: {
 } = {
   app: { name: 'Liberty Next', environment: '', host: '0.0.0.0', port: 8000, log_level: 'info', hot_reload: false, default_language: 'en', oracle_thick: false, default_period: 'thisMonth', default_page_size: 50, dashboard_cache_seconds: 60, tabs_multi: true, tabs_close_on_app_switch: false, tabs_max: 5, drill_inline: false, log_format: 'text', log_file: null, log_file_max_mb: 10, log_file_backups: 5, base_path: '', public_url: '', external_urls: {} },
   ai: {
-    enabled: true, model: 'claude-opus-4-8', max_tokens: 8192, max_iterations: 8, system_prompt: '',
+    enabled: true, model: 'claude-opus-4-8', max_tokens: 8192, max_iterations: 15, system_prompt: '',
     thinking: false, effort: '', request_timeout: 120,
     connector_tools: true, sql_max_rows: 200, usage_retention_days: 90, api_tool: false, scaffold_tools: false, ops_tools: false, write_tools: false, explorer_tools: true, app_tools: true, mcp_enabled: false, mcp_token_max_days: 366, attachment_max_mb: 10, allowed_connectors: [],
     web_fetch_domains: [], web_fetch_max_uses: 5, allowed_models: [], starters: {}, api_key: '',
