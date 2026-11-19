@@ -76,6 +76,14 @@ async def test_a_sensitive_field_is_counted_not_shown(tmp_path) -> None:
         r = await t["explorer_query"].func("shop", "sales", rows=[{"field": "company.REGION"}], measures=[{"field": "sales.QTY", "agg": "sum"}],
                                            filters={"company.NAME": COMPANIES[0][1]})
         assert len(r["rows"]) == 1
+        # …but only on a whole value: a range, a "contains" or an average would give its values away
+        for probing in ({"company.NAME__op": "contains", "company.NAME": "a"}, {"company.NAME__from": "A"}, {"company.NAME__to": "M"}):
+            with pytest.raises(ValueError, match="only on a whole value"):
+                await t["explorer_query"].func("shop", "sales", measures=[{"field": "sales.QTY", "agg": "sum"}], filters=probing)
+        with pytest.raises(ValueError, match="marked sensitive"):
+            await t["explorer_query"].func("shop", "sales", measures=[{"field": "company.NAME", "agg": "avg"}])
+        r = await t["explorer_query"].func("shop", "sales", measures=[{"field": "sales.QTY", "agg": "sum"}], filters={"company.REGION__op": "contains", "company.REGION": "o"})
+        assert "rows" in r
         # the installation does not hide: the field is a heading like any other
         st.settings.ai.hide_sensitive = False
         r = await t["explorer_query"].func("shop", "sales", rows=[{"field": "company.NAME"}], measures=[{"field": "sales.QTY", "agg": "sum"}])

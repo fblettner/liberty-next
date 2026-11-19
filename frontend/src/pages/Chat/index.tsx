@@ -11,7 +11,7 @@ import {
   pickStarterGroups, saveConversation, saveHistory, saveModel, saveNote, setCurrentConversationId, trimHistory,
 } from '../../services/aiChat'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
-import { Button, Banner, SearchSelect, SpinnerRing, Mono, Tag } from '../../common'
+import { Button, Banner, FileInput, SearchSelect, SpinnerRing, Mono, Tag } from '../../common'
 import { Markdown } from '../../common/Markdown'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -450,7 +450,7 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
     setEntries((es) => es.map((e) =>
       e.kind === 'proposal' && e.proposal === proposal ? { ...e, ...patch } : e))
 
-  async function applyProposal(toolName: string, proposal: Proposal) {
+  async function applyProposal(toolName: string, proposal: Proposal, files?: Record<string, File>) {
     updateProposal(proposal, { state: 'applying', error: undefined })
     if (proposal.kind === 'note') {
       // A note is the user's own (their saved views), not configuration: saved here, no further turn.
@@ -459,6 +459,24 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
         await saveNote(p.app || '*', p.text || proposal.summary)
         updateProposal(proposal, { state: 'applied' })
         if (panel) loadPanel()
+      } catch (e) {
+        updateProposal(proposal, { state: 'error', error: e instanceof ApiError ? e.message : String(e) })
+      }
+      return
+    }
+    if (proposal.kind === 'job_run') {
+      // A job run now for the user: the server fires it as the job's own page does. The run goes on
+      // in the background — the assistant is given its id and follows it.
+      try {
+        const p = proposal.payload
+        // the files the user chose on the card go to the job's own upload first; the run takes their paths
+        const uploaded: Record<string, string> = {}
+        for (const [step, file] of Object.entries(files ?? {})) {
+          uploaded[step] = (await apiUpload<{ path: string }>(`/api/jobs/${encodeURIComponent(String(p.job))}/upload`, file)).path
+        }
+        const r = await api.post<{ run_id?: string; status?: string }>('/ai/job-run', { job: p.job, params: p.params ?? {}, preset: p.preset ?? null, files: uploaded })
+        updateProposal(proposal, { state: 'applied' })
+        await runTurn(`Applied: ${toolName} (${proposal.summary}) — the run ${r.run_id ?? ''} is ${r.status ?? 'queued'} and goes on in the background. Tell the user it started; check its state with job_form only if they ask.`, false)
       } catch (e) {
         updateProposal(proposal, { state: 'error', error: e instanceof ApiError ? e.message : String(e) })
       }
@@ -598,7 +616,7 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
             <ProposalEntry
               key={i}
               entry={e}
-              onApply={() => void applyProposal(e.toolName, e.proposal)}
+              onApply={(files) => void applyProposal(e.toolName, e.proposal, files)}
               onSkip={() => skipProposal(e.toolName, e.proposal)}
             />
           ) : e.kind === 'msg' ? (
@@ -686,11 +704,17 @@ function ProposalEntry({
   entry, onApply, onSkip,
 }: {
   entry: Extract<Entry, { kind: 'proposal' }>
-  onApply: () => void
+  onApply: (files?: Record<string, File>) => void
   onSkip: () => void
 }) {
   const { t } = useTranslation()
   const [showPayload, setShowPayload] = useState(false)
+  // A job that loads a file the user brings: the card asks for it, one picker per step — the file
+  // goes to the job's own upload when the card is applied, never through the assistant.
+  const preview = (entry.proposal.payload?.preview ?? {}) as { needs_files?: { step: string; sheet?: string | null }[]; accept?: string[] }
+  const fileSteps = entry.proposal.kind === 'job_run' ? (preview.needs_files ?? []) : []
+  const [files, setFiles] = useState<Record<string, File>>({})
+  const filesMissing = fileSteps.some((s) => !files[s.step])
   const { proposal, state, error, toolName } = entry
   const decided = state === 'applied' || state === 'skipped'
   const KindIcon = state === 'applied' ? Check : state === 'error' ? AlertTriangle : FileEdit
@@ -723,6 +747,17 @@ function ProposalEntry({
           {proposal.notes.map((n, i) => <li key={i}>{n}</li>)}
         </ProposalNotes>
       )}
+      {fileSteps.length > 0 && state !== 'applied' && state !== 'skipped' && (
+        <ProposalNotes as="div">
+          {fileSteps.map((s) => (
+            <div key={s.step} style={{ margin: '4px 0' }}>
+              <div>{t('chat.proposal.fileFor', { step: s.sheet ? `${s.step} (${s.sheet})` : s.step })}</div>
+              <FileInput value={files[s.step] ?? null} accept={(preview.accept ?? []).join(',')} disabled={state === 'applying'}
+                onChange={(f) => setFiles((prev) => { const next = { ...prev }; if (f) next[s.step] = f; else delete next[s.step]; return next })} />
+            </div>
+          ))}
+        </ProposalNotes>
+      )}
       <ProposalActions>
         <PayloadToggle onClick={() => setShowPayload((v) => !v)}>
           {showPayload ? t('chat.proposal.hidePayload') : t('chat.proposal.showPayload')}
@@ -733,7 +768,7 @@ function ProposalEntry({
             <Button $variant="ghost" $size="sm" onClick={onSkip}>
               <X size={12} /> {t('chat.proposal.skip')}
             </Button>
-            <Button $variant="primary" $size="sm" onClick={onApply}>
+            <Button $variant="primary" $size="sm" disabled={filesMissing} onClick={() => onApply(files)}>
               <Check size={12} /> {t('chat.proposal.apply')}
             </Button>
           </>

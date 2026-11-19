@@ -62,15 +62,29 @@ def build_explorer_tools(state: Callable[[], Any], *, allowed: list[str] | None 
             })
         return {"models": out}
 
-    def _refuse_sensitive(view: Any, rows: Any, measures: Any) -> None:
+    def _refuse_sensitive(view: Any, rows: Any, measures: Any, filters: Any = None, period: Any = None) -> None:
         """Where the installation hides sensitive data, a field flagged sensitive is not a row
-        heading (its values would be the answer), nor read by a measure that returns one of its
-        values (min / max / sum…): counting it stays possible."""
+        heading (its values would be the answer), nor read by a measure other than a count (an
+        average, a minimum… returns something of its values), nor filtered other than on a value
+        given whole: a range or a "contains" would let its values be found out count by count."""
         if not hides_sensitive(state()):
             return
-        bad = [r.get("field") for r in rows or [] if isinstance(r, dict) and (f := view.field(str(r.get("field") or ""))) is not None and f.sensitive]
+
+        def flagged(key: Any) -> bool:
+            f = view.field(str(key or ""))
+            return f is not None and f.sensitive
+
+        bad = [r.get("field") for r in rows or [] if isinstance(r, dict) and flagged(r.get("field"))]
         bad += [m.get("field") for m in measures or [] if isinstance(m, dict) and m.get("field")
-                and (f := view.field(str(m["field"]))) is not None and f.sensitive and m.get("agg", "sum") not in ("count", "count_distinct")]
+                and flagged(m["field"]) and m.get("agg", "sum") not in ("count", "count_distinct")]
+        probing = sorted({str(k).rsplit("__", 1)[0] for k in (filters or {}) if "__" in str(k) and flagged(str(k).rsplit("__", 1)[0])
+                          and not (str(k).endswith("__op") and str((filters or {}).get(k)).lower() in ("eq", "equals", "in", "="))})
+        if isinstance(period, dict) and flagged(period.get("field")):
+            probing.append(str(period.get("field")))
+        if probing:
+            raise ValueError(
+                f"{', '.join(probing)}: marked sensitive on this installation — it can be filtered only on a whole value the user gives "
+                "(equals), not on a range or a part of it. Tell the user.")
         if bad:
             raise ValueError(
                 f"{', '.join(str(b) for b in bad)}: marked sensitive on this installation — its values are not given to you. "
@@ -132,7 +146,7 @@ def build_explorer_tools(state: Callable[[], Any], *, allowed: list[str] | None 
                 kept_sort.append(s_)
             else:
                 warnings.append(f"sort on {s_.get('key')!r} ignored: not a row or a measure of this query (keys: {sorted(keys)})")
-        _refuse_sensitive(view, rows, measures)
+        _refuse_sensitive(view, rows, measures, filters, period)
         req = AggregateRequest.model_validate({
             "rows": rows or [], "measures": measures or [], "filters": filters or {}, "sort": kept_sort,
             "limit": max(1, min(int(limit or 100), 10000)), **({"period": period} if period else {}),
@@ -211,7 +225,8 @@ def build_explorer_tools(state: Callable[[], Any], *, allowed: list[str] | None 
             d.setdefault(k, v)
         d["limit"] = max(1, min(int(d.get("limit") or 100), 10000))
         if d["view"] != "detail":
-            _refuse_sensitive(view, d.get("rows"), d.get("measures"))
+            from liberty.explorer.report import compile_filters
+            _refuse_sensitive(view, d.get("rows"), d.get("measures"), compile_filters(d.get("filterRows") or []), d.get("period"))
             req = definition_to_aggregate(d)
             res = await run_aggregate(st.connectors, getattr(st, "screens", None), view, req, scope=current_scope.get(), debug=False)
             preview = {"groups": res.get("groups"), "columns": [c["key"] for c in res.get("columns", [])], "first_rows": res.get("rows", [])[:3]}

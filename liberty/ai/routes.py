@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
@@ -199,7 +200,7 @@ def _write_context(request: Request, principal: Principal) -> Any:
 
 
 async def _record_applied(
-    request: Request, principal: Principal, tool_name: str, app: str, what: str, skipped: bool, *, error: str | None = None,
+    request: Request, principal: Principal, tool_name: str, app: str | None, what: str, skipped: bool, *, error: str | None = None,
 ) -> None:
     """Keep an applied card in the usage record (channel ``apply``): who changed what through
     the assistant, on which record — the turn that proposed it recorded a proposal only. A check
@@ -219,6 +220,50 @@ async def _record_applied(
 def _refusal(exc: Exception) -> HTTPException:
     text = str(exc)
     return HTTPException(status.HTTP_403_FORBIDDEN if text.startswith("permission denied") else status.HTTP_409_CONFLICT, detail=text)
+
+
+class JobRunRequest(BaseModel):
+    """A job run now for the user — what the chat's card applies."""
+
+    job: str = Field(min_length=1)
+    params: dict[str, Any] = Field(default_factory=dict)
+    preset: str | None = None
+    # {step: the path POST /api/jobs/{job}/upload returned} for the steps that load a file
+    files: dict[str, str] = Field(default_factory=dict)
+    dry_run: bool = False
+
+
+@router.post(
+    "/job-run",
+    summary="Run a job for the user",
+    responses={
+        403: {"description": "Caller lacks ``ai:write`` or ``job:<id>``."},
+        404: {"description": "The write tools are off (``[ai] write_tools``)."},
+        409: {"description": "The job cannot be run from here (it needs an uploaded file, is already running, a parameter is wrong)."},
+    },
+)
+async def job_run(
+    body: JobRunRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_permission("ai:write"))],
+) -> dict[str, Any]:
+    """Apply what the assistant's `job_run` tool proposed in the chat: fire the job as the job's
+    own page does for this user (its declared parameters, its presets, `job:<id>`). The run is
+    queued; the answer carries its id."""
+    from liberty.ai.write_tools import perform_job_run
+    from liberty.screens.save import ScreenWriteError
+
+    _write_context(request, principal)          # the switch ([ai] write_tools)
+    what = (f"job={body.job} params={body.params}" + (f" preset={body.preset}" if body.preset else "")
+            + (f" files={sorted(Path(v).name for v in body.files.values())}" if body.files else ""))
+    try:
+        out = await perform_job_run(request.app.state, principal, job=body.job, params=body.params, preset=body.preset,
+                                    files=body.files, dry_run=body.dry_run)
+    except ScreenWriteError as exc:
+        await _record_applied(request, principal, "job_run", None, what, body.dry_run, error=str(exc))
+        raise _refusal(exc) from exc
+    await _record_applied(request, principal, "job_run", None, f"{what} run={out.get('run_id')}", body.dry_run)
+    return out
 
 
 @router.post(

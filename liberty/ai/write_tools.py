@@ -1,7 +1,9 @@
 """Write tools — the assistant changes a record through its screen: ``screen_form`` (what a
 screen lets its user enter and run), ``screen_write`` (add, change or delete one record) and
 ``screen_action`` (run one of the screen's actions — a row menu's "Close", a toolbar's or a form
-tab's button — on the server, through :mod:`liberty.screens.actions`).
+tab's button — on the server, through :mod:`liberty.screens.actions`). And it runs a job:
+``job_form`` (a job as its page shows it) and ``job_run`` ("Run now"), through the functions of
+the job page's own routes (``/api/jobs``).
 
 Nothing is written by another path than the screen's own: the tool calls
 :mod:`liberty.screens.save`, the server-side twin of the record form — the row is read first,
@@ -49,6 +51,7 @@ def write_context(state: Any, principal: Any, *, language: str | None = None, po
         changesets=getattr(state, "changesets_db", None),
         notify_ctx=(getattr(state, "notification_rules", None), getattr(state, "notify", None)),
         language=language, pool=pool, state=state, hide_sensitive=hides_sensitive(state), origin=ORIGIN,
+        allowed=frozenset(getattr(getattr(getattr(state, "settings", None), "ai", None), "allowed_connectors", None) or ()),
     )
 
 
@@ -121,6 +124,88 @@ async def perform_action(
     out.update({"ran": True, **result.to_dict()})
     _log.info("AI action: %s ran %s on %s/%s key=%s ok=%s", ctx.principal.username, act.id, app, screen, out.get("key") or "", out.get("ok"))
     return out
+
+
+def _job_request(state: Any) -> Any:
+    """What the job routes read of a request — the application state and the headers — so the
+    tools call the routes' own functions (``/api/jobs``, the job page a user runs a job from)
+    instead of doing their work again."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(app=SimpleNamespace(state=state), headers={})
+
+
+async def job_page(state: Any, principal: Any, job_id: str) -> dict[str, Any]:
+    """The job as its page shows it to this user (``GET /api/jobs/{id}``): the description, the
+    parameters a user may set with their choices, the steps that need an uploaded file, whether
+    it is running, its last runs. Needs ``job:<id>``."""
+    from fastapi import HTTPException
+
+    from liberty.web.jobs import user_get_job
+
+    try:
+        return await user_get_job(job_id, _job_request(state), principal)
+    except HTTPException as exc:
+        raise ScreenWriteError(_job_refusal(exc, job_id)) from exc
+
+
+def _job_refusal(exc: Any, job_id: str) -> str:
+    if exc.status_code == 403:
+        return f"permission denied: the signed-in user may not run the job {job_id} (missing job:{job_id}). Tell the user."
+    return str(exc.detail)
+
+
+async def perform_job_run(
+    state: Any, principal: Any, *, job: str, params: dict[str, Any] | None = None, preset: str | None = None,
+    files: dict[str, str] | None = None, dry_run: bool = False,
+) -> dict[str, Any]:
+    """Run a job for the user the way its page does (``POST /api/jobs/{id}/run``): the declared
+    parameters only, a value among a parameter's choices, a preset of the job, never while it is
+    already running. A step that loads a file the user brings takes it from *files*
+    (``{step: the path the job's upload returned}`` — the route accepts nothing else). With
+    *dry_run* the job is read and the request checked for what can be checked without firing;
+    nothing runs, and the answer says which steps need a file (``needs_files``)."""
+    from fastapi import HTTPException
+
+    from liberty.web.jobs import user_run
+
+    from liberty.jobs.files import UPLOAD_SUFFIXES
+
+    page = await job_page(state, principal, job)
+    info = page["job"]
+    needs = list(info.get("uploads") or [])
+    files = {str(k): str(v) for k, v in (files or {}).items()}
+    stray = sorted(s for s in files if s not in {u["step"] for u in needs})
+    if stray:
+        raise ScreenWriteError(f"{', '.join(stray)}: not a step of the job {job} that takes a file")
+    declared = {p["name"]: p for p in info.get("params") or []}
+    unknown = sorted(k for k in (params or {}) if k not in declared)
+    if unknown:
+        raise ScreenWriteError(f"{', '.join(unknown)}: not a parameter of the job {job} — its parameters: {', '.join(declared) or 'none'}")
+    missing = sorted(n for n, p in declared.items() if p.get("required") and not ((params or {}).get(n) or p.get("default")))
+    if missing:
+        raise ScreenWriteError(f"the job {job} needs a value for: {', '.join(missing)}")
+    if info.get("in_flight"):
+        raise ScreenWriteError(f"the job {job} is already running: wait for it to finish")
+    preview = {"job": job, **({"description": info["description"]} if info.get("description") else {}),
+               "params": dict(params or {}), **({"preset": preset} if preset else {}),
+               # the steps that load a file the user brings, and the kinds of file they take
+               **({"needs_files": needs, "accept": sorted(UPLOAD_SUFFIXES)} if needs else {})}
+    if dry_run:
+        return {**preview, "ran": False}
+    lacking = [u["step"] for u in needs if u["step"] not in files]
+    if lacking:
+        raise ScreenWriteError(
+            f"the job {job} needs a file for: {', '.join(lacking)} ({', '.join(sorted(UPLOAD_SUFFIXES))}). In the Liberty chat the user "
+            "chooses it on the card; from another client it cannot be sent yet — the user runs the job from its page in Liberty.")
+    try:
+        out = await user_run(job, _job_request(state), principal, {
+            "params": dict(params or {}), **({"preset": preset} if preset else {}), **({"files": files} if files else {})})
+    except HTTPException as exc:
+        raise ScreenWriteError(_job_refusal(exc, job)) from exc
+    _log.info("AI job run: %s fired %s run=%s", principal.username, job, out.get("run_id"))
+    return {**preview, "ran": True, "run_id": out.get("run_id"), "status": out.get("status"),
+            "follow": "job_form on this job shows the run's state; the user sees it under Nomaflow → Job Runs"}
 
 
 def _summary(operation: str, app: str, screen: str, preview: dict[str, Any]) -> str:
@@ -225,6 +310,9 @@ def build_write_tools(state: Callable[[], Any]) -> list[Tool]:
                 entry["values"] = [rule.get("true_value", "Y"), rule.get("false_value")]
             elif rule.get("kind") == "lookup":
                 entry["values_from"] = {k: rule[k] for k in ("connector", "query", "value", "label") if rule.get(k)}
+            if f.get("return_binds"):
+                # picking a value of this list also sets these columns from the picked row: do not give them
+                entry["also_fills"] = sorted({str(rb.get("column")) for rb in f["return_binds"] if rb.get("column")})
             if f.get("rules_when"):
                 entry["values_depend_on"] = sorted({str(rw.get("field")) for rw in f["rules_when"]})
             if is_password(f):
@@ -336,7 +424,78 @@ def build_write_tools(state: Callable[[], Any]) -> list[Tool]:
             message="Checked and proposed to the user, who applies or skips it on the card: nothing has run yet. Stop here and wait.",
         )
 
+    async def job_form(job: str) -> dict[str, Any]:
+        """A job the signed-in user may run, as its page shows it — read it BEFORE job_run: what
+        the job does, the parameters a user may set (their choices, which are required), whether
+        it needs a file the user brings (in the Liberty chat the user chooses it on the card of
+        job_run — you do not handle the file), whether it is running now, and its last runs with their state and error. Call it again after job_run to follow
+        the run. The jobs of an application are listed by describe_instance / search_catalog.
+
+        Args:
+            job: the job id.
+        """
+        who = caller()
+        if who is None:
+            raise ToolPermissionError("permission denied: a job needs a signed-in user")
+        try:
+            page = await job_page(state(), who, job)
+        except ScreenWriteError as exc:
+            raise ValueError(str(exc)) from exc
+        info = page["job"]
+        params = [{**{k: p[k] for k in ("name", "label", "required", "multiple") if p.get(k) not in (None, False, "")},
+                   **({"default": p["default"]} if p.get("default") not in (None, "") else {}),
+                   **({"choices": p["choices"][:ENUM_MAX]} if p.get("choices") else {})} for p in info.get("params") or []]
+        runs = [{k: r.get(k) for k in ("run_id", "id", "state", "started_at", "finished_at", "triggered_by", "error_message") if r.get(k) is not None}
+                for r in (page.get("runs") or [])[:5]]
+        presets = [pr.name for pr in getattr(state().jobs.registry.get(job), "presets", [])]
+        return {"job": info["id"], "description": info.get("description"), "params": params,
+                **({"presets": presets} if presets else {}),
+                **({"needs_uploaded_file": [u["step"] for u in info["uploads"]]} if info.get("uploads") else {}),
+                "running": bool(info.get("in_flight")), "last_runs": runs}
+
+    async def job_run(
+        job: str, params: dict[str, Any] | None = None, preset: str | None = None, files: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Run a job now, for the signed-in user — what "Run now" does on the job's page. It
+        starts real work (a load, a refresh, a report): use it only when the user asked for that
+        run, and say which job and which parameters before you call it. Call job_form first.
+
+        The run is queued and goes on in the background: the answer gives its id; job_form shows
+        its state afterwards. A job that is already running is refused with the reason. In the
+        Liberty chat nothing starts until the user accepts the card — and a job that loads a file
+        asks the user for it there: propose the run, do not ask them to paste the file.
+
+        Args:
+            job: the job id.
+            params: {name: value} among the parameters job_form lists; leave one out for the job's own default.
+            preset: one of the job's presets (job_form → presets), applied under the params.
+            files: {step: uploaded file} for a step that loads a file — only a path an upload of this job returned; not used in the Liberty chat (the card asks).
+        """
+        who = caller()
+        if who is None:
+            raise ToolPermissionError("permission denied: a job needs a signed-in user")
+        proposing = current_channel.get() != "mcp"
+        try:
+            out = await perform_job_run(state(), who, job=job, params=params, preset=preset, files=files, dry_run=proposing)
+        except ScreenWriteError as exc:
+            raise ValueError(str(exc)) from exc
+        if not proposing:
+            return out
+        from liberty.ai.proposal import Proposal, wrap
+
+        shown = ", ".join(f"{k}={v}" for k, v in (params or {}).items())
+        return wrap(
+            Proposal(kind="job_run", summary=f"Run the job {job}" + (f" — {shown}" if shown else "") + (f" (preset {preset})" if preset else ""),
+                     target_path=f"job {job}", payload={"job": job, "params": params or {}, "preset": preset, "preview": out},
+                     notes=[*([out["description"]] if out.get("description") else []),
+                            *(f"needs a file for the step {u['step']}: chosen on this card" for u in out.get("needs_files") or [])]),
+            message="Checked and proposed to the user, who applies or skips it on the card"
+                    + (" and chooses the file there" if out.get("needs_files") else "") + ": nothing has started yet. Stop here and wait.",
+        )
+
     return [
+        tool(job_form, summary_keys=("job",), permission=WRITE_PERMISSION),
+        tool(job_run, summary_keys=("job", "params", "preset"), permission=WRITE_PERMISSION, read_only=False),
         tool(screen_form, summary_keys=("app", "screen"), permission=WRITE_PERMISSION),
         # the record's key is in the summary: the usage record says WHICH record the assistant changed
         tool(screen_write, summary_keys=("operation", "app", "screen", "key"), permission=WRITE_PERMISSION, read_only=False),

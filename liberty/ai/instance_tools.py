@@ -251,7 +251,8 @@ def build_instance_tools(state: Callable[[], Any], *, allowed: list[str] | None 
         )
 
     return [
-        tool(remember_note, chat_only=True, read_only=False),
+        # the summary keeps the application only: the note's text is the user's words, not for the usage record
+        tool(remember_note, summary_keys=("app",), chat_only=True, read_only=False),
         tool(describe_instance, summary_keys=("app",)),
         tool(search_catalog, summary_keys=("query",)),
         tool(list_playbooks),

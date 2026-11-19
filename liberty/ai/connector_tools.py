@@ -278,6 +278,14 @@ def build_connector_tools(
             c.pop("sensitive", None)
         if hidden and hide_sensitive is not None and hide_sensitive():
             gone = set(hidden)
+            # a hidden column is filtered on a whole value only: a range would let its values be
+            # found out row count by row count
+            keys = {c.lower() for c in hidden} | {dd_of.get(c.lower(), c).lower() for c in hidden}
+            ranged = sorted(k for k in (filters or {}) if str(k).endswith(("_from", "_to")) and _filter_item(k) in keys)
+            if ranged:
+                raise ConnectorError(
+                    f"{', '.join(ranged)}: this column is marked sensitive on this installation — it can be filtered only on a whole "
+                    "value the user gives, not on a range. Tell the user.")
             out["columns"] = [c for c in out["columns"] if c["name"] not in gone]
             out["rows"] = [{k: v for k, v in row.items() if k not in gone} for row in out["rows"]]
             out["hidden_columns"] = hidden

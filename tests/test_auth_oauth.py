@@ -129,7 +129,10 @@ def test_the_whole_sign_in(app) -> None:
         bob = _login(client, "bob", "bobpw-123")
 
         info = client.get("/oauth/client", params={"client_id": client_id, "redirect_uri": CALLBACK}, headers=bob).json()
-        assert info == {"client_name": "Claude", "redirect_host": "claude.ai", "local": False, "allowed": True}
+        # what the consent page says: who asks, where the user returns, whether changes are possible, for how long
+        assert info == {"client_name": "Claude", "redirect_host": "claude.ai", "local": False, "allowed": True, "changes": False, "days": 30}
+        app.state.settings.ai.mcp_changes = True
+        assert client.get("/oauth/client", params={"client_id": client_id, "redirect_uri": CALLBACK}, headers=bob).json()["changes"] is True
 
         r = _exchange(client, client_id, _code(client, bob, client_id))
         assert r.status_code == 200, r.text

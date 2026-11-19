@@ -11,6 +11,35 @@
   the instance the user names, and say which instance an answer or a change concerns") — read when the server
   starts. An extension installed before this release keeps working; download it again to get its own name.
 
+- **AI assistant: run a job.** Two more write tools (`[ai] write_tools`, `ai:write`): `job_form` shows a job as
+  its page shows it to the user — what it does, the parameters a user may set with their choices, its presets,
+  whether it is running, its last runs with their state and error — and `job_run` is "Run now": the job's
+  declared parameters and presets only, under `job:<id>`, through the functions of the job page's own routes. In
+  the chat it is a card; the run is queued and goes on in the background, and `job_form` follows it. A job that
+  loads a file the user brings asks for it **on the card**: one picker per file step, the kinds of file the
+  job's upload takes; Apply sends the file through the job's own upload and runs the job with it — the file
+  never goes through the model. From another client (MCP) such a job cannot be given its file yet. Recorded like the other
+  changes (the `apply` channel); over MCP it needs `[ai] mcp_changes`.
+- **Sensitive data, corrections** (found while writing the documentation):
+  - the messages of the actions a screen runs after a write (`on_insert`…) were filled with the sensitive values;
+    they are masked like an action's;
+  - a sensitive field is filtered only on a whole value the user gives (equals): a range or a "contains" let its
+    values be found out count by count — in the Explorer and in `sql_query`; and any measure other than a count
+    is refused (the average too, which the 7.0.81 note left out);
+  - the **Sensitive** option of a screen column has three states in the editor (as the item says / yes / no): the
+    checkbox wrote "no" as soon as it was unticked, with no way back — every optional yes / no option of the
+    editors gains from it.
+- The assistant's write tools follow `[ai] allowed_connectors`: a screen whose data is on another connector does
+  not exist for them.
+- The OAuth consent page says what the client will be able to do on THIS server — read, and change only if
+  `[ai] mcp_changes` allows it — and how long the access lasts.
+- The usage record no longer keeps the text of a note the assistant proposes.
+- The default model of a new installation is `claude-opus-5-5` (`claude-opus-4-8` before); an installation that
+  sets its model keeps it.
+- AI assistant, `screen_write`: **a value picked in a list fills its sibling columns**, as in the form. Where a
+  screen column's list sets other fields from the picked row (`return_binds` — on the Security Workbench, the
+  object gives its product code), the screen now fills them when the assistant writes the value; a sibling the
+  caller gives stays the caller's. `screen_form` names them (`also_fills`), the card shows them.
 - **MCP: changes need their own switch — `[ai] mcp_changes`, off by default.** In the Liberty chat a change is a
   card the user applies; over MCP the only gate is the client's own approval, which its user can set to "always
   allow". A tool that saves something — a record through its screen, an action, **and a saved Explorer analysis
@@ -37,8 +66,8 @@
     hidden, so the assistant can say so); a record's values on a write or an action card ("before", the record of
     a delete, the screen's confirmation and messages — the value the user asked to write is theirs and is
     shown); the page context (the clicked row, the column list, a filter typed on such a column); in the
-    Explorer, a flagged field cannot be a row heading nor be read by `min` / `max` / `sum` — it can be counted,
-    and filtered on a value the user gives. The screens themselves are unchanged.
+    Explorer, a flagged field cannot be a row heading nor be read by a measure other than a count — it can be
+    counted, and filtered on a value the user gives. The screens themselves are unchanged.
   - *What it does not cover* — to know before relying on it: what a user types in a question or attaches; a
     free-text column that is not flagged; what an API endpoint (`api_call`), an application's own tool or the
     operations tools return, since Liberty does not know their columns.
@@ -80,7 +109,7 @@
     action prompts for is given up front (missing and required: nothing runs); what only a browser does
     (`navigate`, `open_url`, `refresh`) is noted, and an action made of nothing else is not offered.
   Three locks, all needed: `[ai] write_tools` (Administer → App → AI Assistant), the new permission `ai:write`
-  (Access → a role → Other → AI) and the permission of each query, endpoint or plugin that runs, as in the
+  (Access → a role → Beyond the menus → AI) and the permission of each query, endpoint or plugin that runs, as in the
   screen. **Who confirms:** in the Liberty chat the tools only propose — the user gets a card (the record before
   and after, or the action with the screen's confirmation and what it runs) and nothing happens until Apply;
   over MCP the client (Claude) asks its user before calling a tool that is not read-only. As in the screen, a
@@ -91,7 +120,7 @@
 
 - **MCP: a Claude Desktop extension, for a server that is not on the internet.** A custom connector is called
   from Anthropic's servers and so needs a public address. The profile's Access tokens tab now offers
-  **Download the extension** (`liberty.mcpb`): opened with Claude Desktop, it runs a small bridge on the user's
+  the **Claude Desktop extension** button (`liberty.mcpb`): opened with Claude Desktop, it runs a small bridge on the user's
   own computer that relays Claude's messages to `/mcp` with the user's personal access token — the server only
   has to be reachable from that computer (an internal address, a VPN). The file is built at download with the
   server's address filled in and carries no secret: the user pastes a token created in the same tab; a switch

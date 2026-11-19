@@ -354,7 +354,7 @@ class AISettings(BaseModel):
 
     enabled: bool = True
     api_key: str = ""  # ${ANTHROPIC_API_KEY}; empty → chat endpoint reports it unconfigured
-    model: str = "claude-opus-4-8"
+    model: str = "claude-opus-5-5"
     max_tokens: int = 8192
     # safety cap on tool-use round trips: 15 since 7.0.81 (8 before) — a procedure that writes several
     # records through its screens takes more rounds than a question; past it, one closing answer

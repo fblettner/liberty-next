@@ -27,7 +27,7 @@ docs at https://docs.nomana-it.fr/liberty/ (a separate Docusaurus repo).
 - **No `ly_*` metadata tables.** Form / column schema is discovered at query time from
   `cursor.description`; connector, screen, menu, dashboard, job definitions live in TOML.
 - **Anthropic, not OpenAI.** The AI assistant uses the `anthropic` SDK. Default model
-  `claude-opus-4-7` unless the user names another; consult the `claude-api` skill before
+  `claude-opus-5-5` unless the user names another; consult the `claude-api` skill before
   changing `liberty/ai/`.
 - **Match the surrounding code's style.** Type hints everywhere (`from __future__ import
   annotations`). Tests for new modules: pytest on the backend, Vitest for the frontend's pure
@@ -116,7 +116,7 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           sensitive data: `[ai] hide_sensitive` + `sensitive` on a dictionary item / screen column → `SQLConnector.sensitive_columns`,
                           `Column.sensitive`; left out of sql_query rows, write / action cards, the Explorer's headings (`tools.hides_sensitive`) and the
                           page context (services/aiContext `withoutSensitive`); not what a user types, an API result or an app's own tool,
-                          write_tools.py (screen_form / screen_write / screen_action — opt-in `[ai] write_tools`, permission `ai:write`: one record
+                          write_tools.py (job_form / job_run through web/jobs' user routes; screen_form / screen_write / screen_action — opt-in `[ai] write_tools`, permission `ai:write`: one record
                           through its screen via screens/save.py, one of its actions via screens/actions.py; proposes a card in the chat
                           (`POST /ai/screen-write` / `/ai/screen-action` apply it), does it over MCP — `tools.current_channel`),
                           app_tools.py (the tools the APPS ship: `[ai.<app>.tools.<id>]` = a plugin `j_` function offered as `<app>_<id>`,

@@ -53,6 +53,7 @@ export interface JsonSchema {
   $ref?: string
   $defs?: Record<string, JsonSchema>
   x_group?: string   // from a Pydantic Field's json_schema_extra — groups the form into tabs
+  x_nullable?: boolean   // set when a `X | None` field's null branch was peeled: "not set" is a value of its own
   /** Model-level (json_schema_extra on the BaseModel): field names to build a list-row summary
    *  from, joined by " · " (skipping empty). e.g. a union source shows "connector · query" instead
    *  of just its first string field. */
@@ -206,6 +207,7 @@ function mergePeel(outer: JsonSchema, branch: JsonSchema): JsonSchema {
     x_enum_ref_ancestor: outer.x_enum_ref_ancestor ?? branch.x_enum_ref_ancestor,
     x_key_enum_ref: outer.x_key_enum_ref ?? branch.x_key_enum_ref,
     x_value_enum_ref: outer.x_value_enum_ref ?? branch.x_value_enum_ref,
+    x_nullable: (outer.anyOf ?? []).some((b) => b.type === 'null') || undefined,
     anyOf: undefined,
   } as JsonSchema
 }
@@ -841,6 +843,14 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
           control = (
             <SearchSelect value={cur == null ? '' : String(cur)} onChange={(v) => set(key, v === '' ? undefined : v)}
               options={sub.enum.map((e) => ({ value: String(e), label: String(e) }))} anyLabel={isReq ? undefined : '(default)'} placeholder="(default)" />
+          )
+        } else if (sub.type === 'boolean' && sub.x_nullable && sub.default == null) {
+          // `bool | None` with no default: three states — not set (the fallback the field describes),
+          // yes, no. A checkbox showed "not set" as unchecked and wrote `false` when unticked, with
+          // no way back to "not set".
+          control = (
+            <SearchSelect value={cur == null ? '' : cur ? 'true' : 'false'} onChange={(v) => set(key, v === '' ? undefined : v === 'true')}
+              options={[{ value: 'true', label: 'yes' }, { value: 'false', label: 'no' }]} anyLabel="(default)" placeholder="(default)" />
           )
         } else if (sub.type === 'boolean') {
           const checked = cur === undefined ? Boolean(sub.default) : Boolean(cur)

@@ -59,6 +59,7 @@ class WriteContext:
     language: str | None = None
     pool: str | None = None             # the environment picked for the page (X-Liberty-Pool)
     state: Any = None                   # the application state (shared actions, settings) — the save hooks' steps
+    allowed: frozenset[str] = frozenset()   # [ai] allowed_connectors — empty = every connector
     origin: str | None = None           # who writes when it is not the screen: named on a change package's entries
     hide_sensitive: bool = False        # leave the data flagged sensitive out of what is shown back ([ai] hide_sensitive)
 
@@ -129,10 +130,18 @@ def active_rule(field: Mapping[str, Any], values: Mapping[str, Any]) -> dict[str
 def active_rule_and_binds(field: Mapping[str, Any], values: Mapping[str, Any]) -> tuple[dict[str, Any] | None, list[Any]]:
     """The rule for these values with ITS lookup binds — a conditional rule (``rules_when``)
     carries its own, the base rule the field's (``activeRulesWhen`` in the form)."""
+    rule, binds, _returns = active_rule_entry(field, values)
+    return rule, binds
+
+
+def active_rule_entry(field: Mapping[str, Any], values: Mapping[str, Any]) -> tuple[dict[str, Any] | None, list[Any], list[Any]]:
+    """``(rule, lookup binds, return binds)`` for these values: a conditional rule's own three,
+    else the field's. The return binds say which sibling columns a picked lookup row fills
+    (``{param: the row's column, column: the screen column}``)."""
     for rw in field.get("rules_when") or []:
         if eval_conditions([{"field": rw.get("field"), "value": rw.get("value")}], values):
-            return rw.get("rule"), list(rw.get("lookup_param_binds") or [])
-    return field.get("rule"), list(field.get("lookup_param_binds") or [])
+            return rw.get("rule"), list(rw.get("lookup_param_binds") or []), list(rw.get("return_binds") or [])
+    return field.get("rule"), list(field.get("lookup_param_binds") or []), list(field.get("return_binds") or [])
 
 
 def with_upper(row: Mapping[str, Any]) -> Row:
@@ -175,8 +184,11 @@ def resolve_bind_list(binds: Any, values: Mapping[str, Any]) -> Row:
 
 
 def find_screen(ctx: WriteContext, app: str, screen_id: str) -> Screen:
+    """The screen — and, where the installation restricts the assistant to some connectors
+    (``[ai] allowed_connectors``), only a screen whose data is on one of them: the same answer as
+    for a screen that does not exist."""
     screen = ((ctx.screens.screens.get(app) if ctx.screens is not None else None) or {}).get(screen_id)
-    if screen is None:
+    if screen is None or (ctx.allowed and connector_of(screen, app) not in ctx.allowed):
         raise ScreenWriteError(f"no screen {app}/{screen_id}")
     return screen
 
@@ -433,7 +445,11 @@ async def _run_hooks(
     if not hooks:
         return None
     change = {"app": app, "screen": screen.id, "entity_key": entity_key(screen, row)} if screen.change_tracked else None
-    deps = ChainDeps(ctx=ctx, default_connector=connector_of(screen, app), inputs=inputs or {}, change_context=change, navigates=False)
+    # what the hooks' messages may show: the record without the values flagged sensitive
+    hidden = hidden_columns(ctx, app, screen, row)
+    display = masked(row, resolved_fields(ctx, app, screen), hidden) if hidden else None
+    deps = ChainDeps(ctx=ctx, default_connector=connector_of(screen, app), inputs=inputs or {}, change_context=change,
+                     navigates=False, display=display)
     result = await run_chain(hooks, row, deps, initial_input=row)
     return result.to_dict()
 
@@ -486,11 +502,11 @@ def _normalise(name: str, value: Any, rule: Mapping[str, Any] | None, label: str
     return value
 
 
-async def lookup_codes(
+async def lookup_rows(
     ctx: WriteContext, rule: Mapping[str, Any], params: Mapping[str, Any], value: Any = None,
-) -> set[str]:
-    """The values a LOOKUP rule accepts for these parameters, trimmed — read the way the form and
-    the import read them (``fetchLookup`` in ``services/lookups.ts``): the lookup's query run with
+) -> list[Row]:
+    """The rows of a LOOKUP rule's list for these parameters — read the way the form and the
+    import read them (``fetchLookup`` in ``services/lookups.ts``): the lookup's query run with
     the parameters, on each of its sources, as the caller; then the rows kept where a column named
     like a parameter holds that parameter's value.
 
@@ -503,39 +519,46 @@ async def lookup_codes(
     wanted = {str(k): str(v).strip() for k, v in params.items() if v is not None and str(v) != ""}
     value_col = str(rule.get("value"))
     sources = rule.get("sources") if len(rule.get("sources") or []) > 1 else [{"connector": rule.get("connector"), "query": rule.get("query")}]
-    codes: set[str] = set()
+    kept: list[Row] = []
 
     def keep(rows: Any) -> None:
         for row in rows or []:
             if any(_has(k, row) and ("" if value_for(k, row) is None else str(value_for(k, row))).strip() != want for k, want in wanted.items()):
                 continue
-            v = value_for(value_col, row)
-            if v is not None:
-                codes.add(str(v).strip())
+            if value_for(value_col, row) is not None:
+                kept.append(row)
+
+    def has(v: Any) -> bool:
+        return any(_same(value_for(value_col, row), v) for row in kept)
 
     for src in sources:
         _require(ctx, src["connector"], src["query"])
         resp = await _run(ctx, src["connector"], src["query"], dict(wanted))
         keep(resp.get("rows"))
-        if resp.get("truncated") and not _empty(value) and str(value).strip() not in codes:
+        if resp.get("truncated") and not _empty(value) and not has(value):
             narrowed = await _run(ctx, src["connector"], src["query"], {**wanted, f"{DD_PARAM_PREFIX}{value_col}": str(value).strip()})
             keep(narrowed.get("rows"))
-    return codes
+    return kept
 
 
 async def _check_lookups(
     ctx: WriteContext, fields: Mapping[str, Mapping[str, Any]], given: Mapping[str, Any], form: Mapping[str, Any],
-) -> None:
+) -> Row:
     """Each given value of a LOOKUP field against its list — the check the grid's import makes
     (``validateImportRow``): the rule that applies to THIS record with its own binds, the value
     compared trimmed, an empty value or an empty list let through, a list that cannot be read
-    refused rather than passed."""
-    cache: dict[str, set[str]] = {}
+    refused rather than passed.
+
+    Returns what the picked rows fill in: in the form, picking a value of some lists also sets
+    sibling fields from the picked row (``return_binds`` — on the Security Workbench, the object
+    gives its product code). ``{screen column: value}``, for the columns the caller did not give."""
+    cache: dict[str, list[Row]] = {}
+    filled: Row = {}
     for name, value in given.items():
         f = fields.get(str(name).lower())
         if f is None or _empty(value) or str(value).strip() == "":
             continue
-        rule, binds = active_rule_and_binds(f, form)
+        rule, binds, returns = active_rule_entry(f, form)
         if not rule or rule.get("kind") != "lookup":
             continue
         params = {**(rule.get("params") or {}), **resolve_bind_list(binds, form)}
@@ -543,14 +566,20 @@ async def _check_lookups(
         key = json.dumps([rule.get("connector"), rule.get("query"), rule.get("value"), rule.get("sources"), params, str(value)], sort_keys=True, default=str)
         if key not in cache:
             try:
-                cache[key] = await lookup_codes(ctx, rule, params, value)
+                cache[key] = await lookup_rows(ctx, rule, params, value)
             except ScreenWriteError as exc:
                 raise ScreenWriteError(f"{shown} ({name}): its list of values could not be read — {exc}") from exc
-        codes = cache[key]
-        if codes and str(value).strip() not in codes:
+        rows = cache[key]
+        picked = next((r for r in rows if _same(value_for(str(rule.get("value")), r), value)), None)
+        if rows and picked is None:
             raise ScreenWriteError(
                 f"{shown} ({name}): {value!r} is not a value of its list ({rule.get('connector')}.{rule.get('query')}"
                 + (f", {', '.join(f'{k}={v}' for k, v in params.items())}" if params else "") + ") — read the list with sql_query and use one of its values")
+        for rb in returns if picked is not None else []:
+            target, source = str(rb.get("column") or ""), str(rb.get("param") or "")
+            if target and source and _has(source, picked) and not _has(target, given) and not _has(target, filled):
+                filled[target] = value_for(source, picked)
+    return filled
 
 
 async def save_row(
@@ -669,7 +698,12 @@ async def save_row(
             raise ScreenWriteError(f"{label(name)} ({name}) cannot be changed on this screen" + (" when adding" if mode == "add" else ""))
         given[name] = _normalise(name, given[name], active_rule(f, form), label(name))
     form = overlay_ci(form, given)
-    await _check_lookups(ctx, fields, given, form)
+    # a picked lookup row fills its sibling columns, as in the form — for those the screen writes
+    filled = {canonical(k): v for k, v in (await _check_lookups(ctx, fields, given, form)).items() if k.upper() in writable}
+    filled = {k: v for k, v in filled.items() if not _same(v, value_for(k, form))}
+    if filled:
+        form = overlay_ci(form, filled)
+        applied.update(filled)
 
     missing = [f"{label(f['name'])} ({f['name']})" for low, f in fields.items()
                if (form_names is None or low in form_names)
@@ -715,6 +749,7 @@ async def save_row(
         "values": masked(sent, fields),
         **({"before": masked({k: value_for(k, saved) for k in sent}, fields, hidden_columns(ctx, app, screen, sent))} if mode == "edit" else {}),
         **({"related_tables": [g.id for g, _q, _e in plan]} if plan else {}),
+        **({"filled_by_the_screen": sorted(k for k in filled if k in sent)} if any(k in sent for k in filled) else {}),
         **_hooks_preview(ctx, screen, operation, inputs),
     }
     if dry_run:

@@ -18,6 +18,10 @@ interface ClientInfo {
   redirect_host: string
   local: boolean
   allowed: boolean
+  /** The server lets an external client make changes (`[ai] mcp_changes`). */
+  changes?: boolean
+  /** How long the consent lasts, in days. */
+  days?: number
 }
 
 export default function OAuthAuthorize() {
@@ -79,7 +83,8 @@ export default function OAuthAuthorize() {
           <>
             <Tagline>{t('oauth.intro', { client: client.client_name, app, user: user.username })}</Tagline>
             <Stack gap={14}>
-              <Hint>{t('oauth.what')}</Hint>
+              <Hint>{t('oauth.what')} {client.changes ? t('oauth.whatChanges') : t('oauth.whatReadOnly')}</Hint>
+              <Hint>{t('oauth.lasts', { count: client.days ?? 0 })}</Hint>
               <Hint>{client.local ? t('oauth.returnsLocal') : t('oauth.returnsTo', { host: client.redirect_host })}</Hint>
               {!client.allowed && <Banner $tone="error">{t('oauth.notAllowed')}</Banner>}
               {error && <Banner $tone="error">{error}</Banner>}

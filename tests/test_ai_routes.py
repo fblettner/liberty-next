@@ -197,7 +197,7 @@ def test_tools_endpoint(app) -> None:
         assert r.status_code == 200
         body = r.json()
         assert body["available"] is False  # api_key="" in the fixture
-        assert body["model"] == "claude-opus-4-8"
+        assert body["model"] == "claude-opus-5-5"
         names = {t["name"] for t in body["tools"]}
         assert {"list_connectors", "sql_query"} <= names  # connector tools are on by default
 
@@ -225,7 +225,7 @@ def test_info_reports_ai(app) -> None:
         assert "model" not in anon["ai"]  # the model name is only shown to authenticated callers
         token = _login(client, "admin", "adminpw")
         body = client.get("/info", headers={"Authorization": f"Bearer {token}"}).json()
-        assert body["ai"]["model"] == "claude-opus-4-8"
+        assert body["ai"]["model"] == "claude-opus-5-5"
 
 
 def test_chat_forwards_the_page_context(app) -> None:
@@ -248,11 +248,11 @@ def test_model_picker_and_starters(app) -> None:
         h = {"Authorization": f"Bearer {token}"}
         # the default: no picker (one model), no starters
         body = client.get("/ai/tools", headers=h).json()
-        assert [m["id"] for m in body["models"]] == ["claude-opus-4-8"] and body["starters"] == {}
+        assert [m["id"] for m in body["models"]] == ["claude-opus-5-5"] and body["starters"] == {}
         _install_fake_assistant(app, model="claude-opus-4-8", allowed_models=["claude-haiku-5-5", "claude-opus-4-8", ""],
                                 starters={"*": ["What can you do?"], "nomajde/f0092": ["Who has no role?"]})
         body = client.get("/ai/tools", headers=h).json()
-        assert body["models"] == [{"id": "claude-opus-4-8", "label": "Opus 4.8 (recommended)"}, {"id": "claude-haiku-5-5", "label": "Haiku 5.5 (fast, cheap)"}]
+        assert body["models"] == [{"id": "claude-opus-4-8", "label": "Opus 4.8"}, {"id": "claude-haiku-5-5", "label": "Haiku 5.5 (fast, cheap)"}]
         assert body["starters"]["nomajde/f0092"] == ["Who has no role?"]
         # the chat refuses a model that is not allowed, accepts an allowed one
         msgs = [{"role": "user", "content": "ping"}]

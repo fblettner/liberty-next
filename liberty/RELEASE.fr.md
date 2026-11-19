@@ -12,6 +12,38 @@
   une réponse ou une modification concerne ») — lu au démarrage du serveur. Une extension installée avant cette
   version continue de fonctionner ; téléchargez-la de nouveau pour qu'elle porte son propre nom.
 
+- **Assistant IA : lancer une tâche.** Deux outils d'écriture de plus (`[ai] write_tools`, `ai:write`) : `job_form`
+  montre une tâche comme sa page la montre à l'utilisateur — ce qu'elle fait, les paramètres qu'un utilisateur peut
+  fixer avec leurs choix, ses préréglages, si elle est en cours, ses dernières exécutions avec leur état et leur
+  erreur — et `job_run` est « Exécuter maintenant » : uniquement les paramètres déclarés et les préréglages de la
+  tâche, sous `job:<id>`, par les fonctions des routes de la page de la tâche. Dans le chat c'est une carte ;
+  l'exécution est mise en file et se poursuit en arrière-plan, et `job_form` la suit. Une tâche qui
+  charge un fichier apporté par l'utilisateur le demande **sur la carte** : un sélecteur par étape de fichier, les
+  types de fichier acceptés par le dépôt de la tâche ; Appliquer envoie le fichier par le dépôt de la tâche et
+  lance la tâche avec — le fichier ne passe jamais par le modèle. Depuis un autre client (MCP), une telle tâche
+  ne peut pas encore recevoir son fichier. Tracé comme les
+  autres modifications (canal `apply`) ; en MCP, il faut `[ai] mcp_changes`.
+- **Données sensibles, corrections** (trouvées en rédigeant la documentation) :
+  - les messages des actions qu'un écran exécute après une écriture (`on_insert`…) étaient remplis avec les
+    valeurs sensibles ; ils sont masqués comme ceux d'une action ;
+  - un champ sensible ne se filtre plus que sur une valeur entière donnée par l'utilisateur (égalité) : une plage
+    ou un « contient » permettait de retrouver ses valeurs décompte après décompte — dans l'Explorateur et dans
+    `sql_query` ; et toute mesure autre qu'un décompte est refusée (la moyenne aussi, que la note 7.0.81 omettait) ;
+  - l'option **Sensible** d'une colonne d'écran a trois états dans l'éditeur (comme l'élément / oui / non) : la
+    case à cocher écrivait « non » dès qu'on la décochait, sans retour possible — toute option facultative
+    oui / non des éditeurs y gagne.
+- Les outils d'écriture de l'assistant respectent `[ai] allowed_connectors` : un écran dont les données sont sur
+  un autre connecteur n'existe pas pour eux.
+- La page de consentement OAuth dit ce que le client pourra faire sur CE serveur — lire, et modifier seulement si
+  `[ai] mcp_changes` l'autorise — et combien de temps l'accès dure.
+- Le registre d'usage ne conserve plus le texte d'une note proposée par l'assistant.
+- Le modèle par défaut d'une nouvelle installation est `claude-opus-5-5` (`claude-opus-4-8` auparavant) ; une
+  installation qui fixe son modèle garde le sien.
+- Assistant IA, `screen_write` : **une valeur choisie dans une liste renseigne ses colonnes associées**, comme dans
+  le formulaire. Là où la liste d'une colonne d'écran renseigne d'autres champs à partir de la ligne choisie
+  (`return_binds` — dans le Security Workbench, l'objet donne son code produit), l'écran les renseigne désormais
+  quand l'assistant écrit la valeur ; une colonne associée fournie par l'appelant reste la sienne. `screen_form`
+  les nomme (`also_fills`), la carte les affiche.
 - **MCP : les modifications ont leur propre interrupteur — `[ai] mcp_changes`, désactivé par défaut.** Dans le chat
   Liberty une modification est une carte que l'utilisateur applique ; en MCP le seul garde-fou est l'approbation du
   client, que son utilisateur peut régler sur « toujours autoriser ». Un outil qui enregistre quelque chose — un
@@ -42,8 +74,8 @@
     écriture ou d'une action (« avant », l'enregistrement d'une suppression, la confirmation et les messages de
     l'écran — la valeur que l'utilisateur a demandé d'écrire est la sienne et s'affiche) ; le contexte de page
     (la ligne cliquée, la liste des colonnes, un filtre saisi sur une telle colonne) ; dans l'Explorateur, un
-    champ marqué ne peut être ni un en-tête de ligne ni lu par `min` / `max` / `sum` — il peut être compté, et
-    filtré sur une valeur donnée par l'utilisateur. Les écrans eux-mêmes ne changent pas.
+    champ marqué ne peut être ni un en-tête de ligne ni lu par une mesure autre qu'un décompte — il peut être
+    compté, et filtré sur une valeur donnée par l'utilisateur. Les écrans eux-mêmes ne changent pas.
   - *Ce que cela ne couvre pas* — à savoir avant de s'y fier : ce qu'un utilisateur saisit dans une question ou
     joint ; une colonne de texte libre non marquée ; ce que renvoient un point d'accès API (`api_call`), un outil
     propre à une application ou les outils d'exploitation, dont Liberty ne connaît pas les colonnes.
@@ -89,7 +121,7 @@
     action est fournie d'avance (absente et obligatoire : rien ne s'exécute) ; ce que seul un navigateur fait
     (`navigate`, `open_url`, `refresh`) est signalé, et une action qui ne fait que cela n'est pas proposée.
   Trois verrous, tous nécessaires : `[ai] write_tools` (Administrer → App → Assistant IA), la nouvelle permission
-  `ai:write` (Accès → un rôle → Autres → IA) et la permission de chaque requête, point d'accès ou plugin exécuté,
+  `ai:write` (Accès → un rôle → Au-delà des menus → IA) et la permission de chaque requête, point d'accès ou plugin exécuté,
   comme dans l'écran. **Qui confirme :** dans le chat Liberty les outils ne font que proposer — l'utilisateur
   reçoit une carte (l'enregistrement avant et après, ou l'action avec la confirmation de l'écran et ce qu'elle
   exécute) et rien ne se passe avant Appliquer ; en MCP le client (Claude) demande à son utilisateur avant
@@ -102,7 +134,7 @@
 
 - **MCP : une extension Claude Desktop, pour un serveur qui n'est pas sur Internet.** Un connecteur personnalisé
   est appelé depuis les serveurs d'Anthropic et exige donc une adresse publique. L'onglet Jetons d'accès du profil
-  propose désormais **Télécharger l'extension** (`liberty.mcpb`) : ouverte avec Claude Desktop, elle exécute sur
+  propose désormais le bouton **Extension Claude Desktop** (`liberty.mcpb`) : ouverte avec Claude Desktop, elle exécute sur
   l'ordinateur de l'utilisateur une petite passerelle qui relaie les messages de Claude vers `/mcp` avec le jeton
   d'accès personnel de l'utilisateur — le serveur n'a qu'à être joignable depuis cet ordinateur (une adresse
   interne, un VPN). Le fichier est construit au téléchargement avec l'adresse du serveur renseignée et ne contient

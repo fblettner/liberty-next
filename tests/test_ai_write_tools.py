@@ -49,7 +49,7 @@ path = "/boom"
 
 [[connectors.shop.queries]]
 name = "customers_get"
-sql = "SELECT c.id AS ID, c.name AS NAME, c.status AS STATUS, c.kind AS KIND, c.sub AS SUB, c.vat AS VAT, c.secret AS SECRET, e.cust_id AS CUST_ID, e.phone AS PHONE FROM customer c LEFT JOIN customer_extra e ON e.cust_id = c.id ORDER BY c.id"
+sql = "SELECT c.id AS ID, c.name AS NAME, c.status AS STATUS, c.kind AS KIND, c.sub AS SUB, c.vat AS VAT, c.secret AS SECRET, c.klabel AS KLABEL, e.cust_id AS CUST_ID, e.phone AS PHONE FROM customer c LEFT JOIN customer_extra e ON e.cust_id = c.id ORDER BY c.id"
 
 [[connectors.shop.queries]]
 name = "kinds_get"
@@ -67,12 +67,12 @@ sql = "SELECT code AS CODE, kind AS KIND FROM sub ORDER BY code"
 
 [[connectors.shop.queries]]
 name = "customers_post"
-sql = "INSERT INTO customer (id, name, status, kind, sub, vat, secret) VALUES (:ID, :NAME, :STATUS, :KIND, :SUB, :VAT, :SECRET)"
+sql = "INSERT INTO customer (id, name, status, kind, sub, vat, secret, klabel) VALUES (:ID, :NAME, :STATUS, :KIND, :SUB, :VAT, :SECRET, :KLABEL)"
 writable = true
 
 [[connectors.shop.queries]]
 name = "customers_put"
-sql = "UPDATE customer SET id = :ID, name = :NAME, status = :STATUS, kind = :KIND, sub = :SUB, vat = :VAT WHERE id = :ID_ORIGINAL"
+sql = "UPDATE customer SET id = :ID, name = :NAME, status = :STATUS, kind = :KIND, sub = :SUB, vat = :VAT, klabel = :KLABEL WHERE id = :ID_ORIGINAL"
 writable = true
 
 [[connectors.shop.queries]]
@@ -148,10 +148,15 @@ rules = "ENUM"
 rules_values = "STATUS"
 default = "A"
 
+# picking a kind also fills its label on the record, from the picked row of the list
 [[screens.shop.customers.columns]]
 name = "KIND"
 rules = "LOOKUP"
 rules_values = "KINDS"
+return_binds = [{ param = "LABEL", column = "KLABEL" }]
+
+[[screens.shop.customers.columns]]
+name = "KLABEL"
 
 [[screens.shop.customers.columns]]
 name = "SUB"
@@ -272,6 +277,11 @@ update_query = "customers_put"
 delete_query = "customers_delete"
 
 [[screens.shop.hooked.on_insert]]
+id = "say"
+type = "notify"
+message = "{NAME} was created."
+
+[[screens.shop.hooked.on_insert]]
 id = "log"
 type = "call_action"
 ref = "log_it"
@@ -353,7 +363,7 @@ values = [{ value = "A", label = "Active" }, { value = "I", label = "Inactive" }
 """
 
 
-def _app(tmp_path, *, write_tools: bool = True, hide_sensitive: bool = False):
+def _app(tmp_path, *, write_tools: bool = True, hide_sensitive: bool = False, allowed: list[str] | None = None):
     db_url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
     (tmp_path / "connectors.toml").write_text(CONNECTORS.format(db_url=db_url))
     (tmp_path / "screens.toml").write_text(textwrap.dedent(SCREENS))
@@ -365,14 +375,14 @@ def _app(tmp_path, *, write_tools: bool = True, hide_sensitive: bool = False):
         db = AuthDatabase(pools, "default")
         await db.create_schema()
         async with pools.engine("default").begin() as conn:
-            await conn.execute(text("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT, status TEXT, kind TEXT, sub TEXT, vat TEXT, secret TEXT)"))
+            await conn.execute(text("CREATE TABLE customer (id INTEGER PRIMARY KEY, name TEXT, status TEXT, kind TEXT, sub TEXT, vat TEXT, secret TEXT, klabel TEXT)"))
             await conn.execute(text("CREATE TABLE kind (code TEXT, label TEXT)"))
             await conn.execute(text("CREATE TABLE sub (code TEXT, kind TEXT)"))
             await conn.execute(text("INSERT INTO kind VALUES ('B ','Business'),('P','Person')"))        # 'B ' padded, as a JDE code reads back
             await conn.execute(text("INSERT INTO sub VALUES ('B1','B'),('B2','B'),('P1','P')"))
             await conn.execute(text("CREATE TABLE customer_extra (cust_id INTEGER PRIMARY KEY, phone TEXT)"))
             await conn.execute(text("CREATE TABLE log (cust_id INTEGER, who TEXT, what TEXT)"))
-            await conn.execute(text("INSERT INTO customer VALUES (1,'Acme','A','B',NULL,'FR1','s3cret'),(2,'Bolt','A','P',NULL,NULL,NULL),(3,'Old','X','P',NULL,NULL,NULL)"))
+            await conn.execute(text("INSERT INTO customer VALUES (1,'Acme','A','B',NULL,'FR1','s3cret',NULL),(2,'Bolt','A','P',NULL,NULL,NULL,NULL),(3,'Old','X','P',NULL,NULL,NULL,NULL)"))
             await conn.execute(text("INSERT INTO customer_extra VALUES (1,'0101')"))
         async with db.session() as s:
             svc = AuthService(s)
@@ -392,7 +402,7 @@ def _app(tmp_path, *, write_tools: bool = True, hide_sensitive: bool = False):
         screens=ScreenSettings(config_path=Path(tmp_path / "screens.toml")),
         actions=ActionSettings(config_path=Path(tmp_path / "actions.toml")),
         auth=AuthSettings(backend="db", jwt_secret="write-tools-test-secret-0123456789abcdef", pool="default"),
-        ai=AISettings(enabled=True, api_key="", config_path=tmp_path / "ai.toml", write_tools=write_tools, mcp_enabled=True, hide_sensitive=hide_sensitive),
+        ai=AISettings(enabled=True, api_key="", config_path=tmp_path / "ai.toml", write_tools=write_tools, mcp_enabled=True, hide_sensitive=hide_sensitive, allowed_connectors=allowed or []),
     ))
 
 
@@ -427,7 +437,7 @@ def test_an_update_changes_only_what_is_given(app) -> None:
         out = r.json()
         assert out["written"] is True and out["rowcount"] == 1
         assert out["key"] == {"ID": 2} and out["values"] == {"NAME": "Bolt Ltd"} and out["before"] == {"NAME": "Bolt"}
-        assert _rows(client, "id = 2") == [{"id": 2, "name": "Bolt Ltd", "status": "A", "kind": "P", "sub": None, "vat": None, "secret": None}]
+        assert _rows(client, "id = 2") == [{"id": 2, "name": "Bolt Ltd", "status": "A", "kind": "P", "sub": None, "vat": None, "secret": None, "klabel": None}]
         # the other records are untouched, and a stored secret is never overwritten by the row that was read
         assert _rows(client, "id = 1")[0]["secret"] == "s3cret" and _rows(client, "id = 1")[0]["name"] == "Acme"
         r = _write(client, "writer", operation="update", key={"ID": 1}, values={"NAME": "Acme SA"})
@@ -449,7 +459,7 @@ def test_an_insert_takes_the_defaults_and_writes_the_related_table(app) -> None:
         r = _write(client, "writer", operation="insert", values={"ID": 10, "NAME": "New", "KIND": "P", "PHONE": "0606"})
         assert r.status_code == 200, r.text
         assert r.json()["values"]["STATUS"] == "A" and r.json()["related_tables"] == ["extra"]        # the column's default
-        assert _rows(client, "id = 10") == [{"id": 10, "name": "New", "status": "A", "kind": "P", "sub": None, "vat": None, "secret": None}]
+        assert _rows(client, "id = 10") == [{"id": 10, "name": "New", "status": "A", "kind": "P", "sub": None, "vat": None, "secret": None, "klabel": "Person"}]
         assert _rows(client, "cust_id = 10", "customer_extra") == [{"cust_id": 10, "phone": "0606"}]   # linked by the group's bind
         # an update of the related column: the row exists (1) → updated; it does not (2) → inserted
         assert _write(client, "writer", operation="update", key={"ID": 1}, values={"PHONE": "0102"}).status_code == 200
@@ -846,8 +856,18 @@ def test_sensitive_data_is_not_given_to_the_assistant(tmp_path) -> None:
         ran = _act(client, "writer", "block", key={"ID": 2}).json()
         assert ran["ok"] is True and ran["messages"] == [f"{hidden} is blocked."] and _rows(client, "id = 2")[0]["status"] == "I"
 
+        # the messages of what a screen runs AFTER a write are filled the same way
+        out = _save(client, "writer", "hooked", operation="insert", values={"ID": 40, "NAME": "Quiet", "STATUS": "A"}).json()
+        assert out["written"] is True and out["actions"]["messages"] == [f"{hidden} was created."]
+        # a hidden column is filtered on a whole value only: a range would find its values out
+        out, err = _tool(client, "writer", "sql_query", {"connector": "shop", "query": "customers_get", "filters": {"NAME_from": "A", "NAME_to": "C"}})
+        assert err and "only on a whole value" in out["error"]
+        out, err = _tool(client, "writer", "sql_query", {"connector": "shop", "query": "customers_get", "filters": {"ID_from": 2}})
+        assert not err and [r["ID"] for r in out["rows"]][:1] == [2]
+
     (tmp_path / "shown").mkdir()
     with TestClient(_app(tmp_path / "shown")) as client:                    # the setting off: as before
+        assert _save(client, "writer", "hooked", operation="insert", values={"ID": 40, "NAME": "Loud", "STATUS": "A"}).json()["actions"]["messages"] == ["Loud was created."]
         out, err = _tool(client, "writer", "sql_query", {"connector": "shop", "query": "customers_get"})
         assert not err and "hidden_columns" not in out and out["rows"][0]["NAME"] == "Acme" and "sensitive" not in json.dumps(out["columns"])
         assert _write(client, "writer", operation="update", key={"ID": 2}, values={"NAME": "Zed"}, dry_run=True).json()["before"] == {"NAME": "Bolt"}
@@ -877,3 +897,36 @@ def test_what_the_assistant_wrote_is_on_record(app) -> None:
             ("writer", "shop", "screen_write", True), ("writer", "shop", "screen_write", False), ("writer", "shop", "screen_action", True)]
         assert "operation=update" in rows[0]["tools"][0]["input"] and "'ID': 2" in rows[0]["tools"][0]["input"] and "Zed" not in json.dumps(rows[0])
         assert "not one of its values" in rows[1]["tools"][0]["error"] and "action=block" in rows[2]["tools"][0]["input"]
+
+
+def test_a_picked_lookup_value_fills_its_sibling_columns(app) -> None:
+    """In the form, picking a value of some lists also sets sibling fields from the picked row
+    (`return_binds` — on the JDE Security Workbench, the object gives its product code). Written
+    from here, the screen fills them the same way: the caller gives the value, not its siblings."""
+    with TestClient(app) as client:
+        out = _write(client, "writer", operation="update", key={"ID": 2}, values={"KIND": "B", "VAT": "FR2"}).json()
+        assert out["written"] is True and out["values"]["KLABEL"] == "Business" and out["filled_by_the_screen"] == ["KLABEL"]
+        assert _rows(client, "id = 2")[0]["klabel"] == "Business"
+        # a sibling the caller gives is the caller's
+        _write(client, "writer", operation="update", key={"ID": 2}, values={"KIND": "P", "KLABEL": "my own"})
+        assert _rows(client, "id = 2")[0]["klabel"] == "my own"
+        # the value is unchanged: nothing is picked, nothing is filled
+        out = _write(client, "writer", operation="update", key={"ID": 2}, values={"NAME": "Bolt 9"}).json()
+        assert "filled_by_the_screen" not in out and _rows(client, "id = 2")[0]["klabel"] == "my own"
+        # a dry run shows what the screen would fill
+        out = _write(client, "writer", operation="update", key={"ID": 1}, values={"KIND": "P"}, dry_run=True).json()
+        assert out["values"] == {"KIND": "P", "KLABEL": "Person"} and out["filled_by_the_screen"] == ["KLABEL"]
+
+
+def test_the_write_tools_follow_the_allowed_connectors(tmp_path) -> None:
+    """[ai] allowed_connectors restricts every tool of the assistant: a screen whose data is on
+    another connector does not exist for the write tools either — the tools and the Apply routes."""
+    with TestClient(_app(tmp_path, allowed=["tiny"])) as client:
+        r = _write(client, "writer", operation="update", key={"ID": 2}, values={"STATUS": "I"})
+        assert r.status_code == 409 and "no screen shop/customers" in r.json()["detail"] and _rows(client, "id = 2")[0]["status"] == "A"
+        assert _act(client, "writer", "block", key={"ID": 2}).status_code == 409
+        out, err = _tool(client, "writer", "screen_form", {"app": "shop", "screen": "customers"})
+        assert err and "no screen" in out["error"]
+    (tmp_path / "in").mkdir()
+    with TestClient(_app(tmp_path / "in", allowed=["shop", "tiny"])) as client:
+        assert _write(client, "writer", operation="update", key={"ID": 2}, values={"STATUS": "I"}).status_code == 200

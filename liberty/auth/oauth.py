@@ -195,6 +195,8 @@ class ClientInfo(BaseModel):
     redirect_host: str          # where the user is sent back — shown on the consent page
     local: bool                 # a listener on the user's own machine (a desktop client)
     allowed: bool               # the caller holds `mcp:use`
+    changes: bool               # the server lets an external client make changes ([ai] mcp_changes)
+    days: int                   # how long the consent lasts ([ai] mcp_token_max_days)
 
 
 class ApproveRequest(BaseModel):
@@ -223,14 +225,17 @@ def _checked_client(tokens: TokenService, client_id: str, redirect_uri: str) -> 
 
 @router.get("/oauth/client", response_model=ClientInfo, summary="Describe an OAuth client", dependencies=[Enabled])
 async def client_info(
-    client_id: str, redirect_uri: str, principal: CurrentPrincipal,
+    client_id: str, redirect_uri: str, request: Request, principal: CurrentPrincipal,
     tokens: Annotated[TokenService, Depends(get_token_service)],
 ) -> ClientInfo:
     """What the consent page shows about the client asking to act as the signed-in user."""
     client = _checked_client(tokens, client_id, redirect_uri)
     host = urlsplit(redirect_uri).hostname or ""
+    ai = request.app.state.settings.ai
     return ClientInfo(client_name=client["name"], redirect_host=host, local=host in _LOOPBACK,
-                      allowed=principal.has_permission(PERSONAL_TOKEN_PERMISSION))
+                      allowed=principal.has_permission(PERSONAL_TOKEN_PERMISSION),
+                      changes=bool(getattr(ai, "mcp_changes", False)),
+                      days=max(1, int(getattr(ai, "mcp_token_max_days", 366) or 366)))
 
 
 @router.post(
