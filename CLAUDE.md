@@ -88,7 +88,7 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           dispose), sql.py (SQLConnector: text() binds, filter / summary wraps,
                           form rules, SEQUENCE, audit mirror, Oracle quirks, NDJSON streaming,
                           multi-pool; the pure SQL-text helpers — ORDER BY split, aggregate / filter wraps,
-                          #SCHEMA# / #DBLINK# placeholders — in sqltext.py), api.py (APIConnector: httpx, 5 auth kinds, templating),
+                          #SCHEMA# / #DBLINK# placeholders — in sqltext.py), api.py (APIConnector: httpx, 5 auth kinds, templating — a value stays where its placeholder is: `substitute_path` / `_json` / `_form`, `file_part_path` for a user's values, `call(..., untrusted=True)`),
                           registry.py (ConnectorRegistry + the shared dictionary), dictionary.py
                           (dictionary.toml: labels, enums, lookups, sequences, rules),
                           introspect.py (schema walk), thick.py / thick_engine.py (Oracle OCI)

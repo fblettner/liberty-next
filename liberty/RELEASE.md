@@ -1,6 +1,31 @@
 # Liberty Next — Release notes
 
-## 7.0.83 — unreleased
+## 7.0.84 — unreleased
+
+- **Security — API connectors: a parameter can no longer redirect an endpoint.** The `{{placeholders}}` of an
+  endpoint were filled as plain text, in the path and in the body. A caller holding the permission on one
+  endpoint could therefore reach another path of the same connector (a value such as `../other/service`), or
+  add fields to a JSON body (a value holding a quote) — so the permission `api:<connector>:<endpoint>` was in
+  practice a permission on the whole connector. Now:
+  - in a **path**, a value may add segments (`report/execute`) but a `.` / `..` segment is refused — written
+    plainly, percent-encoded or with a backslash — `?` and `#` are encoded, and a value cannot give the
+    address of the call; the call is refused before anything is sent (not even a token request);
+  - in a **JSON body**, a value placed inside a string (`"name": "{{NAME}}"`) is inserted as string content
+    and cannot end that string. A value a caller had already escaped is kept as it is; one it had not (a
+    Windows path, a line break, a quote) is now escaped instead of producing an invalid body. A placeholder
+    written outside quotes (`{{BODY}}`, a number) is still inserted as is: that is the author's choice;
+  - in a **form-encoded body**, a value of a `name=value` pair is form-encoded and cannot add a pair
+    (`&admin=1`); one already encoded is kept; a placeholder standing alone (`{{BODY}}`) is inserted as is;
+  - the **file of a multipart part** (`file=@…`): when the values come from a user — the HTTP route, a screen
+    action, the assistant, a notification rule, a replayed change — the endpoint must name the folder
+    (`@/data/out/{{NAME}}`) and the value stays inside it; `@{{FILE}}` is then refused, as the permission on
+    the endpoint would let its holder send any file of the server. A job or a plugin still gives the path it
+    wants. A file part that cannot be read is now a failed call with its reason, not an error 500;
+  - a value is no longer read again for placeholders (a value holding `{{token}}` stays that text).
+  Existing endpoints keep working: only calls that left their path, produced an invalid body, or let a user
+  choose the file to send, change.
+
+## 7.0.83 — 2026-11-19
 
 - **Display fixes after the documentation pass.** The Claude Desktop extension's settings (address, token, files
   folder, certificate) and its description are in French when the profile is in French at download. Monitoring →

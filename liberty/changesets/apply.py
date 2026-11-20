@@ -100,7 +100,7 @@ async def _execute_op(connectors: Any, op: dict[str, Any], *, settings: Any = No
     new = op.get("new_values") or {}
     if op_type == "CALL_API":
         conn = connectors.api(op["connector"])
-        result = await conn.call(op["query"], dict(new))   # op["query"] is the endpoint name
+        result = await conn.call(op["query"], dict(new), untrusted=True)   # op["query"] is the endpoint name; the values a user sent
         if not getattr(result, "success", True):
             raise RuntimeError(
                 f"API replay failed: {getattr(result, 'error', None) or getattr(result, 'status_code', '?')}"

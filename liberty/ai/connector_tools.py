@@ -313,7 +313,7 @@ def build_connector_tools(
         """
         require(f"api:{connector}:{endpoint}", f"the endpoint {connector}.{endpoint}")
         conn = _api(connector)
-        result = await conn.call(endpoint, params or {})
+        result = await conn.call(endpoint, params or {}, untrusted=True)
         return result.to_dict()
 
     tools: list[Tool] = [

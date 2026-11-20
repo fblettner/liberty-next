@@ -8,7 +8,11 @@ by Python's ``json`` module. Features:
   with a TTL, and refreshes once on a ``401``);
 * ``{{placeholder}}`` substitution in the path, query params, headers and body —
   built-ins ``{{username}}`` / ``{{password}}`` / ``{{token}}`` plus per-endpoint
-  declared params and any runtime overrides;
+  declared params and any runtime overrides. A value stays where its placeholder is: it
+  cannot leave the endpoint's path (:func:`substitute_path`), the JSON string it is
+  written in (:func:`substitute_json`), its form pair (:func:`substitute_form`) nor, for
+  a user's values, the folder of a file part (:func:`file_part_path`) — the permission
+  on an endpoint is on that call;
 * response extraction by dot-path (``data.0.id`` indexes list element 0) for a
   single ``response_field`` and/or a named ``response_map``;
 * ``multipart/form-data`` bodies via a line-based parts list (``name=value`` for
@@ -21,12 +25,15 @@ by Python's ``json`` module. Features:
 from __future__ import annotations
 
 import base64
+import json
 import logging
+import re
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote_plus, unquote
 
 import httpx
 
@@ -75,16 +82,150 @@ class ApiResult:
         }
 
 
-def substitute(text: str | None, params: dict[str, Any]) -> str:
-    """Replace every ``{{key}}`` in *text* with ``str(params[key])`` (missing → "")."""
+class ApiParamError(ValueError):
+    """A parameter value that would take the call somewhere else than its endpoint says."""
+
+
+_PLACEHOLDER = re.compile(r"\{\{([^{}]+)\}\}")
+
+
+def _fill(text: str | None, params: dict[str, Any], render: Any) -> str:
+    """Replace every ``{{key}}`` of *text* whose key is in *params* by ``render(key, value, at)``,
+    in ONE pass: a value is never read again for placeholders (a value holding ``{{token}}``
+    stays that text). An unknown key is left as written."""
     if not text:
         return text or ""
-    out = text
-    for key, value in params.items():
-        token = "{{" + key + "}}"
-        if token in out:
-            out = out.replace(token, "" if value is None else str(value))
+
+    def one(m: re.Match[str]) -> str:
+        key = m.group(1)
+        if key not in params:
+            return m.group(0)
+        value = params[key]
+        return render(key, "" if value is None else str(value), m.start())
+
+    return _PLACEHOLDER.sub(one, text)
+
+
+def substitute(text: str | None, params: dict[str, Any]) -> str:
+    """Replace every ``{{key}}`` in *text* with ``str(params[key])`` (a key not in *params* is
+    left as written), as plain text — for headers, query values and non-JSON bodies. A path
+    goes through :func:`substitute_path`, a JSON body through :func:`substitute_json`."""
+    return _fill(text, params, lambda _key, value, _at: value)
+
+
+def substitute_path(text: str | None, params: dict[str, Any]) -> str:
+    """:func:`substitute` for an endpoint's path. A value may add segments (``report/execute``)
+    but may not leave the path the endpoint gives: a ``.`` / ``..`` segment — written plainly,
+    percent-encoded or with a backslash — is refused, and ``?`` / ``#`` are encoded so a value
+    cannot start a query string. Without this, the permission on one endpoint would open every
+    path of the connector (``../other/service``)."""
+
+    def render(key: str, value: str, _at: int) -> str:
+        plain = value
+        for _ in range(3):                      # %252e%252e → %2e%2e → ..
+            decoded = unquote(plain)
+            if decoded == plain:
+                break
+            plain = decoded
+        if _dot_segment(plain):
+            raise ApiParamError(f"parameter {key!r}: a path value cannot hold a '.' or '..' segment")
+        return value.replace("?", "%3F").replace("#", "%23")
+
+    out = _fill(text, params, render)
+    template = (text or "").lstrip().lower()
+    if out.lstrip().lower().startswith(("http://", "https://")) and not template.startswith(("http://", "https://")):
+        raise ApiParamError("a parameter cannot give the address of the call: the endpoint's path decides it")
     return out
+
+
+def _json_string_content(value: str) -> str:
+    """*value* as the inside of a JSON string. A value that already is one (no bare quote, valid
+    escapes — what a caller who escaped it sends) is kept; anything else is escaped. Either way
+    it cannot close the string it is placed in."""
+    try:
+        json.loads(f'"{value}"')
+        return value
+    except ValueError:
+        return json.dumps(value, ensure_ascii=False)[1:-1]
+
+
+def _string_spans(text: str) -> list[tuple[int, int]]:
+    """The ``(start, end)`` of every JSON string literal of *text* (quotes excluded)."""
+    spans: list[tuple[int, int]] = []
+    start: int | None = None
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if start is not None and c == "\\":
+            i += 2
+            continue
+        if c == '"':
+            if start is None:
+                start = i + 1
+            else:
+                spans.append((start, i))
+                start = None
+        i += 1
+    return spans
+
+
+def substitute_json(text: str | None, params: dict[str, Any]) -> str:
+    """:func:`substitute` for a JSON body. A placeholder written inside a string literal
+    (``"name": "{{NAME}}"``) receives its value as string content — a quote in the value cannot
+    end the string and add fields to the request. A placeholder outside quotes is the author's
+    choice of raw JSON (``{{BODY}}``, a number) and is inserted as is."""
+    if not text:
+        return text or ""
+    spans = _string_spans(text)
+
+    def render(_key: str, value: str, at: int) -> str:
+        return _json_string_content(value) if any(a <= at < b for a, b in spans) else value
+
+    return _fill(text, params, render)
+
+
+_FORM_SAFE = re.compile(r"(?:[A-Za-z0-9._~*+-]|%[0-9A-Fa-f]{2})*")
+
+
+def substitute_form(text: str | None, params: dict[str, Any]) -> str:
+    """:func:`substitute` for an ``application/x-www-form-urlencoded`` body. In a ``name=value``
+    pair a value is form-encoded, so it cannot add a pair (``&admin=1``); one a caller already
+    encoded is kept. A placeholder standing alone as a pair (``{{BODY}}``) is raw, the author's
+    choice."""
+    if not text:
+        return text or ""
+
+    def render(_key: str, value: str, _at: int) -> str:
+        return value if _FORM_SAFE.fullmatch(value) else quote_plus(value)
+
+    return "&".join(_fill(pair, params, render) if "=" in pair else substitute(pair, params) for pair in text.split("&"))
+
+
+def _dot_segment(value: str) -> bool:
+    return any(seg.strip() in (".", "..") for seg in value.replace("\\", "/").split("/"))
+
+
+def file_part_path(template: str, params: dict[str, Any], *, untrusted: bool) -> Path:
+    """The file a multipart part sends (``name=@<template>``). Server-side callers (a job, a
+    plugin) may give any path. When the values come from a user (*untrusted*: the HTTP route, a
+    screen action, the assistant, a replayed change), the endpoint must name the folder
+    (``@/data/out/{{NAME}}``) and the value stays inside it — otherwise the permission on the
+    endpoint would let its holder send any file of the server to that API."""
+    rendered = substitute(template, params)
+    path = Path(rendered)
+    if not untrusted or "{{" not in template:
+        return path
+    literal = template.split("{{", 1)[0]
+    folder = literal.rsplit("/", 1)[0] if "/" in literal else ""
+    if not folder:
+        raise ApiParamError("a file to send must be in a folder the endpoint names (@/folder/{{NAME}}), not one a parameter gives")
+    for key, value in params.items():
+        if "{{" + key + "}}" in template and value is not None and _dot_segment(str(value)):
+            raise ApiParamError(f"parameter {key!r}: a file name cannot hold a '.' or '..' segment")
+    root = Path(folder).resolve()
+    if not path.resolve().is_relative_to(root):
+        raise ApiParamError("the file to send is outside the folder the endpoint names")
+    return path
 
 
 def extract_path(data: Any, path: str | None) -> Any:
@@ -308,15 +449,25 @@ class APIConnector:
 
     # -- call -------------------------------------------------------------- #
 
-    async def call(self, endpoint_name: str, params: dict[str, Any] | None = None) -> ApiResult:
+    async def call(self, endpoint_name: str, params: dict[str, Any] | None = None, *, untrusted: bool = False) -> ApiResult:
+        """Call *endpoint_name* with *params*. *untrusted* says the values come from a user (the
+        HTTP route, a screen action, the assistant…) and not from server-side code: a file part
+        may then only send a file of the folder the endpoint names (:func:`file_part_path`)."""
         endpoint = self.get_endpoint(endpoint_name)
         merged = self._merge_params(endpoint, params)
+
+        try:
+            # checked before anything is sent (a token request included)
+            substitute_path(endpoint.path, merged)
+        except ApiParamError as exc:
+            return ApiResult(connector=self.name, endpoint=endpoint_name, success=False, status_code=0,
+                             url=self.config.base_url, error=f"{type(exc).__name__}: {exc}")
 
         token = await self._get_token(merged)
         if token is not None:
             merged["token"] = token
 
-        url = self._resolve_url(substitute(endpoint.path, merged))
+        url = self._resolve_url(substitute_path(endpoint.path, merged))
         query = {k: substitute(v, merged) for k, v in endpoint.query_params.items()}
 
         headers: dict[str, str] = {k: substitute(v, merged) for k, v in self.config.default_headers.items()}
@@ -324,7 +475,11 @@ class APIConnector:
         for k, v in endpoint.headers.items():  # per-endpoint headers win
             headers[k] = substitute(v, merged)
 
-        request_kwargs = self._build_body(endpoint, merged, headers)
+        try:
+            request_kwargs = self._build_body(endpoint, merged, headers, untrusted=untrusted)
+        except (ApiParamError, OSError) as exc:       # a refused value, or a file part that cannot be read
+            return ApiResult(connector=self.name, endpoint=endpoint_name, success=False, status_code=0,
+                             url=url, error=f"{type(exc).__name__}: {exc}")
 
         started = time.perf_counter()
         try:
@@ -337,7 +492,7 @@ class APIConnector:
                     merged["token"] = new_token
                     headers.update(self._auth_headers(new_token))
                     # File-stream bodies were consumed; rebuild before the retry.
-                    request_kwargs = self._build_body(endpoint, merged, headers)
+                    request_kwargs = self._build_body(endpoint, merged, headers, untrusted=untrusted)
                     resp = await self._client.request(
                         endpoint.method.upper(), url, params=query or None, headers=headers, **request_kwargs
                     )
@@ -383,27 +538,28 @@ class APIConnector:
     # -- body construction ------------------------------------------------- #
 
     def _build_body(
-        self, endpoint: EndpointDef, params: dict[str, Any], headers: dict[str, str]
+        self, endpoint: EndpointDef, params: dict[str, Any], headers: dict[str, str], *, untrusted: bool = False
     ) -> dict[str, Any]:
         if endpoint.method.upper() in ("GET", "HEAD", "DELETE") or not endpoint.body:
             return {}
         content_type = (endpoint.content_type or "application/json").lower()
         if content_type.startswith("multipart/form-data"):
-            data, files = _parse_multipart(endpoint.body, params)
+            data, files = _parse_multipart(endpoint.body, params, untrusted=untrusted)
             # Drop any explicit Content-Type so httpx sets the multipart boundary.
             for h in [h for h in headers if h.lower() == "content-type"]:
                 headers.pop(h)
             return {"data": data, "files": files} if files else {"data": data}
-        rendered = substitute(endpoint.body, params)
         if content_type.startswith("application/x-www-form-urlencoded"):
-            return {"content": rendered}
+            return {"content": substitute_form(endpoint.body, params)}
+        # JSON (the default): a value placed inside a string cannot leave it
+        rendered = substitute_json(endpoint.body, params) if "json" in content_type else substitute(endpoint.body, params)
         # application/json (default) and anything else: send verbatim.
         headers.setdefault("Content-Type", endpoint.content_type or "application/json")
         return {"content": rendered}
 
 
 def _parse_multipart(
-    template: str, params: dict[str, Any]
+    template: str, params: dict[str, Any], *, untrusted: bool = False
 ) -> tuple[dict[str, str], dict[str, tuple[str, bytes, str]]]:
     """Parse the line-based parts list into ``(text_parts, file_parts)`` for httpx."""
     data: dict[str, str] = {}
@@ -418,7 +574,7 @@ def _parse_multipart(
         name = name.strip()
         if rest.startswith("@"):
             segments = rest[1:].split(";")
-            path = substitute(segments[0].strip(), params)
+            p = file_part_path(segments[0].strip(), params, untrusted=untrusted)
             filename: str | None = None
             part_ct = "application/octet-stream"
             for seg in segments[1:]:
@@ -430,7 +586,6 @@ def _parse_multipart(
                     filename = v
                 elif k == "contenttype":
                     part_ct = v
-            p = Path(path)
             files[name] = (filename or p.name, p.read_bytes(), part_ct)
         else:
             data[name] = substitute(rest, params)

@@ -110,7 +110,7 @@ async def test_apply_replays_call_api_invocation() -> None:
         success = True
 
     class _Api:
-        async def call(self, endpoint, params):
+        async def call(self, endpoint, params, *, untrusted=False):
             calls.append((endpoint, dict(params)))
             return _Result()
 
@@ -139,7 +139,7 @@ async def test_apply_call_api_failure_is_reported_not_raised() -> None:
         status_code = 500
 
     class _Api:
-        async def call(self, endpoint, params):
+        async def call(self, endpoint, params, *, untrusted=False):
             return _Result()
 
     reg.api = lambda name: _Api()   # type: ignore[attr-defined]

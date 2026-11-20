@@ -1,6 +1,37 @@
 # Liberty Next — Notes de version
 
-## 7.0.83 — non publiée
+## 7.0.84 — non publiée
+
+- **Sécurité — connecteurs API : un paramètre ne peut plus détourner un point d'accès.** Les
+  `{{paramètres}}` d'un point d'accès étaient remplacés comme du texte brut, dans le chemin et dans le corps.
+  Un appelant ayant la permission sur un point d'accès pouvait donc atteindre un autre chemin du même
+  connecteur (une valeur comme `../autre/service`), ou ajouter des champs à un corps JSON (une valeur
+  contenant un guillemet) — la permission `api:<connecteur>:<point d'accès>` valait en pratique pour tout le
+  connecteur. Désormais :
+  - dans un **chemin**, une valeur peut ajouter des segments (`report/execute`) mais un segment `.` / `..`
+    est refusé — écrit tel quel, encodé en pourcent ou avec une barre oblique inversée — `?` et `#` sont
+    encodés, et une valeur ne peut pas donner l'adresse de l'appel ; l'appel est refusé avant tout envoi
+    (pas même une demande de jeton) ;
+  - dans un **corps JSON**, une valeur placée dans une chaîne (`"name": "{{NAME}}"`) est insérée comme
+    contenu de chaîne et ne peut pas fermer cette chaîne. Une valeur déjà échappée par l'appelant est
+    conservée telle quelle ; une valeur qui ne l'était pas (un chemin Windows, un saut de ligne, un
+    guillemet) est maintenant échappée au lieu de produire un corps invalide. Un paramètre écrit hors
+    guillemets (`{{BODY}}`, un nombre) reste inséré tel quel : c'est le choix de l'auteur ;
+  - dans un **corps encodé en formulaire**, la valeur d'une paire `nom=valeur` est encodée et ne peut pas
+    ajouter une paire (`&admin=1`) ; une valeur déjà encodée est conservée ; un paramètre seul (`{{BODY}}`)
+    reste inséré tel quel ;
+  - le **fichier d'une partie multipart** (`file=@…`) : quand les valeurs viennent d'un utilisateur — la
+    route HTTP, une action d'écran, l'assistant, une règle de notification, une modification rejouée — le
+    point d'accès doit nommer le dossier (`@/data/out/{{NAME}}`) et la valeur reste dans ce dossier ;
+    `@{{FILE}}` est alors refusé, car la permission sur le point d'accès permettrait d'envoyer n'importe quel
+    fichier du serveur. Une tâche ou un plugin donne toujours le chemin qu'il veut. Une partie fichier
+    illisible donne maintenant un appel en échec avec sa raison, et non une erreur 500 ;
+  - une valeur n'est plus relue pour y remplacer des paramètres (une valeur contenant `{{token}}` reste ce
+    texte).
+  Les points d'accès existants continuent de fonctionner : seuls changent les appels qui sortaient de leur
+  chemin, produisaient un corps invalide, ou laissaient un utilisateur choisir le fichier envoyé.
+
+## 7.0.83 — 2026-11-19
 
 - **Corrections d'affichage après la passe de documentation.** Les réglages de l'extension Claude Desktop
   (adresse, jeton, dossier de fichiers, certificat) et sa description sont en français quand le profil est en

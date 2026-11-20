@@ -85,7 +85,7 @@ class _Conn:
     async def execute(self, query: str, params: dict):
         self.calls.append((query, params))
 
-    async def call(self, endpoint: str, params: dict):
+    async def call(self, endpoint: str, params: dict, *, untrusted: bool = False):
         self.calls.append(("ep:" + endpoint, params))
 
 

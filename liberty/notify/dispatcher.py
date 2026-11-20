@@ -256,7 +256,7 @@ class Dispatcher:
         if action.query:
             await conn.execute(action.query, params)
         elif action.endpoint:
-            await conn.call(action.endpoint, params)
+            await conn.call(action.endpoint, params, untrusted=True)      # values of the row that fired the rule
         else:
             raise RuntimeError("an action needs a query or an endpoint")
 

@@ -1071,7 +1071,7 @@ async def call_http(
         raise http_for_connector_error(exc) from exc
     # APIConnector.call never raises — a failed upstream call comes back as a
     # structured ApiResult with success=False; surface it as-is (HTTP 200).
-    result = await conn.call(endpoint, call_params)
+    result = await conn.call(endpoint, call_params, untrusted=True)      # a user's values: see APIConnector.call
     # Change-package capture for a call_api action fired from a change-tracked screen. A tracked
     # screen CAPTURES every call (so the package shows it for review); the action's ``change_replay``
     # opt-in — threaded in the tag as ``replay`` — decides whether APPLY actually re-fires it (an
