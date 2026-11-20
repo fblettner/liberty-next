@@ -52,7 +52,7 @@ type Endpoint = {
   content_type?: string
   response_field?: string | null
   response_map?: Record<string, string>
-  params?: Array<{ name: string; label?: string | null; default?: string | null }>
+  params?: Array<{ name: string; label?: string | null; default?: string | null; help?: string | null; example?: string | null; choices?: string[] | null }>
 }
 
 export type ApiConnector = {
@@ -129,6 +129,13 @@ const TableHead = styled.div`
 `
 const TableRow = styled.div`
   display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px; padding: 4px 0;
+`
+// a parameter's second line: what to put in it, and an example
+const ParamHelpRow = styled.div`
+  display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 10px; padding: 0 0 10px 0;
+`
+const ParamHelp = styled.div`
+  grid-column: 1 / -1; color: ${colors.text.muted}; font-size: ${fontSize.micro}; padding: 0 2px 6px; white-space: pre-wrap; word-break: break-word;
 `
 const MapRow = styled.div`
   display: grid; grid-template-columns: 1fr 2fr auto; gap: 10px; padding: 4px 0;
@@ -497,11 +504,21 @@ function EndpointsTab({
 }: { value: ApiConnector; patch: (p: Partial<ApiConnector>) => void }) {
   const { t } = useTranslation()
   const modals = useModals()
-  const endpoints = value.endpoints ?? []
+  const endpoints = useMemo(() => value.endpoints ?? [], [value.endpoints])
   const setEndpoints = (next: Endpoint[]) => patch({ endpoints: next.length ? next : undefined })
   // Collapsed by default — large lists are easier to scan when only headers show. The operator
   // clicks a card to expand it; adding a new endpoint expands that one (see `addEndpoint`).
   const [openIdx, setOpenIdx] = useState<number | null>(null)
+  // Shown in alphabetical order, narrowed by the search box; each row keeps its place in the saved
+  // list (`i`), which is what the edits address.
+  const [search, setSearch] = useState('')
+  const shown = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return endpoints
+      .map((ep, i) => ({ ep, i }))
+      .filter(({ ep }) => !q || [ep.name, ep.label, ep.path, ep.method, ep.description].some((x) => (x ?? '').toLowerCase().includes(q)))
+      .sort((a, b) => a.ep.name.localeCompare(b.ep.name, undefined, { numeric: true, sensitivity: 'base' }))
+  }, [endpoints, search])
 
   const addEndpoint = async () => {
     const name = (await modals.prompt({
@@ -516,6 +533,7 @@ function EndpointsTab({
     }))?.trim()
     if (!name) return
     setEndpoints([...endpoints, { name, method: 'GET', path: '', content_type: 'application/json' }])
+    setSearch('')                      // the new one must not be hidden by a search
     setOpenIdx(endpoints.length)
   }
   const removeEndpoint = async (idx: number) => {
@@ -539,7 +557,11 @@ function EndpointsTab({
       {endpoints.length === 0 && (
         <Hint>{t('settings.api.endpoint.empty')}</Hint>
       )}
-      {endpoints.map((ep, i) => {
+      {endpoints.length > 5 && (
+        <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('table.search')} />
+      )}
+      {endpoints.length > 0 && shown.length === 0 && <Hint>{t('settings.api.endpoint.noMatch')}</Hint>}
+      {shown.map(({ ep, i }) => {
         const open = openIdx === i
         return (
           <EndpointCard key={`${ep.name}-${i}`}>
@@ -771,7 +793,8 @@ function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: En
         <Hint>{t('settings.api.endpoint.parametersEmpty')}</Hint>
       )}
       {params.map((p, i) => (
-        <TableRow key={i}>
+        <div key={i}>
+        <TableRow>
           <Input
             value={p.name}
             onChange={(e) => {
@@ -807,6 +830,47 @@ function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: En
             <Trash2 size={13} />
           </Button>
         </TableRow>
+        <ParamHelpRow>
+          <Input
+            value={p.help ?? ''}
+            onChange={(e) => {
+              const next = params.slice()
+              next[i] = { ...p, help: e.target.value || undefined }
+              setParams(next)
+            }}
+            placeholder={t('settings.api.endpoint.paramHelp')}
+          />
+          <Input
+            value={p.example ?? ''}
+            onChange={(e) => {
+              const next = params.slice()
+              next[i] = { ...p, example: e.target.value || undefined }
+              setParams(next)
+            }}
+            placeholder={t('settings.api.endpoint.paramExample')}
+          />
+          <Input
+            value={(p.choices ?? []).join(', ')}
+            onChange={(e) => {
+              const list = e.target.value.split(',').map((x) => x.trim())
+              const next = params.slice()
+              // keep a trailing blank while the operator is typing the next value; saved without it
+              next[i] = { ...p, choices: list.some((x) => x) ? list.filter((x, k) => x || k === list.length - 1) : undefined }
+              setParams(next)
+            }}
+            onBlur={() => {
+              const clean = (p.choices ?? []).filter((x) => x)
+              if (clean.length !== (p.choices ?? []).length) {
+                const next = params.slice()
+                next[i] = { ...p, choices: clean.length ? clean : undefined }
+                setParams(next)
+              }
+            }}
+            placeholder={t('settings.api.endpoint.paramChoices')}
+          />
+          <span />
+        </ParamHelpRow>
+        </div>
       ))}
       <Button
         $variant="ghost" $size="sm" style={{ alignSelf: 'flex-start' }}
@@ -898,9 +962,9 @@ function TestTab({ connectorName, value }: { connectorName: string; value: ApiCo
             <label>{t('settings.api.test.endpoint')}</label>
             <SearchSelect
               value={selEndpoint}
-              options={endpoints.map((e) => ({
+              options={[...endpoints].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })).map((e) => ({
                 value: e.name,
-                label: e.label ? `${e.name} — ${e.label}` : e.name,
+                label: e.label ?? e.name,
                 mono: e.name,
               }))}
               onChange={(v) => setSelEndpoint(v ?? '')}
@@ -911,11 +975,26 @@ function TestTab({ connectorName, value }: { connectorName: string; value: ApiCo
           {(ep?.params ?? []).map((p) => (
             <TestParamRow key={p.name}>
               <Input value={p.name} readOnly />
-              <Input
-                value={paramValues[p.name] ?? ''}
-                onChange={(e) => setParamValues((prev) => ({ ...prev, [p.name]: e.target.value }))}
-                placeholder={p.default ?? ''}
-              />
+              {p.choices?.length ? (
+                <SearchSelect
+                  value={paramValues[p.name] ?? ''}
+                  options={p.choices.map((c) => ({ value: c, label: c }))}
+                  onChange={(v) => setParamValues((prev) => ({ ...prev, [p.name]: v ?? '' }))}
+                  placeholder={p.default ?? ''}
+                  clearable
+                />
+              ) : (
+                <Input
+                  value={paramValues[p.name] ?? ''}
+                  onChange={(e) => setParamValues((prev) => ({ ...prev, [p.name]: e.target.value }))}
+                  placeholder={p.default ?? p.example ?? ''}
+                />
+              )}
+              {(p.help || p.example) && (
+                <ParamHelp>
+                  {p.help}{p.help && p.example ? ' — ' : ''}{p.example ? t('settings.api.endpoint.paramExampleIs', { v: p.example }) : ''}
+                </ParamHelp>
+              )}
             </TestParamRow>
           ))}
           {extraParams.map((x, i) => (

@@ -434,3 +434,60 @@ async def test_a_users_value_cannot_pick_any_file_to_send(tmp_path) -> None:
         assert ok.success is True and b"the master key" in sent[-1]
     finally:
         await conn.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_parameter_says_what_it_expects_and_is_blank_when_left_out() -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={})
+
+    cfg = ApiConnectorConfig(
+        type="api",
+        base_url="https://api.test",
+        endpoints=[EndpointDef(
+            name="find", method="POST", path="/find", body='{"name": "{{NAME}}", "object": "{{OBJECT}}"}',
+            params=[ParamDef(name="NAME", label="Function", help="The function's name", example="RetrieveCompanyFromBusUnit"),
+                    ParamDef(name="OBJECT")],
+        )],
+    )
+    conn = _connector(cfg, handler)
+    try:
+        described = conn.describe()["endpoints"][0]["params"]
+        assert described[0]["help"] == "The function's name" and described[0]["example"] == "RetrieveCompanyFromBusUnit"
+        assert described[1]["help"] is None and described[1]["example"] is None
+        await conn.call("find", {"NAME": "X"})
+        assert seen["body"] == {"name": "X", "object": ""}        # not the text "{{OBJECT}}"
+    finally:
+        await conn.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_parameter_with_choices_is_checked_and_a_blank_one_takes_its_default() -> None:
+    sent: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={})
+
+    cfg = ApiConnectorConfig(
+        type="api",
+        base_url="https://api.test",
+        endpoints=[EndpointDef(
+            name="query", method="POST", path="/data", body='{"target": "{{TABLE}}", "type": "{{TYPE}}", "where": {{CONDITIONS}}}',
+            params=[ParamDef(name="TABLE"), ParamDef(name="TYPE", default="table", choices=["table", "view"]),
+                    ParamDef(name="CONDITIONS", default="[]")],
+        )],
+    )
+    conn = _connector(cfg, handler)
+    try:
+        assert conn.describe()["endpoints"][0]["params"][1]["choices"] == ["table", "view"]
+        await conn.call("query", {"TABLE": "V0010D", "TYPE": "VIEW"})                     # typed in capitals
+        await conn.call("query", {"TABLE": "F0010", "TYPE": "", "CONDITIONS": ""})          # cleared fields
+        assert sent == [{"target": "V0010D", "type": "view", "where": []}, {"target": "F0010", "type": "table", "where": []}]
+        refused = await conn.call("query", {"TABLE": "F0010", "TYPE": "bsvw"})
+        assert refused.success is False and "is not one of table, view" in (refused.error or "") and len(sent) == 2
+    finally:
+        await conn.aclose()

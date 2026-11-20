@@ -25,6 +25,18 @@
   Existing endpoints keep working: only calls that left their path, produced an invalid body, or let a user
   choose the file to send, change.
 
+- **API connectors: a parameter says what it expects.** A parameter of an endpoint (or of a query) had a name, a
+  label and a default. It now also has a **help** text and an **example**, edited on a second line under each
+  parameter in the endpoint editor, shown under the fields in the HTTP runner and in the editor's test pane,
+  and given to the AI assistant with the endpoint. A JSON parameter no longer has to be guessed.
+  A parameter with only a few possible values lists them (**allowed values**, a third field on that line): it
+  is then a dropdown where it is filled, and an endpoint checks it — another value is refused before anything
+  is sent, and the letter case is corrected (`VIEW` → `view`).
+  A declared parameter the caller leaves out, or sends blank, now takes its default (blank without one); it
+  used to stay in the request as the text `{{NAME}}`, or to replace the default with nothing.
+  The connector's endpoints are listed in alphabetical order, in the Endpoints tab — with a search box (name,
+  label, path, method, description) once there are more than five — and in the Test tab.
+
 ## 7.0.83 — 2026-11-19
 
 - **Display fixes after the documentation pass.** The Claude Desktop extension's settings (address, token, files

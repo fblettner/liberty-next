@@ -1180,7 +1180,8 @@ class SQLConnector:
                 "statement_type": detect_statement_type(q.default_sql),
                 "dialects": q.dialects,
                 "params": [
-                    {"name": p.name, "label": p.label, "default": p.default}
+                    {"name": p.name, "label": p.label, "default": p.default, "help": p.help, "example": p.example,
+                     "choices": list(p.choices)}
                     for p in q.params
                 ],
                 "bind_params": find_bind_params(q.default_sql),

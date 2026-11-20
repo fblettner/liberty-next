@@ -4,12 +4,19 @@ import { useTranslation } from 'react-i18next'
 import { Globe, Play } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import type { ApiEndpointMeta, ApiResult, ConnectorMeta } from '../../types/connectors'
-import { PageLayout, Card, Button, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, Pre, SpinnerRing, FieldLabel } from '../../common'
+import { PageLayout, Card, Button, Input, Field, Banner, SearchSelect, Centered, Tag, Mono, Row, Stack, Pre, SpinnerRing, FieldLabel } from '../../common'
 import { colors, fontSize, fonts } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { findMenuLabel } from '../../services/menuLabels'
 
 const Sub = styled.span`display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;`
+// what each parameter expects, under the fields
+const ParamNotes = styled.div`
+  margin-top: 10px; display: flex; flex-direction: column; gap: 3px;
+  color: ${colors.text.muted}; font-size: ${fontSize.sm}; white-space: pre-wrap; word-break: break-word;
+  b { color: ${colors.text.secondary}; font-weight: 600; }
+  code { font-family: ${fonts.mono}; }
+`
 const Meta = styled.div`
   font-size: ${fontSize.sm};
   display: flex;
@@ -113,12 +120,22 @@ export default function HttpRunner({ connector, endpoint }: { connector: string;
             {meta.params.map((p) => (
               <div key={p.name} style={{ minWidth: 160 }}>
                 <Field label={p.label ?? p.name}>
+                  {p.choices?.length ? (
+                    <SearchSelect
+                      value={params[p.name] ?? ''}
+                      options={p.choices.map((c) => ({ value: c, label: c }))}
+                      onChange={(v) => setParams((s) => ({ ...s, [p.name]: v ?? '' }))}
+                      placeholder={p.default ?? ''}
+                    />
+                  ) : (
                   <Input
                     type="text"
-                    placeholder={p.default != null ? t('table.defaultPrefix', { v: p.default }) : ''}
+                    placeholder={p.default != null && p.default !== '' ? t('table.defaultPrefix', { v: p.default }) : (p.example ?? '')}
+                    title={[p.help, p.example ? t('settings.api.endpoint.paramExampleIs', { v: p.example }) : ''].filter(Boolean).join(' — ')}
                     value={params[p.name] ?? ''}
                     onChange={(e) => setParams((s) => ({ ...s, [p.name]: e.target.value }))}
                   />
+                  )}
                 </Field>
               </div>
             ))}
@@ -127,6 +144,16 @@ export default function HttpRunner({ connector, endpoint }: { connector: string;
               {busy ? t('common.calling') : t('common.call')}
             </Button>
           </Row>
+          {meta.params.some((p) => p.help || p.example) && (
+            <ParamNotes>
+              {meta.params.filter((p) => p.help || p.example).map((p) => (
+                <span key={p.name}>
+                  <b>{p.label ?? p.name}</b>{p.help ? ` — ${p.help}` : ''}
+                  {p.example ? <> — {t('settings.api.endpoint.paramExampleIs', { v: '' })}<code>{p.example}</code></> : null}
+                </span>
+              ))}
+            </ParamNotes>
+          )}
           {runErr && (
             <div style={{ marginTop: 12 }}>
               <Banner $tone="error">{runErr}</Banner>

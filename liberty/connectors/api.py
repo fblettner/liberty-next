@@ -353,7 +353,8 @@ class APIConnector:
                     "response_field": e.response_field,
                     "response_map": e.response_map,
                     "params": [
-                        {"name": p.name, "label": p.label, "default": p.default}
+                        {"name": p.name, "label": p.label, "default": p.default, "help": p.help, "example": p.example,
+                         "choices": list(p.choices)}
                         for p in e.params
                     ],
                 }
@@ -373,11 +374,19 @@ class APIConnector:
 
     def _merge_params(self, endpoint: EndpointDef, params: dict[str, Any] | None) -> dict[str, Any]:
         merged: dict[str, Any] = {"username": self.auth_username, "password": self.auth_password}
-        for p in endpoint.params:
-            if p.default is not None:
-                merged[p.name] = p.default
         if params:
             merged.update(params)
+        for p in endpoint.params:
+            value = merged.get(p.name)
+            if value is None or value == "":
+                # left out, or sent blank (a cleared field): the default — never the text "{{name}}"
+                value = merged[p.name] = p.default if p.default is not None else ""
+            if p.choices and value != "":
+                # one of the declared values, whatever the letter case it was typed in
+                known = {c.lower(): c for c in p.choices}
+                if str(value).lower() not in known:
+                    raise ApiParamError(f"parameter {p.name!r}: {str(value)!r} is not one of {', '.join(p.choices)}")
+                merged[p.name] = known[str(value).lower()]
         return merged
 
     # -- auth -------------------------------------------------------------- #
@@ -454,10 +463,9 @@ class APIConnector:
         HTTP route, a screen action, the assistant…) and not from server-side code: a file part
         may then only send a file of the folder the endpoint names (:func:`file_part_path`)."""
         endpoint = self.get_endpoint(endpoint_name)
-        merged = self._merge_params(endpoint, params)
-
         try:
             # checked before anything is sent (a token request included)
+            merged = self._merge_params(endpoint, params)
             substitute_path(endpoint.path, merged)
         except ApiParamError as exc:
             return ApiResult(connector=self.name, endpoint=endpoint_name, success=False, status_code=0,

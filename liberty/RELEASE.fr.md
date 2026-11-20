@@ -31,6 +31,21 @@
   Les points d'accès existants continuent de fonctionner : seuls changent les appels qui sortaient de leur
   chemin, produisaient un corps invalide, ou laissaient un utilisateur choisir le fichier envoyé.
 
+- **Connecteurs API : un paramètre dit ce qu'il attend.** Un paramètre de point d'accès (ou de requête) avait
+  un nom, un libellé et une valeur par défaut. Il a maintenant aussi un texte d'**aide** et un **exemple**,
+  saisis sur une seconde ligne sous chaque paramètre dans l'éditeur du point d'accès, affichés sous les champs
+  dans l'exécuteur HTTP et dans le volet de test de l'éditeur, et transmis à l'assistant IA avec le point
+  d'accès. Un paramètre JSON n'est plus à deviner.
+  Un paramètre qui n'a que quelques valeurs possibles les liste (**valeurs autorisées**, un troisième champ
+  sur cette ligne) : c'est alors une liste déroulante là où il est renseigné, et un point d'accès le contrôle
+  — une autre valeur est refusée avant tout envoi, et la casse est corrigée (`VIEW` → `view`).
+  Un paramètre déclaré que l'appelant ne renseigne pas, ou envoie vide, prend maintenant sa valeur par défaut
+  (vide s'il n'en a pas) ; il restait auparavant dans la requête sous la forme du texte `{{NOM}}`, ou
+  remplaçait la valeur par défaut par rien.
+  Les points d'accès du connecteur sont listés par ordre alphabétique, dans l'onglet Points d'accès — avec
+  une zone de recherche (nom, libellé, chemin, méthode, description) dès qu'il y en a plus de cinq — et dans
+  l'onglet Test.
+
 ## 7.0.83 — 2026-11-19
 
 - **Corrections d'affichage après la passe de documentation.** Les réglages de l'extension Claude Desktop

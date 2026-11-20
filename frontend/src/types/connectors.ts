@@ -5,6 +5,9 @@ export interface ParamDef {
   name: string
   label: string | null
   default: string | null
+  help?: string | null       // what to put in it
+  example?: string | null    // an example value
+  choices?: string[] | null  // the only values allowed → a dropdown
 }
 
 export interface SqlQueryMeta {
