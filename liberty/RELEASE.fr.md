@@ -46,6 +46,20 @@
   une zone de recherche (nom, libellé, chemin, méthode, description) dès qu'il y en a plus de cinq — et dans
   l'onglet Test.
 
+- **Connecteurs API : créer un point d'accès à partir de ce que le serveur décrit.** Un point d'accès générique
+  (« lancer n'importe quel état », avec du JSON pour tout ce qui dépend de l'état) est difficile à renseigner.
+  Un connecteur peut maintenant déclarer des **générateurs** (`[[connectors.<nom>.generators]]` : un id, un
+  libellé, une fonction de plugin) : l'onglet Points d'accès propose alors un bouton **Créer à partir de…** —
+  on cherche l'objet, on répond à quelques questions (quelles colonnes, quelles options), et le point d'accès
+  est écrit avec une variable nommée par entrée, son libellé, son aide et sa valeur par défaut. Il est ajouté
+  non enregistré et ouvert, pour relecture et renommage avant d'enregistrer ; il a sa propre permission
+  `api:<connecteur>:<point d'accès>`, ce qui permet d'autoriser à un rôle un état ou une orchestration, et non
+  tous.
+  Le générateur appartient à l'application (une fonction `j_` sous plugins/, appelée en trois étapes :
+  `search`, `options`, `build`) ; le framework l'exécute sur le connecteur enregistré
+  (`POST /admin/config/api/generate`, super-utilisateur) et valide le point d'accès construit. Les générateurs
+  du connecteur se modifient en bas de l'onglet Points d'accès.
+
 ## 7.0.83 — 2026-11-19
 
 - **Corrections d'affichage après la passe de documentation.** Les réglages de l'extension Claude Desktop

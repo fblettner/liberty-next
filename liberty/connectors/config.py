@@ -970,6 +970,21 @@ class ApiTargetConfig(BaseModel):
     verify_ssl: bool | None = Field(default=None, description="Verify this server's TLS certificate. Blank = the connector's setting.")
 
 
+class EndpointGenerator(BaseModel):
+    """A way to create an endpoint of this connector from what its server describes — "an endpoint
+    for this report, with one variable per option". The logic is the application's: a plugin
+    function called in three steps by the endpoint editor (``step`` = ``search`` → the candidates
+    for a text; ``options`` → what to ask about the chosen candidate; ``build`` → the endpoint,
+    added to the connector unsaved, for the operator to review)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(description="Unique id within the connector.")
+    label: str = Field(description="What it creates, as shown in the editor's \"Create from…\" list (An orchestration, A report version…).")
+    callable: str = Field(description="The plugin function that does it, ``module:function`` (a ``j_`` entry point under plugins/). It receives ``connectors``, ``connector`` (this connector's name), ``step``, ``query``, ``candidate`` and ``options``.")
+    description: str | None = Field(default=None, description="A sentence on what the created endpoint does and what its variables are.")
+
+
 class ApiConnectorConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1051,6 +1066,7 @@ class ApiConnectorConfig(BaseModel):
     default_headers: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Transport"}, description="Headers sent on every request from this connector.")
     timeout: float = Field(default=30.0, json_schema_extra={"x_group": "Transport"}, description="Per-request timeout in seconds.")
     verify_ssl: bool = Field(default=True, json_schema_extra={"x_group": "Transport"}, description="Verify the server's TLS certificate (disable only for dev / self-signed).")
+    generators: list[EndpointGenerator] = Field(default_factory=list, json_schema_extra={"x_group": "Endpoints"}, description="Ways to create an endpoint from what the server describes — the editor's \"Create from…\" (see EndpointGenerator).")
     endpoints: list[EndpointDef] = Field(default_factory=list, json_schema_extra={"x_group": "Endpoints"}, description="The named HTTP endpoints this connector exposes.")
     pool: str | None = Field(
         default=None,

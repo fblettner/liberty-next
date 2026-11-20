@@ -19,16 +19,17 @@
 // semantically (Connection / Authentication / Endpoints) so the operator sees only what's
 // useful. The Test tab here mirrors nomaubl's — pick the endpoint, parameters appear
 // automatically with each declared name/label/default, click Run.
-import { useContext, useEffect, useMemo, useState } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import {
-  Activity, ChevronDown, ChevronRight, Plus, Trash2,
+  Activity, ChevronDown, ChevronRight, Plus, Trash2, Wand2,
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
   Banner, Button, Checkbox, FrameworkEnumsContext, Input, Row, SearchSelect, Stack, useModals,
 } from '../../common'
+import { EndpointGeneratorModal, type EndpointGeneratorDef } from './EndpointGeneratorModal'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { EndpointBody, EndpointCard, EndpointHead, FieldRow, Hint, SectionHead } from './apiEditorAtoms'
 import ApiEnvironmentsTab from './ApiEnvironmentsTab'
@@ -77,6 +78,8 @@ export type ApiConnector = {
   auth_token_headers?: Record<string, string>
   auth_token_ttl?: number                                   // seconds (Pydantic side)
   endpoints?: Endpoint[]
+  /** Ways to create an endpoint from what the server describes — the Endpoints tab's "Create from…". */
+  generators?: EndpointGeneratorDef[]
   /** The pool (environment) this server serves; ``targets`` = one server per other pool. */
   pool?: string | null
   targets?: Record<string, ApiTarget>
@@ -136,6 +139,9 @@ const ParamHelpRow = styled.div`
 `
 const ParamHelp = styled.div`
   grid-column: 1 / -1; color: ${colors.text.muted}; font-size: ${fontSize.micro}; padding: 0 2px 6px; white-space: pre-wrap; word-break: break-word;
+`
+const GeneratorRow = styled.div`
+  display: grid; grid-template-columns: 1fr 1.4fr 2fr 2fr auto; gap: 10px; padding: 2px 0;
 `
 const MapRow = styled.div`
   display: grid; grid-template-columns: 1fr 2fr auto; gap: 10px; padding: 4px 0;
@@ -232,7 +238,7 @@ export default function ApiConnectorEditor({ name, value, hasMenu, sqlConnectors
       {tab === 'connection' && <ConnectionTab value={value} patch={patch} hasMenu={hasMenu} />}
       {tab === 'auth' && <AuthTab value={value} patch={patch} />}
       {tab === 'environments' && <ApiEnvironmentsTab value={value} patch={patch} sqlConnectors={sqlConnectors ?? []} />}
-      {tab === 'endpoints' && <EndpointsTab value={value} patch={patch} />}
+      {tab === 'endpoints' && <EndpointsTab connectorName={name} value={value} patch={patch} />}
       {tab === 'webhooks' && <WebhooksTab />}
       {tab === 'test' && <TestTab connectorName={name} value={value} />}
     </Stack>
@@ -500,8 +506,8 @@ function AuthTab({
 
 // ── Endpoints tab ──────────────────────────────────────────────────────────────────────────
 function EndpointsTab({
-  value, patch,
-}: { value: ApiConnector; patch: (p: Partial<ApiConnector>) => void }) {
+  connectorName, value, patch,
+}: { connectorName: string; value: ApiConnector; patch: (p: Partial<ApiConnector>) => void }) {
   const { t } = useTranslation()
   const modals = useModals()
   const endpoints = useMemo(() => value.endpoints ?? [], [value.endpoints])
@@ -509,6 +515,8 @@ function EndpointsTab({
   // Collapsed by default — large lists are easier to scan when only headers show. The operator
   // clicks a card to expand it; adding a new endpoint expands that one (see `addEndpoint`).
   const [openIdx, setOpenIdx] = useState<number | null>(null)
+  const openRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => { openRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, [openIdx])
   // Shown in alphabetical order, narrowed by the search box; each row keeps its place in the saved
   // list (`i`), which is what the edits address.
   const [search, setSearch] = useState('')
@@ -552,10 +560,62 @@ function EndpointsTab({
     next[idx] = ep
     setEndpoints(next)
   }
+  // "Create from…": an endpoint a generator of the connector built from the server's own
+  // description. Added unsaved and opened, under a free name, for the operator to review.
+  const generators = value.generators ?? []
+  const [generating, setGenerating] = useState(false)
+  const [showGenerators, setShowGenerators] = useState(false)
+  const addGenerated = (raw: Record<string, unknown>) => {
+    const ep = raw as unknown as Endpoint
+    let name = ep.name || 'endpoint'
+    for (let n = 2; endpoints.some((e) => e.name === name); n++) name = `${ep.name}_${n}`
+    setEndpoints([...endpoints, { ...ep, name }])
+    setSearch('')
+    setOpenIdx(endpoints.length)
+    setGenerating(false)
+  }
+  const setGenerators = (next: EndpointGeneratorDef[]) => patch({ generators: next.length ? next : undefined })
   return (
     <Stack gap={6}>
       {endpoints.length === 0 && (
         <Hint>{t('settings.api.endpoint.empty')}</Hint>
+      )}
+      <Row gap={8}>
+        <Button $variant="ghost" $size="sm" onClick={addEndpoint}>
+          <Plus size={13} /> {t('settings.api.endpoint.add')}
+        </Button>
+        {generators.length > 0 && (
+          <Button $variant="ghost" $size="sm" onClick={() => setGenerating(true)} title={t('settings.api.generate.hint')}>
+            <Wand2 size={13} /> {t('settings.api.generate.button')}
+          </Button>
+        )}
+        <Button $variant="ghost" $size="sm" onClick={() => setShowGenerators((v) => !v)}>
+          {showGenerators ? <ChevronDown size={13} /> : <ChevronRight size={13} />} {t('settings.api.generate.declared', { count: generators.length })}
+        </Button>
+      </Row>
+      {showGenerators && (
+        <Stack gap={4}>
+          <Hint>{t('settings.api.generate.declaredHint')}</Hint>
+          {generators.map((g, i) => (
+            <GeneratorRow key={i}>
+              <Input value={g.id} placeholder={t('settings.api.generate.id')}
+                onChange={(e) => setGenerators(generators.map((x, j) => (j === i ? { ...x, id: e.target.value } : x)))} />
+              <Input value={g.label} placeholder={t('settings.api.generate.label')}
+                onChange={(e) => setGenerators(generators.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} />
+              <Input value={g.callable} placeholder="app.module:j_function"
+                onChange={(e) => setGenerators(generators.map((x, j) => (j === i ? { ...x, callable: e.target.value } : x)))} />
+              <Input value={g.description ?? ''} placeholder={t('settings.api.generate.description')}
+                onChange={(e) => setGenerators(generators.map((x, j) => (j === i ? { ...x, description: e.target.value || undefined } : x)))} />
+              <Button $variant="ghost" $size="sm" onClick={() => setGenerators(generators.filter((_, j) => j !== i))} title={t('common.remove')}>
+                <Trash2 size={13} />
+              </Button>
+            </GeneratorRow>
+          ))}
+          <Button $variant="ghost" $size="sm" style={{ alignSelf: 'flex-start' }}
+            onClick={() => setGenerators([...generators, { id: '', label: '', callable: '' }])}>
+            <Plus size={13} /> {t('settings.api.generate.add')}
+          </Button>
+        </Stack>
       )}
       {endpoints.length > 5 && (
         <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('table.search')} />
@@ -564,7 +624,7 @@ function EndpointsTab({
       {shown.map(({ ep, i }) => {
         const open = openIdx === i
         return (
-          <EndpointCard key={`${ep.name}-${i}`}>
+          <EndpointCard key={`${ep.name}-${i}`} ref={open ? openRef : undefined}>
             <EndpointHead $open={open} onClick={() => setOpenIdx(open ? null : i)} type="button">
               {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
               <MethodPill $tone={ep.method ?? 'GET'}>{ep.method ?? 'GET'}</MethodPill>
@@ -581,9 +641,9 @@ function EndpointsTab({
           </EndpointCard>
         )
       })}
-      <Button $variant="ghost" $size="sm" onClick={addEndpoint} style={{ alignSelf: 'flex-start' }}>
-        <Plus size={13} /> {t('settings.api.endpoint.add')}
-      </Button>
+      {generating && (
+        <EndpointGeneratorModal connector={connectorName} generators={generators} onCreate={addGenerated} onClose={() => setGenerating(false)} />
+      )}
     </Stack>
   )
 }

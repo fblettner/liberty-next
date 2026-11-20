@@ -37,6 +37,18 @@
   The connector's endpoints are listed in alphabetical order, in the Endpoints tab — with a search box (name,
   label, path, method, description) once there are more than five — and in the Test tab.
 
+- **API connectors: create an endpoint from what the server describes.** A generic endpoint ("run any report",
+  with JSON for whatever depends on the report) is hard to fill. A connector can now declare **generators**
+  (`[[connectors.<name>.generators]]`: an id, a label, a plugin function): the Endpoints tab then has a
+  **Create from…** button — search the object, answer a few questions (which columns, which options), and the
+  endpoint is written with one named variable per input, its label, its help and its default. It is added
+  unsaved and opened, for you to review and rename before saving; it has its own permission
+  `api:<connector>:<endpoint>`, so a role can be allowed one report or one orchestration, not all of them.
+  The generator is the application's (a `j_` function under plugins/, called in three steps: `search`,
+  `options`, `build`); the framework runs it against the saved connector (`POST /admin/config/api/generate`,
+  superuser) and validates the endpoint it built. The connector's generators are edited at the bottom of the
+  Endpoints tab.
+
 ## 7.0.83 — 2026-11-19
 
 - **Display fixes after the documentation pass.** The Claude Desktop extension's settings (address, token, files
