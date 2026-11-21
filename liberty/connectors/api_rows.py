@@ -201,9 +201,25 @@ def sensitive_names(dictionary: DictionaryFile, names: list[str], hints: list[Co
     return out
 
 
+def _means_empty(endpoint: EndpointDef, result: Any) -> bool:
+    """A failed call that is the server's way of saying "nothing to list" (``EndpointDef.empty_on``):
+    one of the texts is in its error, or is its HTTP status."""
+    if not endpoint.empty_on:
+        return False
+    said = f"{result.error or ''} {(result.body or '')[:2000]}".lower()
+    return any(t.strip() and (t.strip() == str(result.status_code) or t.strip().lower() in said) for t in endpoint.empty_on)
+
+
 def _records(endpoint: EndpointDef, parsed: Any) -> list[dict[str, Any]]:
     found = extract_path(parsed, endpoint.rows_field)
     if found is None:
+        # the list is not where the endpoint says: an empty answer — unless the answer plainly holds
+        # something else at its top, which is a wrong ``rows_field`` and would show as a screen that
+        # stays empty for no visible reason (a server whose documentation names the key differently)
+        first = str(endpoint.rows_field or "").split(".")[0]
+        if isinstance(parsed, dict) and parsed and first and first not in parsed:
+            raise ApiRowsError(f"{endpoint.name}: the answer has no '{first}' — it holds: {', '.join(list(parsed)[:8])}. "
+                               "Check where the endpoint says its rows are (rows_field).")
         return []
     if not isinstance(found, list):
         raise ApiRowsError(f"{endpoint.name}: '{endpoint.rows_field}' is not a list in the answer")
@@ -216,6 +232,9 @@ def _records(endpoint: EndpointDef, parsed: Any) -> list[dict[str, Any]]:
 def _columns(endpoint: EndpointDef, parsed: Any, rows: list[dict[str, Any]], hints: list[ColumnHint] | None,
              dictionary: DictionaryFile, language: str | None, dictionary_scope: str | None) -> list[Column]:
     names = list(endpoint.row_map) if endpoint.row_map else list(dict.fromkeys(k for r in rows[:50] for k in r))
+    if not names and not rows and hints:
+        # nothing to list, and no map to know the columns from: the screen's own, so its grid is drawn empty
+        names = [h.name for h in hints]
     titles = extract_path(parsed, endpoint.labels_field) if endpoint.labels_field else None
     key_of = endpoint.row_map or {n: n for n in names}
     discovered = [Column(name=n, label=str(titles[key_of[n]]) if isinstance(titles, dict) and titles.get(key_of[n]) else None) for n in names]
@@ -254,18 +273,21 @@ async def api_row_events(
         # (a limit of 0 = the columns only: one row is enough to know them)
         sent_params[limit_name] = str(max(1, min(limit, 100_000)))
     result = await conn.call(endpoint_name, sent_params, untrusted=True)
-    if not result.success:
+    # the server refuses when it has nothing to list (``empty_on``): an empty list
+    empty = not result.success and _means_empty(endpoint, result)
+    if not result.success and not empty:
         # the server's own words when it gave some (an HTTP 500 with a text body), after the status
         said = (result.body or "").strip() if result.json is None else ""
         raise ApiRowsError(f"{conn.name}.{endpoint_name}: {result.error or f'HTTP {result.status_code}'}" + (f" — {said[:300]}" if said else ""))
-    rows = _records(endpoint, result.json)
-    more = bool(extract_path(result.json, endpoint.more_field)) if endpoint.more_field else False
+    answer = None if empty else result.json
+    rows = _records(endpoint, answer)
+    more = bool(extract_path(answer, endpoint.more_field)) if endpoint.more_field else False
     if scope is not None:
         dd_of = {h.name.lower(): (h.dd or h.name) for h in column_hints or [] if h.dd != ""}
         rows = [r for r in rows if scope.allows_row(r, dd_of, connector=conn.name)]
     cap = max(1, min(max_rows or screen_max_rows or DEFAULT_MAX_ROWS, 100_000))
     truncated = more or len(rows) > cap
-    columns = _columns(endpoint, result.json, rows, column_hints, dictionary, language, dictionary_scope)
+    columns = _columns(endpoint, answer, rows, column_hints, dictionary, language, dictionary_scope)
     # a limit of 0 asks for the columns only (the screen editor's column list), as for a query
     rows = [] if max_rows == 0 else rows[:cap]
     size = max(1, min(chunk_size or DEFAULT_CHUNK_SIZE, 5000))

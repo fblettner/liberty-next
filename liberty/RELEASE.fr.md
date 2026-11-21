@@ -153,6 +153,19 @@
   navigateur ; un double-clic rend la largeur par défaut). Et **le libellé d'une entrée de menu prend deux
   lignes** au lieu d'être coupé après quelques mots (son texte complet reste l'infobulle). La page d'un écran qui lit un point d'accès d'API porte le libellé de l'écran, et
   non la description du point d'accès (une phrase).
+- Connecteurs API — **un paramètre nommé `username` ou `password` est celui du point d'accès, pas
+  l'identifiant du connecteur.** `{{username}}` / `{{password}}` remplissent une demande de jeton avec les
+  identifiants du connecteur ; un point d'accès qui DÉCLARAIT un paramètre de ce nom les recevait aussi quand
+  il était laissé vide — un filtre d'utilisateur partait avec l'identifiant du connecteur (réponse : « aucun
+  utilisateur »), et un mot de passe laissé vide aurait porté celui du connecteur. Un paramètre déclaré laissé
+  vide est maintenant vide.
+- Connecteurs API — **un serveur qui refuse quand il n'a rien à lister.** Le nouveau réglage « vide si »
+  (`empty_on`) d'un point d'accès nomme les refus qui veulent dire « aucune ligne » — une partie de l'erreur du
+  serveur (« no active users »), ou son statut HTTP (`404`) : l'écran montre alors une liste vide au lieu d'une
+  erreur. Une erreur HTTP porte maintenant **les mots du serveur** quand les champs d'erreur du point d'accès
+  les trouvent (« HTTP 500 — There are no active users… », et non un simple « HTTP 500 »). Et une liste qui
+  n'est **pas là où le point d'accès le dit** (`rows_field`) est une erreur qui nomme ce que la réponse
+  contient, au lieu d'un écran qui reste vide sans raison visible.
 - Un serveur d'API injoignable est **dit avec son adresse** : « cannot connect to https://host:8999 — check the
   connector's base URL », là où le texte du pilote (« nodename nor servname provided ») ne nommait ni l'un ni
   l'autre.

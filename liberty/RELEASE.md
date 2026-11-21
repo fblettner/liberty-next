@@ -135,6 +135,17 @@
   double click gives the default back). And **a menu entry's label takes two lines** instead of being cut
   after a few words (its full text stays the tooltip). The page of a screen that reads an API endpoint is titled by the screen's label, not by the
   endpoint's description (a sentence).
+- API connectors — **a parameter called `username` or `password` is the endpoint's, not the connector's
+  login.** `{{username}}` / `{{password}}` fill a token request with the connector's own credentials; an
+  endpoint that DECLARED a parameter of that name got them too when it was left blank — a user filter was sent
+  as the connector's login (and answered "no such user"), and a password field left empty would have carried
+  the connector's password. A declared parameter left blank is now blank.
+- API connectors — **a server that refuses when it has nothing to list.** An endpoint's new "empty on" setting
+  (`empty_on`) names the refusals that mean "no rows" — part of the server's error ("no active users"), or its
+  HTTP status (`404`): a screen then shows an empty list instead of an error. An HTTP error now carries **the
+  server's own words** when the endpoint's error fields find them ("HTTP 500 — There are no active users…",
+  not a bare "HTTP 500"). And a list that is **not where the endpoint says** (`rows_field`) is an error naming
+  what the answer holds, instead of a screen that stays empty for no visible reason.
 - An API server that cannot be reached is **said with its address**: "cannot connect to https://host:8999 —
   check the connector's base URL", where the driver's own text ("nodename nor servname provided") named neither.
 - A PDF asked on a machine where **the Pango library is missing** (WeasyPrint installed, `brew install pango`

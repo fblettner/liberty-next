@@ -541,7 +541,10 @@ export default function TableView({ connector, query, screenApp, screenId, embed
   // The standalone control bar carries the param form; it also carries Run + Max-rows until the
   // first SELECT result lands — after that those two move into the grid's own toolbar (see below),
   // so the data has the screen to itself.
-  const showBar = paramNames.length > 0 || !hasSelectResult
+  // … unless the answer has no column at all (an endpoint that had nothing to list): no grid is drawn
+  // then, so Run stays here — a screen must always be able to read again.
+  const gridless = hasSelectResult && (result?.columns.length ?? 0) === 0
+  const showBar = paramNames.length > 0 || !hasSelectResult || gridless
 
   return (
     <>
@@ -615,7 +618,7 @@ export default function TableView({ connector, query, screenApp, screenId, embed
               )
             })}
             {!result && maxRowsField}
-            {!hasSelectResult && runBtn}
+            {(!hasSelectResult || gridless) && runBtn}
           </Row>
         )}
 
@@ -663,7 +666,8 @@ export default function TableView({ connector, query, screenApp, screenId, embed
               )}
             </Row>
             {effectiveResult.columns.length === 0 ? (
-              <Meta>{t('table.noColumns')}</Meta>
+              // nothing came back, not even a column (an endpoint with nothing to list): said as "no rows"
+              <Meta>{effectiveResult.rows.length === 0 ? t('table.noResults') : t('table.noColumns')}</Meta>
             ) : view === 'chart' ? (
               // Suspense + lazy: the Recharts chunk only fetches when the operator first
               // toggles to Chart mode. The fallback shows the existing centred spinner.

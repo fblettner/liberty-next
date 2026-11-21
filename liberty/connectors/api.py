@@ -171,6 +171,13 @@ def _string_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _http_error(status: int, parsed: Any, error_fields: list[str]) -> str:
+    """``HTTP 500`` — with what the server says of it when its answer is JSON and the endpoint's
+    ``error_fields`` name where (``errorMessage``): "HTTP 500 — There are no active users…"."""
+    said = _errors_in(parsed, error_fields) if (parsed is not None and error_fields) else None
+    return f"HTTP {status}" + (f" — {said}" if said else "")
+
+
 def _transport_error(exc: Exception, url: str) -> str:
     """A call that never reached the server, in words an operator can act on: which server, and —
     when it could not even be connected to — that the address is the connector's to check (the
@@ -413,7 +420,12 @@ class APIConnector:
         return self.config.base_url.rstrip("/") + "/" + path_or_url.lstrip("/")
 
     def _merge_params(self, endpoint: EndpointDef, params: dict[str, Any] | None) -> dict[str, Any]:
-        merged: dict[str, Any] = {"username": self.auth_username, "password": self.auth_password}
+        # ``{{username}}`` / ``{{password}}`` are the connector's own credentials (a token request's
+        # body) — unless the endpoint DECLARES a parameter of that name: then it is the endpoint's, and
+        # left blank it is blank. (A user filter called ``username`` was sent as the connector's login,
+        # and a ``password`` parameter left empty would have carried the connector's password.)
+        declared = {p.name for p in endpoint.params}
+        merged: dict[str, Any] = {k: v for k, v in (("username", self.auth_username), ("password", self.auth_password)) if k not in declared}
         if params:
             merged.update(params)
         for p in endpoint.params:
@@ -600,7 +612,8 @@ class APIConnector:
             json=parsed,
             extracted=extracted,
             mapped=mapped,
-            error=refused if ok else f"HTTP {resp.status_code}",
+            # an HTTP error keeps the server's own words when the endpoint says where they are
+            error=refused if ok else _http_error(resp.status_code, parsed, endpoint.error_fields),
             warnings=warned,
             duration_ms=duration_ms,
         )

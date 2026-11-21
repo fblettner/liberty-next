@@ -576,3 +576,35 @@ async def test_a_blank_query_parameter_is_left_out_when_the_endpoint_says_so() -
     await conn.call("state", {"NAME": "AIS1"})
     await conn.call("as_before", {"NAME": "AIS1"})
     assert seen == ["instanceName=AIS1", "a=AIS1&b="]
+
+
+@pytest.mark.asyncio
+async def test_a_declared_parameter_is_not_the_connectors_credential() -> None:
+    """``{{username}}`` / ``{{password}}`` fill a token request with the connector's own login — but an
+    endpoint that DECLARES a ``username`` parameter (a user filter) owns the name: left blank it is
+    blank. Seen on Server Manager: "who is connected" was asked for the console's admin, and answered
+    "no active users"."""
+    sent: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append((request.url.path, dict(request.url.params), request.content.decode()))
+        return httpx.Response(200, json={})
+
+    cfg = ApiConnectorConfig(type="api", base_url="https://api.test", auth_type="basic", auth_username="svc_admin", auth_password="s3cret", endpoints=[
+        EndpointDef(name="users", path="/users", skip_blank_query=True, query_params={"username": "{{username}}"}, params=[ParamDef(name="username")]),
+        EndpointDef(name="create", method="POST", path="/create", body='{"name": "{{NAME}}", "password": "{{password}}"}',
+                    params=[ParamDef(name="NAME"), ParamDef(name="password")]),
+        EndpointDef(name="token", method="POST", path="/token", body='{"username": "{{username}}", "password": "{{password}}"}'),
+    ])
+    conn = _connector(cfg, handler)
+    try:
+        await conn.call("users")
+        assert sent[-1][:2] == ("/users", {})                                    # the filter left blank: not the connector's login
+        await conn.call("users", {"username": "JDE"})
+        assert sent[-1][1] == {"username": "JDE"}
+        await conn.call("create", {"NAME": "x"})
+        assert json.loads(sent[-1][2]) == {"name": "x", "password": ""}          # never the connector's password
+        await conn.call("token")
+        assert json.loads(sent[-1][2]) == {"username": "svc_admin", "password": "s3cret"}   # undeclared: the built-ins, as before
+    finally:
+        await conn.aclose()

@@ -115,3 +115,42 @@ async def test_what_is_not_readable_and_what_fails() -> None:
         await _read(conn, "addresses", {"AT1": "ZZ"})
     with pytest.raises(ApiRowsError, match="not an endpoint a screen can read"):
         await _read(conn, "no_rows")
+
+
+@pytest.mark.asyncio
+async def test_a_server_that_refuses_when_it_has_nothing_and_rows_that_are_not_where_the_endpoint_says() -> None:
+    """Seen on JD Edwards' Server Manager: "no active users" comes as an HTTP 500 with a message,
+    and the instances are under ``result`` where the documentation says ``instancesInfo``."""
+    cfg = ApiConnectorConfig(type="api", base_url="https://sm.test/rest", endpoints=[
+        EndpointDef(name="users", path="/useractivity", rows_field="userActivityDetail", error_fields=["errorMessage"],
+                    empty_on=["no active users"]),
+        EndpointDef(name="strict", path="/useractivity", rows_field="userActivityDetail", error_fields=["errorMessage"]),
+        EndpointDef(name="missing", path="/missing", rows_field="items", empty_on=["404"]),
+        EndpointDef(name="instances", path="/instancesinfo", rows_field="instancesInfo"),
+        EndpointDef(name="deep", path="/instancesinfo", rows_field="result.0.nodes"),
+    ])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/useractivity"):
+            return httpx.Response(500, json={"errorCode": 27, "errorMessage": "There are no active users that match the supplied criteria."})
+        if request.url.path.endswith("/missing"):
+            return httpx.Response(404, text="Not Found")
+        return httpx.Response(200, json={"result": [{"instanceName": "EntServer"}]})
+
+    conn = APIConnector("sm", cfg, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    # the refusal that means "nothing to list": an empty list — with the screen's own columns, so its grid
+    # (and the toolbar that reads again) is drawn; without a screen, no column
+    meta, rows, done = await _read(conn, "users", column_hints=[ColumnHint(name="userName", label="User")])
+    assert rows == [] and done.total == 0 and [(c.name, c.label) for c in meta.columns] == [("userName", "User")]
+    assert (await _read(conn, "users"))[0].columns == []
+    assert (await _read(conn, "missing"))[1] == []                                   # … by its HTTP status
+    # not declared: an error — with the server's own words (its error field), not a bare "HTTP 500"
+    with pytest.raises(ApiRowsError, match="HTTP 500 — There are no active users"):
+        await _read(conn, "strict")
+    assert (await conn.call("strict")).error == "HTTP 500 — There are no active users that match the supplied criteria."
+    # a list that is not where the endpoint says it is: said, with what the answer holds — not an empty screen
+    with pytest.raises(ApiRowsError, match="the answer has no 'instancesInfo' — it holds: result"):
+        await _read(conn, "instances")
+    # … but a path that starts right and has nothing further is just empty
+    assert (await _read(conn, "deep"))[1] == []
+    await conn.aclose()
