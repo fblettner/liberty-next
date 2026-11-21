@@ -1098,6 +1098,8 @@ const fr: Resources = {
     selectPlaceholder: 'Sélectionner…',
   },
   explorer: {
+    shelfOptions: "Options",
+    shelfView: "Vue",
     title: 'Explorateur de données',
     noModels: 'Aucun modèle d\'exploration ne vous est accessible. Un opérateur en définit un dans Liberty Next → Construire → Explorateur.',
     searchFields: 'Rechercher un champ…',

@@ -290,6 +290,13 @@
   Deploy folder: check, then deliver.
 - **Long flows wrap, and zoom.** A service's, a job's and an endpoint's flow continue on the next row instead
   of running off to the right, and each canvas has a zoom (− / % / +, kept per kind of flow on the device).
+- **The Explorer page has the look of the editors.** What an analysis is made of reads as five cards, each
+  with its coloured icon and title — **View**, **Period**, **Rows**, **Measures**, **Filters** (and
+  **Options** for a pivot or a chart) — with its chips in its colour; the result is a panel whose head says the
+  view and what the run answered (groups, rows, truncation); Save, Save as, Delete, Excel and PDF are in the
+  page header beside the model picker. The dashboards of analyses take the same period card. Nothing behaves
+  differently: fields are still clicked or dragged onto a shelf, chips still reorder by drag. The heading of the
+  result table and of the pivot hides the rows that scroll under it (its background was see-through).
 - **An Explorer model is drawn.** The Explorer builder shows the model as a diagram: the hub, the entities it
   reaches placed by how far they are from it, each relation a line carrying the columns it joins on — and,
   set apart in orange, the entities that do **not** reach the hub (an analysis cannot use them) and the

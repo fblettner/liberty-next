@@ -1096,6 +1096,8 @@ const en = {
     selectPlaceholder: 'Select…',
   },
   explorer: {
+    shelfOptions: "Options",
+    shelfView: "View",
     title: 'Data Explorer',
     noModels: 'No explorer model is available to you. An operator defines one under Liberty Next → Build → Explorer.',
     searchFields: 'Search fields…',

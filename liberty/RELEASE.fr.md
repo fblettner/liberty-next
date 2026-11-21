@@ -343,6 +343,15 @@
 - **Les longs flux passent à la ligne, et se zooment.** Le flux d'un service, d'un job et d'un point d'accès
   continue sur la ligne suivante au lieu de partir à droite, et chaque canevas a un zoom (− / % / +, gardé par
   nature de flux sur l'appareil).
+- **La page Explorer a l'allure des éditeurs.** Ce dont une analyse est faite se lit en cinq cartes, chacune
+  avec son icône et son titre en couleur — **Vue**, **Période**, **Lignes**, **Mesures**, **Filtres** (et
+  **Options** pour un tableau croisé ou un graphique) — avec ses pastilles dans sa couleur ; le résultat est un
+  panneau dont l'en-tête dit la vue et ce que l'exécution a répondu (groupes, lignes, troncature) ;
+  Enregistrer, Enregistrer sous, Supprimer, Excel et PDF sont dans l'en-tête de la page à côté du choix du
+  modèle. Les tableaux de bord d'analyses prennent la même carte de période. Rien ne se comporte autrement :
+  les champs se cliquent ou se glissent toujours sur une étagère, les pastilles se réordonnent toujours en
+  glissant. L'en-tête du tableau de résultat et du tableau croisé cache les lignes qui défilent dessous (son
+  fond laissait voir au travers).
 - **Un modèle de l'Explorer est dessiné.** L'éditeur de l'Explorer montre le modèle en schéma : le pivot, les
   entités qu'il atteint placées selon leur distance, chaque relation un trait portant les colonnes de la
   jointure — et, à part en orange, les entités qui n'atteignent **pas** le pivot (une analyse ne peut pas les

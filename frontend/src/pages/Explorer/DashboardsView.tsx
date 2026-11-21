@@ -13,6 +13,7 @@ import { buildAggregateRequest, buildDetailRequest, drillCellsOf } from '../../s
 import { TILE_HEIGHT, withDashboardPeriod, type DashboardDefinition, type DashboardTile, type SavedAnalysis, type TileHeight } from '../../services/explorerSaved'
 import type { AggregateResult, AnalysisDefinition, DetailResult, DrillCell } from '../../types/explorer'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { ShelfBox, ShelfTitle } from './shelfKit'
 import { ResultTable } from './ResultTable'
 import { PivotView } from './PivotView'
 import { ChartView } from './ChartView'
@@ -25,8 +26,7 @@ const Card = styled.div<{ $w: number; $h: number }>`
 const Head = styled.div`display: flex; align-items: center; gap: 6px; font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.primary}; font-family: ${fonts.sans};
   & .spacer { flex: 1; } & .mini { border: none; background: transparent; color: ${colors.text.muted}; cursor: pointer; display: inline-flex; padding: 2px; &:hover { color: ${colors.text.primary}; } }`
 const Body = styled.div`flex: 1; min-height: 0; display: flex; flex-direction: column;`
-const Bar = styled.div`display: flex; align-items: center; gap: 8px; flex-wrap: wrap;`
-const Empty = styled.div`grid-column: 1 / -1; padding: 40px; text-align: center; color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; border: 1px dashed ${colors.border}; border-radius: ${radius.md};`
+const Empty = styled.div`grid-column: 1 / -1; padding: 40px; text-align: center; color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; border: 1px solid ${colors.border}; border-radius: ${radius.lg}; background: var(--bg-modal);`
 
 export function DashboardsView({ app, model, definition, analyses, editing, lang, onChange, onOpenAnalysis }: {
   app: string
@@ -51,8 +51,8 @@ export function DashboardsView({ app, model, definition, analyses, editing, lang
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minHeight: 0, overflow: 'auto' }}>
-      <Bar>
-        <CalendarRange size={13} style={{ color: colors.text.muted }} />
+      <ShelfBox $tone="purple" data-shelf="period">
+        <ShelfTitle $tone="purple"><span className="chip"><CalendarRange size={13} /></span>{t('explorer.period')}</ShelfTitle>
         <DateRangeFilter preset={period?.preset ?? 'all'} range={period?.range ?? { dateFrom: '', dateTo: '' }}
           onChange={(p: DatePreset, r: DateRange) => onChange({ ...definition, period: p === 'all' ? null : { preset: p, range: r } })} />
         <span style={{ fontSize: fontSize.micro, color: colors.text.muted }}>{t('explorer.dashboardPeriodNote')}</span>
@@ -65,7 +65,7 @@ export function DashboardsView({ app, model, definition, analyses, editing, lang
             </div>
           </>
         )}
-      </Bar>
+      </ShelfBox>
       <Grid>
         {definition.tiles.length === 0 && <Empty>{t('explorer.noTiles')}</Empty>}
         {definition.tiles.map((tile, i) => {

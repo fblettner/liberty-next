@@ -12,16 +12,12 @@ import { BUCKETS, NUMERIC_AGGREGATES, moveItem, opsFor } from '../../services/ex
 import type { Aggregate, AnalysisDefinition, Bucket, ExplorerField, FilterOp, FilterRow } from '../../types/explorer'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { FIELD_DND } from './FieldsPane'
+import { ShelfBox, ShelfTitle, type ShelfTone } from './shelfKit'
 
-const Shelf = styled.div<{ $over?: boolean }>`
-  display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 4px 8px; flex-wrap: wrap;
-  border: 1px dashed ${({ $over }) => ($over ? colors.blue.main : colors.border)}; border-radius: ${radius.md};
-  background: ${({ $over }) => ($over ? colors.blue.bg : 'transparent')};
-`
-const ShelfLabel = styled.span`display: inline-flex; align-items: center; gap: 5px; min-width: 84px; font-size: ${fontSize.micro}; color: ${colors.text.muted}; text-transform: uppercase; letter-spacing: 0.04em; font-family: ${fonts.sans};`
-const Chip = styled.div<{ $dragging?: boolean }>`
+const Chip = styled.div<{ $dragging?: boolean; $tone?: ShelfTone }>`
   display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; border-radius: ${radius.md}; cursor: grab;
-  border: 1px solid ${colors.blue.border}; background: ${colors.blue.bg}; color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  border: 1px solid ${({ $tone = 'blue' }) => colors[$tone].border}; background: ${({ $tone = 'blue' }) => colors[$tone].bg};
+  color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
   opacity: ${({ $dragging }) => ($dragging ? 0.5 : 1)};
   & .x { border: none; background: transparent; color: ${colors.text.muted}; cursor: pointer; display: inline-flex; padding: 2px; &:hover { color: ${colors.red.main}; } }
   & .sel { min-width: 90px; }
@@ -80,8 +76,8 @@ export function Shelves({ def, fields, onChange }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <Shelf $over={over === 'rows'} onDragOver={allowDrop('rows')} onDragLeave={() => setOver(null)} onDrop={dropField('rows')}>
-        <ShelfLabel><Rows3 size={12} /> {def.view === 'detail' ? t('explorer.columns') : t('explorer.rows')}</ShelfLabel>
+      <ShelfBox $tone="blue" data-shelf="rows" $over={over === 'rows'} onDragOver={allowDrop('rows')} onDragLeave={() => setOver(null)} onDrop={dropField('rows')}>
+        <ShelfTitle $tone="blue"><span className="chip"><Rows3 size={13} /></span>{def.view === 'detail' ? t('explorer.columns') : t('explorer.rows')}</ShelfTitle>
         {def.rows.length === 0 && <Hint>{t('explorer.rowsHint')}</Hint>}
         {def.rows.map((r, i) => {
           const f = fields.get(r.field)
@@ -97,15 +93,15 @@ export function Shelves({ def, fields, onChange }: {
             </Chip>
           )
         })}
-      </Shelf>
+      </ShelfBox>
       {def.view !== 'detail' && (
-        <Shelf $over={over === 'measures'} onDragOver={allowDrop('measures')} onDragLeave={() => setOver(null)} onDrop={dropField('measures')}>
-          <ShelfLabel><Sigma size={12} /> {t('explorer.measures')}</ShelfLabel>
+        <ShelfBox $tone="green" data-shelf="measures" $over={over === 'measures'} onDragOver={allowDrop('measures')} onDragLeave={() => setOver(null)} onDrop={dropField('measures')}>
+          <ShelfTitle $tone="green"><span className="chip"><Sigma size={13} /></span>{t('explorer.measures')}</ShelfTitle>
           {def.measures.length === 0 && <Hint>{t('explorer.measuresHint')}</Hint>}
           {def.measures.map((m, i) => {
             const f = m.field ? fields.get(m.field) : undefined
             return (
-              <Chip key={`${m.field ?? '*'}:${i}`} data-index={i} draggable onDragStart={chipDrag('measures', i)} onDragEnd={() => setDrag(null)} $dragging={drag?.shelf === 'measures' && drag.index === i}>
+              <Chip $tone="green" key={`${m.field ?? '*'}:${i}`} data-index={i} draggable onDragStart={chipDrag('measures', i)} onDragEnd={() => setDrag(null)} $dragging={drag?.shelf === 'measures' && drag.index === i}>
                 {m.field ? (
                   <span className="sel"><SearchSelect value={m.agg} options={aggOpts(f)} onChange={(v) => onChange({ ...def, measures: def.measures.map((x, k) => (k === i ? { ...x, agg: v as Aggregate } : x)) })} /></span>
                 ) : null}
@@ -115,10 +111,10 @@ export function Shelves({ def, fields, onChange }: {
             )
           })}
           <AddBtn type="button" title={t('explorer.addCount')} onClick={() => onChange({ ...def, measures: [...def.measures, { field: null, agg: 'count' }] })}><Plus size={12} /></AddBtn>
-        </Shelf>
+        </ShelfBox>
       )}
-      <Shelf $over={over === 'filters'} onDragOver={allowDrop('filters')} onDragLeave={() => setOver(null)} onDrop={dropField('filters')}>
-        <ShelfLabel><Filter size={12} /> {t('explorer.filters')}</ShelfLabel>
+      <ShelfBox $tone="orange" data-shelf="filters" $over={over === 'filters'} onDragOver={allowDrop('filters')} onDragLeave={() => setOver(null)} onDrop={dropField('filters')}>
+        <ShelfTitle $tone="orange"><span className="chip"><Filter size={13} /></span>{t('explorer.filters')}</ShelfTitle>
         {def.filterRows.length === 0 && <Hint>{t('explorer.filtersHint')}</Hint>}
         {def.filterRows.map((r, i) => (
           <FilterChip key={r.field} index={i} row={r} field={fields.get(r.field)} dragging={drag?.shelf === 'filters' && drag.index === i}
@@ -126,7 +122,7 @@ export function Shelves({ def, fields, onChange }: {
             onChange={(next) => onChange({ ...def, filterRows: def.filterRows.map((x, k) => (k === i ? next : x)) })}
             onRemove={() => onChange({ ...def, filterRows: def.filterRows.filter((_, k) => k !== i) })} />
         ))}
-      </Shelf>
+      </ShelfBox>
     </div>
   )
 }
@@ -163,7 +159,7 @@ function FilterChip({ index, row, field, dragging, onDragStart, onDragEnd, onCha
   const pickerIn = inOp && valueOpts.length > 0
 
   return (
-    <Chip data-index={index} draggable onDragStart={onDragStart} onDragEnd={onDragEnd} $dragging={dragging}>
+    <Chip $tone="orange" data-index={index} draggable onDragStart={onDragStart} onDragEnd={onDragEnd} $dragging={dragging}>
       <span>{field?.label ?? row.field}</span>
       <span className="sel"><SearchSelect value={row.op} options={ops} onChange={(v) => onChange({ ...row, op: v as FilterOp, value: '', valueTo: undefined })} /></span>
       {!noValue && row.op === 'between' && (

@@ -15,7 +15,8 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 const Wrap = styled.div`flex: 1; min-height: 0; overflow: auto; border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.card};`
 const Table = styled.table`
   border-collapse: separate; border-spacing: 0; width: 100%; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
-  & th { position: sticky; top: 0; z-index: 1; background: ${colors.bg.card}; text-align: left; padding: 8px 10px; border-bottom: 1px solid ${colors.border};
+  /* the heading stays while the rows scroll under it: its background must hide them (bg.card is see-through) */
+  & th { position: sticky; top: 0; z-index: 1; background: ${colors.bg.dropdown}; text-align: left; padding: 8px 10px; border-bottom: 1px solid ${colors.border};
          font-size: ${fontSize.micro}; color: ${colors.text.muted}; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; cursor: pointer; user-select: none; }
   & th.num, & td.num { text-align: right; font-variant-numeric: tabular-nums; }
   & th .code { margin-left: 6px; font-family: ${fonts.mono}; text-transform: none; letter-spacing: 0; color: ${colors.text.muted}; opacity: 0.8; }

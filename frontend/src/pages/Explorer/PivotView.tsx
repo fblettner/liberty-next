@@ -14,7 +14,8 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 const Wrap = styled.div`flex: 1; min-height: 0; overflow: auto; border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.card};`
 const Table = styled.table`
   border-collapse: separate; border-spacing: 0; width: 100%; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
-  & th { position: sticky; top: 0; z-index: 1; background: ${colors.bg.card}; text-align: right; padding: 8px 10px; border-bottom: 1px solid ${colors.border};
+  /* opaque, like ResultTable's: the rows scroll under the heading */
+  & th { position: sticky; top: 0; z-index: 1; background: ${colors.bg.dropdown}; text-align: right; padding: 8px 10px; border-bottom: 1px solid ${colors.border};
          font-size: ${fontSize.micro}; color: ${colors.text.muted}; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
   & th.lbl { text-align: left; }
   & td { padding: 5px 10px; border-bottom: 1px solid ${colors.border}; color: ${colors.text.primary}; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }

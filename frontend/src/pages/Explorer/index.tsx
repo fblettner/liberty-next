@@ -9,10 +9,10 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
 import { setPageContext } from '../../services/aiContext'
-import { BookOpen, Compass, Play, Table2, List, ArrowLeft, Code2, X, Grid3x3, BarChart3, LineChart, PieChart, Gauge, Save, Copy, Trash2, LayoutDashboard, FlaskConical, Pencil, FileDown } from 'lucide-react'
+import { BookOpen, Compass, Play, Table2, List, ArrowLeft, Code2, X, Grid3x3, BarChart3, LineChart, PieChart, Gauge, Save, Copy, Trash2, LayoutDashboard, FlaskConical, Pencil, FileDown, LayoutGrid, SlidersHorizontal } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
-import { Banner, Button, Centered, Checkbox, Input, PageLayout, SearchSelect, SpinnerRing, useModals, type SearchSelectOption } from '../../common'
+import { Banner, Button, Centered, Checkbox, Input, PageLayout, SearchSelect, SpinnerRing, useModals, type SearchSelectOption, HeaderActions, HeaderSlot, HeaderSlotProvider, Card } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import {
   addField, addFilter, buildAggregateRequest, buildDetailRequest, dateFields, drillCellsOf, emptyDefinition, fieldIndex, measureKey, usedKeys, withCalculated,
@@ -20,6 +20,7 @@ import {
 import { deleteSaved, downloadExport, listSaved, saveSaved, savedOptions, type DashboardDefinition, type SavedAnalysis, type SavedDashboard } from '../../services/explorerSaved'
 import type { AggregateResult, AnalysisDefinition, AnalysisView, CalcDef, DetailResult, DrillCell, ExplorerModel, ExplorerModelSummary, FieldType } from '../../types/explorer'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { ShelfBox, ShelfTitle } from './shelfKit'
 import { FieldsPane } from './FieldsPane'
 import { Shelves } from './Shelves'
 import { PeriodBar } from './PeriodBar'
@@ -33,7 +34,16 @@ import { DashboardsView } from './DashboardsView'
 
 const Body = styled.div`display: grid; grid-template-columns: 260px 1fr; gap: 12px; flex: 1; min-height: 0;`
 const Canvas = styled.div`display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0;`
-const Toolbar = styled.div`display: flex; align-items: center; gap: 8px; flex-wrap: wrap;`
+// the result: a panel like the editors' — its head says the view and what the run answered
+const ResultPanel = styled(Card)`flex: 1; min-height: 0; padding: 0; display: flex; flex-direction: column; overflow: hidden;`
+const ResultHead = styled.div`
+  display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid ${colors.border}; background: ${colors.bg.input}; flex-shrink: 0;
+  font-family: ${fonts.sans}; min-height: 40px;
+  & .title { font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.primary}; text-transform: uppercase; letter-spacing: 0.06em; }
+  & .note { flex: 1; min-width: 0; font-size: ${fontSize.sm}; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+`
+/* one scroll only: the table (or the pivot) scrolls inside its own frame, the heading stays */
+const ResultBody = styled.div`flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px; overflow: hidden;`
 const Seg = styled.div`display: inline-flex; border: 1px solid ${colors.border}; border-radius: ${radius.md}; overflow: hidden;`
 const SegBtn = styled.button<{ $active?: boolean }>`
   display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border: 0; cursor: pointer; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
@@ -66,6 +76,7 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
   const [modelId, setModelId] = useState<string>('')
   const [model, setModel] = useState<ExplorerModel | null>(null)
   const [mode, setMode] = useState<Mode>('analyses')
+  const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null)
   const [def, setDef] = useState<AnalysisDefinition | null>(null)
   const [calcTypes, setCalcTypes] = useState<Record<string, FieldType>>({})
   const [result, setResult] = useState<AggregateResult | null>(null)
@@ -306,11 +317,13 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
             <SearchSelect sort value={currentAnalysis?.id ?? ''} options={savedOptions(analyses, t('explorer.mine'))} anyLabel={t('explorer.newAnalysis')} placeholder={t('explorer.pickAnalysis')}
               onChange={(v) => loadAnalysis(analyses.find((a) => a.id === v) ?? null)} />
           </div>
-          <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'analyses', asNew: false })} disabled={def.rows.length === 0 && def.measures.length === 0}><Save size={13} /> {t('common.save')}</Button>
-          {currentAnalysis && <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'analyses', asNew: true })}><Copy size={13} /> {t('explorer.saveAs')}</Button>}
-          {canDeleteAnalysis && <Button $size="sm" $variant="ghost" onClick={() => void removeAnalysis()} style={{ color: colors.red.main }}><Trash2 size={13} /> {t('common.delete')}</Button>}
-          <Button $size="sm" $variant="ghost" onClick={() => void exportFile('xlsx')} disabled={def.rows.length === 0 && def.measures.length === 0} title={t('explorer.exportExcel')}><FileDown size={13} /> Excel</Button>
-          <Button $size="sm" $variant="ghost" onClick={() => void exportFile('pdf')} disabled={def.rows.length === 0 && def.measures.length === 0} title={t('explorer.exportPdf')}><FileDown size={13} /> PDF</Button>
+          <HeaderActions>
+            <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'analyses', asNew: false })} disabled={def.rows.length === 0 && def.measures.length === 0}><Save size={13} /> {t('common.save')}</Button>
+            {currentAnalysis && <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'analyses', asNew: true })}><Copy size={13} /> {t('explorer.saveAs')}</Button>}
+            {canDeleteAnalysis && <Button $size="sm" $variant="ghost" onClick={() => void removeAnalysis()} style={{ color: colors.red.main }}><Trash2 size={13} /> {t('common.delete')}</Button>}
+            <Button $size="sm" $variant="ghost" onClick={() => void exportFile('xlsx')} disabled={def.rows.length === 0 && def.measures.length === 0} title={t('explorer.exportExcel')}><FileDown size={13} /> Excel</Button>
+            <Button $size="sm" $variant="ghost" onClick={() => void exportFile('pdf')} disabled={def.rows.length === 0 && def.measures.length === 0} title={t('explorer.exportPdf')}><FileDown size={13} /> PDF</Button>
+          </HeaderActions>
         </>
       ) : (
         <>
@@ -319,11 +332,13 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
               onChange={(v) => loadDashboard(dashboards.find((d) => d.id === v) ?? null)} />
           </div>
           <Button $size="sm" $variant={dashEditing ? 'primary' : 'ghost'} onClick={() => setDashEditing((v) => !v)}><Pencil size={13} /> {t('explorer.editLayout')}</Button>
-          <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'dashboards', asNew: false })} disabled={dashDef.tiles.length === 0}><Save size={13} /> {t('common.save')}</Button>
-          {currentDashboard && <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'dashboards', asNew: true })}><Copy size={13} /> {t('explorer.saveAs')}</Button>}
-          {canDeleteDashboard && <Button $size="sm" $variant="ghost" onClick={() => void removeDashboard()} style={{ color: colors.red.main }}><Trash2 size={13} /> {t('common.delete')}</Button>}
-          {currentDashboard && <Button $size="sm" $variant="ghost" onClick={() => void exportFile('xlsx')} title={t('explorer.exportExcel')}><FileDown size={13} /> Excel</Button>}
-          {currentDashboard && <Button $size="sm" $variant="ghost" onClick={() => void exportFile('pdf')} title={t('explorer.exportPdf')}><FileDown size={13} /> PDF</Button>}
+          <HeaderActions>
+            <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'dashboards', asNew: false })} disabled={dashDef.tiles.length === 0}><Save size={13} /> {t('common.save')}</Button>
+            {currentDashboard && <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'dashboards', asNew: true })}><Copy size={13} /> {t('explorer.saveAs')}</Button>}
+            {canDeleteDashboard && <Button $size="sm" $variant="ghost" onClick={() => void removeDashboard()} style={{ color: colors.red.main }}><Trash2 size={13} /> {t('common.delete')}</Button>}
+            {currentDashboard && <Button $size="sm" $variant="ghost" onClick={() => void exportFile('xlsx')} title={t('explorer.exportExcel')}><FileDown size={13} /> Excel</Button>}
+            {currentDashboard && <Button $size="sm" $variant="ghost" onClick={() => void exportFile('pdf')} title={t('explorer.exportPdf')}><FileDown size={13} /> PDF</Button>}
+          </HeaderActions>
         </>
       )}
     </ModeBar>
@@ -331,10 +346,11 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
 
   return (
     <PageLayout icon={<Compass size={18} />} title={t('explorer.title')} description={<span>{model.label}{model.description ? ` — ${model.description}` : ''}{model.derived && model.preset ? ` · ${t('explorer.fromPreset', { preset: model.preset })}` : ''}</span>}
-      headerRight={models && models.length > 0 ? (
+      headerRight={<><HeaderSlot ref={setHeaderSlot} />{models && models.length > 0 ? (
         <div style={{ width: 380 }}><SearchSelect sort value={`${app}/${modelId}`} options={models.map((m) => ({ value: `${m.app}/${m.model}`, label: m.label, group: m.group || menus?.[m.app]?.label || m.app }))}
           onChange={(v) => { const [a, m] = v.split('/'); if (a && m) { setApp(a); setModelId(m) } }} /></div>
-      ) : undefined}>
+      ) : null}</>}>
+      <HeaderSlotProvider value={headerSlot}>
       {model.warnings.length > 0 && user?.is_superuser && <Banner $tone="warning" style={{ marginBottom: 8 }}>{model.warnings.join(' · ')}</Banner>}
       {user?.is_superuser && (model.undocumented ?? 0) > 0 && (
         <Banner $tone="info" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -357,7 +373,8 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
             onPrimary={(e) => setDef({ ...emptyDefinition(e), view: def.view })}
             onCalcNew={() => setCalcEditing(null)} onCalcEdit={(name) => setCalcEditing(def.calculated.find((c) => c.name === name) ?? null)} onCalcDelete={(name) => void deleteCalc(name)} />
           <Canvas>
-            <Toolbar>
+            <ShelfBox $tone="blue" data-shelf="view">
+              <ShelfTitle $tone="blue"><span className="chip"><LayoutGrid size={13} /></span>{t('explorer.shelfView')}</ShelfTitle>
               <div style={{ width: 180 }}><SearchSelect value={def.entity} options={entityOpts} onChange={(e) => setDef({ ...emptyDefinition(e), view: def.view })} /></div>
               <Seg>
                 {AGG_VIEWS.map((v) => <SegBtn key={v} type="button" $active={def.view === v} onClick={() => setView(v)} title={t(`explorer.view.${v}`)}>{viewIcon[v]}</SegBtn>)}
@@ -371,13 +388,11 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
               )}
               <div style={{ flex: 1 }} />
               {running && <SpinnerRing size={14} thickness={2} />}
-              {result && !showingDetail && (
-                <Note>{t('explorer.groupsNote', { groups: result.groups, scanned: result.scanned })}{result.truncated ? ` · ${t('explorer.truncated', { limit: def.limit })}` : ''}{result.scan_truncated ? ` · ${t('explorer.scanTruncated')}` : ''}</Note>
-              )}
-              {user?.is_superuser && sql && <Button $size="sm" $variant="ghost" onClick={() => setShowSql((v) => !v)} title="SQL"><Code2 size={13} /></Button>}
               <Button $size="sm" $variant="primary" onClick={() => void run(def, { drill, page })} disabled={running}><Play size={13} /> {t('explorer.run')}</Button>
-            </Toolbar>
+            </ShelfBox>
             {(def.view === 'pivot' || ['bar', 'line', 'pie'].includes(def.view)) && !showingDetail && (
+              <ShelfBox $tone="blue" data-shelf="options">
+              <ShelfTitle $tone="blue"><span className="chip"><SlidersHorizontal size={13} /></span>{t('explorer.shelfOptions')}</ShelfTitle>
               <Options>
                 <span>{t('explorer.measure')}</span>
                 <div style={{ width: 200 }}><SearchSelect value={(def.view === 'pivot' ? def.pivot?.measure : def.chart?.measure) ?? ''} options={measureOpts} anyLabel={t('explorer.firstMeasure')}
@@ -395,10 +410,18 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
                   <Checkbox checked={!!def.chart?.stacked} onChange={(v) => setDef({ ...def, chart: { ...def.chart, stacked: v } })} label={t('explorer.stacked')} />
                 ) : null}
               </Options>
+              </ShelfBox>
             )}
             <PeriodBar period={def.period} dateFields={dates} onChange={(p) => setDef({ ...def, period: p })} />
             <Shelves def={def} fields={fields} onChange={setDef} />
             {error && <Banner $tone="error">{error}</Banner>}
+            <ResultPanel data-result>
+              <ResultHead>
+                <span className="title">{t(`explorer.view.${showingDetail ? 'detail' : def.view}`)}</span>
+                <span className="note">{result && !showingDetail ? <>{t('explorer.groupsNote', { groups: result.groups, scanned: result.scanned })}{result.truncated ? ` · ${t('explorer.truncated', { limit: def.limit })}` : ''}{result.scan_truncated ? ` · ${t('explorer.scanTruncated')}` : ''}</> : ''}</span>
+                {user?.is_superuser && sql && <Button $size="sm" $variant="ghost" onClick={() => setShowSql((v) => !v)} title="SQL"><Code2 size={13} /></Button>}
+              </ResultHead>
+              <ResultBody>
             {showSql && sql && <Sql>{sql}</Sql>}
             {drill && (
               <DrillBar>
@@ -420,6 +443,8 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
             ) : (
               <ChartView result={result} view={def.view as 'bar' | 'line' | 'pie' | 'kpi'} measureKey={def.chart?.measure ?? null} seriesKey={def.pivotColumn ?? null} stacked={!!def.chart?.stacked} lang={lang} connector={app} />
             )}
+              </ResultBody>
+            </ResultPanel>
           </Canvas>
         </Body>
       )}
@@ -433,6 +458,7 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
         <SaveModal kind={saveModal.kind} asNew={saveModal.asNew} current={saveModal.kind === 'analyses' ? currentAnalysis : currentDashboard}
           onSave={(f) => (saveModal.kind === 'analyses' ? saveAnalysis(f, saveModal.asNew) : saveDashboard(f, saveModal.asNew))} onClose={() => setSaveModal(null)} />
       )}
+      </HeaderSlotProvider>
     </PageLayout>
   )
 }
