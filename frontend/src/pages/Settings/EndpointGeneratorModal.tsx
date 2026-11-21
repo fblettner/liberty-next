@@ -11,7 +11,7 @@
 // A generator may build a whole SCREEN instead (the endpoints it reads and saves through, and the
 // screen itself): the dialog then asks where to put it and creates everything in one pass through
 // the Screen Assistant's route (POST /admin/assistant/scaffold) — saved, unlike a single endpoint.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
@@ -58,7 +58,7 @@ const Item = styled.button<{ $on: boolean }>`
   & .desc { color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 `
 
-export function EndpointGeneratorModal({ connector, generators, existingNames = [], onCreate, onClose }: {
+export function EndpointGeneratorModal({ connector, generators, existingNames = [], onCreate, onClose, initial }: {
   connector: string
   generators: EndpointGeneratorDef[]
   /** The names of the connector's endpoints: a screen's endpoint that already exists is kept or replaced. */
@@ -68,11 +68,13 @@ export function EndpointGeneratorModal({ connector, generators, existingNames = 
    *  were written again). */
   onCreate: (endpoints: Record<string, unknown>[], saved: boolean, replaced?: boolean) => void
   onClose: () => void
+  /** Opened by a link (services/deepLinks.ts): the generator to start on and the text to search at once. */
+  initial?: { generator?: string; query?: string }
 }) {
   const { t } = useTranslation()
   const { apps, currentApp, lastApp } = useWorkspace()
-  const [genId, setGenId] = useState(generators[0]?.id ?? '')
-  const [query, setQuery] = useState('')
+  const [genId, setGenId] = useState((initial?.generator && generators.some((g) => g.id === initial.generator) ? initial.generator : generators[0]?.id) ?? '')
+  const [query, setQuery] = useState(initial?.query ?? '')
   const [candidates, setCandidates] = useState<Candidate[] | null>(null)
   const [picked, setPicked] = useState<Candidate | null>(null)
   const [fields, setFields] = useState<OptionField[]>([])
@@ -104,6 +106,11 @@ export function EndpointGeneratorModal({ connector, generators, existingNames = 
     const r = await step<{ candidates: Candidate[] }>('search', { query })
     if (r) setCandidates(r.candidates ?? [])
   }
+  // opened by a link with a text: its candidates are there when the dialog shows
+  useEffect(() => {
+    if (initial?.query) void search()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on what the dialog was opened with
+  }, [])
   const pick = async (c: Candidate) => {
     setPicked(c); setFields([]); setNote(null); setAnswers({})
     const r = await step<{ options: OptionField[]; note?: string | null }>('options', { candidate: c.id })

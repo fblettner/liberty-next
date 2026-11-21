@@ -23,6 +23,7 @@ import { useAuth } from '../../auth/AuthContext'
 import { iconFor } from '../../components/SidebarMenu'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 import { callableRef } from '../../tabs/pageTabs'
+import { hasPermission } from '../../services/permissions'
 
 export const PAGE_SDK_VERSION = 1
 
@@ -54,6 +55,9 @@ export interface PageSdk {
   useUser: () => { username: string; is_superuser: boolean; permissions: string[] } | null
   /** hook: a function that opens a route of the application in its tab ('/screen/<app>/<id>', '/explorer'…) */
   useOpen: () => (path: string) => void
+  /** hook: a function that says whether the caller holds a permission ('job:<id>', 'plugin:…'; a superuser
+   *  holds them all) — to show a button only to who may use it. The server decides in the end. */
+  useCan: () => (permission: string) => boolean
 }
 
 export function buildSdk(app: string, page: string): PageSdk {
@@ -74,6 +78,10 @@ export function buildSdk(app: string, page: string): PageSdk {
     useOpen: () => {
       const navigate = useNavigate()
       return (path: string) => { void navigate(path) }
+    },
+    useCan: () => {
+      const { user } = useAuth()
+      return (permission: string) => !!user && (!!user.is_superuser || hasPermission(user.permissions ?? [], permission))
     },
   }
 }

@@ -307,6 +307,11 @@
   function of the application — so the page imports nothing and looks like the rest. The permission is
   `page:<app>:<page>`, checked before the file is looked up and asked of the menu entry too; the role editor
   knows it. The contract is `frontend/src/pages/AppPage/sdk.ts` (version 1: fields are added, never renamed).
+- **A link can open a page on something.** `/job/<id>?<parameter>=<value>` opens a job's page with those values
+  filled in; `/liberty/connectors?connector=<name>` opens the Connectors page on that connector, and with
+  `&create=<generator>&q=<text>` its "Create from…" dialog on that generator with the text already searched.
+  For a page an application ships, a notification, a document. The page contract gains `useCan` (does the caller
+  hold a permission — to show a button only to who may use it).
 - **A query and an API connector are drawn as stages.** A custom query, a sequence or a lookup opens as three
   cards — **What it is** (label, description), **Statement** (its first word, the databases it is written for,
   in orange when it is empty or writes without being marked writable) and **Parameters** (how many are

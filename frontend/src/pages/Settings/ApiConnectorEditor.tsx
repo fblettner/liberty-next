@@ -118,6 +118,9 @@ interface ApiConnectorEditorProps {
   /** Every SQL connector's pools — the Environments tab lists the environments without a server. */
   sqlConnectors?: SqlPools[]
   onChange: (next: ApiConnector) => void
+  /** A link asked for "Create from…" (services/deepLinks.ts): the endpoints open, the dialog on this generator
+   *  and text; `n` changes with each ask. */
+  openGenerator?: { generator?: string; query?: string; n: number } | null
 }
 
 // ── small styled atoms (matches the screenshot's borderless look) ──────────────────────────
@@ -202,13 +205,16 @@ const queryFromString = (s: string): Record<string, string> => {
 // ── main component ─────────────────────────────────────────────────────────────────────────
 type TabKey = 'connection' | 'auth' | 'environments' | 'endpoints' | 'webhooks' | 'test'
 
-export default function ApiConnectorEditor({ name, value, hasMenu, sqlConnectors, onChange }: ApiConnectorEditorProps) {
+export default function ApiConnectorEditor({ name, value, hasMenu, sqlConnectors, onChange, openGenerator }: ApiConnectorEditorProps) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<TabKey>('connection')
   const fig = apiFigures(value as unknown as Record<string, unknown>)
   // Reset to the Connection tab when the operator switches connectors — otherwise they may
   // be left looking at the Test tab of a different connector's data.
-  useEffect(() => { setTab('connection') }, [name])
+  const askedN = openGenerator?.n
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- on another connector; a link's ask is the effect below
+  useEffect(() => { setTab(askedN ? 'endpoints' : 'connection') }, [name])
+  useEffect(() => { if (askedN) setTab('endpoints') }, [askedN])
 
   // Generic per-field patch — preserves every other field on the connector. Drops the key
   // when the new value is null/undefined/empty so the saved TOML stays terse (matches the
@@ -240,7 +246,7 @@ export default function ApiConnectorEditor({ name, value, hasMenu, sqlConnectors
       {tab === 'connection' && <ConnectionTab value={value} patch={patch} hasMenu={hasMenu} />}
       {tab === 'auth' && <AuthTab value={value} patch={patch} />}
       {tab === 'environments' && <ApiEnvironmentsTab value={value} patch={patch} sqlConnectors={sqlConnectors ?? []} />}
-      {tab === 'endpoints' && <EndpointsTab connectorName={name} value={value} patch={patch} />}
+      {tab === 'endpoints' && <EndpointsTab connectorName={name} value={value} patch={patch} openGenerator={openGenerator} />}
       {tab === 'webhooks' && <WebhooksTab />}
       {tab === 'test' && <TestTab connectorName={name} value={value} />}
     </Stack>
@@ -508,8 +514,8 @@ function AuthTab({
 
 // ── Endpoints tab ──────────────────────────────────────────────────────────────────────────
 function EndpointsTab({
-  connectorName, value, patch,
-}: { connectorName: string; value: ApiConnector; patch: (p: Partial<ApiConnector>) => void }) {
+  connectorName, value, patch, openGenerator,
+}: { connectorName: string; value: ApiConnector; patch: (p: Partial<ApiConnector>) => void; openGenerator?: { generator?: string; query?: string; n: number } | null }) {
   const { t } = useTranslation()
   const modals = useModals()
   const endpoints = useMemo(() => value.endpoints ?? [], [value.endpoints])
@@ -579,7 +585,9 @@ function EndpointsTab({
   // "Create from…": an endpoint a generator of the connector built from the server's own
   // description. Added unsaved and opened, under a free name, for the operator to review.
   const generators = value.generators ?? []
-  const [generating, setGenerating] = useState(false)
+  const [generating, setGenerating] = useState(!!openGenerator)
+  const askedN = openGenerator?.n
+  useEffect(() => { if (askedN) setGenerating(true) }, [askedN])
   const [showGenerators, setShowGenerators] = useState(false)
   const addGenerated = (raws: Record<string, unknown>[], saved: boolean, replaced = false) => {
     const next = [...endpoints]
@@ -766,7 +774,8 @@ function EndpointsTab({
         )
       })()}
       {generating && (
-        <EndpointGeneratorModal connector={connectorName} generators={generators} existingNames={endpoints.map((e) => e.name)} onCreate={addGenerated} onClose={() => setGenerating(false)} />
+        <EndpointGeneratorModal key={askedN ?? 0} connector={connectorName} generators={generators} existingNames={endpoints.map((e) => e.name)} onCreate={addGenerated} onClose={() => setGenerating(false)}
+          initial={openGenerator ?? undefined} />
       )}
     </Stack>
   )

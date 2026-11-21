@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
+import { useLocation } from 'react-router-dom'
 import { Play, Download, FileSpreadsheet } from 'lucide-react'
 import { ApiError } from '../../api/client'
 import { Banner, Button, Centered, FileInput, Input, PageLayout, SearchSelect, SpinnerRing, Tag } from '../../common'
@@ -12,6 +13,7 @@ import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { findMenuLabel } from '../../services/menuLabels'
 import { splitJobTarget } from '../../services/menuPath'
 import { toMulti } from '../../services/multiChoice'
+import { jobValues } from '../../services/deepLinks'
 import { MultiChoice } from '../../common/MultiChoice'
 import { downloadRunFile, downloadRunInput, durationOf, filesInLog, getJob, getRun, isActive, runJob, uploadFile, type JobRunDetail, type JobRunRow, type UserJob } from '../../services/jobRunner'
 import { STATE_TONE, relative } from '../Nomaflow/util'
@@ -55,6 +57,17 @@ export default function JobRunner({ jobId: target }: { jobId: string }) {
   const logRef = useRef<HTMLPreElement | null>(null)
 
   const title = useMemo(() => findMenuLabel(menus, { kind: 'job', connector: '', target }) ?? (preset ? `${jobId} · ${preset}` : jobId), [menus, target, jobId, preset])
+
+  // a link to this page may carry values (/job/<id>?name=value): filled in once per link, then the user's to change
+  const location = useLocation()
+  const linked = useMemo(() => jobValues(location.pathname, location.search, target), [location.pathname, location.search, target])
+  const linkApplied = useRef('')
+  useEffect(() => {
+    const key = JSON.stringify(linked)
+    if (!job || key === '{}' || linkApplied.current === key) return
+    linkApplied.current = key
+    setParams((cur) => ({ ...cur, ...Object.fromEntries(job.params.filter((p) => p.name in linked).map((p) => [p.name, linked[p.name]])) }))
+  }, [linked, job])
 
   const loadJob = useCallback(async () => {
     try {

@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers, Undo2, GitBranch, Shuffle, ArrowRightLeft, Hash, List as ListIcon, Tag, Braces } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useLocation } from 'react-router-dom'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, HeaderActions, Row, Stack, SpinnerRing, Mono, SchemaForm, SearchSelect, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Input, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc } from '../../types/config'
@@ -23,6 +24,7 @@ import { useWorkspace } from '../../workspace/WorkspaceContext'
 import ConnectorsTableEditor from './ConnectorsTableEditor'
 import StageStrip, { type StageView } from './StageStrip'
 import { connectorFigures, queryFigures } from '../../services/connectorFigures'
+import { connectorLink } from '../../services/deepLinks'
 import { ScreenDesignerModal } from './ScreenDesignerModal'
 import { CRUD_KINDS, type TableEntry, duplicateTableEntry, findTableIndex, newEmptyTable, pickSchemaProperties, removeTableByName, replaceTableByName, tableEntryFromFlatQueries, tableExistsByName } from './connectorTables'
 import { ScaffoldQueryModal, type ScaffoldKind } from './ScaffoldQueryModal'
@@ -126,6 +128,15 @@ export default function ConnectorsBuilder() {
   const [dictOriginal, setDictOriginal] = useState('')
   const [sel, setSel] = useState<string | null>(null)
   const [q, setQ] = useState('')
+  // a link may open the page on a connector, and its "Create from…" on a generator (services/deepLinks.ts)
+  const location = useLocation()
+  const [asked, setAsked] = useState<{ connector: string; generator?: string; query?: string; n: number } | null>(null)
+  useEffect(() => {
+    const link = connectorLink(location.pathname, location.search)
+    if (!link) return
+    setSel(link.connector)
+    setAsked(link.create ? { connector: link.connector, generator: link.create, query: link.q, n: Date.now() } : null)
+  }, [location.pathname, location.search])
   // "Clone app" modal — duplicates the source app's config (connector, dictionary
   // overlay, menus, screens) under a new name pointing at a new pool. The on-disk
   // edit is atomic: the backend POST /admin/config/clone-app validates every
@@ -1048,7 +1059,7 @@ export default function ConnectorsBuilder() {
                 // (no need to save first). SchemaNavigator was the previous render path; it
                 // surfaced 20+ flat fields including OAuth2 ones that didn't apply to a basic
                 // connector and vice versa, which made the editor noisy and hard to scan.
-                <ApiConnectorEditor name={sel!} value={selConn as ApiConnectorEditorValue} hasMenu={appSet.has(sel!)} sqlConnectors={sqlPools} onChange={(v) => update(sel!, v as unknown as Record<string, unknown>)} />
+                <ApiConnectorEditor name={sel!} value={selConn as ApiConnectorEditorValue} hasMenu={appSet.has(sel!)} sqlConnectors={sqlPools} openGenerator={asked && asked.connector === sel ? asked : null} onChange={(v) => update(sel!, v as unknown as Record<string, unknown>)} />
               )}
               {/* Tables view = CRUD-grouped tables ONLY. Custom (non-CRUD) queries live in their
                   own tab now, so this list isn't mixed with them anymore. */}

@@ -352,7 +352,8 @@ pages/AppPage/         a page an application ships (index = fetch + import the m
                        handed to it — add fields, never rename; `tabs/pageTabs.appPageOf` / `callableRef`, tested)
 pages/DashboardView/ Chat/ (AiDrawer) Reports/ Notifications/ (the inbox; components/NotificationBell
                        in the header, live via SioContext.subscribeNotifications) ScreenAssistant/ HttpRunner/ Monitoring/ Login/
-services/ types/       no-React helpers (lookups, cells, gridViews, poolSchema, sqlCompletion, aiContext = the
+services/ types/       no-React helpers (deepLinks = a link that opens a page ON something: `/job/<id>?name=value`,
+                       `/liberty/connectors?connector=&create=&q=`, tested; lookups, cells, gridViews, poolSchema, sqlCompletion, aiContext = the
                        page context the TableView publishes and the chat drawer sends, aiChat = starters / persisted
                        history / picked model…) and the backend response shapes
 locales/{en,fr}.ts     react-i18next; keys must exist in both (fr is typed against en)

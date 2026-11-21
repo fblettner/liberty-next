@@ -363,6 +363,11 @@
   `page:<app>:<page>`, vérifiée avant de chercher le fichier et demandée aussi à l'entrée de menu ; l'éditeur de
   rôles la connaît. Le contrat est `frontend/src/pages/AppPage/sdk.ts` (version 1 : des champs s'ajoutent, aucun
   n'est renommé).
+- **Un lien peut ouvrir une page sur quelque chose.** `/job/<id>?<paramètre>=<valeur>` ouvre la page d'un
+  traitement avec ces valeurs remplies ; `/liberty/connectors?connector=<nom>` ouvre la page Connecteurs sur ce
+  connecteur, et avec `&create=<générateur>&q=<texte>` son dialogue « Créer depuis… » sur ce générateur, le texte
+  déjà cherché. Pour une page livrée par une application, une notification, un document. Le contrat des pages
+  gagne `useCan` (l'appelant détient-il une permission — pour ne montrer un bouton qu'à qui peut s'en servir).
 - **Une requête et un connecteur d'API se dessinent en étapes.** Une requête, une séquence ou une liste de
   valeurs s'ouvre en trois cartes — **Ce que c'est** (libellé, description), **Instruction** (son premier mot,
   les bases pour lesquelles elle est écrite, en orange quand elle est vide ou qu'elle écrit sans être marquée
