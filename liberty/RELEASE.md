@@ -135,6 +135,12 @@
   double click gives the default back). And **a menu entry's label takes two lines** instead of being cut
   after a few words (its full text stays the tooltip). The page of a screen that reads an API endpoint is titled by the screen's label, not by the
   endpoint's description (a sentence).
+- A screen on an API endpoint — **its advanced filters work on every column it flags.** A filter was offered
+  only where the endpoint had a parameter of that name; any other flagged column is now filtered on the rows
+  the endpoint returned, with the same operators as a query's (contains, equals, not equals, starts / ends
+  with, a range) — and a column with an enum or a lookup is a pick-list there, a lookup being free to read an
+  endpoint itself. A **parameter with a closed list of values** (`choices`) is a dropdown above the grid
+  instead of a text field. (An endpoint whose server caps the rows is filtered within what it returned.)
 - API connectors — **a parameter called `username` or `password` is the endpoint's, not the connector's
   login.** `{{username}}` / `{{password}}` fill a token request with the connector's own credentials; an
   endpoint that DECLARED a parameter of that name got them too when it was left blank — a user filter was sent

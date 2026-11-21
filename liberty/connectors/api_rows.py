@@ -201,6 +201,70 @@ def sensitive_names(dictionary: DictionaryFile, names: list[str], hints: list[Co
     return out
 
 
+_TEXT_OPS = ("contains", "equals", "notEquals", "startsWith", "endsWith")
+
+
+def _as_number(value: Any) -> float | None:
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def filter_rows(rows: list[dict[str, Any]], params: dict[str, Any] | None, hints: list[ColumnHint] | None,
+                endpoint: EndpointDef) -> list[dict[str, Any]]:
+    """The screen's filters applied to an endpoint's rows — what the SQL connector does with a
+    ``WHERE`` around a query. A column flagged ``filter`` that IS a parameter of the endpoint was
+    filtered by the server; any other is filtered here, on what came back: its value (``<COL>``)
+    with its operator (``<COL>_op``: contains — the default — equals, notEquals, startsWith,
+    endsWith; without regard to case, numbers compared as numbers on an equals), and
+    ``<COL>_from`` / ``<COL>_to`` bounds on any hinted column.
+
+    An endpoint whose server caps the rows (``limit_param``) is filtered within what it returned."""
+    given = {str(k).lower(): v for k, v in (params or {}).items()}
+    served = {p.name.lower() for p in endpoint.params}
+    tests: list[Any] = []
+
+    def cell(row: dict[str, Any], name: str) -> Any:
+        if name in row:
+            return row[name]
+        low = name.lower()
+        return next((v for k, v in row.items() if str(k).lower() == low), None)
+
+    for h in hints or []:
+        low = h.name.lower()
+        for suffix, above in (("_from", True), ("_to", False)):
+            bound = given.get(low + suffix)
+            if bound in (None, ""):
+                continue
+
+            def within(row: dict[str, Any], name: str = h.name, bound: Any = bound, above: bool = above) -> bool:
+                value = cell(row, name)
+                if value in (None, ""):
+                    return False
+                a, b = _as_number(value), _as_number(bound)
+                left, right = (a, b) if a is not None and b is not None else (str(value)[:len(str(bound))], str(bound))
+                return left >= right if above else left <= right
+            tests.append(within)
+        wanted = given.get(low)
+        if not h.filter or low in served or wanted in (None, ""):
+            continue
+        op = str(given.get(low + "_op") or "contains").strip()
+        op = op if op in _TEXT_OPS else "contains"
+        text = str(wanted).strip().lower()
+
+        def match(row: dict[str, Any], name: str = h.name, op: str = op, text: str = text, wanted: Any = wanted) -> bool:
+            value = cell(row, name)
+            have = "" if value is None else str(value).strip().lower()
+            if op in ("equals", "notEquals"):
+                a, b = _as_number(value), _as_number(wanted)
+                same = (a == b) if a is not None and b is not None else have == text
+                return same if op == "equals" else not same
+            return have.startswith(text) if op == "startsWith" else have.endswith(text) if op == "endsWith" else text in have
+        tests.append(match)
+    return [r for r in rows if all(t(r) for t in tests)] if tests else rows
+
+
 def _means_empty(endpoint: EndpointDef, result: Any) -> bool:
     """A failed call that is the server's way of saying "nothing to list" (``EndpointDef.empty_on``):
     one of the texts is in its error, or is its HTTP status."""
@@ -240,12 +304,9 @@ def _columns(endpoint: EndpointDef, parsed: Any, rows: list[dict[str, Any]], hin
     discovered = [Column(name=n, label=str(titles[key_of[n]]) if isinstance(titles, dict) and titles.get(key_of[n]) else None) for n in names]
     columns = _apply_column_hints(discovered, hints or [], dictionary, language, connector=dictionary_scope)
     by_name = {c.name: c for c in discovered}
-    filterable = {p.name.lower() for p in endpoint.params}
     for c in columns:
         if c.label is None and by_name.get(c.name) is not None:
             c.label = by_name[c.name].label                       # the server's own title, when nothing else names the column
-        if c.filter and c.name.lower() not in filterable:
-            c.filter = False                                      # the endpoint cannot filter on it: not offered
     flagged = sensitive_names(dictionary, [c.name for c in columns], hints, dictionary_scope)
     for c in columns:
         if c.name in flagged:
@@ -280,7 +341,8 @@ async def api_row_events(
         said = (result.body or "").strip() if result.json is None else ""
         raise ApiRowsError(f"{conn.name}.{endpoint_name}: {result.error or f'HTTP {result.status_code}'}" + (f" — {said[:300]}" if said else ""))
     answer = None if empty else result.json
-    rows = _records(endpoint, answer)
+    # the screen's filters the endpoint does not take as parameters: applied to the rows it returned
+    rows = filter_rows(_records(endpoint, answer), params, column_hints, endpoint)
     more = bool(extract_path(answer, endpoint.more_field)) if endpoint.more_field else False
     if scope is not None:
         dd_of = {h.name.lower(): (h.dd or h.name) for h in column_hints or [] if h.dd != ""}

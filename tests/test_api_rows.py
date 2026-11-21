@@ -83,8 +83,32 @@ async def test_the_screens_columns_the_dictionary_and_the_filters_the_endpoint_h
     dictionary = DictionaryFile(entries={"AN8": DictionaryEntry(label="Address"), "AT1": DictionaryEntry(label="Search type")})
     hints = [ColumnHint(name="ALPH", label="Name", filter=True), ColumnHint(name="AN8", filter=True), ColumnHint(name="AT1", filter=True)]
     meta, _rows, _done = await _read(conn, "addresses", column_hints=hints, dictionary=dictionary)
-    # the screen's order and labels, then the dictionary's; a filter only where the endpoint has the parameter
-    assert [(c.name, c.label, c.filter) for c in meta.columns] == [("ALPH", "Name", True), ("AN8", "Address", False), ("AT1", "Search type", True)]
+    # the screen's order and labels, then the dictionary's; every column the screen flags can be filtered —
+    # by the server when it is a parameter of the endpoint (ALPH, AT1), on the rows returned otherwise (AN8)
+    assert [(c.name, c.label, c.filter) for c in meta.columns] == [("ALPH", "Name", True), ("AN8", "Address", True), ("AT1", "Search type", True)]
+
+
+@pytest.mark.asyncio
+async def test_a_filter_the_endpoint_does_not_take_is_applied_to_its_rows() -> None:
+    """What the SQL connector does with a WHERE: the value, its operator, and the bounds."""
+    sent: list = []
+    conn = _conn(sent)
+    hints = [ColumnHint(name="ALPH", filter=True), ColumnHint(name="AN8", filter=True), ColumnHint(name="AT1", filter=True)]
+
+    async def names(**params):
+        return [r["ALPH"] for r in (await _read(conn, "addresses", params, column_hints=hints))[1]]
+
+    assert await names() == ["AB Common", "Long, Ben", "Capital System"]
+    assert await names(AN8="12") == ["Long, Ben"]                               # contains, the default
+    assert await names(AN8="1001", AN8_op="equals") == ["AB Common"]            # a number as a number ("1001" = 1001)
+    assert await names(AN8="1001", AN8_op="notEquals") == ["Long, Ben", "Capital System"]
+    assert await names(AN8="42", AN8_op="startsWith") == ["Capital System"] and await names(AN8="34", AN8_op="endsWith") == ["Long, Ben"]
+    assert await names(AN8_from="1200", AN8_to="5000") == ["Long, Ben", "Capital System"]
+    # a column that IS a parameter is the server's to filter: sent, not applied again here
+    sent.clear()
+    assert await names(AT1="C") == ["AB Common", "Long, Ben", "Capital System"] and sent[-1][1]["type"] == "C"
+    # an unflagged column is not a filter
+    assert len((await _read(conn, "addresses", {"AN8": "12"}, column_hints=[ColumnHint(name="AN8")]))[1]) == 3
 
 
 @pytest.mark.asyncio

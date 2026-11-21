@@ -153,6 +153,13 @@
   navigateur ; un double-clic rend la largeur par défaut). Et **le libellé d'une entrée de menu prend deux
   lignes** au lieu d'être coupé après quelques mots (son texte complet reste l'infobulle). La page d'un écran qui lit un point d'accès d'API porte le libellé de l'écran, et
   non la description du point d'accès (une phrase).
+- Un écran sur un point d'accès d'API — **ses filtres avancés portent sur chaque colonne qu'il marque.** Un
+  filtre n'était proposé que là où le point d'accès avait un paramètre de ce nom ; toute autre colonne marquée
+  est maintenant filtrée sur les lignes renvoyées, avec les mêmes opérateurs que pour une requête (contient,
+  égal, différent, commence / finit par, un intervalle) — et une colonne dotée d'une énumération ou d'une liste
+  de valeurs y est une liste à choisir, cette liste pouvant elle-même lire un point d'accès. Un **paramètre à
+  liste fermée de valeurs** (`choices`) est une liste déroulante au-dessus de la grille, et non un champ de
+  saisie. (Un point d'accès dont le serveur plafonne les lignes est filtré dans ce qu'il a renvoyé.)
 - Connecteurs API — **un paramètre nommé `username` ou `password` est celui du point d'accès, pas
   l'identifiant du connecteur.** `{{username}}` / `{{password}}` remplissent une demande de jeton avec les
   identifiants du connecteur ; un point d'accès qui DÉCLARAIT un paramètre de ce nom les recevait aussi quand

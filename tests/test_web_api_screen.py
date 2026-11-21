@@ -169,11 +169,12 @@ def test_the_grids_route_serves_an_endpoints_rows(env) -> None:
         assert r.status_code == 200, r.text
         lines = [json.loads(line) for line in r.text.splitlines() if line]
         meta, rows, done = lines[0], [x for line in lines if line["kind"] == "rows" for x in line["rows"]], lines[-1]
-        # the screen's columns: its order and label, the server's title otherwise; a filter only where the endpoint has the parameter
-        assert [(c["name"], c["label"], c.get("filter", False)) for c in meta["columns"]] == [("ALPH", "Name", False), ("AT1", "Sch Typ", True), ("AN8", "Address Number", False)]
+        # the screen's columns: its order and label, the server's title otherwise; the columns it flags are filters
+        assert [(c["name"], c["label"], c.get("filter", False)) for c in meta["columns"]] == [("ALPH", "Name", False), ("AT1", "Sch Typ", True), ("AN8", "Address Number", True)]
         assert meta["cap"] == 50                                    # the screen's own limit
-        assert rows == [{"AN8": 1001, "ALPH": "AB Common", "AT1": "E"}, {"AN8": 1234, "ALPH": "Long, Ben", "AT1": "E"}]
-        assert done["kind"] == "done" and done["total"] == 2 and done["truncated"] is False
+        # AT1 is the endpoint's parameter: the server filtered. AN8 is not: filtered here, on the rows returned
+        assert rows == [{"AN8": 1234, "ALPH": "Long, Ben", "AT1": "E"}]
+        assert done["kind"] == "done" and done["total"] == 1 and done["truncated"] is False
         assert sent == [{"type": "E"}]                              # AN8 is not a parameter of the endpoint: not sent
         # not streamed (a lookup): the same rows as a query's result
         whole = client.get("/api/sql/erp/addresses?AT1=E", headers=_h(client, "ann")).json()
