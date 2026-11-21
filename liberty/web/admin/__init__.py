@@ -152,6 +152,7 @@ from liberty.web.admin.builders import (
     get_menus_parsed,
     get_pools_config,
     get_screens_parsed,
+    probe_pool_connection,
     put_connectors_parsed,
     put_dictionary_parsed,
     put_menus_parsed,

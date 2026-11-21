@@ -290,6 +290,17 @@
   Deploy folder: check, then deliver.
 - **Long flows wrap, and zoom.** A service's, a job's and an endpoint's flow continue on the next row instead
   of running off to the right, and each canvas has a zoom (− / % / +, kept per kind of flow on the device).
+- **The Pools page: an address typed as an address, and a connection you can test.** A pool's line in the
+  list says what it connects to (`postgresql · host:5432 / database`). The picked pool is drawn as its stages
+  — **Database**, **Account**, **Schemas**, **Database links**, **Tuning** — each card saying what it holds.
+  The database's address is typed as host, port, database (or Oracle SID / service name), driver and options;
+  the SQLAlchemy URL is composed from them and stays editable. A URL the page cannot read part by part
+  (anything it could not put back identically) is shown alone and never rewritten; `${VAR}` references are
+  kept as typed. A password written in the URL is flagged, with a button that moves it to the encrypted
+  password field. **Test connection** opens one connection with the pool as it is on the page — saved or not
+  — and answers with the time taken and the server's version, or the driver's own words
+  (`POST /admin/config/pools/test`; nothing is saved, the running pools are not touched). Add, Discard and
+  Save are in the page header.
 - **The App page is a list of sections with the picked one beside it.** The ten to thirteen accordions in
   alphabetical order are now four groups in the order an installation is set up — **The installation** (server,
   display, external addresses, PDF branding, licence), **Signing in** (accounts, OpenID Connect), **What is

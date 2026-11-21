@@ -9,10 +9,13 @@ name; the registry owns their lifecycle.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import time
+from typing import Any
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -266,3 +269,38 @@ class PoolRegistry:
         for engine in self._engines.values():
             await engine.dispose()
         self._engines.clear()
+
+
+async def try_pool(cfg: PoolConfig, *, master_key: str = "", oracle_thick: bool = False, timeout: float = 10.0) -> dict[str, Any]:
+    """Open ONE connection with *cfg* — a pool as an editor holds it, saved or not — run the smallest query,
+    close everything. Never raises: ``{ok, dialect, duration_ms, version | error}``. The pool is built the way
+    the registry builds it (the password decrypted, thick mode followed), on a registry of its own, disposed."""
+    probe = cfg.model_copy(update={"pool_size": 1, "max_overflow": 0, "pool_pre_ping": False, "echo": False})
+    registry = PoolRegistry({"probe": probe}, master_key=master_key, oracle_thick=oracle_thick)
+    started = time.perf_counter()
+    backend = ""
+
+    def _answer(**extra: Any) -> dict[str, Any]:
+        return {"dialect": backend, "duration_ms": round((time.perf_counter() - started) * 1000, 1), **extra}
+
+    async def _probe() -> str:
+        async with registry.engine("probe").connect() as conn:
+            await conn.execute(text("SELECT 1 FROM DUAL" if backend == "oracle" else "SELECT 1"))
+            info = getattr(getattr(conn, "dialect", None), "server_version_info", None)
+            return ".".join(str(n) for n in info) if info else ""
+
+    try:
+        backend = make_url(cfg.url).get_backend_name()
+        version = await asyncio.wait_for(_probe(), timeout)
+        return _answer(ok=True, version=version)
+    except asyncio.TimeoutError:
+        return _answer(ok=False, error=f"no answer after {timeout:g} s")
+    except Exception as exc:  # noqa: BLE001 — a test reports the failure, whatever it is
+        # the driver's own words, without SQLAlchemy's "Background on this error" trailer
+        lines = [ln.strip() for ln in str(exc).splitlines() if ln.strip() and not ln.strip().startswith("(Background on this error")]
+        return _answer(ok=False, error=(" ".join(lines) or type(exc).__name__)[:600])
+    finally:
+        try:
+            await registry.dispose()
+        except Exception:  # noqa: BLE001 — a probe that never connected has nothing to close
+            pass

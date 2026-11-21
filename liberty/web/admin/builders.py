@@ -108,6 +108,26 @@ class PoolsBody(BaseModel):
     pools: dict[str, dict[str, Any]]
 
 
+class PoolTestBody(BaseModel):
+    pool: dict[str, Any]
+
+
+@router.post("/config/pools/test", summary="Test a pool's connection")
+async def probe_pool_connection(body: PoolTestBody, request: Request, _: Superuser) -> dict[str, Any]:
+    """Open one connection with the pool **as the editor holds it** (saved or not) and run ``SELECT 1``:
+    ``{ok, dialect, duration_ms, version}`` or ``{ok: false, error}`` with the driver's own words. Nothing is
+    saved and the running pools are not touched — the probe has its own engine, closed afterwards. A
+    ``${VAR}`` typed in the form is resolved from the server's environment, as a saved pool's is."""
+    from liberty.connectors.db import try_pool
+
+    settings = request.app.state.settings
+    try:
+        cfg = PoolConfig.model_validate(substitute_env(body.pool))
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid pool: {exc}") from exc
+    return await try_pool(cfg, master_key=settings.crypto.master_key, oracle_thick=settings.app.oracle_thick)
+
+
 # Password-shaped fields on each config kind that must be encrypted before they land on disk
 # (the UI fetches the ENC: value, edits whatever, sends back; the user typing a new plaintext
 # password is the case that matters). ``encrypt`` is idempotent so re-encrypting an already

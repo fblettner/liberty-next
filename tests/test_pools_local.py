@@ -198,3 +198,32 @@ def test_connectors_save_keeps_env_references_and_doesnt_encrypt_them(db_dir: Pa
     assert ais["auth_username"] == "JDE2"
     # the pools ride along untouched
     assert tomllib.loads(conn.read_text())["pools"]["default"]["url"] == "sqlite+aiosqlite:///${LIB_TEST_DB_DIR}/app.db"
+
+
+# ── the editor's "Test connection" ───────────────────────────────────────────────────────────
+
+def test_try_pool_answers_ok_or_the_drivers_words(tmp_path: Path) -> None:
+    from liberty.connectors.db import try_pool
+
+    ok = asyncio.run(try_pool(PoolConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'probe.db'}")))
+    assert ok["ok"] is True and ok["dialect"] == "sqlite" and ok["duration_ms"] >= 0
+    bad = asyncio.run(try_pool(PoolConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'no' / 'such' / 'dir' / 'x.db'}")))
+    assert bad["ok"] is False and bad["dialect"] == "sqlite" and "unable to open database file" in bad["error"]
+    assert "Background on this error" not in bad["error"]
+    unknown = asyncio.run(try_pool(PoolConfig(url="nosuchdb://host/db")))
+    assert unknown["ok"] is False and unknown["error"]
+
+
+def test_pool_test_route_probes_the_pool_as_typed_and_saves_nothing(db_dir: Path) -> None:
+    app, conn = _app(db_dir, _SHARED)
+    before = conn.read_text()
+    with TestClient(app) as client:
+        h = _h(client)
+        # a ${VAR} typed in the form is resolved like a saved pool's
+        r = client.post("/admin/config/pools/test", json={"pool": {"url": "sqlite+aiosqlite:///${LIB_TEST_DB_DIR}/app.db"}}, headers=h)
+        assert r.status_code == 200 and r.json()["ok"] is True and r.json()["dialect"] == "sqlite"
+        r = client.post("/admin/config/pools/test", json={"pool": {"url": "sqlite+aiosqlite:///${LIB_TEST_DB_DIR}/gone/x.db"}}, headers=h)
+        assert r.status_code == 200 and r.json()["ok"] is False and r.json()["error"]
+        assert client.post("/admin/config/pools/test", json={"pool": {"pool_size": "many"}}, headers=h).status_code == 422
+        assert client.post("/admin/config/pools/test", json={"pool": {"url": "sqlite+aiosqlite:///x.db"}}).status_code in (401, 403)
+    assert conn.read_text() == before

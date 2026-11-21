@@ -343,6 +343,18 @@
 - **Les longs flux passent à la ligne, et se zooment.** Le flux d'un service, d'un job et d'un point d'accès
   continue sur la ligne suivante au lieu de partir à droite, et chaque canevas a un zoom (− / % / +, gardé par
   nature de flux sur l'appareil).
+- **La page Pools : une adresse saisie comme une adresse, et une connexion que l'on peut tester.** La ligne
+  d'un pool dans la liste dit à quoi il se connecte (`postgresql · hôte:5432 / base`). Le pool choisi est
+  dessiné en étapes — **Base de données**, **Compte**, **Schémas**, **Liens de base**, **Réglages fins** —
+  chaque carte disant ce qu'elle contient. L'adresse de la base se saisit en hôte, port, base (ou SID / nom de
+  service Oracle), pilote et options ; l'URL SQLAlchemy en est composée et reste modifiable. Une URL que la
+  page ne sait pas lire champ par champ (tout ce qu'elle ne saurait pas réécrire à l'identique) est montrée
+  seule et jamais réécrite ; les références `${VAR}` sont gardées telles quelles. Un mot de passe écrit dans
+  l'URL est signalé, avec un bouton qui le déplace dans le champ mot de passe chiffré. **Tester la connexion**
+  ouvre une connexion avec le pool tel qu'il est sur la page — enregistré ou non — et répond par le temps pris
+  et la version du serveur, ou par les mots du pilote (`POST /admin/config/pools/test` ; rien n'est
+  enregistré, les pools en service ne sont pas touchés). Ajouter, Annuler et Enregistrer sont dans l'en-tête
+  de la page.
 - **La page App est une liste de sections avec, à côté, celle qui est choisie.** Les dix à treize accordéons en
   ordre alphabétique sont maintenant quatre groupes dans l'ordre où une installation se règle —
   **L'installation** (serveur, affichage, adresses externes, charte des PDF, licence), **La connexion**
