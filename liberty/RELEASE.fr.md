@@ -396,6 +396,13 @@
   connecteur, et avec `&create=<générateur>&q=<texte>` son dialogue « Créer depuis… » sur ce générateur, le texte
   déjà cherché. Pour une page livrée par une application, une notification, un document. Le contrat des pages
   gagne `useCan` (l'appelant détient-il une permission — pour ne montrer un bouton qu'à qui peut s'en servir).
+- **Une page livrée par une application peut utiliser la grille partagée.** Le contrat des pages (version 2)
+  gagne `Grid` : la grille des écrans de données — recherche, filtres par colonne, tri, regroupement, choix des
+  colonnes, export, vues enregistrées de l'utilisateur — pour une liste de lignes que la page lui donne. La page
+  décrit ses colonnes dans une petite forme propre au contrat (`{ key, label, type?, mono?, muted?, value?,
+  render? }` : une cellule peut dessiner un lien ou une étiquette, la colonne trie, filtre et exporte toujours
+  sur sa valeur) et donne à la grille une boîte qui a une hauteur. Chargée avec la première page qui en dessine
+  une : le paquet d'entrée ne grossit pas.
 - **Une requête et un connecteur d'API se dessinent en étapes.** Une requête, une séquence ou une liste de
   valeurs s'ouvre en trois cartes — **Ce que c'est** (libellé, description), **Instruction** (son premier mot,
   les bases pour lesquelles elle est écrite, en orange quand elle est vide ou qu'elle écrit sans être marquée

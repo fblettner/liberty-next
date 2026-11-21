@@ -23,9 +23,11 @@ import { useAuth } from '../../auth/AuthContext'
 import { iconFor } from '../../components/SidebarMenu'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 import { callableRef } from '../../tabs/pageTabs'
+import { PageGrid } from './PageGrid'
 import { hasPermission } from '../../services/permissions'
 
-export const PAGE_SDK_VERSION = 1
+// 2: `Grid` (the shared grid)
+export const PAGE_SDK_VERSION = 2
 
 export interface PageSdk {
   /** the contract's version (this file) */
@@ -41,6 +43,10 @@ export interface PageSdk {
   theme: { colors: typeof colors; fontSize: typeof fontSize; fonts: typeof fonts; radius: typeof radius; shadow: typeof shadow }
   /** the shared components: PageLayout, Card, Button, Input, SearchSelect, Tag, Banner, Spinner, Modal… */
   ui: typeof ui
+  /** The shared grid, for a list of rows: search, filters, sort, grouping, columns, export and the user's saved
+   *  views — `<Grid columns={[{ key, label, type?, mono?, render? }]} rows={rows} id="app:page:list" />` in a box
+   *  that has a height. Since version 2. */
+  Grid: typeof PageGrid
   /** a menu icon by its name ("search", "database"…), or null */
   icon: typeof iconFor
   /** the API client (get / post / put / delete on the server's routes, the session handled) */
@@ -64,6 +70,7 @@ export function buildSdk(app: string, page: string): PageSdk {
   return {
     version: PAGE_SDK_VERSION, app, page,
     React, styled, ui, api,
+    Grid: PageGrid,
     theme: { colors, fontSize, fonts, radius, shadow },
     icon: iconFor,
     call: async <T,>(fn: string, params: Record<string, unknown> = {}) => {

@@ -353,7 +353,8 @@ pages/Explorer/        the Data Explorer page: index (model, the AnalysisDefinit
                        click-to-add), services/explorerPivot.ts (pivot tree, chart shaping, KPI totals), both tested,
                        services/explorerSaved.ts (the saved routes, dashboard shape); shapes in types/explorer.ts
 pages/AppPage/         a page an application ships (index = fetch + import the module, problems said; sdk.ts = THE CONTRACT
-                       handed to it — add fields, never rename; `tabs/pageTabs.appPageOf` / `callableRef`, tested)
+                       handed to it — add fields, never rename; PageGrid.tsx = `sdk.Grid`, the shared grid in a column / row shape of the
+                       contract's own, the DataTable loaded lazily; `tabs/pageTabs.appPageOf` / `callableRef`, tested)
 pages/DashboardView/ Chat/ (AiDrawer) Reports/ Notifications/ (the inbox; components/NotificationBell
                        in the header, live via SioContext.subscribeNotifications) ScreenAssistant/ HttpRunner/ Monitoring/ Login/
 services/ types/       no-React helpers (deepLinks = a link that opens a page ON something: `/job/<id>?name=value`,

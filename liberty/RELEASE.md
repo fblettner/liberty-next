@@ -336,6 +336,12 @@
   `&create=<generator>&q=<text>` its "Create from…" dialog on that generator with the text already searched.
   For a page an application ships, a notification, a document. The page contract gains `useCan` (does the caller
   hold a permission — to show a button only to who may use it).
+- **A page an application ships can use the shared grid.** The page contract (version 2) gains `Grid`: the
+  grid of the data screens — search, filters per column, sort, grouping, the choice of columns, the export, the
+  user's saved views — for a list of rows the page hands it. The page describes its columns in a small shape of
+  the contract's own (`{ key, label, type?, mono?, muted?, value?, render? }`: a cell can draw a link or a tag
+  while the column still sorts, filters and exports on its value) and gives the grid a box that has a height.
+  Loaded with the first page that draws one: the entry bundle does not grow.
 - **A query and an API connector are drawn as stages.** A custom query, a sequence or a lookup opens as three
   cards — **What it is** (label, description), **Statement** (its first word, the databases it is written for,
   in orange when it is empty or writes without being marked writable) and **Parameters** (how many are
