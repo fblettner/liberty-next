@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from liberty.auth.principal import Principal
+from liberty.connectors.api_rows import api_connector, endpoint_of, query_permission, sensitive_names
 from liberty.connectors.base import ConnectorError, find_bind_params
 from liberty.screens.config import Screen, ScreensFile
 
@@ -262,21 +263,29 @@ def operations(ctx: WriteContext, app: str, screen: Screen) -> dict[str, Any]:
     for op in ("insert", "update", "delete"):
         why = blockers(screen, op)
         query = {"insert": screen.insert_query, "update": screen.update_query, "delete": screen.delete_query}[op]
-        if query and not ctx.principal.has_permission(f"sql:{connector}:{query}"):
-            why.append(f"the signed-in user may not (missing sql:{connector}:{query})")
+        if query and not ctx.principal.has_permission(perm := query_permission(ctx.connectors, connector, query)):
+            why.append(f"the signed-in user may not (missing {perm})")
         out[op] = True if not why else why
     return out
 
 
 def _require(ctx: WriteContext, connector: str, query: str) -> None:
-    if not ctx.principal.has_permission(f"sql:{connector}:{query}"):
-        raise ScreenWriteError(f"permission denied: the signed-in user may not run {connector}.{query} (missing sql:{connector}:{query}). Tell the user.")
+    perm = query_permission(ctx.connectors, connector, query)
+    if not ctx.principal.has_permission(perm):
+        raise ScreenWriteError(f"permission denied: the signed-in user may not run {connector}.{query} (missing {perm}). Tell the user.")
 
 
 def _binds_of(ctx: WriteContext, connector: str, query: str | None) -> set[str]:
     """The ``:NAME`` parameters *query* reads, upper-cased, without the ``_ORIGINAL`` ones."""
     if not query:
         return set()
+    api = api_connector(ctx.connectors, connector)
+    if api is not None:
+        # a screen that saves through an API: what it writes is the endpoint's variables
+        endpoint = endpoint_of(api, query)
+        if endpoint is None:
+            raise ScreenWriteError(f"{connector}: no endpoint {query!r}")
+        return {p.name.upper() for p in endpoint.params if not p.name.upper().endswith(_ORIGINAL)}
     try:
         qdef = ctx.connectors.sql(connector).get_query(query)
     except ConnectorError as exc:
@@ -332,13 +341,22 @@ async def read_row(ctx: WriteContext, app: str, screen: Screen, key: Mapping[str
     # that is not that first carrier (two columns of the result share its item) is left to the
     # match below.
     dd_of = {h.name.lower(): (h.dd or h.name) for h in screen.columns if h.dd != ""}
+    api = api_connector(ctx.connectors, connector)
     try:
-        prefix = int(getattr(ctx.connectors.sql(connector).config, "dd_prefix", 0) or 0)
+        prefix = 0 if api is not None else int(getattr(ctx.connectors.sql(connector).config, "dd_prefix", 0) or 0)
     except ConnectorError as exc:
         raise ScreenWriteError(str(exc)) from exc
     request: Row = dict(params or {})
     unfiltered: list[str] = []
     for k in key_columns:
+        if api is not None:
+            # an endpoint narrows with its own parameters: the key column that is one of them is
+            # sent as such, any other is matched below on what came back
+            if not _empty(value_for(k, key)) and k.upper() in _binds_of(ctx, connector, screen.read_query):
+                request[k] = value_for(k, key)
+            else:
+                unfiltered.append(k)
+            continue
         if _empty(value_for(k, key)):
             unfiltered.append(k)                # a blank part cannot narrow the read: matched below
             continue
@@ -397,6 +415,9 @@ def hidden_columns(ctx: WriteContext, app: str, screen: Screen, names: Any) -> s
     sensitive by the screen column or its dictionary item, where the installation hides them."""
     if not ctx.hide_sensitive:
         return set()
+    if api_connector(ctx.connectors, connector_of(screen, app)) is not None:
+        # no SQL connector to ask: the screen column's own flag, else its dictionary item
+        return {n.lower() for n in sensitive_names(ctx.connectors.dictionary, [str(n) for n in names], list(screen.columns), app)}
     try:
         conn = ctx.connectors.sql(connector_of(screen, app))
     except ConnectorError:

@@ -73,6 +73,16 @@ def _rows_endpoint_names(state: Any, connector: str) -> set[str]:
     return {e.name for e in getattr(cfg, "endpoints", None) or [] if getattr(e, "rows_field", None)}
 
 
+def _write_endpoint_names(state: Any, connector: str) -> set[str]:
+    """The endpoints of *connector* a screen can save through (marked as changing data)."""
+    connectors = getattr(state, "connectors", None)
+    try:
+        cfg = connectors.get(connector).config if connectors is not None else None
+    except Exception:  # noqa: BLE001 — unknown connector: reported by the caller
+        return set()
+    return {e.name for e in getattr(cfg, "endpoints", None) or [] if getattr(e, "writable", False)}
+
+
 def _api_endpoint_names(conn: Any) -> set[str] | None:
     cfg = getattr(conn, "config", None)
     eps = getattr(cfg, "endpoints", None)
@@ -224,9 +234,10 @@ def _check_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
             sql = idx.sql_by_conn.get(conn, set())
             # a screen may read an API connector's endpoint that says where its rows are (api_rows)
             readable = _rows_endpoint_names(state, conn)
+            saving = _write_endpoint_names(state, conn)      # … and save through its endpoints that change data
             for attr in ("read_query", "update_query", "insert_query", "delete_query"):
                 q = getattr(s, attr, None)
-                if q and attr == "read_query" and q in readable:
+                if q and q in (readable if attr == "read_query" else saving):
                     continue
                 if q and conn in idx.conn_names and q not in sql:
                     out.append(Issue("error", "Missing query",
@@ -396,10 +407,22 @@ def _check_generated_endpoints(state: Any, idx: _Index, out: list[Issue]) -> Non
     connectors = getattr(state, "connectors", None)
     if connectors is None:
         return
+    known: set[str] | None = None
     for name in connectors.names():
         cfg = getattr(connectors.get(name), "config", None)
         declared = {g.id for g in getattr(cfg, "generators", None) or []}
         for ep in getattr(cfg, "endpoints", None) or []:
+            served_by = getattr(ep, "callable", None)
+            if served_by:
+                # an endpoint served by a plugin function: the function must be a plugin entry point
+                if known is None:
+                    from liberty.jobs.discover import discover_callables
+                    from liberty.plugins.invoke import plugins_root
+                    known = {c.callable for c in discover_callables(plugins_root())}
+                if served_by not in known:
+                    out.append(Issue("error", "Endpoint function not found",
+                                     f"endpoint '{name}.{ep.name}' is served by '{served_by}', which is not a function of an installed "
+                                     "plugin — its calls fail", _connector_deep_link(name)))
             source = getattr(ep, "source", None)
             if source is not None and source.generator not in declared:
                 out.append(Issue("warning", "Generated endpoint without its generator",

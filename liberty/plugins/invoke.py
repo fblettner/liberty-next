@@ -20,6 +20,8 @@ from __future__ import annotations
 import asyncio
 import importlib
 import inspect
+import os
+from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from liberty.coercion import CoercionError, annotation_name, coerce_kwargs
@@ -29,6 +31,13 @@ from liberty.jobs.steps.base import StepResult
 class PluginInvocationError(Exception):
     """A plugin callable could not be resolved, its kwargs couldn't be coerced, or it returned an
     unsupported shape. Carries a message safe to surface to the operator."""
+
+
+def plugins_root() -> Path:
+    """``${LIBERTY_APPS_DIR}/../plugins`` (same resolution as ``ensure_plugins_on_sys_path`` and
+    the Job Designer's callable catalog); ``./plugins`` when the env var is unset."""
+    apps = os.environ.get("LIBERTY_APPS_DIR", "").strip()
+    return Path(apps).parent / "plugins" if apps else Path("plugins")
 
 
 def resolve_callable(ref: str) -> Callable[..., Any]:

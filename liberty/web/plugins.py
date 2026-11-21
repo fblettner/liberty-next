@@ -17,7 +17,6 @@ module. Runs synchronously — long batch work should target a nomaflow job inst
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -28,7 +27,7 @@ from liberty.connectors import ConnectorRegistry
 from liberty.jobs.discover import discover_callables
 from liberty.jobs.steps.base import RunContext, StepResult
 from liberty.jobs.triggers import ManualTrigger
-from liberty.plugins.invoke import PluginInvocationError, invoke_callable
+from liberty.plugins.invoke import PluginInvocationError, invoke_callable, plugins_root
 from liberty.web.deps import get_connectors, require_permission
 
 _log = logging.getLogger(__name__)
@@ -39,10 +38,7 @@ Connectors = Annotated[ConnectorRegistry, Depends(get_connectors)]
 
 
 def _plugins_root() -> Path:
-    """``${LIBERTY_APPS_DIR}/../plugins`` (same resolution as ``ensure_plugins_on_sys_path`` and
-    the Job Designer's callable catalog); ``./plugins`` when the env var is unset."""
-    apps = os.environ.get("LIBERTY_APPS_DIR", "").strip()
-    return Path(apps).parent / "plugins" if apps else Path("plugins")
+    return plugins_root()
 
 
 @router.get("/callables", summary="List plugin callables")

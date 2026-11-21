@@ -298,3 +298,35 @@ async def test_sql_query_still_refuses_a_write_and_an_unknown_query(udc) -> None
         await udc["sql_query"].run({"connector": "jde", "query": "ghost"})
     with pytest.raises(Exception, match="no connector|not a SQL connector|ghost"):
         await udc["sql_query"].run({"connector": "ghost", "query": "f0004_get"})
+
+
+@pytest.mark.asyncio
+async def test_sql_query_reads_an_endpoint_that_holds_rows() -> None:
+    """What a screen on an API connector reads, the assistant reads the same way: the endpoint's
+    parameters are its only filters."""
+    import httpx
+
+    from liberty.connectors.base import ConnectorError
+    from tests.test_api_rows import ANSWER, CFG
+
+    sent: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content or b"null"))
+        return httpx.Response(200, json=ANSWER)
+
+    reg = ConnectorRegistry(ConnectorsFile(pools={"default": PoolConfig(url="sqlite+aiosqlite:///:memory:")}, connectors={"erp": CFG}),
+                            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    try:
+        tools = build_connector_tools(reg, include_api=True)
+        listed = (await _tool(tools, "list_connectors").run({"connector": "erp"}))["connectors"][0]["endpoints"]
+        assert [e.get("rows") for e in listed] == [True, True, None]
+        out = await _tool(tools, "sql_query").run({"connector": "erp", "query": "addresses", "filters": {"at1": "E"}, "limit": 2})
+        assert [r["AN8"] for r in out["rows"]] == [1001, 1234] and out["truncated"] is True
+        assert sent[-1] == {"type": "E", "name": "", "max": "2"}          # the filter went to the endpoint, with the limit
+        with pytest.raises(ConnectorError, match="filters only on its parameters: AT1, ALPH, MAX"):
+            await _tool(tools, "sql_query").run({"connector": "erp", "query": "addresses", "filters": {"AN8": 1001}})
+        with pytest.raises(ConnectorError, match="not an endpoint that holds rows"):
+            await _tool(tools, "sql_query").run({"connector": "erp", "query": "no_rows"})
+    finally:
+        await reg.aclose()

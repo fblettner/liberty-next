@@ -95,8 +95,27 @@
   returned; the caller's **data scope** applies to the rows returned, each rule with its own mode as for a
   query. The permission is the endpoint's (`api:<connector>:<endpoint>`), in the grid's route, the screen
   catalog and the menus.
-  Read-only in this version: saving through endpoints, the Excel export, the server-side summary, the audit
-  mirror, the Data Explorer and the assistant's `sql_query` do not take an endpoint yet.
+  **Saving through endpoints.** The screen's update, insert and delete queries can name endpoints marked
+  "Changes data": the grid and the record form save as they always do, and the row's values go to the
+  endpoint's variables by name (the value a row held when it was loaded under `<COLUMN>_ORIGINAL`, as for a
+  query). The endpoint's permission is needed; the screen's `editable_when` is enforced; what the server
+  refuses (its error fields) is the save's error, in the server's words; its warnings come back with the
+  answer; a value the endpoint maps out of its answer (`response_map`) returns to the form, like a number a
+  sequence assigns; the notification rules fire. Checked by the integrity report. The assistant reads such a
+  screen's rows with `sql_query` (the endpoint's parameters are its only filters; the sensitive columns are
+  left out as for a query), and its write tools go through the same save.
+  Not on an API screen: the import of rows, the configured workbook export (the grid's own export works),
+  the server-side summary, the audit mirror, change packages on its saves, the dictionary's write rules
+  (SEQUENCE, LOGIN, SYSDATE — the server decides), the Data Explorer.
+- **An endpoint served by a function.** One HTTP call cannot do everything: changing a row a server only
+  exposes through a form means finding it, checking that exactly one was found, then acting — several calls in
+  one session. An endpoint can now name a function of an application's plugin (**Served by a function**,
+  `callable`) that answers instead of an HTTP call. Its arguments are the endpoint's parameters, or the JSON
+  object the body gives once its `{{placeholders}}` are filled (so fixed arguments and variables mix, and a
+  user's value stays inside its string); its answer is treated like a response — rows, error and warning
+  fields, response field and map, "Changes data" — so a screen, an action, a job or the assistant use it like
+  any endpoint. Only a function discovered under `plugins/` (`j_*`) can be named; an exception is the call's
+  failure; the integrity report names an endpoint whose function is not installed.
 
 ## 7.0.83 — 2026-11-19
 

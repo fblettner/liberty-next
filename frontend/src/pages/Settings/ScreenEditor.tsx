@@ -214,11 +214,17 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     }))
   }, [selectedConnectorMeta])
   // What a screen can READ on the effective connector: its queries, or — on an API connector — the
-  // endpoints that say where their rows are. (Saving through endpoints is not there yet: the three
-  // write slots stay empty on an API connector.)
+  // endpoints that say where their rows are.
   const readOptions = useMemo<SearchSelectOption[]>(() => {
     if (selectedConnectorMeta?.type !== 'api') return queryOptions
     return selectedConnectorMeta.endpoints.filter((e) => e.rows_field)
+      .map((e) => ({ value: e.name, label: e.description || e.label || e.name, mono: e.name }))
+  }, [selectedConnectorMeta, queryOptions])
+  // What a screen can SAVE through: its queries, or — on an API connector — the endpoints marked as
+  // changing data (the row's values go to the endpoint's variables by name).
+  const writeOptions = useMemo<SearchSelectOption[]>(() => {
+    if (selectedConnectorMeta?.type !== 'api') return queryOptions
+    return selectedConnectorMeta.endpoints.filter((e) => e.writable)
       .map((e) => ({ value: e.name, label: e.description || e.label || e.name, mono: e.name }))
   }, [selectedConnectorMeta, queryOptions])
   // CRUD tables on the effective connector — drives the "pick a table → fill all four queries"
@@ -799,7 +805,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
           <div style={{ flex: 1, minWidth: 0 }}>
             <SearchSelect sort
               value={queryName}
-              options={key === 'read_query' ? readOptions : queryOptions}
+              options={key === 'read_query' ? readOptions : writeOptions}
               onChange={(v) => setProp(key, v || (required ? value[key] ?? '' : null))}
               anyLabel={required ? undefined : t('common.none')}
               placeholder={selectedConnectorMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}

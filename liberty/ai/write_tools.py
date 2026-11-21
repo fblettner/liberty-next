@@ -31,6 +31,7 @@ from typing import Any, Callable
 from liberty.ai.tools import Tool, ToolPermissionError, caller, current_channel, hides_sensitive, tool
 from liberty.connectors.api import current_pool
 from liberty.screens.actions import ChainDeps, check_inputs, does_something, entity_key, fill_text, outline, run_chain
+from liberty.connectors.api_rows import query_permission
 from liberty.screens.save import (
     ScreenWriteError, WriteContext, _binds_of, connector_of, delete_row, field_state, find_screen, form_field_names,
     hidden_columns, is_password, masked, operations, parent_links, read_row, resolved_fields, save_hooks, save_row, value_for,
@@ -139,7 +140,7 @@ async def perform_action(
     *dry_run* the record is read and everything that can be checked is; nothing runs."""
     sc = find_screen(ctx, app, screen)
     connector = connector_of(sc, app)
-    if not ctx.principal.has_permission(f"sql:{connector}:{sc.read_query}"):
+    if not ctx.principal.has_permission(query_permission(ctx.connectors, connector, sc.read_query)):
         raise ScreenWriteError(f"permission denied: the signed-in user may not open {app}/{screen}. Tell the user.")
     offered = screen_actions(sc, ctx.state)
     match = next(((on, a) for on, a in offered if a.id.lower() == str(action).lower()), None)
@@ -351,7 +352,7 @@ def build_write_tools(state: Callable[[], Any], *, include_api: bool = False) ->
         try:
             sc = find_screen(ctx, app, screen)
             connector = connector_of(sc, app)
-            if not ctx.principal.has_permission(f"sql:{connector}:{sc.read_query}"):
+            if not ctx.principal.has_permission(query_permission(ctx.connectors, connector, sc.read_query)):
                 raise ToolPermissionError(f"permission denied: the signed-in user may not open {app}/{screen}. Tell the user.")
             fields = resolved_fields(ctx, app, sc)
             writes: set[str] = set()

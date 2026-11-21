@@ -60,7 +60,11 @@ class ConnectorRegistry:
                     default_language=default_language,
                 )
             elif isinstance(conn_cfg, ApiConnectorConfig):
-                self._connectors[name] = APIConnector(name, conn_cfg, client=http_client, master_key=master_key)
+                api = APIConnector(name, conn_cfg, client=http_client, master_key=master_key)
+                api.registry = self
+                for target in api._targets.values():
+                    target.registry = self
+                self._connectors[name] = api
             else:  # pragma: no cover - guarded by the discriminated union
                 raise TypeError(f"Unsupported connector config: {type(conn_cfg)!r}")
         self._govern_api_targets(set(config.pools))

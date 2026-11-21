@@ -50,15 +50,31 @@ def rows_endpoint(conn: Any, name: str) -> EndpointDef | None:
     return endpoint if endpoint is not None and endpoint.rows_field else None
 
 
-def read_permission(connectors: Any, connector: str, query: str) -> str:
-    """The permission that lets a caller read *query* on *connector*: ``api:…`` when it is an
-    endpoint a screen can read, else the query's ``sql:…`` — one definition for the route, the
-    screen catalog and the menus."""
+def api_connector(connectors: Any, connector: str) -> APIConnector | None:
+    """*connector* when it is an API connector, else ``None`` — an unknown / unlicensed one included."""
     try:
         conn = connectors.get(connector) if connectors is not None else None
     except Exception:  # noqa: BLE001 — an unknown / unlicensed connector: the SQL answer, as before
-        conn = None
-    return f"api:{connector}:{query}" if rows_endpoint(conn, query) is not None else f"sql:{connector}:{query}"
+        return None
+    return conn if isinstance(conn, APIConnector) else None
+
+
+def endpoint_of(conn: Any, name: str | None) -> EndpointDef | None:
+    """The endpoint *name* of an API connector, else ``None``."""
+    if not isinstance(conn, APIConnector) or not name:
+        return None
+    return next((e for e in conn.config.endpoints if e.name == name), None)
+
+
+def query_permission(connectors: Any, connector: str, query: str) -> str:
+    """The permission that lets a caller run *query* on *connector* through a screen: ``api:…``
+    when the connector is an API connector (the query is one of its endpoints — a screen's read
+    or one of its saves), else the query's ``sql:…`` — one definition for the routes, the screen
+    catalog, the menus and the server-side save."""
+    return f"api:{connector}:{query}" if api_connector(connectors, connector) is not None else f"sql:{connector}:{query}"
+
+
+read_permission = query_permission
 
 
 def endpoint_params(endpoint: EndpointDef, params: dict[str, Any] | None) -> dict[str, Any]:
@@ -74,6 +90,60 @@ def endpoint_params(endpoint: EndpointDef, params: dict[str, Any] | None) -> dic
             value = value.strip()
         if actual is not None and value not in (None, ""):
             out[actual] = value
+    return out
+
+
+def write_params(endpoint: EndpointDef, params: dict[str, Any] | None) -> dict[str, Any]:
+    """A saved row's values for the endpoint that saves it. A screen sends the row by column name,
+    upper-cased, with what the row held when it was loaded under ``<COL>_ORIGINAL``: a parameter
+    takes the value of its own name (so a parameter ``AN8_ORIGINAL`` gets the loaded key), without
+    regard to case. A parameter the row does not carry keeps its default."""
+    return endpoint_params(endpoint, params)
+
+
+async def api_write(conn: APIConnector, endpoint_name: str, params: dict[str, Any] | None, *, statement_type: str = "CALL") -> dict[str, Any]:
+    """Call the endpoint that saves a screen's row and answer as a statement does (``rowcount`` 1,
+    the values the endpoint maps out of its answer — ``response_map`` — as ``resolved_binds``, so
+    a number the server assigned reaches the form). Raises :class:`ApiRowsError` when the call
+    fails or the server refuses (the endpoint's ``error_fields``): the message is the server's."""
+    endpoint = endpoint_of(conn, endpoint_name)
+    if endpoint is None:
+        raise ApiRowsError(f"{conn.name}.{endpoint_name}: no such endpoint")
+    if not endpoint.writable:
+        raise ApiRowsError(f"{conn.name}.{endpoint_name}: this endpoint is not marked as changing data (writable) — a screen cannot save through it")
+    started = time.perf_counter()
+    result = await conn.call(endpoint_name, write_params(endpoint, params), untrusted=True)
+    if not result.success:
+        said = (result.body or "").strip() if result.json is None else ""
+        raise ApiRowsError(f"{result.error or f'HTTP {result.status_code}'}" + (f" — {said[:300]}" if said else ""))
+    out: dict[str, Any] = {
+        "connector": conn.name, "query": endpoint_name, "statement_type": statement_type, "columns": [], "rows": [],
+        "row_count": 1, "rowcount": 1, "truncated": False, "duration_ms": round((time.perf_counter() - started) * 1000.0, 3),
+        "resolved_binds": {str(k).upper(): v for k, v in (result.mapped or {}).items() if v is not None},
+    }
+    if result.warnings:
+        out["warnings"] = result.warnings
+    return out
+
+
+def sensitive_names(dictionary: DictionaryFile, names: list[str], hints: list[ColumnHint] | None, dictionary_scope: str | None) -> set[str]:
+    """Which of the columns *names* hold data flagged sensitive (returned as given): the screen
+    column's own ``sensitive`` when it is set, else the dictionary item the column carries (its
+    ``dd``, or its name) — :meth:`SQLConnector.sensitive_columns` without a connector's prefix."""
+    by_name = {h.name.lower(): h for h in hints or []}
+    out: set[str] = set()
+    for name in names:
+        h = by_name.get(name.lower())
+        if h is not None and h.sensitive is not None:
+            if h.sensitive:
+                out.add(name)
+            continue
+        if h is not None and h.dd == "":
+            continue
+        item = (h.dd if h is not None and h.dd else None) or name
+        entry = next((e for e in (dictionary.find_entry(k, connector=dictionary_scope) for k in dict.fromkeys((item, item.upper(), item.lower()))) if e is not None), None)
+        if entry is not None and getattr(entry, "sensitive", False):
+            out.add(name)
     return out
 
 
@@ -103,6 +173,10 @@ def _columns(endpoint: EndpointDef, parsed: Any, rows: list[dict[str, Any]], hin
             c.label = by_name[c.name].label                       # the server's own title, when nothing else names the column
         if c.filter and c.name.lower() not in filterable:
             c.filter = False                                      # the endpoint cannot filter on it: not offered
+    flagged = sensitive_names(dictionary, [c.name for c in columns], hints, dictionary_scope)
+    for c in columns:
+        if c.name in flagged:
+            c.sensitive = True                                    # left out of what the AI assistant reads, as for a query
     return columns
 
 

@@ -59,7 +59,7 @@ def load_registry(settings: Settings, license_result: LicenseResult | None) -> C
     """Build a :class:`ConnectorRegistry` from *settings* — the single source of the
     ``load_connectors(...)`` call so every kwarg (``master_key``, ``license``,
     ``default_language``, ``oracle_thick``, …) is threaded in exactly once."""
-    return load_connectors(
+    registry = load_connectors(
         settings.connectors.config_path,
         dictionary_path=settings.connectors.dictionary_path,
         master_key=settings.crypto.master_key,
@@ -68,6 +68,9 @@ def load_registry(settings: Settings, license_result: LicenseResult | None) -> C
         oracle_thick=settings.app.oracle_thick,
         pools_path=settings.connectors.pools_path,
     )
+    # what an API endpoint served by a plugin function hands it, next to the registry itself
+    registry.settings = settings  # type: ignore[attr-defined]
+    return registry
 
 
 def journal_schema(settings: Settings, changes: list) -> None:

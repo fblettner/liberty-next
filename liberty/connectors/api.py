@@ -279,6 +279,9 @@ class APIConnector:
         # ``governed_pools`` = the pools a call is refused for when they have no target — the
         # registry widens it to the pools of the SQL connectors running on ``config.pool``.
         self.target_pool: str | None = config.pool
+        # the registry this connector belongs to (set by it): what an endpoint served by a plugin
+        # function receives as ``connectors``
+        self.registry: Any = None
         self._targets: dict[str, APIConnector] = {
             pool: APIConnector._for_target(name, config, pool, target, client=client, master_key=master_key)
             for pool, target in config.targets.items()
@@ -354,6 +357,7 @@ class APIConnector:
                     "path": e.path,
                     "content_type": e.content_type,
                     "rows_field": e.rows_field,
+                    "callable": e.callable,
                     "limit_param": e.limit_param,
                     "error_fields": list(e.error_fields),
                     "warning_fields": list(e.warning_fields),
@@ -487,6 +491,8 @@ class APIConnector:
         except ApiParamError as exc:
             return ApiResult(connector=self.name, endpoint=endpoint_name, success=False, status_code=0,
                              url=self.config.base_url, error=f"{type(exc).__name__}: {exc}")
+        if endpoint.callable:
+            return await self._call_plugin(endpoint, merged)
 
         token = await self._get_token(merged)
         if token is not None:
@@ -562,6 +568,56 @@ class APIConnector:
             error=refused if ok else f"HTTP {resp.status_code}",
             warnings=warned,
             duration_ms=duration_ms,
+        )
+
+    async def _call_plugin(self, endpoint: EndpointDef, merged: dict[str, Any]) -> ApiResult:
+        """An endpoint served by a plugin function (``callable``): its arguments are the
+        endpoint's parameters — or the object its ``body`` gives once filled — and its answer is
+        treated as an HTTP answer's JSON (error / warning fields, response field and map)."""
+        from liberty.plugins.invoke import (
+            PluginInvocationError, build_kwargs, call_target, normalise_result, plugins_root, resolve_callable,
+        )
+
+        ref = endpoint.callable or ""
+        url = f"plugin:{ref}"
+
+        def failed(message: str, started: float | None = None) -> ApiResult:
+            return ApiResult(connector=self.name, endpoint=endpoint.name, success=False, status_code=0, url=url, error=message,
+                             duration_ms=(time.perf_counter() - started) * 1000.0 if started is not None else 0.0)
+
+        try:
+            if endpoint.body:
+                kwargs = json.loads(substitute_json(endpoint.body, merged))
+                if not isinstance(kwargs, dict):
+                    return failed(f"{endpoint.name}: the body of an endpoint served by a function must be a JSON object (its arguments)")
+            else:
+                kwargs = {p.name: merged.get(p.name) for p in endpoint.params if merged.get(p.name) not in (None, "")}
+        except (ApiParamError, ValueError) as exc:
+            return failed(f"{type(exc).__name__}: {exc}")
+        # only a real plugin entry point: the module:function text cannot import anything else
+        from liberty.jobs.discover import discover_callables
+        if ref not in {c.callable for c in discover_callables(plugins_root())}:
+            return failed(f"Unknown plugin callable: {ref}")
+        started = time.perf_counter()
+        try:
+            target = resolve_callable(ref)
+            raw = await call_target(target, build_kwargs(target, kwargs, injections=(
+                ("connectors", self.registry), ("connector", self.name), ("settings", getattr(self.registry, "settings", None)))))
+            answer = normalise_result(raw)
+        except PluginInvocationError as exc:
+            return failed(str(exc), started)
+        except Exception as exc:  # noqa: BLE001 — the function's own failure (the server refused, nothing found…) is the endpoint's
+            return failed(str(exc) or type(exc).__name__, started)
+        parsed: Any = dict(answer.extras or {})
+        if answer.rows_affected is not None:
+            parsed.setdefault("rows_affected", answer.rows_affected)
+        parsed = json.loads(json.dumps(parsed, default=str))
+        refused = _errors_in(parsed, endpoint.error_fields)
+        return ApiResult(
+            connector=self.name, endpoint=endpoint.name, success=refused is None, status_code=200, url=url,
+            body=json.dumps(parsed), json=parsed, extracted=extract_path(parsed, endpoint.response_field) if refused is None else None,
+            mapped={name: extract_path(parsed, path) for name, path in endpoint.response_map.items()} if refused is None and endpoint.response_map else {},
+            error=refused, warnings=_errors_in(parsed, endpoint.warning_fields), duration_ms=(time.perf_counter() - started) * 1000.0,
         )
 
     # -- body construction ------------------------------------------------- #

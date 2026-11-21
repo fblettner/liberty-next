@@ -112,9 +112,31 @@
   retourné ; le **périmètre de données** de l'appelant s'applique aux lignes retournées, chaque règle avec son
   propre mode comme pour une requête. La permission est celle du point d'accès
   (`api:<connecteur>:<point d'accès>`), dans la route de la grille, le catalogue des écrans et les menus.
-  En lecture seule dans cette version : l'enregistrement par des points d'accès, l'export Excel, le résumé côté
-  serveur, le miroir d'audit, le Data Explorer et le `sql_query` de l'assistant ne prennent pas encore un point
-  d'accès.
+  **Enregistrer par des points d'accès.** Les requêtes de mise à jour, d'insertion et de suppression de
+  l'écran peuvent désigner des points d'accès marqués « Modifie des données » : la grille et la fiche
+  enregistrent comme toujours, et les valeurs de la ligne vont aux variables du point d'accès par leur nom (la
+  valeur que la ligne avait au chargement sous `<COLONNE>_ORIGINAL`, comme pour une requête). Il faut la
+  permission du point d'accès ; le `editable_when` de l'écran est appliqué ; ce que le serveur refuse (ses
+  champs d'erreur) est l'erreur de l'enregistrement, avec les mots du serveur ; ses avertissements reviennent
+  avec la réponse ; une valeur que le point d'accès extrait de sa réponse (`response_map`) revient dans la
+  fiche, comme un numéro attribué par une séquence ; les règles de notification se déclenchent. Contrôlé par
+  le rapport d'intégrité. L'assistant lit les lignes d'un tel écran avec `sql_query` (les paramètres du point
+  d'accès sont ses seuls filtres ; les colonnes sensibles sont écartées comme pour une requête), et ses outils
+  d'écriture passent par le même enregistrement.
+  Pas sur un écran API : l'import de lignes, l'export de classeur configuré (l'export de la grille
+  fonctionne), le résumé côté serveur, le miroir d'audit, les paquets de changements sur ses enregistrements,
+  les règles d'écriture du dictionnaire (SEQUENCE, LOGIN, SYSDATE — le serveur décide), le Data Explorer.
+- **Un point d'accès servi par une fonction.** Un seul appel HTTP ne peut pas tout faire : modifier une ligne
+  qu'un serveur n'expose que par un formulaire, c'est la trouver, vérifier qu'il n'y en a qu'une, puis agir —
+  plusieurs appels dans une session. Un point d'accès peut maintenant désigner une fonction du plugin d'une
+  application (**Servi par une fonction**, `callable`) qui répond à la place d'un appel HTTP. Ses arguments
+  sont les paramètres du point d'accès, ou l'objet JSON que donne le corps une fois ses `{{variables}}`
+  remplies (arguments fixes et variables se mélangent, et la valeur d'un utilisateur reste dans sa chaîne) ;
+  sa réponse est traitée comme une réponse — lignes, champs d'erreur et d'avertissement, champ et
+  correspondance de réponse, « Modifie des données » — si bien qu'un écran, une action, un job ou l'assistant
+  l'utilisent comme n'importe quel point d'accès. Seule une fonction découverte sous `plugins/` (`j_*`) peut
+  être désignée ; une exception est l'échec de l'appel ; le rapport d'intégrité nomme un point d'accès dont la
+  fonction n'est pas installée.
 
 ## 7.0.83 — 2026-11-19
 

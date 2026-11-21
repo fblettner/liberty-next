@@ -131,7 +131,9 @@ def build_connector_tools(
                 _compact({"name": e["name"], "label": e.get("label"), "description": e.get("description"),
                           "method": e.get("method"), "params": [_compact(p) for p in e.get("params") or []],
                           # an endpoint that changes data is called with api_run, not api_call
-                          "changes_data": True if e.get("writable") else None})
+                          "changes_data": True if e.get("writable") else None,
+                          # an endpoint that holds rows is read like a query: sql_query, its parameters as filters
+                          "rows": True if e.get("rows_field") and not e.get("writable") else None})
                 for e in desc["endpoints"] if may(f"api:{desc['name']}:{e['name']}")
             ]
         return []
@@ -228,12 +230,29 @@ def build_connector_tools(
 
         from liberty.web.connectors import DD_PARAM_PREFIX, _column_hints_for, _find_screen_for_query, select_events   # how a screen runs a SELECT
 
+        from liberty.connectors.api_rows import api_connector, query_permission, rows_endpoint
+
         # the permission before the lookup, like the HTTP route: no name enumeration
-        require(f"sql:{connector}:{query}", f"the query {connector}.{query}")
-        qdef = _sql(connector).get_query(query)  # raises QueryNotFoundError
-        if qdef.writable:
-            raise ConnectorError(f"query {connector}.{query} is writable and not available to the assistant")
+        require(query_permission(connectors, connector, query), f"the query {connector}.{query}")
         cap = row_cap if limit is None else max(1, min(int(limit), row_cap))
+        api = api_connector(connectors, connector)
+        endpoint = rows_endpoint(api, query) if api is not None else None
+        if api is not None:
+            # an API endpoint that holds rows (what a screen on an API connector reads): its filters
+            # are the endpoint's own parameters, nothing else can narrow it
+            if endpoint is None or endpoint.writable:
+                raise ConnectorError(f"{connector}.{query} is not an endpoint that holds rows — call it with api_call (or api_run when it changes data)")
+            names = {p.name.lower(): p.name for p in endpoint.params}
+            unknown = sorted(k for k in (filters or {}) if str(k).lower() not in names)
+            if unknown:
+                raise ConnectorError(
+                    f"filter {', '.join(unknown)}: {connector}.{query} is read from an API — it filters only on its parameters: "
+                    f"{', '.join(p.name for p in endpoint.params) or '(none)'}")
+            filters, params = None, {**(params or {}), **(filters or {})}
+        else:
+            qdef = _sql(connector).get_query(query)  # raises QueryNotFoundError
+            if qdef.writable:
+                raise ConnectorError(f"query {connector}.{query} is writable and not available to the assistant")
         # `filters` are the framework's dictionary binds (what a dashboard filter sends): the
         # connector finds the column carrying each one, types and trims the value. A screen
         # column carries the item its hint names (DTSY → SY): a filter given by column name is

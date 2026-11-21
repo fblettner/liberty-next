@@ -89,7 +89,9 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           form rules, SEQUENCE, audit mirror, Oracle quirks, NDJSON streaming,
                           multi-pool; the pure SQL-text helpers — ORDER BY split, aggregate / filter wraps,
                           #SCHEMA# / #DBLINK# placeholders — in sqltext.py), api.py (APIConnector: httpx, 5 auth kinds, templating — a value stays where its placeholder is: `substitute_path` / `_json` / `_form`, `file_part_path` for a user's values, `call(..., untrusted=True)`; a parameter's help / example / choices; `generators` = the editor's "Create from…", a plugin function run by `web/admin/api_test.py` `POST /admin/config/api/generate`),
-                          api_rows.py (an endpoint a SCREEN reads: `rows_field` / `row_map` / `labels_field` / `more_field` →
+                          an endpoint SERVED by a plugin function: `callable` + the body as its arguments, `_call_plugin`),
+                          api_rows.py (a screen on an API connector — its saves: `api_write`, endpoints marked `writable`, through
+                          `web/connectors._run_api`; `query_permission` = api: or sql:; its read: `rows_field` / `row_map` / `labels_field` / `more_field` / `limit_param` →
                           the same StreamMeta / StreamRows / StreamDone as a query, through `web/connectors.select_events`;
                           filters = the endpoint's params, scope on the rows, `read_permission` = api: or sql:),
                           registry.py (ConnectorRegistry + the shared dictionary), dictionary.py

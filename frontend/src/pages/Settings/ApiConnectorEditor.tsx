@@ -64,6 +64,7 @@ type Endpoint = {
   labels_field?: string | null
   more_field?: string | null
   limit_param?: string | null
+  callable?: string | null
   error_fields?: string[] | null
   /** Where the server puts its warnings: reported with the answer, the call stands. */
   warning_fields?: string[] | null
@@ -782,6 +783,12 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
   }
   const [headersText, setHeadersText] = useState(headersToString(value.headers))
   const [queryText, setQueryText] = useState(queryToString(value.query_params))
+  // the plugin functions an endpoint can be served by (the same catalogue as a call_plugin action)
+  const [callables, setCallables] = useState<Array<{ callable: string; docstring: string | null }>>([])
+  useEffect(() => {
+    api.get<{ callables: Array<{ callable: string; docstring: string | null }> }>('/api/plugins/callables')
+      .then((r) => setCallables(r.callables)).catch(() => setCallables([]))
+  }, [])
   useEffect(() => { setHeadersText(headersToString(value.headers)) }, [value.headers])
   useEffect(() => { setQueryText(queryToString(value.query_params)) }, [value.query_params])
 
@@ -846,6 +853,17 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
           </div>
         </Row>
       </FieldRow>
+      <FieldRow>
+        <label title={t('settings.api.endpoint.callableHint')}>{t('settings.api.endpoint.callable')}</label>
+        <SearchSelect
+          value={value.callable ?? ''}
+          onChange={(v) => set({ callable: v || undefined })}
+          options={[{ value: '', label: t('settings.api.endpoint.callableNone') },
+            ...callables.map((c) => ({ value: c.callable, label: c.callable })),
+            ...(value.callable && !callables.some((c) => c.callable === value.callable) ? [{ value: value.callable, label: value.callable }] : [])]}
+        />
+      </FieldRow>
+      {value.callable && <Banner $tone="info">{t('settings.api.endpoint.callableHint')}</Banner>}
       <FieldRow>
         <label>{t('settings.api.endpoint.headers')}</label>
         <Input

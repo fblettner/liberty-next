@@ -46,13 +46,27 @@ more_field = "grid.more"
 [[connectors.erp.endpoints]]
 name = "ping"
 path = "/ping"
+
+[[connectors.erp.endpoints]]
+name = "address_save"
+method = "POST"
+path = "/save"
+writable = true
+body = '{{"an8": "{{{{AN8}}}}", "name": "{{{{ALPH}}}}", "was": "{{{{AN8_ORIGINAL}}}}"}}'
+params = [ {{ name = "AN8" }}, {{ name = "ALPH" }}, {{ name = "AN8_ORIGINAL" }} ]
+error_fields = ["errors"]
+warning_fields = ["warnings"]
+response_map = {{ AN8 = "saved.an8" }}
 """
 
 _SCREENS = """
 [screens.erp.addresses]
 label = "Addresses"
 read_query = "addresses"
+update_query = "address_save"
+insert_query = "address_save"
 max_rows = 50
+editable_when = [ { field = "AT1", value = "E" } ]
 
 [[screens.erp.addresses.columns]]
 name = "ALPH"
@@ -87,6 +101,8 @@ def env(tmp_path, monkeypatch):
         async with auth.session() as s:
             svc = AuthService(s)
             await svc.get_or_create_role("reader", permissions=["api:erp:addresses"])
+            await svc.get_or_create_role("writer", permissions=["api:erp:addresses", "api:erp:address_save"])
+            await svc.create_user("wim", password="wimpw", roles=["writer"])
             await svc.get_or_create_role("sqlonly", permissions=["sql:*"])
             await svc.create_user("admin", password="adminpw", is_superuser=True)
             await svc.create_user("ann", password="annpw", roles=["reader"])
@@ -158,3 +174,45 @@ def test_a_failed_call_is_the_reads_error(env) -> None:
         last = json.loads(r.text.splitlines()[-1])
         assert last["kind"] == "error" and "erp.addresses" in last["detail"]
         assert client.get("/api/sql/erp/addresses", headers=_h(client, "ann")).status_code == 502
+
+
+def test_a_row_is_saved_through_an_endpoint(env) -> None:
+    """The grid's save (``POST /api/sql/{c}/{q}`` with the row's values) on a screen whose update /
+    insert queries are endpoints marked as changing data."""
+    with TestClient(env) as client:
+        sent: list = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            sent.append((request.url.path, body))
+            if body.get("name") == "":
+                return httpx.Response(200, json={"errors": [{"TITLE": "Error: Alpha Name required"}]})
+            return httpx.Response(200, json={"errors": [], "warnings": ["Duplicate name"], "saved": {"an8": 4242}})
+
+        client.app.state.connectors.get("erp")._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        row = {"params": {"AN8": 1234, "ALPH": "  Long, Benjamin ", "AT1": "E", "AN8_ORIGINAL": 1234, "AT1_ORIGINAL": "E"}}
+        # the endpoint's own permission: reading the screen is not enough to save
+        assert client.post("/api/sql/erp/address_save", json=row, headers=_h(client, "ann")).status_code == 403
+        r = client.post("/api/sql/erp/address_save", json=row, headers=_h(client, "wim"))
+        assert r.status_code == 200, r.text
+        out = r.json()
+        # answered as a statement: one row, the values the endpoint maps out of its answer, the server's warnings
+        assert out["rowcount"] == 1 and out["statement_type"] == "UPDATE" and out["resolved_binds"] == {"AN8": 4242}
+        assert out["warnings"] and "Duplicate name" in str(out["warnings"])
+        # the row's values went to the endpoint's variables by name; the rest of the row is not sent
+        assert sent[-1] == ("/rest/save", {"an8": "1234", "name": "Long, Benjamin", "was": "1234"})
+        # the server refuses (its error fields): the save fails with its words
+        r = client.post("/api/sql/erp/address_save", json={"params": {"AN8": 1, "AT1": "E"}}, headers=_h(client, "wim"))
+        assert r.status_code == 502 and "Alpha Name required" in r.json()["detail"]
+        # the screen's editable_when holds for an API save too
+        r = client.post("/api/sql/erp/address_save", json={"params": {"AN8": 2, "ALPH": "x", "AT1_ORIGINAL": "C"}}, headers=_h(client, "wim"))
+        assert r.status_code == 409
+        # an endpoint that neither holds rows nor changes data is not a screen's query
+        assert client.post("/api/sql/erp/ping", json={}, headers=_h(client, "admin")).status_code == 400
+        # the catalog says the screen saves; integrity knows the endpoints
+        detail = client.get("/api/screens/erp/addresses", headers=_h(client, "wim")).json()
+        assert detail["update_query"] == "address_save"
+        issues = client.get("/admin/config/integrity", headers=_h(client, "admin")).json()["issues"]
+        assert not [i for i in issues if i["category"] == "Missing query"]
+        # importing rows is said not to be available
+        assert client.post("/api/sql/erp/_import", json={"rows": []}, headers=_h(client, "wim")).status_code == 400

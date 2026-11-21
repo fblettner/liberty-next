@@ -289,6 +289,16 @@ async def _run_sql(
     several screens share one ``read_query`` (e.g. a copied F95921 screen with hidden columns
     tweaked): without it, ``_find_screen_for_query`` returns the FIRST match and the copy's hints
     are ignored. The caller (a screen TableView / a nested-table tab) knows its own screen id."""
+    from liberty.connectors.api_rows import api_connector
+
+    api_conn = api_connector(connectors, connector)
+    if api_conn is not None:
+        # a screen on an API connector: its read is an endpoint with rows, its saves are endpoints
+        # that change data — same route, same shape of answer (liberty/connectors/api_rows.py)
+        return await _run_api(
+            api_conn, connectors, connector, query, params, language=language, max_rows=max_rows, user=user,
+            screens=screens, screen_hint=screen_hint, pool=pool, scope=scope, notify_ctx=notify_ctx,
+        )
     params, dd_binds = split_dd_binds(params)
     screen, slot, screen_app = (None, None, None)
     if screen_hint and screens:
@@ -322,17 +332,8 @@ async def _run_sql(
     # The row's values are the submitted binds — the ``<COL>_ORIGINAL`` ones (what the row held
     # when it was loaded) over the plain ones; a rule field the caller did not send cannot be
     # verified and is refused too, so a hand-built request cannot sidestep the rule.
-    if screen is not None and not is_group and slot in ("update", "delete") and screen.editable_when:
-        row = {str(k): v for k, v in (params or {}).items() if not str(k).upper().endswith("_ORIGINAL")}
-        row.update({str(k)[:-9]: v for k, v in (params or {}).items() if str(k).upper().endswith("_ORIGINAL")})
-        ok = screen.is_row_editable(row)
-        if ok is not True:
-            fields = ", ".join(r.field for r in screen.editable_when)
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                detail=(f"This row is read-only ({fields})" if ok is False
-                        else f"This row cannot be changed: its {fields} value was not sent"),
-            )
+    if screen is not None and not is_group:
+        _refuse_read_only_row(screen, slot, params)
     try:
         # ``pool`` (from the ``X-Liberty-Pool`` header) rebinds a multi-pool connector to a
         # different DB instance for this call. The header is a broadcast HINT from the app
@@ -445,6 +446,71 @@ async def _run_sql(
                 row.setdefault(str(k)[:-9], v)
         fire_screen_event(rules, dispatcher, app=screen_app or "", screen=screen.id, event=slot, row=row, user=user)
     return result.to_dict()
+
+
+def _refuse_read_only_row(screen: Screen, slot: str | None, params: dict[str, Any] | None) -> None:
+    """``editable_when``: an update / delete through the screen must target a row the rule allows
+    (409 otherwise) — the row is the submitted values, the ``<COL>_ORIGINAL`` ones over the plain."""
+    if slot not in ("update", "delete") or not screen.editable_when:
+        return
+    row = {str(k): v for k, v in (params or {}).items() if not str(k).upper().endswith("_ORIGINAL")}
+    row.update({str(k)[:-9]: v for k, v in (params or {}).items() if str(k).upper().endswith("_ORIGINAL")})
+    ok = screen.is_row_editable(row)
+    if ok is not True:
+        fields = ", ".join(r.field for r in screen.editable_when)
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=(f"This row is read-only ({fields})" if ok is False
+                    else f"This row cannot be changed: its {fields} value was not sent"),
+        )
+
+
+async def _run_api(
+    api_conn: Any, connectors: ConnectorRegistry, connector: str, query: str, params: dict[str, Any], *,
+    language: str | None = None, max_rows: int | None = None, user: str | None = None,
+    screens: ScreensFile | None = None, screen_hint: tuple[str, str] | None = None,
+    pool: str | None = None, scope: DataScope | None = None, notify_ctx: tuple[Any, Any] | None = None,
+) -> dict[str, Any]:
+    """*query* of an API connector run as a screen runs a query: an endpoint with rows is read
+    (:func:`_api_rows_result`); an endpoint marked ``writable`` saves the row — its values bound
+    to the endpoint's variables by name, the screen's ``editable_when`` enforced, the server's
+    refusal (``error_fields``) as the error, a notification rule fired as for a statement. What
+    such a save does not have: the audit mirror, change packages, the dictionary's write rules."""
+    from liberty.connectors.api_rows import ApiRowsError, api_write, endpoint_of
+
+    endpoint = endpoint_of(api_conn, query)
+    if endpoint is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"{connector}: no endpoint {query!r}")
+    if endpoint.rows_field and not endpoint.writable:
+        return await _api_rows_result(
+            connectors, connector, query, params, language=language, max_rows=max_rows, user=user,
+            screens=screens, screen_hint=screen_hint, pool=pool, scope=scope,
+        )
+    if not endpoint.writable:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=(
+            f"{connector}.{query} holds no rows (rows_field) and is not marked as changing data (writable): "
+            "a screen can neither read it nor save through it"))
+    screen, slot, screen_app = _find_screen_for_query(screens, connector, query) if screens else (None, None, None)
+    if screen is not None and slot != "group":
+        _refuse_read_only_row(screen, slot, params)
+    kind = {"insert": "INSERT", "update": "UPDATE", "delete": "DELETE"}.get(slot or "", "CALL")
+    try:
+        out = await api_write(api_conn, query, params, statement_type=kind)
+    except ApiRowsError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except ConnectorError as exc:
+        raise http_for_connector_error(exc) from exc
+    except ValueError as exc:            # a value the endpoint's template refuses (ApiParamError), a value not allowed
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if notify_ctx is not None and screen is not None and slot in ("insert", "update", "delete"):
+        from liberty.notify.events import fire_screen_event
+        rules, dispatcher = notify_ctx
+        row = dict(params or {})
+        for k, v in list(row.items()):
+            if str(k).upper().endswith("_ORIGINAL"):
+                row.setdefault(str(k)[:-9], v)
+        fire_screen_event(rules, dispatcher, app=screen_app or "", screen=screen.id, event=slot, row=row, user=user)
+    return out
 
 
 def _api_reader(connectors: ConnectorRegistry, connector: str, query: str) -> Any:
@@ -930,6 +996,10 @@ async def sql_import(
 
     Returns ``{committed, mode, valid, invalid, results: [{index, action, ok, error?, rowcount?}]}``.
     """
+    from liberty.connectors.api_rows import api_connector
+
+    if api_connector(connectors, connector) is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Importing rows is not available on a screen that saves through an API.")
     mode = (body.mode or "upsert").lower()
     if mode not in ("upsert", "insert", "update"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="mode must be upsert | insert | update.")
@@ -1064,7 +1134,9 @@ async def sql_query_post(
     Reserved query-string params (``_stream`` / ``_chunk_size``) work the same as GET.
     Streaming POST is supported but rare in practice — the SPA streams via GET to keep
     the SSE consumer simple."""
-    require_permission(principal, f"sql:{connector}:{query}")
+    from liberty.connectors.api_rows import query_permission
+
+    require_permission(principal, query_permission(connectors, connector, query))
     qp = dict(request.query_params)
     stream = _streaming_requested(qp)
     chunk_size = _as_int(qp.get("_chunk_size"))
