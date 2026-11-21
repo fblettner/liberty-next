@@ -11,7 +11,7 @@
 // only; pages/Liberty wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers, Undo2, GitBranch, Shuffle, ArrowRightLeft, Hash, List as ListIcon } from 'lucide-react'
+import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers, Undo2, GitBranch, Shuffle, ArrowRightLeft, Hash, List as ListIcon, Tag, Braces } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Button, Banner, Centered, Card, HeaderActions, Row, Stack, SpinnerRing, Mono, SchemaForm, SearchSelect, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Input, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
@@ -22,7 +22,7 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import ConnectorsTableEditor from './ConnectorsTableEditor'
 import StageStrip, { type StageView } from './StageStrip'
-import { connectorFigures } from '../../services/connectorFigures'
+import { connectorFigures, queryFigures } from '../../services/connectorFigures'
 import { ScreenDesignerModal } from './ScreenDesignerModal'
 import { CRUD_KINDS, type TableEntry, duplicateTableEntry, findTableIndex, newEmptyTable, pickSchemaProperties, removeTableByName, replaceTableByName, tableEntryFromFlatQueries, tableExistsByName } from './connectorTables'
 import { ScaffoldQueryModal, type ScaffoldKind } from './ScaffoldQueryModal'
@@ -169,6 +169,8 @@ export default function ConnectorsBuilder() {
   const [moveTarget, setMoveTarget] = useState<{ kind: 'table' | 'query' | 'sequence' | 'lookup'; name: string } | null>(null)
   // Selected single-query name when ``mode === 'sequences'`` or ``'lookups'``.
   const [selQuery, setSelQuery] = useState<string | null>(null)
+  // the stage of the query in view (what it is / its statement / its parameters): kept from a query to the next
+  const [queryStage, setQueryStage] = useState<'general' | 'sql' | 'params'>('sql')
   const [tq, setTq] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
@@ -818,6 +820,32 @@ export default function ConnectorsBuilder() {
     return { ...(queryDefSchema as object), properties: rest, required } as JsonSchema
   })()
 
+  // A query as its three stages, each a part of QueryDef: the statement (the fields without a group), its
+  // parameters (the "Params" group), what it is (label, description — and any other group, so no field is
+  // left out). The group is taken off the fields: the stage is the tab.
+  const queryStageSchema = (stage: 'general' | 'sql' | 'params'): JsonSchema | null => {
+    const props = (queryEditorSchema as { properties?: Record<string, { x_group?: string }> } | null)?.properties
+    if (!queryEditorSchema || !props) return queryEditorSchema
+    const stageOf = (g: string | undefined) => (!g ? 'sql' : g === 'Params' ? 'params' : 'general')
+    const mine = Object.fromEntries(Object.entries(props).filter(([, v]) => stageOf(v?.x_group) === stage).map(([k, v]) => { const { x_group: _g, ...rest } = v ?? {}; void _g; return [k, rest] }))
+    const required = ((queryEditorSchema as { required?: string[] }).required ?? []).filter((r) => r in mine)
+    return { ...(queryEditorSchema as object), properties: mine, required } as JsonSchema
+  }
+  const queryStages = (picked: Record<string, unknown>): StageView[] => {
+    const f = queryFigures(picked)
+    const bad = f.blank || (f.writes && !f.writable)
+    return [
+      { id: 'general', tone: 'blue', icon: <Tag size={15} />, title: t('settings.connectors.query.general'), what: f.label || String(picked.name ?? ''), more: f.description },
+      { id: 'sql', tone: f.writes ? 'purple' : 'green', icon: <Database size={15} />, title: t('settings.connectors.query.sql'),
+        what: f.blank ? t('settings.tables.stage.blank') : [f.verb, f.dialects.length > 1 ? f.dialects.join(', ') : ''].filter(Boolean).join(' · '),
+        more: f.blank ? '' : f.writes ? (f.writable ? t('settings.tables.stage.writable') : t('settings.tables.stage.notWritable')) : t('settings.connectors.query.readOnly'),
+        warn: bad },
+      { id: 'params', tone: 'orange', icon: <Braces size={15} />, title: t('settings.connectors.query.params'),
+        what: f.declared ? t('settings.connectors.query.declared', { n: f.declared }) : t('settings.connectors.query.noneDeclared'),
+        more: f.placeholders.length ? f.placeholders.map((p) => `:${p}`).join(' ') : t('settings.connectors.query.noPlaceholder') },
+    ]
+  }
+
   // Single-query editor (the SchemaForm over QueryDef) — used by the Unclassified / Sequences /
   // Lookups views. The name is shown read-only with a Rename button (cross-file rename); everything
   // else edits inline. Caller guards on ``queryDefSchema`` being loaded.
@@ -852,13 +880,16 @@ export default function ConnectorsBuilder() {
           <Trash2 size={13} /> {t('common.delete')}
         </Button>
       </Row>
+      <StageStrip dense current={queryStage} onPick={(k) => setQueryStage(k as 'general' | 'sql' | 'params')} stages={queryStages(picked)} />
       <SqlConnectorContext.Provider value={sel ?? undefined}>
         <SchemaForm
-          schema={queryEditorSchema as JsonSchema}
+          key={queryStage}
+          schema={queryStageSchema(queryStage) as JsonSchema}
           defs={allDefs}
           value={picked}
           onChange={(v: Record<string, unknown>) => {
-            // The form omits `name`, so preserve it on the patched query.
+            // The form shows one stage's fields and hands back the whole query (a cleared field is dropped);
+            // it omits `name`, so preserve it on the patched query.
             const merged = { ...v, name: picked.name }
             const { key, arr } = curSection()
             updateSection(sel!, key, arr.map((qq) => (qq.name === picked.name ? merged : qq)))

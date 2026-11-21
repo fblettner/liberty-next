@@ -1,0 +1,79 @@
+// What a page shipped by an application receives — the CONTRACT between the framework and the
+// applications' pages (liberty/web/app_pages.py serves them, pages/AppPage loads them).
+//
+// A page is one ES module whose default export is a function: it takes this object and returns
+// the React component to draw. It imports nothing: everything it is made of comes from here, so
+// the page and the framework share one React, one theme and the same components.
+//
+//   export default function page(sdk) {
+//     const { React, ui } = sdk
+//     const h = React.createElement
+//     return function MyPage() { return h(ui.PageLayout, { title: 'My page' }, h(ui.Card, null, '…')) }
+//   }
+//
+// Keeping it stable: a field is added, never renamed or removed, and `version` goes up when a page
+// could tell the difference. A page that needs a newer contract checks `sdk.version` and says so.
+import React from 'react'
+import styled from '@emotion/styled'
+import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import * as ui from '../../common'
+import { api } from '../../api/client'
+import { useAuth } from '../../auth/AuthContext'
+import { iconFor } from '../../components/SidebarMenu'
+import { colors, fontSize, fonts, radius, shadow } from '../../theme'
+import { callableRef } from '../../tabs/pageTabs'
+
+export const PAGE_SDK_VERSION = 1
+
+export interface PageSdk {
+  /** the contract's version (this file) */
+  version: number
+  /** the application and the page being drawn */
+  app: string
+  page: string
+  /** the framework's React: hooks, createElement, Fragment */
+  React: typeof React
+  /** styled components (emotion), on the theme below */
+  styled: typeof styled
+  /** the theme's tokens — CSS variables: they follow dark / light by themselves */
+  theme: { colors: typeof colors; fontSize: typeof fontSize; fonts: typeof fonts; radius: typeof radius; shadow: typeof shadow }
+  /** the shared components: PageLayout, Card, Button, Input, SearchSelect, Tag, Banner, Spinner, Modal… */
+  ui: typeof ui
+  /** a menu icon by its name ("search", "database"…), or null */
+  icon: typeof iconFor
+  /** the API client (get / post / put / delete on the server's routes, the session handled) */
+  api: typeof api
+  /** Run a function of the application and get what it returns: `call('xref:j_xref_search', { q })`
+   *  runs `<app>.xref:j_xref_search` — or name another package in full (`'pkg.mod:fn'`). The caller
+   *  needs `plugin:<that reference>`. */
+  call: <T = unknown>(fn: string, params?: Record<string, unknown>) => Promise<T>
+  /** hook: the language of the interface ('en', 'fr'…) — the page ships its own texts */
+  useLang: () => string
+  /** hook: who is signed in */
+  useUser: () => { username: string; is_superuser: boolean; permissions: string[] } | null
+  /** hook: a function that opens a route of the application in its tab ('/screen/<app>/<id>', '/explorer'…) */
+  useOpen: () => (path: string) => void
+}
+
+export function buildSdk(app: string, page: string): PageSdk {
+  return {
+    version: PAGE_SDK_VERSION, app, page,
+    React, styled, ui, api,
+    theme: { colors, fontSize, fonts, radius, shadow },
+    icon: iconFor,
+    call: async <T,>(fn: string, params: Record<string, unknown> = {}) => {
+      const r = await api.post<{ extras?: unknown }>('/api/plugins/run', { callable: callableRef(app, fn), params })
+      return (r.extras ?? r) as T
+    },
+    useLang: () => useTranslation().i18n.language || 'en',
+    useUser: () => {
+      const { user } = useAuth()
+      return user ? { username: user.username, is_superuser: !!user.is_superuser, permissions: user.permissions ?? [] } : null
+    },
+    useOpen: () => {
+      const navigate = useNavigate()
+      return (path: string) => { void navigate(path) }
+    },
+  }
+}

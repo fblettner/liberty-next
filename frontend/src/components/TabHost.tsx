@@ -5,7 +5,7 @@
 // when the current route is the index landing or a framework page (Settings / nomaflow) — those
 // render through <Outlet/> instead — but the tabs underneath stay mounted.
 import { lazy, Suspense, useEffect, useState, type LazyExoticComponent, type ComponentType } from 'react'
-import { explorerModelOf } from '../tabs/pageTabs'
+import { appPageOf, explorerModelOf } from '../tabs/pageTabs'
 import { libertyPageOf } from '../services/libertyMenu'
 import i18n from 'i18next'
 import { Centered, ErrorBoundary } from '../common'
@@ -33,6 +33,7 @@ const PAGE_COMPONENTS: Record<string, LazyExoticComponent<ComponentType>> = {
   '/developer': lazy(() => import('../pages/Developer')),
 }
 const ExplorerPage = lazy(() => import('../pages/Explorer'))
+const AppPage = lazy(() => import('../pages/AppPage'))
 
 // A ``screen`` tab opens a designed screen by id (``/screen/<app>/<id>``). We resolve the screen
 // from the workspace catalog to get its connector + read query, then drive the TableView with the
@@ -83,6 +84,8 @@ export default function TabHost({ hidden }: { hidden: boolean }) {
                 (() => {
                   const initial = explorerModelOf(tab.target)
                   if (initial) return <ExplorerPage initial={initial} />
+                  const shipped = appPageOf(tab.target)                  // a page an application ships
+                  if (shipped) return <AppPage app={shipped.app} page={shipped.page} />
                   const liberty = libertyPageOf(tab.target)
                   if (liberty) return <LibertyPage page={liberty} />
                   const P = PAGE_COMPONENTS[tab.target]; return P ? <P /> : <Centered />

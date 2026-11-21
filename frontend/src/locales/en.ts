@@ -896,6 +896,8 @@ const en = {
     never: "never",
   },
   tests: {
+    mayRunOnly: 'You may play these tests, not change them.',
+    mayViewOnly: 'You may read these tests, not play or change them.',
     contains: "A value of the raw answer holds — path, text",
     present: "Must hold something — one path per line",
     absent: "Must hold nothing — one path per line",
@@ -1094,6 +1096,11 @@ const en = {
       missingRequired: 'Missing required parameter: {{name}}',
     },
     selectPlaceholder: 'Select…',
+  },
+  appPage: {
+    missing: 'The application {{app}} ships no page “{{page}}”, or the page is not built.',
+    forbidden: 'You may not open this page (permission page:{{app}}:{{page}}).',
+    broken: 'The page {{app}}/{{page}} could not be drawn',
   },
   explorer: {
     show: { label: 'Label', both: 'Code + label', code: 'Code' },
@@ -1988,6 +1995,10 @@ const en = {
         add: 'Add a generator',
       },
       stage: {
+        noAddress: 'no address yet',
+        auth: { none: 'None', basic: 'User and password', bearer: 'Bearer token', api_key: 'API key', oauth2: 'OAuth 2' },
+        missing: { username: 'no user yet', token: 'no token, no token address', tokenEndpoint: 'no token address' },
+        anyEnvironment: 'one server for all', targets: '{{n}} other server(s)', writable: '{{n}} that write', notYet: 'not available yet', tryIt: 'try an endpoint',
         general: "What it is",
         inputs: "Inputs",
         call: "The call",
@@ -2034,7 +2045,7 @@ const en = {
         callableHint: 'A function of an application’s plugin answers instead of an HTTP call — for what one call cannot do (find a row, check it, then change it). Its arguments are the parameters, or the JSON object the body gives once its {{placeholders}} are filled; its answer is treated like a response (rows, error fields, response map). Method and path are not used.',
         writable: 'Changes data',
         writableHint: 'It submits, creates or runs something: the assistant calls it only with ai:write and a card the user accepts',
-        writableTag: 'changes data',
+        wide: 'Open over the whole window', wideNote: 'Kept in the connector being edited: Save on the Connectors page writes it.', writableTag: 'changes data',
         body: 'Body',
         formatJson: 'Format JSON',
         bodyHint: 'Use {{param}} placeholders for variables',
@@ -2182,6 +2193,7 @@ const en = {
       export: 'Export',
     },
     connectors: {
+      query: { general: 'What it is', sql: 'Statement', params: 'Parameters', readOnly: 'reads only', declared: '{{n}} declared', noneDeclared: 'none declared', noPlaceholder: 'no :placeholder in the statement' },
       stage: {
         settings: "Settings",
       },

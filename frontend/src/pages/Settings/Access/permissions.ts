@@ -6,6 +6,7 @@
 // allowed / denied node — so existing roles and the backend's `_keeper` are untouched.
 
 import { hasPermission, isDenied } from '../../../services/permissions'
+import { appPageOf } from '../../../tabs/pageTabs'
 // the backend's matcher lives in services/ (shared with the screens that gate an action)
 export { hasPermission, isDenied, segmentMatch } from '../../../services/permissions'
 
@@ -44,9 +45,12 @@ export const isLeaf = (n: MenuNode): boolean => !!n.type && !!n.target
 
 /** The permission a `page` leaf's route needs — the nomaflow pages ask `nomaflow:view` (which
  *  `nomaflow:edit` includes), the tests' pages `tests:view` (which `tests:run` / `tests:edit` include); other pages are open (liberty/web/menus.py `page_permission`). */
-export const pagePermission = (target: string): string | null =>
-  target === '/nomaflow' || target.startsWith('/nomaflow/') ? 'nomaflow:view'
+export const pagePermission = (target: string): string | null => {
+  const shipped = appPageOf(target)                                  // a page an application ships: its own permission
+  if (shipped) return `page:${shipped.app}:${shipped.page}`
+  return target === '/nomaflow' || target.startsWith('/nomaflow/') ? 'nomaflow:view'
     : target === '/liberty/tests' || target === '/liberty/test-results' ? 'tests:view' : null
+}
 const INCLUDED_IN: Record<string, string[]> = { 'nomaflow:view': ['nomaflow:edit'], 'tests:view': ['tests:run', 'tests:edit'] }
 
 /** The permission a menu leaf's target needs — the same resolution as the backend's `_keeper`:

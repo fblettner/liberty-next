@@ -24,7 +24,10 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { FlowCanvas, FlowRows } from './flowKit'
-import { Activity, ChevronDown, ChevronRight, Plus, RefreshCw, Trash2, Wand2, Tag, LogIn, LogOut, Send } from 'lucide-react'
+import { Activity, ChevronDown, ChevronRight, Plus, RefreshCw, Trash2, Wand2, Tag, LogIn, LogOut, Send, Globe, KeyRound, Server, Layers, Bell, Play, Maximize2 } from 'lucide-react'
+import { EditorModalShell } from '../../common/EditorModalShell'
+import StageStrip from './StageStrip'
+import { apiFigures } from '../../services/connectorFigures'
 import { api, ApiError } from '../../api/client'
 import {
   Banner, Button, Checkbox, FrameworkEnumsContext, Input, Row, SearchSelect, Stack, useModals,
@@ -118,18 +121,6 @@ interface ApiConnectorEditorProps {
 }
 
 // ── small styled atoms (matches the screenshot's borderless look) ──────────────────────────
-const TabsBar = styled.div`
-  display: flex; gap: 14px; border-bottom: 1px solid ${colors.border};
-  margin-bottom: 18px; padding: 0 2px;
-`
-const TabBtn = styled.button<{ $active?: boolean }>`
-  background: transparent; border: none; padding: 10px 4px 12px;
-  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.muted)};
-  font-size: ${fontSize.sm}; cursor: pointer; font-family: ${fonts.sans};
-  border-bottom: 2px solid ${({ $active }) => ($active ? colors.blue.main : 'transparent')};
-  margin-bottom: -1px;
-  &:hover { color: ${colors.blue.main}; }
-`
 // A wider control area used for textareas — drops the label-aligned center for top-align.
 const FieldRowTop = FieldRow
 const Textarea = styled.textarea`
@@ -214,6 +205,7 @@ type TabKey = 'connection' | 'auth' | 'environments' | 'endpoints' | 'webhooks' 
 export default function ApiConnectorEditor({ name, value, hasMenu, sqlConnectors, onChange }: ApiConnectorEditorProps) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<TabKey>('connection')
+  const fig = apiFigures(value as unknown as Record<string, unknown>)
   // Reset to the Connection tab when the operator switches connectors — otherwise they may
   // be left looking at the Test tab of a different connector's data.
   useEffect(() => { setTab('connection') }, [name])
@@ -232,26 +224,19 @@ export default function ApiConnectorEditor({ name, value, hasMenu, sqlConnectors
 
   return (
     <Stack gap={0}>
-      <TabsBar>
-        <TabBtn type="button" $active={tab === 'connection'} onClick={() => setTab('connection')}>
-          {t('settings.api.tab.connection')}
-        </TabBtn>
-        <TabBtn type="button" $active={tab === 'auth'} onClick={() => setTab('auth')}>
-          {t('settings.api.tab.authentication')}
-        </TabBtn>
-        <TabBtn type="button" $active={tab === 'environments'} onClick={() => setTab('environments')}>
-          {t('settings.api.tab.environments')}
-        </TabBtn>
-        <TabBtn type="button" $active={tab === 'endpoints'} onClick={() => setTab('endpoints')}>
-          {t('settings.api.tab.endpoints')}
-        </TabBtn>
-        <TabBtn type="button" $active={tab === 'webhooks'} onClick={() => setTab('webhooks')}>
-          {t('settings.api.tab.webhooks')}
-        </TabBtn>
-        <TabBtn type="button" $active={tab === 'test'} onClick={() => setTab('test')}>
-          {t('settings.api.tab.test')}
-        </TabBtn>
-      </TabsBar>
+      {/* the connector as its stages, like a pool or a table: each card says what it holds, in orange what it lacks */}
+      <StageStrip compact dense={tab === 'endpoints' || tab === 'test'} current={tab} onPick={(k) => setTab(k as TabKey)} stages={[
+        { id: 'connection', tone: 'blue', icon: <Globe size={15} />, title: t('settings.api.tab.connection'),
+          what: fig.host || t('settings.api.stage.noAddress'), warn: !fig.host },
+        { id: 'auth', tone: 'purple', icon: <KeyRound size={15} />, title: t('settings.api.tab.authentication'),
+          what: t(`settings.api.stage.auth.${fig.auth}`), more: fig.authMissing ? t(`settings.api.stage.missing.${fig.authMissing}`) : (value.auth_username ?? ''), warn: !!fig.authMissing },
+        { id: 'environments', tone: 'green', icon: <Server size={15} />, title: t('settings.api.tab.environments'),
+          what: fig.pool || t('settings.api.stage.anyEnvironment'), more: fig.targets ? t('settings.api.stage.targets', { n: fig.targets }) : '' },
+        { id: 'endpoints', tone: 'green', icon: <Layers size={15} />, title: t('settings.api.tab.endpoints'),
+          what: t('settings.connectors.fig.endpoints', { n: fig.endpoints }), more: fig.writable ? t('settings.api.stage.writable', { n: fig.writable }) : '' },
+        { id: 'webhooks', tone: 'orange', icon: <Bell size={15} />, title: t('settings.api.tab.webhooks'), what: t('settings.api.stage.notYet') },
+        { id: 'test', tone: 'orange', icon: <Play size={15} />, title: t('settings.api.tab.test'), what: t('settings.api.stage.tryIt') },
+      ]} />
       {tab === 'connection' && <ConnectionTab value={value} patch={patch} hasMenu={hasMenu} />}
       {tab === 'auth' && <AuthTab value={value} patch={patch} />}
       {tab === 'environments' && <ApiEnvironmentsTab value={value} patch={patch} sqlConnectors={sqlConnectors ?? []} />}
@@ -532,6 +517,8 @@ function EndpointsTab({
   // Collapsed by default — large lists are easier to scan when only headers show. The operator
   // clicks a card to expand it; adding a new endpoint expands that one (see `addEndpoint`).
   const [openIdx, setOpenIdx] = useState<number | null>(null)
+  // one endpoint edited over the whole window (many steps, a long body): the same editor on the same draft
+  const [wideIdx, setWideIdx] = useState<number | null>(null)
   const openRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => { openRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, [openIdx])
   // Shown under their group's heading (the ungrouped ones first), in alphabetical order, narrowed by
@@ -744,9 +731,10 @@ function EndpointsTab({
               {ep.label && <span style={{ color: colors.text.muted, fontFamily: fonts.sans }}>· {ep.label}</span>}
               {ep.writable && <WritesTag title={t('settings.api.endpoint.writableHint')}>{t('settings.api.endpoint.writableTag')}</WritesTag>}
               <span className="grow" />
+              <Maximize2 size={13} data-endpoint-wide={ep.name} style={{ color: colors.text.muted }} onClick={(e) => { e.stopPropagation(); setWideIdx(i) }}><title>{t('settings.api.endpoint.wide')}</title></Maximize2>
               <Trash2 size={13} style={{ color: colors.text.muted }} onClick={(e) => { e.stopPropagation(); void removeEndpoint(i) }} />
             </EndpointHead>
-            {open && (
+            {open && wideIdx !== i && (
               <EndpointBody>
                 <EndpointEditor
                   value={ep} onChange={(v) => updateEndpoint(i, v)}
@@ -761,6 +749,22 @@ function EndpointsTab({
           </Fragment>
         )
       })}
+      {wideIdx !== null && endpoints[wideIdx] && (() => {
+        const ep = endpoints[wideIdx]
+        const close = () => setWideIdx(null)
+        return (
+          <EditorModalShell variant="visual" defaultFullscreen onClose={close}
+            title={<>{t('studio.endpoint')} · <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontSize: fontSize.sm, fontWeight: 400 }}>{connectorName}.{ep.name}</span></>}
+            footer={<><span style={{ flex: 1, color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.api.endpoint.wideNote')}</span><Button $size="sm" $variant="primary" onClick={close}>{t('common.close')}</Button></>}>
+            <EndpointEditor
+              value={ep} onChange={(v) => updateEndpoint(wideIdx, v)}
+              sourceLabel={ep.source ? `${generators.find((g) => g.id === ep.source?.generator)?.label ?? ep.source.generator} — ${ep.source.candidate}` : undefined}
+              onRefresh={ep.source ? () => void refreshEndpoint(wideIdx) : undefined}
+              refreshing={checking}
+            />
+          </EditorModalShell>
+        )
+      })()}
       {generating && (
         <EndpointGeneratorModal connector={connectorName} generators={generators} existingNames={endpoints.map((e) => e.name)} onCreate={addGenerated} onClose={() => setGenerating(false)} />
       )}

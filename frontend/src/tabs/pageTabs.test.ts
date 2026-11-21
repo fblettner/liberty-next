@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { explorerModelOf, isPageTabPath } from './pageTabs'
+import { explorerModelOf, isPageTabPath, appPageOf, callableRef } from './pageTabs'
 
 describe('pageTabs', () => {
   it('recognises the fixed page paths and an Explorer model link', () => {
@@ -14,3 +14,19 @@ describe('pageTabs', () => {
     expect(explorerModelOf('/explorer')).toBeNull()
   })
 })
+
+describe("a page an application ships", () => {
+  it('is a page tab at /app/<app>/<page>', () => {
+    expect(appPageOf('/app/nomajde/crossref')).toEqual({ app: 'nomajde', page: 'crossref' })
+    expect(isPageTabPath('/app/nomajde/crossref')).toBe(true)
+    expect(appPageOf('/app/nomajde')).toBeNull()
+    expect(appPageOf('/app/Bad-Name/x')).toBeNull()
+    expect(appPageOf('/app/nomajde/x/y')).toBeNull()
+    expect(isPageTabPath('/app/nomajde/../x')).toBe(false)
+  })
+  it("names a function of the application, or one given in full", () => {
+    expect(callableRef('nomajde', 'xref:j_xref_search')).toBe('nomajde.xref:j_xref_search')
+    expect(callableRef('nomajde', 'nomasx1.xref:j_x')).toBe('nomasx1.xref:j_x')
+  })
+})
+

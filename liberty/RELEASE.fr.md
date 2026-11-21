@@ -353,6 +353,36 @@
   Exécuter sur une ligne. Une analyse enregistrée s'ouvre ainsi, une nouvelle sur sa définition ; le bouton
   reste à la même place dans les deux états. Un tableau dans une tuile de tableau de bord est la même grille
   sans sa barre d'outils.
+- **Une application peut livrer sa propre page.** Un écran configuré est une grille et un formulaire ; ce qui
+  n'est ni l'un ni l'autre — une structure à parcourir, un parcours guidé — une application le livre désormais
+  comme une page : un module JavaScript construit par page, `plugins/<app>/pages/<page>.js`. Une entrée de menu
+  de type `page` dont la cible est `/app/<app>/<page>` l'ouvre dans un onglet ; le cadre sert le module
+  (`GET /api/pages/<app>/<page>`, listé par `GET /api/pages`) et lui remet ce dont ses propres pages sont
+  faites — React, les composants communs, le client d'API, le thème, un `call` qui exécute une fonction de
+  l'application — si bien que la page n'importe rien et ressemble au reste. La permission est
+  `page:<app>:<page>`, vérifiée avant de chercher le fichier et demandée aussi à l'entrée de menu ; l'éditeur de
+  rôles la connaît. Le contrat est `frontend/src/pages/AppPage/sdk.ts` (version 1 : des champs s'ajoutent, aucun
+  n'est renommé).
+- **Une requête et un connecteur d'API se dessinent en étapes.** Une requête, une séquence ou une liste de
+  valeurs s'ouvre en trois cartes — **Ce que c'est** (libellé, description), **Instruction** (son premier mot,
+  les bases pour lesquelles elle est écrite, en orange quand elle est vide ou qu'elle écrit sans être marquée
+  modifiable) et **Paramètres** (combien sont déclarés, les `:paramètres` de l'instruction) — chacune montrant
+  sa partie du formulaire ; elles remplacent les onglets du formulaire. Les six onglets d'un connecteur d'API
+  sont les mêmes cartes : l'hôte du serveur, le type d'authentification et ce qui lui manque encore, les
+  environnements, les points d'accès et combien écrivent, les webhooks, le test. La ligne d'un point d'accès a
+  un bouton qui ouvre son éditeur sur toute la fenêtre — pour celui qui a beaucoup d'étapes ou un long corps ;
+  c'est le même éditeur sur le même brouillon, écrit par Enregistrer de la page.
+- **Une analyse exportée par le serveur suit libellé / code / les deux.** Les exports Excel et PDF — les
+  boutons de la page, un tableau de bord d'analyses, l'étape rapport d'un traitement — écrivaient les codes
+  bruts. Ils écrivent maintenant ce que l'analyse montre : le libellé par défaut, le code, ou les deux (deux
+  colonnes dans un tableau, `code · libellé` dans un tableau croisé ou un graphique). Une liste de valeurs est
+  lue avec la permission et le périmètre de l'appelant ; celle qui ne peut pas être lue laisse les codes.
+  **Un rapport planifié d'une analyse ayant une colonne codée montre donc des libellés à partir de cette
+  version** — réglez le champ sur *Code* pour garder les codes.
+- **La page Tests montre les boutons que l'appelant peut utiliser.** Enregistrer et les boutons de création /
+  suppression demandent `tests:edit` ; Exécuter, Enregistrer la référence et « Remplir » demandent `tests:run`
+  (ou `tests:edit`). Un utilisateur qui ne peut que lire n'en voit aucun, et une ligne le dit. Les routes
+  refusaient déjà ; la page ne propose plus ce qu'elles refusent.
 - **Une colonne codée d'une analyse montre son libellé, son code, ou les deux.** Dans l'Explorer, la pastille
   d'un champ lu par une énumération ou une liste de valeurs porte le choix : **Libellé** (comme avant),
   **Code + libellé**, **Code**. Dans le tableau, *Code + libellé* donne deux colonnes comme sur un écran de
@@ -361,8 +391,7 @@
   sur son axe sauf si le champ est réglé sur son code. Le choix est enregistré avec l'analyse et suivi par les
   tuiles des tableaux de bord. Deux conséquences d'une lecture unique pour toutes les vues : le tableau croisé,
   qui montrait les codes bruts, montre maintenant les libellés par défaut, et un code qui est un nombre (un
-  numéro de société) est lu par sa règle dans le tableau aussi, au lieu d'être écrit comme un chiffre. L'export
-  Excel / PDF d'une analyse par le serveur écrit toujours les codes.
+  numéro de société) est lu par sa règle dans le tableau aussi, au lieu d'être écrit comme un chiffre.
 - **Un tableau de bord d'analyses se met en page comme les tableaux de bord.** Dans **Modifier la
   disposition** de l'Explorer, une tuile se déplace par glisser-déposer — sa poignée, une barre montrant où elle
   arrive — et se dimensionne par son coin : des colonnes entières (1 à 4) et la plus proche des trois hauteurs.

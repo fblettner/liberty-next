@@ -273,8 +273,16 @@ async def export_model(
     else:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="give an analysis, a dashboard or a definition")
     window = (body.from_, body.to) if (body.from_ and body.to) else None
+
+    async def lookup_rows(connector: str, query: str, params: dict[str, Any]) -> dict[str, Any]:
+        # The labels of a coded column, as the page reads them: the caller needs the lookup query's
+        # permission (without it the export writes the codes), and their scope applies.
+        from liberty.web.connectors import _run_sql
+        require_permission(principal, f"sql:{connector}:{query}")
+        return await _run_sql(connectors, connector, query, params, language=language, user=principal.username, screens=screens, scope=principal.data_scope)
+
     try:
-        sections = await build_sections(connectors, screens, view, items, window=window, scope=current_scope.get(), lang=language)
+        sections = await build_sections(connectors, screens, view, items, window=window, scope=current_scope.get(), lang=language, labels=lookup_rows)
     except SQLAlchemyError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=db_error_detail(exc, context=f"explorer {app} export failed", verbose=principal.is_superuser, log=_log)) from exc
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in (title or "explorer")).strip("_") or "explorer"

@@ -135,7 +135,12 @@ class ReportStepExecutor:
                 if period and (definition.get("period") or {}).get("field"):
                     definition["period"] = {**definition["period"], "preset": period.get("preset"), "range": period.get("range") or {}}
                 items.append((tile.get("title") or a["name"], definition))
-        sections = await build_sections(connectors, screens, view, items, window=window, scope=scope)
+        async def lookup_rows(connector: str, query: str, params: dict[str, Any]) -> dict[str, Any]:
+            # the labels of the coded columns, read like any query of the report: under the report's scope
+            from liberty.web.connectors import _run_sql
+            return await _run_sql(connectors, connector, query, params, screens=screens, scope=scope)
+
+        sections = await build_sections(connectors, screens, view, items, window=window, scope=scope, labels=lookup_rows)
         if fmt == "pdf":
             settings = st.settings
             branding = getattr(getattr(settings, "reports", None), "branding", None)

@@ -61,6 +61,11 @@ _INCLUDED_IN: dict[str, tuple[str, ...]] = {"nomaflow:view": ("nomaflow:edit",),
 def page_permission(target: str | None) -> str | None:
     """The permission a ``page`` leaf's route needs, or None when the route is open."""
     t = target or ""
+    # a page an application ships (/app/<app>/<page>, liberty/web/app_pages.py): its own permission
+    from liberty.web.app_pages import route_permission
+    shipped = route_permission(t)
+    if shipped:
+        return shipped
     return next((perm for prefix, perm in _PAGE_PERMISSIONS if t == prefix or t.startswith(prefix + "/")), None)
 
 

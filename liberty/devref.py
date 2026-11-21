@@ -262,7 +262,7 @@ _CATEGORIES: dict[str, str] = {
     "connectors": "Workspace", "screens": "Workspace", "menus": "Workspace", "charts": "Workspace",
     "dashboards": "Workspace", "actions": "Workspace", "export": "Workspace", "views": "Workspace",
     "theme": "Workspace", "license": "Workspace", "dictgen": "Workspace",
-    "explorer": "Features", "reports": "Features", "notifications": "Features", "plugins": "Features",
+    "explorer": "Features", "reports": "Features", "notifications": "Features", "plugins": "Features", "app_pages": "Features",
     "jobs": "nomaflow & deployment", "changesets": "nomaflow & deployment", "promotion": "nomaflow & deployment",
     "admin": "Settings", "logs": "Operations", "retention": "Operations", "ai_usage": "Operations", "developer": "Operations", "meta": "Operations",
     "ai": "Assistant",

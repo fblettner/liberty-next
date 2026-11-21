@@ -29,6 +29,7 @@ from liberty.auth.scope import DataScope
 from liberty.connectors.registry import ConnectorRegistry
 from liberty.explorer.chart_svg import Series, fmt_number, render_chart
 from liberty.explorer.engine import AggregateRequest, DetailRequest, ExplorerError, run_aggregate, run_detail
+from liberty.explorer.labels import RunQuery, apply_shows
 from liberty.explorer.model import ModelView
 from liberty.screens.config import ScreensFile
 
@@ -290,22 +291,29 @@ def _chart_rows(result: dict[str, Any], measure_key: str | None, series_key: str
 async def build_sections(
     connectors: ConnectorRegistry, screens: ScreensFile | None, view: ModelView, items: list[tuple[str, dict[str, Any]]], *,
     window: tuple[date, date] | None = None, scope: DataScope | None = None, today: date | None = None, lang: str | None = None,
+    labels: RunQuery | None = None,
 ) -> list[Section]:
     """One section per (title, definition), in the definition's own view; the note under a
-    section in *lang*."""
+    section in *lang*. With *labels* (a runner for the lookup queries) a coded column is written as
+    the definition shows it — its label, its code or both (:mod:`liberty.explorer.labels`);
+    without it, the codes."""
     out: list[Section] = []
+    memo: dict[str, dict[str, str]] = {}
     for title, d in items:
         kind = d.get("view") or "table"
         try:
             if kind == "detail":
                 res = await run_detail(connectors, screens, view, definition_to_detail(d, window=window, today=today), scope=scope)
-                cols = res["columns"]
-                out.append(Section(title, "detail", [c["label"] for c in cols], [[r.get(c["key"]) for c in cols] for r in res["rows"]], truncated=res["total"] > len(res["rows"])))
+                cols, rows = await apply_shows(res["columns"], res["rows"], d, labels, split=True, memo=memo)
+                out.append(Section(title, "detail", [c["label"] for c in cols], [[r.get(c["key"]) for c in cols] for r in rows], truncated=res["total"] > len(res["rows"])))
                 continue
             res = await run_aggregate(connectors, screens, view, definition_to_aggregate(d, window=window, today=today), scope=scope)
         except ExplorerError as exc:
             out.append(Section(title, "error", ["error"], [[str(exc)]]))
             continue
+        # a table has a column for the code and one for the label; a pivot or a chart one cell per value
+        shown_cols, shown_rows = await apply_shows(res["columns"], res["rows"], d, labels, split=kind not in ("pivot", "bar", "line", "pie", "kpi"), memo=memo)
+        res = {**res, "columns": shown_cols, "rows": shown_rows}
         cols = res["columns"]
         note = _note(d, res, window, lang)
         if kind == "pivot":

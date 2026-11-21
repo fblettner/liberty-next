@@ -67,9 +67,12 @@ def _seed_db(db_url: str) -> None:
             await svc.get_or_create_role("admin", permissions=["*"])
             # A non-superuser who may run any plugin, and one who may not.
             await svc.get_or_create_role("plugins", permissions=["plugin:*"])
+            # a role that may open one page an application ships
+            await svc.get_or_create_role("pages", permissions=["page:plg:browse"])
             await svc.create_user("admin", password="adminpw", is_superuser=True, roles=["admin"])
             await svc.create_user("merger", password="mergerpw", roles=["plugins"])
             await svc.create_user("reader", password="readerpw")
+            await svc.create_user("browser", password="browserpw", roles=["pages"])
         await pools.dispose()
     asyncio.run(go())
 
@@ -83,6 +86,12 @@ def env(tmp_path, monkeypatch):
     pkg.mkdir(parents=True)
     (pkg / "__init__.py").write_text("")
     (pkg / "merge.py").write_text(textwrap.dedent(_PLUGIN_MODULE))
+    # two pages the application ships (liberty/web/app_pages.py), and files that are not pages
+    (pkg / "pages").mkdir()
+    (pkg / "pages" / "browse.js").write_text("export default () => null\n")
+    (pkg / "pages" / "other.js").write_text("export default () => 1\n")
+    (pkg / "pages" / "Bad-Name.js").write_text("nope")
+    (pkg / "pages" / "source.tsx").write_text("nope")
     monkeypatch.setenv("LIBERTY_APPS_DIR", str(tmp_path / "config"))
 
     db_url = f"sqlite+aiosqlite:///{tmp_path / 'app.db'}"
@@ -186,3 +195,41 @@ def test_run_bad_kwarg_coercion_is_400(env) -> None:
         )
         assert r.status_code == 400
         assert "coerced" in r.json()["detail"]
+
+
+# ── /api/pages — the pages an application ships ───────────────────────────────────────────────
+def test_pages_are_listed_and_read_by_who_may_open_them(env) -> None:
+    with TestClient(env) as client:
+        assert client.get("/api/pages").status_code == 401 and client.get("/api/pages/plg/browse").status_code == 401
+        admin, browser, reader = _h(client, "admin"), _h(client, "browser"), _h(client, "reader")
+        # a superuser sees every page; a role, the ones it holds; the files that are not pages are not listed
+        assert client.get("/api/pages", headers=admin).json()["pages"] == [
+            {"app": "plg", "page": "browse", "route": "/app/plg/browse"}, {"app": "plg", "page": "other", "route": "/app/plg/other"}]
+        assert [p["page"] for p in client.get("/api/pages", headers=browser).json()["pages"]] == ["browse"]
+        assert client.get("/api/pages", headers=reader).json()["pages"] == []
+        r = client.get("/api/pages/plg/browse", headers=browser)
+        assert r.status_code == 200 and r.text == "export default () => null\n"
+        assert r.headers["content-type"].startswith("text/javascript") and r.headers["cache-control"] == "no-store"
+
+
+def test_a_page_is_refused_before_it_is_looked_up(env) -> None:
+    with TestClient(env) as client:
+        browser, admin = _h(client, "browser"), _h(client, "admin")
+        # no permission: 403 whether the page exists or not (no name told apart)
+        assert client.get("/api/pages/plg/other", headers=browser).status_code == 403
+        assert client.get("/api/pages/plg/nothing", headers=browser).status_code == 403
+        # with it: 404 for what is not a page — a missing one, a name that is not an identifier, a path
+        assert client.get("/api/pages/plg/nothing", headers=admin).status_code == 404
+        assert client.get("/api/pages/plg/Bad-Name", headers=admin).status_code == 404
+        assert client.get("/api/pages/plg/..%2Fmerge", headers=admin).status_code in (404, 422)
+        assert client.get("/api/pages/nope/browse", headers=admin).status_code == 404
+
+
+def test_the_menu_entry_of_a_page_asks_its_permission() -> None:
+    from liberty.web.app_pages import route_permission
+    from liberty.web.menus import page_permission
+
+    assert page_permission("/app/nomajde/crossref") == "page:nomajde:crossref" == route_permission("/app/nomajde/crossref")
+    assert page_permission("/app/nomajde") is None and page_permission("/app/Bad/x") is None and page_permission("/explorer") is None
+    assert page_permission("/nomaflow/runs") == "nomaflow:view"
+

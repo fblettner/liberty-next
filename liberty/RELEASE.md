@@ -299,6 +299,31 @@
   page, with the view, the period, the Top and Run on one line. A saved analysis opens that way, a new one
   on its definition; the button stays at the same place in both states. A table inside a dashboard tile is
   the same grid without its toolbar.
+- **An application can ship its own page.** A configured screen is a grid and a form; what is neither — a
+  structure to browse, a guided flow — an application now ships as a page: one built JavaScript module per page,
+  `plugins/<app>/pages/<page>.js`. A menu entry of type `page` with the target `/app/<app>/<page>` opens it in a
+  tab; the framework serves the module (`GET /api/pages/<app>/<page>`, listed by `GET /api/pages`) and hands it
+  what its own pages are made of — React, the shared components, the API client, the theme, a `call` that runs a
+  function of the application — so the page imports nothing and looks like the rest. The permission is
+  `page:<app>:<page>`, checked before the file is looked up and asked of the menu entry too; the role editor
+  knows it. The contract is `frontend/src/pages/AppPage/sdk.ts` (version 1: fields are added, never renamed).
+- **A query and an API connector are drawn as stages.** A custom query, a sequence or a lookup opens as three
+  cards — **What it is** (label, description), **Statement** (its first word, the databases it is written for,
+  in orange when it is empty or writes without being marked writable) and **Parameters** (how many are
+  declared, the `:placeholders` of the statement) — each showing its part of the form; they replace the form's
+  own tabs. An API connector's six tabs are the same cards: the server's host, the kind of authentication and
+  what it still lacks, the environments, the endpoints and how many write, webhooks, the test. An endpoint's
+  line has a button that opens its editor over the whole window — for one with many steps or a long body; it is
+  the same editor on the same draft, written by the page's Save.
+- **An analysis exported by the server follows label / code / both.** The Excel and PDF exports — the page's
+  buttons, a dashboard of analyses, the report step of a job — wrote the raw codes. They now write what the
+  analysis shows: the label by default, the code, or both (two columns in a table, `code · label` in a pivot or
+  a chart). A lookup is read under the caller's permission and scope; one that cannot be read leaves the codes.
+  **A scheduled report of an analysis with a coded column therefore shows labels from this version on** — set
+  the field to *Code* to keep the codes.
+- **The Tests page shows the buttons the caller may use.** Save, the new / delete buttons need `tests:edit`;
+  Run, Record and "Fill" need `tests:run` (or `tests:edit`). A user who may only read sees none of them, and a
+  line says so. The routes already refused; the page no longer offers what they refuse.
 - **A coded column of an analysis shows its label, its code, or both.** In the Explorer, the chip of a field
   read through an enum or a lookup takes the choice: **Label** (as before), **Code + label**, **Code**. In the
   table, *Code + label* is two columns like on a data screen — `Company (ID)` then `Company` — each sorted,
@@ -306,8 +331,7 @@
   keeps the labels on its axis unless the field is set to its code. The choice is saved with the analysis and
   followed by the dashboard tiles. Two things follow from one reading for every view: the pivot, which showed
   the raw codes, now shows the labels by default, and a code that is a number (a company number) is read
-  through its rule in the table too instead of being printed as a figure. The server's Excel / PDF export of an
-  analysis still writes the codes.
+  through its rule in the table too instead of being printed as a figure.
 - **A dashboard of analyses is laid out like the dashboards.** In the Explorer's **Edit layout**, a tile moves
   by drag and drop — its grip, a bar showing where it lands — and is sized by its corner: whole columns (1–4)
   and the closest of the three heights. The grip takes the keyboard too (arrows move, Shift + arrows size).

@@ -14,6 +14,7 @@ from liberty.web.jobs import router as jobs_router
 from liberty.web.jobs import user_router as user_jobs_router
 from liberty.web.license import router as license_router
 from liberty.web.menus import router as menus_router
+from liberty.web.app_pages import router as app_pages_router
 from liberty.web.plugins import router as plugins_router
 from liberty.web.reports import router as reports_router
 from liberty.web.screens import router as screens_router
@@ -41,6 +42,7 @@ __all__ = [
     "user_jobs_router",
     "license_router",
     "menus_router",
+    "app_pages_router",
     "plugins_router",
     "reports_router",
     "screens_router",

@@ -10,6 +10,8 @@ import { CheckCircle2, CircleDashed, FlaskConical, Flag, Play, Plus, Save, Trash
 import { Banner, Button, Centered, Checkbox, Field, Input, SearchSelect, Textarea, useModals } from '../../common'
 import { api, ApiError } from '../../api/client'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
+import { useAuth } from '../../auth/AuthContext'
+import { hasPermission } from '../../services/permissions'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 import { FlowCanvas, FlowRows } from './flowKit'
 import { PairsField } from '../TableView/PairsField'
@@ -90,6 +92,11 @@ const num = (v: string): number | null => (v.trim() === '' || Number.isNaN(Numbe
 
 export default function TestsBuilder() {
   const { t } = useTranslation()
+  // what the routes allow: reading needs tests:view, playing tests:run, writing tests:edit (which also plays).
+  // A button the caller may not use is not shown — the server would refuse it anyway.
+  const { user } = useAuth()
+  const may = (...perms: string[]) => !!user && (user.is_superuser || perms.some((p) => hasPermission(user.permissions ?? [], p)))
+  const mayEdit = may('tests:edit'), mayRun = may('tests:run', 'tests:edit')
   const modals = useModals()
   const { connectors } = useWorkspace()
   const [suites, setSuites] = useState<SuiteLine[] | null>(null)
@@ -207,7 +214,7 @@ export default function TestsBuilder() {
         </Field>
         <Bar>
           <h3 style={{ flex: 1 }}>{t('tests.expected')}</h3>
-          <Button $variant="ghost" $size="sm" disabled={busy || !step.endpoint} onClick={() => void fill()}><Wand2 size={13} /> {t('tests.fill')}</Button>
+          {mayRun && <Button $variant="ghost" $size="sm" disabled={busy || !step.endpoint} onClick={() => void fill()}><Wand2 size={13} /> {t('tests.fill')}</Button>}
         </Bar>
         <div className="two">
           <Field label={t('tests.outcome')}>
@@ -243,8 +250,8 @@ export default function TestsBuilder() {
           </div>
         </details>
         {seen && seen.problems.length > 0 && <div><h3>{t('tests.found')}</h3><div className="found">{seen.problems.join('\n')}</div></div>}
-        <Bar><Button $variant="ghost" $size="sm" style={{ color: colors.red.main }} onClick={() => { patchCase({ steps: current.steps.filter((_s, i) => i !== stepAt) }); setStepAt(null) }}>
-          <Trash2 size={13} /> {t('tests.deleteStep')}</Button></Bar>
+        {mayEdit && <Bar><Button $variant="ghost" $size="sm" style={{ color: colors.red.main }} onClick={() => { patchCase({ steps: current.steps.filter((_s, i) => i !== stepAt) }); setStepAt(null) }}>
+          <Trash2 size={13} /> {t('tests.deleteStep')}</Button></Bar>}
       </>
     )
   } else if (doc && current) {
@@ -266,8 +273,8 @@ export default function TestsBuilder() {
             {(loaded?.results[current.id] ?? []).slice(0, 8).map((r, i) => <Run key={i} $tone={TONE[r.status] ?? null}>{statusIcon(r.status)}<b>{r.status}</b>{r.mode === 'record' && <span>{t('tests.reference')}</span>}<i>{when(r.at)}</i></Run>)}
           </div>
         )}
-        <Bar><Button $variant="ghost" $size="sm" style={{ color: colors.red.main }} onClick={() => { setDoc({ ...doc, case: doc.case.filter((c) => c !== current) }); setCaseId(null) }}>
-          <Trash2 size={13} /> {t('tests.deleteCase')}</Button></Bar>
+        {mayEdit && <Bar><Button $variant="ghost" $size="sm" style={{ color: colors.red.main }} onClick={() => { setDoc({ ...doc, case: doc.case.filter((c) => c !== current) }); setCaseId(null) }}>
+          <Trash2 size={13} /> {t('tests.deleteCase')}</Button></Bar>}
       </>
     )
   }
@@ -275,7 +282,7 @@ export default function TestsBuilder() {
   return (
     <Page>
       <Left>
-        <Button $variant="ghost" $size="sm" onClick={() => void newSuite()}><Plus size={13} /> {t('tests.newSuite')}</Button>
+        {mayEdit && <Button $variant="ghost" $size="sm" onClick={() => void newSuite()}><Plus size={13} /> {t('tests.newSuite')}</Button>}
         {suites.length === 0 && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('tests.none')}</span>}
         {suites.map((s) => {
           const mine = loaded?.name === s.name
@@ -289,7 +296,7 @@ export default function TestsBuilder() {
                   {statusIcon(c.last?.status)}<span>{c.label || c.id}</span>
                 </CaseRow>
               ))}
-              {mine && <CaseRow type="button" $on={false} onClick={newCase} style={{ color: colors.text.muted }}><Plus size={13} /><span>{t('tests.newCase')}</span></CaseRow>}
+              {mine && mayEdit && <CaseRow type="button" $on={false} onClick={newCase} style={{ color: colors.text.muted }}><Plus size={13} /><span>{t('tests.newCase')}</span></CaseRow>}
               {!mine && s.cases.length === 0 && !s.error && <CaseRow type="button" $on={false} onClick={() => open(s.name)} style={{ color: colors.text.muted }}><span>{t('tests.openSuite')}</span></CaseRow>}
             </div>
           )
@@ -297,13 +304,14 @@ export default function TestsBuilder() {
       </Left>
       <Mid>
         <Bar>
-          <Button $variant="primary" $size="sm" disabled={busy || !dirty} onClick={() => void save()}><Save size={13} /> {t('common.save')}</Button>
-          <Button $variant="ghost" $size="sm" disabled={busy || !current} onClick={() => void run(caseId, 'compare')}><Play size={13} /> {t('tests.runCase')}</Button>
-          <Button $variant="ghost" $size="sm" disabled={busy || !loaded} onClick={() => void run(null, 'compare')}><Play size={13} /> {t('tests.runSuite')}</Button>
-          <Button $variant="ghost" $size="sm" disabled={busy || !loaded} title={t('tests.recordHint')} onClick={() => void run(null, 'record')}><Flag size={13} /> {t('tests.record')}</Button>
-          <Checkbox checked={writes} onChange={setWrites} label={t('tests.allowWrites')} />
+          {mayEdit && <Button $variant="primary" $size="sm" disabled={busy || !dirty} onClick={() => void save()}><Save size={13} /> {t('common.save')}</Button>}
+          {mayRun && <Button $variant="ghost" $size="sm" disabled={busy || !current} onClick={() => void run(caseId, 'compare')}><Play size={13} /> {t('tests.runCase')}</Button>}
+          {mayRun && <Button $variant="ghost" $size="sm" disabled={busy || !loaded} onClick={() => void run(null, 'compare')}><Play size={13} /> {t('tests.runSuite')}</Button>}
+          {mayRun && <Button $variant="ghost" $size="sm" disabled={busy || !loaded} title={t('tests.recordHint')} onClick={() => void run(null, 'record')}><Flag size={13} /> {t('tests.record')}</Button>}
+          {mayRun && <Checkbox checked={writes} onChange={setWrites} label={t('tests.allowWrites')} />}
+          {!mayEdit && <span data-tests-readonly style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t(mayRun ? 'tests.mayRunOnly' : 'tests.mayViewOnly')}</span>}
           <span style={{ flex: 1 }} />
-          {loaded && <Button $variant="ghost" $size="sm" style={{ color: colors.red.main }} onClick={() => void removeSuite()}><Trash2 size={13} /> {t('tests.deleteSuite')}</Button>}
+          {loaded && mayEdit && <Button $variant="ghost" $size="sm" style={{ color: colors.red.main }} onClick={() => void removeSuite()}><Trash2 size={13} /> {t('tests.deleteSuite')}</Button>}
         </Bar>
         {error && <Banner $tone="error">{error}</Banner>}
         {notice && !error && <Banner $tone="ok">{notice}</Banner>}

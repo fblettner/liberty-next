@@ -220,6 +220,7 @@ tests/                    pytest (asyncio auto mode); SQLite fixtures; no live D
 | `/api` | `web/connectors.py` | `GET/POST /api/sql/{c}/{q}` (+ `?_stream=1` NDJSON, `_limit`, `_chunk_size`, screen-aware), `/api/http/{c}/{e}`, `/api/connectors`, `_schemas` / `_schema` introspection, `_import` |
 | `/api` | `web/menus.py`, `web/screens.py`, `web/export.py`, `web/charts.py`, `web/dashboards.py`, `web/actions.py`, `web/license.py`, `web/theme.py` | permission-pruned catalogs: menus, screens (+ dialog / actions resolved), workbook export, charts, dashboards, shared actions, license status, theme |
 | `/api/reports` `/api/views` `/api/plugins` | `web/reports.py`, `web/views.py`, `web/plugins.py` | run / download reports, saved views, invoke app callables |
+| `/api/pages` | `web/app_pages.py` | the pages the APPS ship: `plugins/<app>/pages/<page>.js` (built by the app), listed and served — perm `page:<app>:<page>`; opened at the route `/app/<app>/<page>` (a menu entry of type `page`), loaded by `frontend/src/pages/AppPage/` which hands the module the contract of `sdk.ts` (React, the shared components, api, theme, `call` = a function of the app) |
 | `/api/notifications` `/admin/notify/test` | `web/notifications.py` | my inbox (list, unread count, mark read); a superuser's test send through the dispatcher |
 | `/api/explorer` | `web/explorer.py` | the explorer models the caller may use (perm `explorer:{app}:{model}`), `{app}/{model}/model` with the discovered fields (`?refresh=1`), `POST {app}/query` (aggregate: rows / measures / filters bag / period / sort / limit), `POST {app}/detail` (rows, paged, `drill`), `POST {app}/calc/test`, `GET/PUT {app}/saved/{analyses|dashboards}` + `DELETE …/{id}`, `POST {app}/export` (xlsx / pdf) |
 | `/ai` | `ai/routes.py` | `POST /ai/chat` (SSE), `GET /ai/tools` — perm `ai:chat` |
@@ -347,6 +348,8 @@ pages/Explorer/        the Data Explorer page: index (model, the AnalysisDefinit
                        running a saved analysis); logic in services/explorer.ts (definition ⇄ requests, filter bag,
                        click-to-add), services/explorerPivot.ts (pivot tree, chart shaping, KPI totals), both tested,
                        services/explorerSaved.ts (the saved routes, dashboard shape); shapes in types/explorer.ts
+pages/AppPage/         a page an application ships (index = fetch + import the module, problems said; sdk.ts = THE CONTRACT
+                       handed to it — add fields, never rename; `tabs/pageTabs.appPageOf` / `callableRef`, tested)
 pages/DashboardView/ Chat/ (AiDrawer) Reports/ Notifications/ (the inbox; components/NotificationBell
                        in the header, live via SioContext.subscribeNotifications) ScreenAssistant/ HttpRunner/ Monitoring/ Login/
 services/ types/       no-React helpers (lookups, cells, gridViews, poolSchema, sqlCompletion, aiContext = the

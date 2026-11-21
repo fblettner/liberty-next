@@ -898,6 +898,8 @@ const fr: Resources = {
     never: "jamais",
   },
   tests: {
+    mayRunOnly: 'Vous pouvez jouer ces tests, pas les modifier.',
+    mayViewOnly: 'Vous pouvez lire ces tests, pas les jouer ni les modifier.',
     contains: "Une valeur de la réponse brute contient — chemin, texte",
     present: "Doit contenir quelque chose — un chemin par ligne",
     absent: "Ne doit rien contenir — un chemin par ligne",
@@ -1096,6 +1098,11 @@ const fr: Resources = {
       missingRequired: 'Paramètre requis manquant : {{name}}',
     },
     selectPlaceholder: 'Sélectionner…',
+  },
+  appPage: {
+    missing: 'L\'application {{app}} ne livre pas de page « {{page}} », ou la page n\'est pas construite.',
+    forbidden: 'Vous ne pouvez pas ouvrir cette page (permission page:{{app}}:{{page}}).',
+    broken: 'La page {{app}}/{{page}} n\'a pas pu être dessinée',
   },
   explorer: {
     show: { label: 'Libellé', both: 'Code + libellé', code: 'Code' },
@@ -1986,6 +1993,10 @@ const fr: Resources = {
         add: 'Ajouter un générateur',
       },
       stage: {
+        noAddress: 'pas encore d\'adresse',
+        auth: { none: 'Aucune', basic: 'Utilisateur et mot de passe', bearer: 'Jeton Bearer', api_key: 'Clé d\'API', oauth2: 'OAuth 2' },
+        missing: { username: 'pas encore d\'utilisateur', token: 'ni jeton ni adresse de jeton', tokenEndpoint: 'pas d\'adresse de jeton' },
+        anyEnvironment: 'un serveur pour tous', targets: '{{n}} autre(s) serveur(s)', writable: '{{n}} qui écrivent', notYet: 'pas encore disponible', tryIt: 'essayer un point d\'accès',
         general: "Ce qu'il est",
         inputs: "Entrées",
         call: "L'appel",
@@ -2032,7 +2043,7 @@ const fr: Resources = {
         callableHint: 'Une fonction du plugin d’une application répond à la place d’un appel HTTP — pour ce qu’un seul appel ne peut pas faire (trouver une ligne, la vérifier, puis la modifier). Ses arguments sont les paramètres, ou l’objet JSON que donne le corps une fois ses {{variables}} remplies ; sa réponse est traitée comme une réponse (lignes, champs d’erreur, correspondance de réponse). La méthode et le chemin ne servent pas.',
         writable: 'Modifie des données',
         writableHint: 'Il soumet, crée ou lance quelque chose : l’assistant ne l’appelle qu’avec ai:write et une carte que l’utilisateur accepte',
-        writableTag: 'modifie des données',
+        wide: 'Ouvrir sur toute la fenêtre', wideNote: 'Gardé dans le connecteur en cours de modification : Enregistrer, sur la page Connecteurs, l\'écrit.', writableTag: 'modifie des données',
         body: 'Corps',
         formatJson: 'Formater le JSON',
         bodyHint: 'Utilisez des substituts {{param}} pour les variables',
@@ -2180,6 +2191,7 @@ const fr: Resources = {
       export: 'Exporter',
     },
     connectors: {
+      query: { general: 'Ce que c\'est', sql: 'Instruction', params: 'Paramètres', readOnly: 'lecture seule', declared: '{{n}} déclaré(s)', noneDeclared: 'aucun déclaré', noPlaceholder: 'aucun :paramètre dans l\'instruction' },
       stage: {
         settings: "Réglages",
       },

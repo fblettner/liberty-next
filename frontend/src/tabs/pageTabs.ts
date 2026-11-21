@@ -20,8 +20,24 @@ export const PAGE_TAB_PATHS = [
 /** The Explorer opened on one model: ``/explorer/<app>/<model>`` (a menu link per model). */
 export const EXPLORER_MODEL_PATH = /^\/explorer\/([^/]+)\/([^/]+)$/
 
+/** A page an application ships: ``/app/<app>/<page>`` (liberty/web/app_pages.py — the same names as its `ROUTE`). */
+export const APP_PAGE_PATH = /^\/app\/([a-z0-9][a-z0-9_]*)\/([a-z0-9][a-z0-9_]*)$/
+
 export function isPageTabPath(pathname: string): boolean {
-  return (PAGE_TAB_PATHS as readonly string[]).includes(pathname) || EXPLORER_MODEL_PATH.test(pathname) || libertyPageOf(pathname) !== null
+  return (PAGE_TAB_PATHS as readonly string[]).includes(pathname) || EXPLORER_MODEL_PATH.test(pathname) || APP_PAGE_PATH.test(pathname) || libertyPageOf(pathname) !== null
+}
+
+/** The ``{app, page}`` of an application's page path, else null. */
+export function appPageOf(pathname: string): { app: string; page: string } | null {
+  const m = APP_PAGE_PATH.exec(pathname)
+  return m ? { app: m[1], page: m[2] } : null
+}
+
+/** The function a page asks for, as the server names it: ``module:function`` is the application's own
+ *  (``<app>.module:function``); a reference that already names its package (a dot before the colon) is kept. */
+export function callableRef(app: string, fn: string): string {
+  const [mod = '', name = ''] = fn.split(':')
+  return mod.includes('.') ? `${mod}:${name}` : `${app}.${mod}:${name}`
 }
 
 /** The ``{app, model}`` of an Explorer model path, else null. */
