@@ -1,12 +1,14 @@
 // Visual dashboard builder — a fullscreen editor that shows the REAL widget grid (live charts /
-// KPIs / tables, same renderers DashboardView uses) with edit chrome on each cell: resize (width
-// 1–12 / height in rows), reorder (← →), edit (opens the per-widget WidgetEditorModal — which
-// reuses the chart builder for chart widgets), and delete. Add widgets from the toolbar. Plus the
-// dashboard meta (label / description) and the filter bar. Save persists the whole dashboard.
+// KPIs / tables, same renderers DashboardView uses). A card is MOVED by dragging its grip onto another
+// card (a bar shows on which side it will land) and SIZED by dragging its corner (whole columns, 1–12,
+// and rows); the grip also takes the keyboard (arrows move, Shift + arrows size). Edit opens the
+// per-widget WidgetEditorModal — which reuses the chart builder for chart widgets — and delete removes.
+// Add widgets from the toolbar. Plus the dashboard meta (label / description) and the filter bar. Save
+// persists the whole dashboard. The layout arithmetic is in services/dashLayout.ts, tested.
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Plus, Pencil, Trash2, ChevronLeft, ChevronRight, BarChart3, Hash, Table as TableIcon, LayoutDashboard, List as ListIcon, BarChartHorizontal, FileText, Link2, Workflow } from 'lucide-react'
+import { Plus, Pencil, Trash2, GripVertical, BarChart3, Hash, Table as TableIcon, LayoutDashboard, List as ListIcon, BarChartHorizontal, FileText, Link2, Workflow } from 'lucide-react'
 import { Button, Input, Field, Banner, SearchSelect, useModals, type SearchSelectOption } from '../../common'
 import { api } from '../../api/client'
 import type { QueryResult } from '../../types/connectors'
@@ -24,10 +26,12 @@ import { BarsWidget } from '../DashboardView/BarsWidget'
 import type { DashboardWidget, ChartWidgetWire, KpiWidgetWire, TableWidgetWire, TextWidgetWire, LinksWidgetWire, LinkWire, JobsWidgetWire } from '../../types/dashboards'
 import type { SavedChartSpec } from '../../types/charts'
 import { WidgetEditorModal } from './WidgetEditorModal'
+import { dropSide, dropped, resized, stepped } from '../../services/dashLayout'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 type Raw = Record<string, unknown>
 const ROW_PX = 150
+const GAP_PX = 14
 
 const CloseBtn = styled.button`
   display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
@@ -37,24 +41,39 @@ const CloseBtn = styled.button`
 const MetaRow = styled.div`display: grid; grid-template-columns: 1fr 2fr; gap: 12px;`
 const AddBar = styled.div`display: flex; gap: 8px; align-items: center; flex-wrap: wrap;`
 const Grid = styled.div`
-  display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; grid-auto-rows: ${ROW_PX}px;
+  display: grid; grid-template-columns: repeat(12, 1fr); gap: ${GAP_PX}px; grid-auto-rows: ${ROW_PX}px;
 `
 const Cell = styled.div<{ $cs: number; $rs: number }>`
   position: relative; grid-column: span ${({ $cs }) => $cs}; grid-row: span ${({ $rs }) => $rs};
   min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px;
   border: 1px dashed transparent; border-radius: ${radius.lg};
-  &:hover { border-color: ${colors.blue.border}; }
-  &:hover .chrome { opacity: 1; }
+  &:hover, &[data-sizing='true'] { border-color: ${colors.blue.border}; }
+  &:hover .chrome, &:hover .corner, &[data-sizing='true'] .corner { opacity: 1; }
+  &[data-dragged='true'] { opacity: 0.45; }
+  /* where a dragged card would land: a bar on that side */
+  &[data-drop]::before {
+    content: ''; position: absolute; top: 0; bottom: 0; width: 4px; border-radius: 2px; background: ${colors.blue.main}; z-index: 6;
+  }
+  &[data-drop='before']::before { left: -9px; }
+  &[data-drop='after']::before { right: -9px; }
 `
 const Title = styled.div`font-size: ${fontSize.micro}; color: ${colors.text.muted}; font-weight: 600; letter-spacing: 0.04em; padding: 0 4px; flex-shrink: 0;`
 const Host = styled.div`flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column;`
 const Chrome = styled.div`
-  position: absolute; top: 4px; right: 4px; z-index: 5; display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s;
+  position: absolute; top: 4px; right: 4px; z-index: 5; display: flex; align-items: center; gap: 2px; opacity: 0; transition: opacity 0.12s;
   background: var(--bg-modal); border: 1px solid ${colors.border}; border-radius: ${radius.md}; padding: 2px;
-  & button { border: 0; background: transparent; color: ${colors.text.muted}; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; border-radius: ${radius.sm}; font-size: 10px; font-weight: 700; }
+  & button { border: 0; background: transparent; color: ${colors.text.muted}; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; border-radius: ${radius.sm}; font-size: ${fontSize.micro}; font-family: ${fonts.mono}; }
   & button:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
   & button.del:hover { background: ${colors.red.bg}; color: ${colors.red.main}; }
-  & .sep { width: 1px; background: ${colors.border}; margin: 2px 1px; }
+  & button.grip { cursor: grab; }
+  & button.grip:active { cursor: grabbing; }
+  & .size { padding: 0 5px; font-size: ${fontSize.micro}; font-family: ${fonts.mono}; color: ${colors.text.muted}; }
+  & .sep { width: 1px; align-self: stretch; background: ${colors.border}; margin: 2px 1px; }
+`
+// the corner a card is sized by
+const Corner = styled.div`
+  position: absolute; right: -2px; bottom: -2px; width: 18px; height: 18px; z-index: 5; cursor: nwse-resize; opacity: 0; transition: opacity 0.12s; touch-action: none;
+  border-right: 3px solid ${colors.blue.main}; border-bottom: 3px solid ${colors.blue.main}; border-radius: 0 0 ${radius.lg} 0;
 `
 const Placeholder = styled.div`
   flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px;
@@ -193,12 +212,61 @@ export function DashboardEditorModal({
     })
     return { reached, missed }
   }
-  const resize = (i: number, dCol: number, dRow: number) => setWidgets((ws) => ws.map((w, j) =>
-    j === i ? { ...w, col_span: Math.min(12, Math.max(1, snum(w.col_span, 6) + dCol)), row_span: Math.min(8, Math.max(1, snum(w.row_span, 2) + dRow)) } : w))
+  // ── moving and sizing the cards ──────────────────────────────────────────────────────────────
+  const gridRef = useRef<HTMLDivElement>(null)
+  const dragFrom = useRef<number | null>(null)
+  const [dragged, setDragged] = useState<number | null>(null)
+  const [dropAt, setDropAt] = useState<{ over: number; side: 'before' | 'after' } | null>(null)
+  const [sizing, setSizing] = useState<{ i: number; col_span: number; row_span: number } | null>(null)
+  const spans = (w: Raw) => ({ cs: snum(w.col_span, 6), rs: snum(w.row_span, 2) })
   const move = (i: number, dir: -1 | 1) => setWidgets((ws) => {
     const j = i + dir; if (j < 0 || j >= ws.length) return ws
     const next = [...ws]; [next[i], next[j]] = [next[j], next[i]]; return next
   })
+  const endDrag = () => { dragFrom.current = null; setDragged(null); setDropAt(null) }
+  const onDragOverCell = (i: number, e: React.DragEvent<HTMLDivElement>) => {
+    const from = dragFrom.current
+    if (from == null) return
+    e.preventDefault()
+    const box = e.currentTarget.getBoundingClientRect()
+    const side = dropSide(from, i, e.clientX, box.left, box.width)
+    setDropAt((cur) => (side == null ? null : cur && cur.over === i && cur.side === side ? cur : { over: i, side }))
+  }
+  const onDropCell = (i: number, e: React.DragEvent<HTMLDivElement>) => {
+    const from = dragFrom.current
+    if (from == null) return
+    e.preventDefault()
+    const box = e.currentTarget.getBoundingClientRect()
+    const side = dropSide(from, i, e.clientX, box.left, box.width)
+    if (side) setWidgets((ws) => dropped(ws, from, i, side === 'after'))
+    endDrag()
+  }
+  // the corner: the card follows the pointer in whole columns and rows, its new size written on release
+  const startSizing = (i: number, e: React.PointerEvent<HTMLDivElement>) => {
+    const grid = gridRef.current
+    if (!grid) return
+    e.preventDefault(); e.stopPropagation()
+    const { cs, rs } = spans(widgets[i])
+    const colPx = (grid.getBoundingClientRect().width + GAP_PX) / 12, rowPx = ROW_PX + GAP_PX
+    const x0 = e.clientX, y0 = e.clientY
+    let last = { col_span: cs, row_span: rs }
+    const onMove = (ev: PointerEvent) => { last = resized(cs, rs, ev.clientX - x0, ev.clientY - y0, colPx, rowPx); setSizing({ i, ...last }) }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp)
+      setSizing(null)
+      if (last.col_span !== cs || last.row_span !== rs) patchWidget(i, last)
+    }
+    window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp)
+    setSizing({ i, ...last })
+  }
+  // the grip takes the keyboard too: arrows move the card, Shift + arrows size it
+  const onGripKey = (i: number, e: React.KeyboardEvent) => {
+    const arrow = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key] as [number, number] | undefined
+    if (!arrow) return
+    e.preventDefault()
+    if (e.shiftKey) { const { cs, rs } = spans(widgets[i]); patchWidget(i, stepped(cs, rs, arrow[0], arrow[1])) }
+    else if (arrow[0]) move(i, arrow[0] as -1 | 1)
+  }
   const del = (i: number) => setWidgets((ws) => ws.filter((_, j) => j !== i))
 
   const addWidget = (kind: Kind) => {
@@ -304,27 +372,35 @@ export function DashboardEditorModal({
           {widgets.length === 0 ? (
             <Placeholder style={{ minHeight: 160 }}>{t('settings.dash.noWidgets')}</Placeholder>
           ) : (
-            <Grid>
+            <Grid ref={gridRef}>
               {widgets.map((w, i) => {
                 const kind = widgetType(w)
                 const Icon = KIND_ICON[kind] ?? BarChart3
                 const wire = toWire(w, chartsCatalog, scope)
-                const cs = snum(w.col_span, 6), rs = snum(w.row_span, 2)
+                const live = sizing?.i === i ? sizing : null     // its corner is being dragged
+                const cs = live?.col_span ?? snum(w.col_span, 6), rs = live?.row_span ?? snum(w.row_span, 2)
                 return (
-                  <Cell key={i} $cs={cs} $rs={rs}>
+                  <Cell key={i} $cs={cs} $rs={rs} data-widget={i} data-dragged={dragged === i || undefined} data-sizing={live ? 'true' : undefined}
+                    data-drop={dropAt?.over === i ? dropAt.side : undefined}
+                    onDragOver={(e) => onDragOverCell(i, e)} onDrop={(e) => onDropCell(i, e)}>
                     {sstr(w.label) && <Title>{sstr(w.label)}</Title>}
                     <Chrome className="chrome">
-                      <button title={t('settings.dash.narrower')} onClick={() => resize(i, -1, 0)}>W−</button>
-                      <button title={t('settings.dash.wider')} onClick={() => resize(i, +1, 0)}>W+</button>
-                      <button title={t('settings.dash.shorter')} onClick={() => resize(i, 0, -1)}>H−</button>
-                      <button title={t('settings.dash.taller')} onClick={() => resize(i, 0, +1)}>H+</button>
-                      <span className="sep" />
-                      <button title={t('settings.dash.moveLeft')} onClick={() => move(i, -1)}><ChevronLeft size={13} /></button>
-                      <button title={t('settings.dash.moveRight')} onClick={() => move(i, +1)}><ChevronRight size={13} /></button>
+                      <button className="grip" draggable title={t('settings.dash.drag')} aria-label={t('settings.dash.drag')} data-grip={i}
+                        onDragStart={(e) => {
+                          dragFrom.current = i; setDragged(i)
+                          e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(i))
+                          const cell = e.currentTarget.closest('[data-widget]')
+                          if (cell) e.dataTransfer.setDragImage(cell, 24, 16)
+                        }}
+                        onDragEnd={endDrag} onKeyDown={(e) => onGripKey(i, e)}>
+                        <GripVertical size={13} />
+                      </button>
+                      <span className="size">{cs} × {rs}</span>
                       <span className="sep" />
                       <button title={t('common.edit')} onClick={() => { setEditIdx(i); setNewIdx(null) }}><Pencil size={13} /></button>
                       <button className="del" title={t('common.delete')} onClick={() => del(i)}><Trash2 size={13} /></button>
                     </Chrome>
+                    <Corner className="corner" title={t('settings.dash.size')} data-corner={i} onPointerDown={(e) => startSizing(i, e)} />
                     <Host>
                       {wire ? (
                         wire.type === 'chart' ? <ChartWidget widget={wire} filters={[]} filterValues={{}} />

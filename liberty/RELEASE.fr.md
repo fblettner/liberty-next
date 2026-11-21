@@ -343,11 +343,21 @@
 - **Les longs flux passent à la ligne, et se zooment.** Le flux d'un service, d'un job et d'un point d'accès
   continue sur la ligne suivante au lieu de partir à droite, et chaque canevas a un zoom (− / % / +, gardé par
   nature de flux sur l'appareil).
+- **Tableaux de bord : les cartes se déplacent par glisser-déposer et se dimensionnent par leur coin.** Dans
+  l'éditeur de tableau de bord, la poignée d'une carte se glisse sur une autre carte — une barre montre de
+  quel côté elle se posera — et son coin inférieur droit la dimensionne, la carte suivant le pointeur en
+  colonnes et lignes entières avec sa taille écrite près de la poignée (`6 × 2`). Les huit petits boutons
+  (L− L+ H− H+ ← →) ont disparu ; la poignée prend le clavier à leur place : les flèches déplacent la carte,
+  Maj + flèches la dimensionnent.
 - **La page Pools : une adresse saisie comme une adresse, et une connexion que l'on peut tester.** La ligne
   d'un pool dans la liste dit à quoi il se connecte (`postgresql · hôte:5432 / base`). Le pool choisi est
   dessiné en étapes — **Base de données**, **Compte**, **Schémas**, **Liens de base**, **Réglages fins** —
-  chaque carte disant ce qu'elle contient. L'adresse de la base se saisit en hôte, port, base (ou SID / nom de
-  service Oracle), pilote et options ; l'URL SQLAlchemy en est composée et reste modifiable. Une URL que la
+  chaque carte disant ce qu'elle contient. L'adresse de la base se saisit selon ce que son type demande, sur
+  une ligne : le **type de base**, l'hôte, le port et le seul nom qui dit quelle base — une base, un **nom de
+  service** Oracle (un SID quand l'URL est écrite avec), un fichier SQLite. Choisir un autre type y fait passer
+  le pool : son pilote, son port habituel, et le nom porté d'une base à un nom de service ou l'inverse. Le
+  pilote (une liste), les options et l'URL SQLAlchemy — composée à partir des champs, toujours modifiable —
+  sont repliés sous **Avancé**. Une URL que la
   page ne sait pas lire champ par champ (tout ce qu'elle ne saurait pas réécrire à l'identique) est montrée
   seule et jamais réécrite ; les références `${VAR}` sont gardées telles quelles. Un mot de passe écrit dans
   l'URL est signalé, avec un bouton qui le déplace dans le champ mot de passe chiffré. **Tester la connexion**

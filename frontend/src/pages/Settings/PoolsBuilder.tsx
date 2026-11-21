@@ -9,18 +9,18 @@
 // own form, one group per stage.
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
-import { Save, RefreshCw, Plus, Trash2, Database, Edit3, Undo2, GitBranch, PlugZap, KeyRound, Layers, Link2, SlidersHorizontal } from 'lucide-react'
+import { Save, RefreshCw, Plus, Trash2, Database, Edit3, Undo2, GitBranch, PlugZap, KeyRound, Layers, Link2, SlidersHorizontal, ChevronDown, ChevronRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import {
-  Button, Banner, Centered, Card, FieldLabel, HeaderActions, Input, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals,
+  Button, Banner, Centered, Card, FieldLabel, HeaderActions, Input, SearchSelect, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals,
   type FrameworkEnums, type JsonSchema,
 } from '../../common'
 import type { ConfigSchemas, PoolsDoc } from '../../types/config'
 import { renameKey } from '../../services/keyRename'
 import { validateId } from '../../services/idValidator'
 import {
-  DIALECTS, composeUrl, dialectOf, optionOf, plainPassword, poolFigures, urlParts, withOption, type UrlParts,
+  DIALECTS, DIALECT_LABELS, composeUrl, dialectOf, driversFor, optionOf, plainPassword, poolFigures, targetField, urlParts, withDialect, withOption, type UrlParts,
 } from '../../services/poolUrl'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import StageStrip, { type StageView } from './StageStrip'
@@ -71,6 +71,11 @@ const Cell = styled.div<{ $wide?: boolean }>`
   & > .help { font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans}; }
 `
 const Hint = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans};`
+const Fold = styled.button`
+  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; padding: 2px 0; border: none; background: transparent; cursor: pointer;
+  color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  &:hover { color: ${colors.text.primary}; }
+`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px; text-align: center;`
 
 function Part({ label, help, wide, children }: { label: string; help?: string; wide?: boolean; children: ReactNode }) {
@@ -97,6 +102,7 @@ export default function PoolsBuilder() {
   const [busy, setBusy] = useState(false)
   const [stage, setStage] = useState<PoolStage>('database')
   const [tests, setTests] = useState<Record<string, TestResult | 'running'>>({})
+  const [advanced, setAdvanced] = useState(false)
 
   const load = () => {
     setError(null); setStatus(null)
@@ -122,8 +128,11 @@ export default function PoolsBuilder() {
     const prevDialect = typeof pools?.[name]?.dialect === 'string' ? (pools[name].dialect as string) : ''
     const nextDialect = typeof v.dialect === 'string' ? v.dialect : ''
     const url = typeof v.url === 'string' ? v.url.trim() : ''
-    if (nextDialect && nextDialect !== prevDialect && URL_TEMPLATES[nextDialect] && (!url || TEMPLATE_SET.has(url))) {
-      update(name, { ...v, url: URL_TEMPLATES[nextDialect] })
+    if (nextDialect && nextDialect !== prevDialect) {
+      // another kind of database: an empty pool starts from the kind's template; one already filled keeps its
+      // host, account and database and takes the kind's driver (and port, when it had the usual one)
+      const seeded = URL_TEMPLATES[nextDialect] && (!url || TEMPLATE_SET.has(url))
+      update(name, { ...v, url: seeded ? URL_TEMPLATES[nextDialect] : withDialect(url, nextDialect) })
       return
     }
     update(name, v)
@@ -240,42 +249,70 @@ export default function PoolsBuilder() {
     const kind = parts ? dialectOf(parts.scheme) : ''
     const look = DIALECTS[kind]
     const setParts = (patch: Partial<UrlParts>) => { if (parts) update(name, { ...value, url: composeUrl({ ...parts, ...patch }) }) }
-    if (stage === 'database') return (
-      <StageBody>
-        {formOf(name, 'General', ['dialect'])}
-        {parts && (
+    if (stage === 'database') {
+      // the kind of database: the pool's own setting, else the one its URL says
+      const picked = (typeof value.dialect === 'string' && value.dialect) || kind
+      const kinds = [...new Set([...Object.keys(DIALECTS), ...(picked ? [picked] : [])])]
+      const target = parts ? targetField(parts) : 'database'
+      return (
+        <StageBody>
+          {/* only what this kind of database needs: its address, and the one name that tells which database */}
           <Fields>
-            {kind !== 'sqlite' && (
+            <Part label={t('settings.pools.kind')}>
+              <div data-part="dialect">
+                <SearchSelect value={picked} onChange={(d) => { if (d) onFormChange(name, { ...value, dialect: d }) }}
+                  options={kinds.map((k) => ({ value: k, label: DIALECT_LABELS[k] ?? k }))} />
+              </div>
+            </Part>
+            {parts && target !== 'file' && (
               <>
                 <Part label={t('settings.pools.host')}><Input value={parts.host} data-part="host" onChange={(e) => setParts({ host: e.target.value })} /></Part>
                 <Part label={t('settings.pools.port')}><Input value={parts.port} data-part="port" placeholder={look?.port} onChange={(e) => setParts({ port: e.target.value })} /></Part>
               </>
             )}
-            <Part label={t(`settings.pools.${look?.database ?? 'database'}`)} help={kind === 'oracle' ? t('settings.pools.sidHelp') : undefined}>
-              <Input value={parts.database ?? ''} data-part="database" onChange={(e) => setParts({ database: e.target.value })} style={{ fontFamily: fonts.mono }} />
-            </Part>
-            {kind === 'oracle' && (
+            {parts && target === 'service' && (
               <Part label={t('settings.pools.serviceName')}>
                 <Input value={optionOf(parts.options, 'service_name')} data-part="service_name" style={{ fontFamily: fonts.mono }}
-                  onChange={(e) => { const options = withOption(parts.options, 'service_name', e.target.value); setParts({ options, database: parts.database ?? (options != null ? '' : null) }) }} />
+                  onChange={(e) => setParts({ options: withOption(parts.options, 'service_name', e.target.value), database: '' })} />
               </Part>
             )}
-            <Part label={t('settings.pools.driver')} help={t('settings.pools.driverHelp')}>
-              <Input value={parts.scheme} data-part="scheme" onChange={(e) => setParts({ scheme: e.target.value.trim() || parts.scheme })} style={{ fontFamily: fonts.mono }} />
-            </Part>
-            <Part label={t('settings.pools.options')} help={t('settings.pools.optionsHelp')} wide>
-              <Input value={parts.options ?? ''} data-part="options" onChange={(e) => setParts({ options: e.target.value === '' ? null : e.target.value })} style={{ fontFamily: fonts.mono }} />
-            </Part>
+            {parts && target !== 'service' && (
+              <Part label={t(`settings.pools.${target}`)}>
+                <Input value={parts.database ?? ''} data-part="database" onChange={(e) => setParts({ database: e.target.value })} style={{ fontFamily: fonts.mono }} />
+              </Part>
+            )}
           </Fields>
-        )}
-        {!parts && url && <Banner $tone="info">{t('settings.pools.urlAsIs')}</Banner>}
-        <div>
-          <FieldLabel>{t('settings.pools.url')}</FieldLabel>
-          <Input value={url} data-part="url" onChange={(e) => update(name, { ...value, url: e.target.value })} style={{ fontFamily: fonts.mono }} />
-          <Hint style={{ marginTop: 4 }}>{parts ? t('settings.pools.urlHelp') : t('settings.pools.urlEmptyHelp')}</Hint>
-        </div>
-      </StageBody>
-    )
+          {!parts && url && <Banner $tone="info">{t('settings.pools.urlAsIs')}</Banner>}
+          {!parts && !url && <Hint>{t('settings.pools.urlEmptyHelp')}</Hint>}
+          {/* the rest is rarely touched: folded, unless the URL is one the page shows as it is */}
+          <Fold type="button" data-part="advanced" onClick={() => setAdvanced((v) => !v)}>
+            {advanced || (!parts && !!url) ? <ChevronDown size={13} /> : <ChevronRight size={13} />} {t('settings.pools.advanced')}
+          </Fold>
+          {(advanced || (!parts && !!url)) && (
+            <>
+              {parts && (
+                <Fields>
+                  <Part label={t('settings.pools.driver')}>
+                    <div data-part="scheme">
+                      <SearchSelect value={parts.scheme} allowCustom onChange={(d) => { if (d) setParts({ scheme: d.trim() }) }}
+                        options={driversFor(parts.scheme).map((d) => ({ value: d, label: d, mono: d }))} />
+                    </div>
+                  </Part>
+                  <Part label={t('settings.pools.options')} help={t('settings.pools.optionsHelp')} wide>
+                    <Input value={parts.options ?? ''} data-part="options" onChange={(e) => setParts({ options: e.target.value === '' ? null : e.target.value })} style={{ fontFamily: fonts.mono }} />
+                  </Part>
+                </Fields>
+              )}
+              <div>
+                <FieldLabel>{t('settings.pools.url')}</FieldLabel>
+                <Input value={url} data-part="url" onChange={(e) => update(name, { ...value, url: e.target.value })} style={{ fontFamily: fonts.mono }} />
+                {parts && <Hint style={{ marginTop: 4 }}>{t('settings.pools.urlHelp')}</Hint>}
+              </div>
+            </>
+          )}
+        </StageBody>
+      )
+    }
     if (stage === 'account') return (
       <StageBody>
         {parts && kind !== 'sqlite' && (

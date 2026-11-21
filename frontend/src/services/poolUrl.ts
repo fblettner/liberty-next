@@ -113,3 +113,55 @@ export function poolFigures(pool: Record<string, unknown>): PoolFigures {
     flags: ['trim_strings', 'coalesce_nulls', 'debug_sql', 'echo'].filter((k) => pool[k] === true),
   }
 }
+
+/** The drivers offered for each kind of database (the first is the one a new pool starts with). */
+export const DRIVERS: Record<string, string[]> = {
+  postgresql: ['postgresql+asyncpg', 'postgresql+psycopg'],
+  oracle: ['oracle+oracledb'],
+  mysql: ['mysql+aiomysql', 'mysql+asyncmy'],
+  mariadb: ['mariadb+asyncmy', 'mariadb+aiomysql'],
+  mssql: ['mssql+aioodbc'],
+  sqlite: ['sqlite+aiosqlite'],
+}
+
+/** The drivers to list for a URL's driver: those of its kind of database, and the one it has when it is another. */
+export function driversFor(scheme: string): string[] {
+  const known = DRIVERS[dialectOf(scheme)] ?? []
+  return scheme && !known.includes(scheme) ? [scheme, ...known] : known
+}
+
+/** The URL moved to another kind of database. Its driver becomes that kind's, and its port too when it was the
+ *  usual port of the kind it leaves; the host and the account stay. What names the database follows the kind:
+ *  Oracle is reached by a service name (`/?service_name=X`), the others by a database (`/X`) — the name is
+ *  carried from one form to the other. To or from SQLite (a file, no host) the URL starts again from the kind's
+ *  template. The same URL when it already is of that kind, when the kind is not one the page knows, or when the
+ *  URL is not readable. */
+export function withDialect(url: string, dialect: string): string {
+  const parts = urlParts(url)
+  const target = DIALECTS[dialect]
+  if (!parts || !target) return url
+  const from = dialectOf(parts.scheme)
+  if (from === dialect) return url
+  if (from === 'sqlite' || dialect === 'sqlite') return target.template
+  const port = parts.port === (DIALECTS[from]?.port ?? '') || parts.port === '' ? (parts.host ? target.port : '') : parts.port
+  let { database, options } = parts
+  const service = optionOf(options, 'service_name')
+  if (dialect === 'oracle' && database && !service) { options = withOption(options, 'service_name', database); database = '' }
+  else if (from === 'oracle' && service) { database = database || service; options = withOption(options, 'service_name', '') }
+  return composeUrl({ ...parts, scheme: target.scheme, port, database, options })
+}
+
+/** What names the database in the form, for a kind of database and a URL: Oracle's service name — or its SID
+ *  when the URL is written with one —, a file for SQLite, a database for the others. One field, never two. */
+export type TargetField = 'database' | 'service' | 'sid' | 'file'
+export function targetField(parts: UrlParts): TargetField {
+  const kind = dialectOf(parts.scheme)
+  if (kind === 'sqlite') return 'file'
+  if (kind !== 'oracle') return 'database'
+  return parts.database && !optionOf(parts.options, 'service_name') ? 'sid' : 'service'
+}
+
+/** The kinds of database, as the form names them. */
+export const DIALECT_LABELS: Record<string, string> = {
+  postgresql: 'PostgreSQL', oracle: 'Oracle', mysql: 'MySQL', mariadb: 'MariaDB', mssql: 'SQL Server', sqlite: 'SQLite',
+}

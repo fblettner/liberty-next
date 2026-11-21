@@ -326,6 +326,7 @@ pages/Settings/        one *Builder per config section + the Visual Designer (Sc
                        AccessBuilder (+ Access/: RoleEditor panel, MenuTree inherit|allow|deny, OtherAccess,
                        permissions.ts = strings ⇄ tree model + the backend's glob matcher, ScopeRulesEditor +
                        scopeRules.ts = data-scope rules / attributes helpers, both tested),
+                       DashboardEditorModal (cards moved by drag and drop, sized by their corner: services/dashLayout.ts, tested),
                        PoolsBuilder (a pool as stages — StageStrip, shared with the screen designer —, its URL as fields:
                        services/poolUrl.ts, tested; Test connection = POST /admin/config/pools/test, connectors/db.try_pool),
                        AppBuilder (its sections as a grouped list, the picked one beside: services/appSections.ts, tested),

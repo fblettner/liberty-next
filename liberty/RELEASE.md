@@ -290,11 +290,20 @@
   Deploy folder: check, then deliver.
 - **Long flows wrap, and zoom.** A service's, a job's and an endpoint's flow continue on the next row instead
   of running off to the right, and each canvas has a zoom (− / % / +, kept per kind of flow on the device).
+- **Dashboards: cards are moved by drag and drop, and sized by their corner.** In the dashboard editor a card's
+  grip is dragged onto another card — a bar shows on which side it will land — and its bottom-right corner
+  sizes it, the card following the pointer in whole columns and rows with its size written beside the grip
+  (`6 × 2`). The eight small buttons (W− W+ H− H+ ← →) are gone; the grip takes the keyboard instead: arrows
+  move the card, Shift + arrows size it.
 - **The Pools page: an address typed as an address, and a connection you can test.** A pool's line in the
   list says what it connects to (`postgresql · host:5432 / database`). The picked pool is drawn as its stages
   — **Database**, **Account**, **Schemas**, **Database links**, **Tuning** — each card saying what it holds.
-  The database's address is typed as host, port, database (or Oracle SID / service name), driver and options;
-  the SQLAlchemy URL is composed from them and stays editable. A URL the page cannot read part by part
+  The database's address is typed as what its type needs, on one row: the **database type**, host, port and
+  the one name that tells which database — a database, an Oracle **service name** (a SID when the URL is
+  written with one), a SQLite file. Picking another type moves the pool to it: its driver, its usual port,
+  and the name carried from a database to a service name or back. The driver (a dropdown), the options and
+  the SQLAlchemy URL — composed from the fields, still editable — are folded under **Advanced**. A URL the
+  page cannot read part by part
   (anything it could not put back identically) is shown alone and never rewritten; `${VAR}` references are
   kept as typed. A password written in the URL is flagged, with a button that moves it to the encrypted
   password field. **Test connection** opens one connection with the pool as it is on the page — saved or not

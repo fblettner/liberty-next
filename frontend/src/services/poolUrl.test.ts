@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DIALECTS, composeUrl, optionOf, plainPassword, poolFigures, poolSummary, urlParts, withOption } from './poolUrl'
+import { DIALECTS, DRIVERS, composeUrl, driversFor, optionOf, plainPassword, poolFigures, poolSummary, targetField, urlParts, withDialect, withOption } from './poolUrl'
 
 describe("a pool's URL as parts", () => {
   it('reads the usual URLs and puts them back unchanged', () => {
@@ -63,5 +63,42 @@ describe("what a pool's stages say", () => {
       schemas: ['CO', 'DTA'], dblinks: [], size: 8, overflow: 10, flags: ['trim_strings'] })
     expect(poolFigures({ url: 'postgresql+asyncpg://u:secret@h/db' })).toMatchObject({ passwordSet: false, passwordInUrl: true, size: 5 })
     expect(poolFigures({ url: '', dialect: 'oracle' })).toMatchObject({ dialect: 'oracle', where: '', understood: false })
+  })
+})
+
+describe("a pool's driver", () => {
+  it('lists the drivers of the kind of database, and the one in place when it is another', () => {
+    expect(driversFor('postgresql+asyncpg')).toEqual(['postgresql+asyncpg', 'postgresql+psycopg'])
+    expect(driversFor('postgresql+pg8000')).toEqual(['postgresql+pg8000', 'postgresql+asyncpg', 'postgresql+psycopg'])
+    expect(driversFor('oracle+oracledb')).toEqual(['oracle+oracledb'])
+    expect(driversFor('db2+ibm_db')).toEqual(['db2+ibm_db'])
+    for (const [kind, d] of Object.entries(DIALECTS)) expect(DRIVERS[kind][0], kind).toBe(d.scheme)
+  })
+  it('follows the kind of database: the driver, and the port when it was the usual one', () => {
+    expect(withDialect('postgresql+asyncpg://app@db.example.com:5432/app', 'mysql')).toBe('mysql+aiomysql://app@db.example.com:3306/app')
+    expect(withDialect('postgresql+asyncpg://app@db.example.com:6543/app', 'mysql')).toBe('mysql+aiomysql://app@db.example.com:6543/app')   // a port of its own stays
+    // Oracle is reached by a service name, the others by a database: the name is carried over
+    expect(withDialect('postgresql+asyncpg://app@db.example.com/app', 'oracle')).toBe('oracle+oracledb://app@db.example.com:1521/?service_name=app')
+    expect(withDialect('oracle+oracledb://jde@ora:1521/?service_name=JDEPD&expire_time=2', 'postgresql')).toBe('postgresql+asyncpg://jde@ora:5432/JDEPD?expire_time=2')
+    expect(withDialect('oracle+oracledb://jde@ora:1521/ORCL', 'postgresql')).toBe('postgresql+asyncpg://jde@ora:5432/ORCL')
+    // a file has no host: to or from SQLite the URL starts again from the template
+    expect(withDialect('postgresql+asyncpg://app@h:5432/app', 'sqlite')).toBe('sqlite+aiosqlite:///./database.db')
+    expect(withDialect('sqlite+aiosqlite:///./database.db', 'postgresql')).toBe('postgresql+asyncpg://user@host:5432/dbname')
+  })
+  it('leaves the URL alone when there is nothing to follow', () => {
+    expect(withDialect('postgresql+psycopg://app@h:5432/app', 'postgresql')).toBe('postgresql+psycopg://app@h:5432/app')   // already of that kind: its driver is kept
+    expect(withDialect('postgresql+asyncpg://app@h:5432/app', 'db2')).toBe('postgresql+asyncpg://app@h:5432/app')
+    expect(withDialect('not a url', 'oracle')).toBe('not a url')
+    expect(withDialect('', 'oracle')).toBe('')
+  })
+})
+
+describe('the one field that names the database', () => {
+  it('follows the kind of database', () => {
+    expect(targetField(urlParts('postgresql+asyncpg://u@h:5432/app')!)).toBe('database')
+    expect(targetField(urlParts('oracle+oracledb://u@h:1521/?service_name=X')!)).toBe('service')
+    expect(targetField(urlParts('oracle+oracledb://u@h:1521/')!)).toBe('service')     // a new Oracle pool: a service name
+    expect(targetField(urlParts('oracle+oracledb://u@h:1521/ORCL')!)).toBe('sid')     // written with a SID: kept as one
+    expect(targetField(urlParts('sqlite+aiosqlite:///./database.db')!)).toBe('file')
   })
 })
