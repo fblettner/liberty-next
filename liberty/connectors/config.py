@@ -934,6 +934,17 @@ class SqlConnectorConfig(BaseModel):
 AuthType = Literal["none", "basic", "bearer", "api_key", "oauth2"]
 
 
+class EndpointSource(BaseModel):
+    """Where a generated endpoint comes from — what "Create from…" was asked, kept so the endpoint
+    can be built again when the object it describes changes on the server ("Refresh")."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    generator: str = Field(description="The id of the connector's generator that built it.")
+    candidate: str = Field(description="The object it was built for, as the generator names it.")
+    options: dict[str, Any] = Field(default_factory=dict, description="The answers given when it was created (which columns, which options).")
+
+
 class EndpointDef(BaseModel):
     """A named HTTP endpoint relative to the connector's ``base_url``."""
 
@@ -945,11 +956,14 @@ class EndpointDef(BaseModel):
         description="HTTP method.",
         json_schema_extra={"x_enum_ref": "HTTP_METHOD"},
     )
+    source: EndpointSource | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Set on an endpoint a generator built (\"Create from…\"): what it was built from, for \"Refresh\". Leave it alone.")
+    writable: bool = Field(default=False, description="This endpoint changes something on the server (it submits, creates, runs…). The AI assistant then calls it only through its write tool: the user holds ``ai:write`` and accepts a card in the chat (over MCP, ``[ai] mcp_changes``). Leave off for an endpoint that only reads.")
     path: str = Field(default="", description="Path appended to the connector's base URL. Supports ``{{placeholder}}`` substitution. Use an absolute URL to bypass the base URL.")
     headers: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Headers"}, description="Per-endpoint headers (merged over the connector's defaults). Values support ``{{placeholders}}``.")
     query_params: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Headers"}, description="Query-string parameters. Values support ``{{placeholders}}``.")
     body: str | None = Field(default=None, description="Request body template with ``{{placeholders}}``. For multipart: ``name=value`` (text) or ``name=@path;filename=X;contentType=Y`` (file).")
     content_type: str = Field(default="application/json", description="Content-Type of the request body.")
+    error_fields: list[str] = Field(default_factory=list, json_schema_extra={"x_group": "Response"}, description="Dot-paths into the JSON response where the server puts its errors when it answers 200 all the same (``errors``, ``result.messages``, ``fs_P01012_W01012A.errors``). When one of them holds something, the call is a failure and its error is that content — an action or a job step then stops instead of going on as if it had worked.")
     response_field: str | None = Field(default=None, json_schema_extra={"x_group": "Response"}, description="Dot-path into the JSON response to extract (e.g. ``data.0.id``). Blank returns the whole response.")
     response_map: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Response"}, description="Extract several fields from the response: ``{output_name = dot.path}``.")
     params: list[ParamDef] = Field(default_factory=list, json_schema_extra={"x_group": "Params"}, description="Declared parameters for the ``{{placeholders}}``.")

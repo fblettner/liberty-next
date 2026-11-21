@@ -233,6 +233,50 @@ def _refusal(exc: Exception) -> HTTPException:
     return HTTPException(status.HTTP_403_FORBIDDEN if text.startswith("permission denied") else status.HTTP_409_CONFLICT, detail=text)
 
 
+class ApiRunRequest(BaseModel):
+    """An API endpoint that changes data, called for the user — what the chat's card applies."""
+
+    connector: str = Field(min_length=1)
+    endpoint: str = Field(min_length=1)
+    params: dict[str, Any] = Field(default_factory=dict)
+    dry_run: bool = False
+
+
+@router.post(
+    "/api-run",
+    summary="Call an endpoint that changes data",
+    responses={
+        403: {"description": "Caller lacks ``ai:write`` or ``api:<connector>:<endpoint>``."},
+        404: {"description": "The write tools or the API tool are off (``[ai] write_tools`` / ``api_tool``)."},
+        409: {"description": "The endpoint only reads, a parameter is unknown or its value is refused."},
+    },
+)
+async def api_run(
+    body: ApiRunRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_permission("ai:write"))],
+) -> dict[str, Any]:
+    """Apply what the assistant's `api_run` tool proposed in the chat: call the endpoint as its
+    own route does for this user (`api:<connector>:<endpoint>`, the change-package capture). The
+    answer says whether the other system accepted the call (`success`, `status_code`, `error`)."""
+    from liberty.ai.write_tools import perform_api_run
+    from liberty.screens.save import ScreenWriteError
+
+    _write_context(request, principal)          # the switch ([ai] write_tools)
+    if not request.app.state.settings.ai.api_tool:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="The assistant's API tool is off ([ai] api_tool)")
+    what = f"endpoint={body.connector}.{body.endpoint} params={body.params}"
+    try:
+        out = await perform_api_run(request.app.state, principal, connector=body.connector, endpoint=body.endpoint,
+                                    params=body.params, dry_run=body.dry_run)
+    except ScreenWriteError as exc:
+        await _record_applied(request, principal, "api_run", None, what, body.dry_run, error=str(exc))
+        raise _refusal(exc) from exc
+    failed = None if out.get("success", True) else f"HTTP {out.get('status_code')} {out.get('error') or ''}".strip()
+    await _record_applied(request, principal, "api_run", None, what, body.dry_run, error=failed)
+    return out
+
+
 class JobRunRequest(BaseModel):
     """A job run now for the user — what the chat's card applies."""
 

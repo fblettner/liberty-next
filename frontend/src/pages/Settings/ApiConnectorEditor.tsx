@@ -23,13 +23,14 @@ import { useContext, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import {
-  Activity, ChevronDown, ChevronRight, Plus, Trash2, Wand2,
+  Activity, ChevronDown, ChevronRight, Plus, RefreshCw, Trash2, Wand2,
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
   Banner, Button, Checkbox, FrameworkEnumsContext, Input, Row, SearchSelect, Stack, useModals,
 } from '../../common'
 import { EndpointGeneratorModal, type EndpointGeneratorDef } from './EndpointGeneratorModal'
+import { mergeGenerated, type GeneratedEndpoint } from '../../services/endpointRefresh'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { EndpointBody, EndpointCard, EndpointHead, FieldRow, Hint, SectionHead } from './apiEditorAtoms'
 import ApiEnvironmentsTab from './ApiEnvironmentsTab'
@@ -51,7 +52,13 @@ type Endpoint = {
   query_params?: Record<string, string>
   body?: string | null
   content_type?: string
+  /** The endpoint changes something on the server: the assistant calls it only through its write tool. */
+  writable?: boolean
+  /** Set by "Create from…": what the endpoint was built from, for "Refresh from the server". */
+  source?: { generator: string; candidate: string; options?: Record<string, unknown> } | null
   response_field?: string | null
+  /** Where the server puts its errors when it answers 200 all the same: something there = the call failed. */
+  error_fields?: string[] | null
   response_map?: Record<string, string>
   params?: Array<{ name: string; label?: string | null; default?: string | null; help?: string | null; example?: string | null; choices?: string[] | null }>
 }
@@ -139,6 +146,10 @@ const ParamHelpRow = styled.div`
 `
 const ParamHelp = styled.div`
   grid-column: 1 / -1; color: ${colors.text.muted}; font-size: ${fontSize.micro}; padding: 0 2px 6px; white-space: pre-wrap; word-break: break-word;
+`
+const WritesTag = styled.span`
+  font-family: ${fonts.sans}; font-size: ${fontSize.micro}; color: ${colors.orange.main};
+  border: 1px solid ${colors.orange.main}; border-radius: 999px; padding: 0 7px; margin-left: 4px;
 `
 const GeneratorRow = styled.div`
   display: grid; grid-template-columns: 1fr 1.4fr 2fr 2fr auto; gap: 10px; padding: 2px 0;
@@ -575,6 +586,63 @@ function EndpointsTab({
     setGenerating(false)
   }
   const setGenerators = (next: EndpointGeneratorDef[]) => patch({ generators: next.length ? next : undefined })
+  // "Refresh from the server": a generated endpoint is built again from what it was created from
+  // and merged into the operator's (services/endpointRefresh). Nothing is saved: the list changes,
+  // the builder's Save writes it.
+  const [checking, setChecking] = useState(false)
+  const rebuild = async (ep: Endpoint): Promise<GeneratedEndpoint> => {
+    const r = await api.post<{ endpoint: GeneratedEndpoint }>('/admin/config/api/generate', {
+      connector: connectorName, generator: ep.source?.generator, step: 'build', candidate: ep.source?.candidate, options: ep.source?.options ?? {},
+    })
+    return r.endpoint
+  }
+  const changeList = (changes: string[]) => <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>{changes.map((c) => <li key={c}>{c}</li>)}</ul>
+  const refreshEndpoint = async (idx: number) => {
+    const ep = endpoints[idx]
+    if (!ep?.source) return
+    setChecking(true)
+    try {
+      const { next, changes } = mergeGenerated(ep as unknown as GeneratedEndpoint, await rebuild(ep))
+      if (!changes.length) {
+        await modals.alert({ title: t('settings.api.refresh.title', { name: ep.name }), message: t('settings.api.refresh.upToDate') })
+        return
+      }
+      const ok = await modals.confirm({
+        title: t('settings.api.refresh.title', { name: ep.name }),
+        message: <>{t('settings.api.refresh.changes')}{changeList(changes)}</>,
+        confirmLabel: t('settings.api.refresh.apply'),
+      })
+      if (ok) updateEndpoint(idx, next as unknown as Endpoint)
+    } catch (e) {
+      await modals.alert({ title: t('settings.api.refresh.title', { name: ep.name }), message: e instanceof ApiError ? e.message : String(e), variant: 'danger' })
+    } finally {
+      setChecking(false)
+    }
+  }
+  const generated = endpoints.filter((e) => e.source)
+  const checkGenerated = async () => {
+    setChecking(true)
+    const lines: { name: string; text: string }[] = []
+    try {
+      for (const ep of generated) {
+        try {
+          const { changes } = mergeGenerated(ep as unknown as GeneratedEndpoint, await rebuild(ep))
+          if (changes.length) lines.push({ name: ep.name, text: changes.join(' · ') })
+        } catch (e) {
+          lines.push({ name: ep.name, text: e instanceof ApiError ? e.message : String(e) })
+        }
+      }
+    } finally {
+      setChecking(false)
+    }
+    await modals.alert({
+      title: t('settings.api.refresh.checkTitle'),
+      message: lines.length === 0
+        ? t('settings.api.refresh.allUpToDate', { count: generated.length })
+        : <>{t('settings.api.refresh.someChanged', { count: lines.length })}
+            <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>{lines.map((l) => <li key={l.name}><b>{l.name}</b> — {l.text}</li>)}</ul></>,
+    })
+  }
   return (
     <Stack gap={6}>
       {endpoints.length === 0 && (
@@ -587,6 +655,11 @@ function EndpointsTab({
         {generators.length > 0 && (
           <Button $variant="ghost" $size="sm" onClick={() => setGenerating(true)} title={t('settings.api.generate.hint')}>
             <Wand2 size={13} /> {t('settings.api.generate.button')}
+          </Button>
+        )}
+        {generated.length > 0 && (
+          <Button $variant="ghost" $size="sm" onClick={() => void checkGenerated()} disabled={checking} title={t('settings.api.refresh.checkHint')}>
+            <RefreshCw size={13} /> {t('settings.api.refresh.check', { count: generated.length })}
           </Button>
         )}
         <Button $variant="ghost" $size="sm" onClick={() => setShowGenerators((v) => !v)}>
@@ -630,12 +703,18 @@ function EndpointsTab({
               <MethodPill $tone={ep.method ?? 'GET'}>{ep.method ?? 'GET'}</MethodPill>
               <span className="name">{ep.name || '(unnamed)'}</span>
               {ep.label && <span style={{ color: colors.text.muted, fontFamily: fonts.sans }}>· {ep.label}</span>}
+              {ep.writable && <WritesTag title={t('settings.api.endpoint.writableHint')}>{t('settings.api.endpoint.writableTag')}</WritesTag>}
               <span className="grow" />
               <Trash2 size={13} style={{ color: colors.text.muted }} onClick={(e) => { e.stopPropagation(); void removeEndpoint(i) }} />
             </EndpointHead>
             {open && (
               <EndpointBody>
-                <EndpointEditor value={ep} onChange={(v) => updateEndpoint(i, v)} />
+                <EndpointEditor
+                  value={ep} onChange={(v) => updateEndpoint(i, v)}
+                  sourceLabel={ep.source ? `${generators.find((g) => g.id === ep.source?.generator)?.label ?? ep.source.generator} — ${ep.source.candidate}` : undefined}
+                  onRefresh={ep.source ? () => void refreshEndpoint(i) : undefined}
+                  refreshing={checking}
+                />
               </EndpointBody>
             )}
           </EndpointCard>
@@ -649,7 +728,14 @@ function EndpointsTab({
 }
 
 // ── per-endpoint editor ────────────────────────────────────────────────────────────────────
-function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: Endpoint) => void }) {
+function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }: {
+  value: Endpoint
+  onChange: (v: Endpoint) => void
+  /** A generated endpoint: what it was created from, and the refresh from the server. */
+  sourceLabel?: string
+  onRefresh?: () => void
+  refreshing?: boolean
+}) {
   const { t } = useTranslation()
   const set = (p: Partial<Endpoint>): void => {
     const next: Record<string, unknown> = { ...value }
@@ -682,6 +768,17 @@ function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: En
 
   return (
     <Stack gap={4}>
+      {sourceLabel && (
+        <FieldRow>
+          <label>{t('settings.api.refresh.source')}</label>
+          <Row gap={10}>
+            <span style={{ color: colors.text.secondary, fontSize: fontSize.sm }}>{sourceLabel}</span>
+            <Button $variant="ghost" $size="sm" onClick={onRefresh} disabled={refreshing} title={t('settings.api.refresh.hint')}>
+              <RefreshCw size={13} /> {t('settings.api.refresh.button')}
+            </Button>
+          </Row>
+        </FieldRow>
+      )}
       <FieldRow>
         <label>{t('settings.api.endpoint.name')}</label>
         <Row gap={10}>
@@ -726,6 +823,14 @@ function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: En
         />
       </FieldRow>
       <FieldRow>
+        <label>{t('settings.api.endpoint.writable')}</label>
+        <Checkbox
+          checked={value.writable === true}
+          onChange={(v: boolean) => set({ writable: v ? true : undefined })}
+          label={t('settings.api.endpoint.writableHint')}
+        />
+      </FieldRow>
+      <FieldRow>
         <label>{t('settings.api.endpoint.contentType')}</label>
         <SearchSelect
           value={value.content_type ?? 'application/json'}
@@ -764,6 +869,22 @@ function EndpointEditor({ value, onChange }: { value: Endpoint; onChange: (v: En
             set({ query_params: queryFromString(e.target.value) })
           }}
           placeholder="pageSize={{pageSize}}&page={{page}}"
+        />
+      </FieldRow>
+      <FieldRow>
+        <label title={t('settings.api.endpoint.errorFieldsHint')}>{t('settings.api.endpoint.errorFields')}</label>
+        <Input
+          value={(value.error_fields ?? []).join(', ')}
+          onChange={(e) => {
+            const list = e.target.value.split(',').map((x) => x.trim())
+            set({ error_fields: list.some((x) => x) ? list.filter((x, k) => x || k === list.length - 1) : undefined })
+          }}
+          onBlur={() => {
+            const clean = (value.error_fields ?? []).filter((x) => x)
+            if (clean.length !== (value.error_fields ?? []).length) set({ error_fields: clean.length ? clean : undefined })
+          }}
+          placeholder="errors, result.messages"
+          title={t('settings.api.endpoint.errorFieldsHint')}
         />
       </FieldRow>
       <FieldRow>

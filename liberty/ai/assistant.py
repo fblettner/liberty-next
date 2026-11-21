@@ -58,7 +58,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "2. sql_query is read-only. Data changes only through a screen, when the tools are offered "
     "to you: screen_form first, then screen_action when the screen has an action for what the "
     "user asks (\"Close\", \"Validate\"…), else screen_write for one record. A job is run with "
-    "job_run, after job_form. Only for what the user asked: say what you are about to do, one "
+    "job_run, after job_form. An API endpoint marked changes_data is called with api_run. Only for what the user asked: say what you are about to do, one "
     "record or one run at a time, and when it is refused give the reason instead of trying "
     "another way. Without these tools, explain that you can only read.\n"
     "3. If a tool fails, tell the user the tool name, the input you tried, and the error "
@@ -570,7 +570,9 @@ def build_assistant(
         if settings.ops_tools:
             registry.add(*build_ops_tools(state))
         if settings.write_tools:
-            registry.add(*build_write_tools(state))
+            # api_run (an endpoint that changes data) goes with the API tool: without it the assistant
+            # does not see the endpoints at all
+            registry.add(*build_write_tools(state, include_api=settings.api_tool))
         if settings.app_tools:
             # read at call time: a reload of ai.toml is seen without rebuilding the assistant
             registry.provider = app_tools_provider(state, allowed=settings.allowed_connectors or None)

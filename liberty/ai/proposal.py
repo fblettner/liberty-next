@@ -23,6 +23,7 @@ ProposalKind = Literal[
     "connector_queries",   # add/update queries on a SQL connector in connectors.toml
     "screen",              # add/replace a screen in screens.toml
     "menu_item",           # append a menu item to a [menus.<app>] tree
+    "api_run",             # an API endpoint that changes data, called for the user (liberty.ai.write_tools) — applied by POST /ai/api-run
     "job_run",             # a nomaflow job run now for the user (liberty.ai.write_tools) — applied by POST /ai/job-run
     "screen_write_many",   # several records of one screen, one operation (liberty.ai.write_tools) — applied by POST /ai/screen-write-many
     "screen_action",       # one action of a screen run on a record (liberty.ai.write_tools) — applied by POST /ai/screen-action

@@ -348,8 +348,10 @@ class APIConnector:
                     "label": e.label,
                     "description": e.description,
                     "method": e.method.upper(),
+                    "writable": e.writable,
                     "path": e.path,
                     "content_type": e.content_type,
+                    "error_fields": list(e.error_fields),
                     "response_field": e.response_field,
                     "response_map": e.response_map,
                     "params": [
@@ -456,6 +458,16 @@ class APIConnector:
             return {self.config.auth_api_key_header or "X-Api-Key": token}
         return {}
 
+    def preview(self, endpoint_name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """What :meth:`call` would send, without sending it: the method, the address and the
+        parameters as they would be filled (defaults, allowed values). Raises
+        :class:`ApiParamError` on a value :meth:`call` would refuse — a check before a card."""
+        endpoint = self.get_endpoint(endpoint_name)
+        merged = self._merge_params(endpoint, params)
+        url = self._resolve_url(substitute_path(endpoint.path, merged))
+        return {"method": endpoint.method.upper(), "url": url, "writable": endpoint.writable,
+                "params": {p.name: merged.get(p.name) for p in endpoint.params}}
+
     # -- call -------------------------------------------------------------- #
 
     async def call(self, endpoint_name: str, params: dict[str, Any] | None = None, *, untrusted: bool = False) -> ApiResult:
@@ -523,6 +535,8 @@ class APIConnector:
         except ValueError:
             parsed = None
         ok = 200 <= resp.status_code < 300
+        # a server that answers 200 with its errors inside (a form that refused the save): a failure
+        refused = _errors_in(parsed, endpoint.error_fields) if (ok and parsed is not None) else None
         extracted = extract_path(parsed, endpoint.response_field) if (ok and parsed is not None) else None
         mapped = (
             {name: extract_path(parsed, path) for name, path in endpoint.response_map.items()}
@@ -532,14 +546,14 @@ class APIConnector:
         return ApiResult(
             connector=self.name,
             endpoint=endpoint_name,
-            success=ok,
+            success=ok and refused is None,
             status_code=resp.status_code,
             url=str(resp.request.url),
             body=body,
             json=parsed,
             extracted=extracted,
             mapped=mapped,
-            error=None if ok else f"HTTP {resp.status_code}",
+            error=refused if ok else f"HTTP {resp.status_code}",
             duration_ms=duration_ms,
         )
 
@@ -598,6 +612,35 @@ def _parse_multipart(
         else:
             data[name] = substitute(rest, params)
     return data, files
+
+
+_ERROR_KEYS = ("TITLE", "title", "message", "MESSAGE", "alphaDescription", "DESC", "desc", "description", "error", "detail", "text")
+
+
+def _error_text(item: Any) -> str:
+    """One error of a response, as a line: its title / message when it is an object, else itself."""
+    if isinstance(item, dict):
+        for key in _ERROR_KEYS:
+            if item.get(key) not in (None, ""):
+                where = item.get("CONTROLTITLE") or item.get("field") or item.get("ALIAS")
+                return f"{item[key]}" + (f" ({where})" if where and str(where) not in str(item[key]) else "")
+        return json.dumps(item, ensure_ascii=False, default=str)[:300]
+    return str(item)
+
+
+def _errors_in(parsed: Any, paths: list[str]) -> str | None:
+    """The errors a response carries at *paths* (an endpoint's ``error_fields``), as one text —
+    ``None`` when every path is empty, absent, false or zero."""
+    found: list[str] = []
+    for path in paths:
+        value = extract_path(parsed, path)
+        if value in (None, "", [], {}, False, 0):
+            continue
+        for item in value if isinstance(value, list) else [value]:
+            text = _error_text(item).strip()
+            if text and text not in found:
+                found.append(text)
+    return "; ".join(found)[:2000] if found else None
 
 
 def _stringify(value: Any) -> str | None:

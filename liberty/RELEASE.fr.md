@@ -58,7 +58,35 @@
   Le générateur appartient à l'application (une fonction `j_` sous plugins/, appelée en trois étapes :
   `search`, `options`, `build`) ; le framework l'exécute sur le connecteur enregistré
   (`POST /admin/config/api/generate`, super-utilisateur) et valide le point d'accès construit. Les générateurs
-  du connecteur se modifient en bas de l'onglet Points d'accès.
+  du connecteur se modifient depuis l'onglet Points d'accès.
+  Un point d'accès généré retient ce à partir de quoi il a été créé : **Actualiser depuis le serveur**, sur le
+  point d'accès, le reconstruit et montre ce qui change avant de l'appliquer — l'adresse, le corps, la liste
+  des paramètres suivent le serveur ; votre nom, votre libellé, votre description et ce que vous avez écrit
+  sur un paramètre conservé sont gardés. **Vérifier les générés** interroge le serveur pour chaque point
+  d'accès généré et liste ceux qui ne correspondent plus. Les contrôles d'intégrité signalent un point d'accès
+  généré dont le générateur n'est plus déclaré sur le connecteur.
+
+- **Assistant IA : un point d'accès API qui modifie des données ne s'appelle pas comme un point d'accès de
+  lecture.** Avec l'outil API activé (`[ai] api_tool`), `api_call` appelait tout point d'accès autorisé à
+  l'utilisateur — un état soumis, une orchestration lancée — sans carte, sans `ai:write`, et en MCP sans
+  `[ai] mcp_changes`. Un point d'accès indique maintenant qu'il **modifie des données** (une case à cocher
+  dans l'éditeur du point d'accès, `writable = true` ; une étiquette « modifie des données » dans la liste) :
+  - `api_call` le refuse et le liste avec `changes_data` ;
+  - un nouvel outil, **`api_run`**, l'appelle — proposé quand `[ai] api_tool` et `[ai] write_tools` sont
+    tous deux activés, à un utilisateur ayant `ai:write` et la permission du point d'accès
+    `api:<connecteur>:<point d'accès>`. Dans le chat Liberty, il contrôle tout (le point d'accès, la
+    permission, chaque valeur) et propose une **carte** ; rien n'est envoyé tant que l'utilisateur ne l'applique
+    pas (`POST /ai/api-run`). En MCP il effectue l'appel, et demande `[ai] mcp_changes` ;
+  - l'appel figure dans le journal d'usage comme les autres modifications faites par l'assistant.
+  Un point d'accès non marqué est traité comme une lecture, comme avant : **marquez les points d'accès qui
+  écrivent** sur vos connecteurs API.
+
+- **Connecteurs API : un serveur qui répond 200 avec ses erreurs à l'intérieur.** Certains serveurs signalent un
+  refus dans le corps d'une réponse réussie (un formulaire JD Edwards qui refuse un enregistrement répond 200
+  avec une liste `errors`). L'appel était alors un succès pour Liberty : le volet de test l'indiquait, une
+  action passait à l'étape suivante. Un point d'accès nomme maintenant ses **champs d'erreur** (chemins à
+  points, dans l'éditeur du point d'accès) : quand l'un d'eux contient quelque chose, l'appel est un échec et
+  son erreur est ce contenu (« Alpha Name Cannot Be Blank »). La réponse complète reste retournée.
 
 ## 7.0.83 — 2026-11-19
 

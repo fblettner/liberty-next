@@ -36,7 +36,7 @@ CHANNEL_MCP = "mcp"
 # this is the list of what was changed through the assistant, by whom and on which record.
 CHANNEL_APPLY = "apply"
 # The tools that save something: called over MCP they ARE the change (in the chat they propose).
-CHANGE_TOOLS = frozenset({"screen_write", "screen_write_many", "screen_action", "job_run", "explorer_save_analysis", "explorer_save_dashboard"})
+CHANGE_TOOLS = frozenset({"screen_write", "screen_write_many", "screen_action", "job_run", "api_run", "explorer_save_analysis", "explorer_save_dashboard"})
 CHANGES_MAX = 200       # the most changes the summary lists (the newest)
 
 _SUMMARY_MAX = 200     # a tool's input summary, as kept

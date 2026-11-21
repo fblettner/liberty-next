@@ -374,6 +374,25 @@ def _check_homes(state: Any, idx: _Index, out: list[Issue]) -> None:
                              f"connector '{conn}' home → menu item '{home}' does not exist", _connector_deep_link(conn)))
 
 
+def _check_generated_endpoints(state: Any, idx: _Index, out: list[Issue]) -> None:
+    """An endpoint built by "Create from…" names the generator it came from: if the connector no
+    longer declares it, the endpoint still works but can no longer be refreshed from the server.
+    (Whether the object it describes has changed there is asked of the server — the connector
+    editor's "Check generated endpoints" — not here: this check never leaves the configuration.)"""
+    connectors = getattr(state, "connectors", None)
+    if connectors is None:
+        return
+    for name in connectors.names():
+        cfg = getattr(connectors.get(name), "config", None)
+        declared = {g.id for g in getattr(cfg, "generators", None) or []}
+        for ep in getattr(cfg, "endpoints", None) or []:
+            source = getattr(ep, "source", None)
+            if source is not None and source.generator not in declared:
+                out.append(Issue("warning", "Generated endpoint without its generator",
+                                 f"endpoint '{name}.{ep.name}' was created by the generator '{source.generator}', which the connector no "
+                                 "longer declares — it cannot be refreshed from the server", _connector_deep_link(name)))
+
+
 def _check_api_targets(state: Any, idx: _Index, out: list[Issue]) -> None:
     """An API connector with per-pool ``targets`` (AIS per JDE environment): a pool of its
     environments without a target is refused at call time, a target on an unknown pool never
@@ -554,6 +573,7 @@ def check_integrity(state: Any) -> list[Issue]:
     _check_dashboards_charts(state, idx, out)
     _check_homes(state, idx, out)
     _check_api_targets(state, idx, out)
+    _check_generated_endpoints(state, idx, out)
     _check_unused_connectors(state, idx, out)
     _check_orphan_screens(state, idx, out)
     _check_unused_queries(state, idx, out)

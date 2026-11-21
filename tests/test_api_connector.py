@@ -491,3 +491,33 @@ async def test_a_parameter_with_choices_is_checked_and_a_blank_one_takes_its_def
         assert refused.success is False and "is not one of table, view" in (refused.error or "") and len(sent) == 2
     finally:
         await conn.aclose()
+
+
+@pytest.mark.asyncio
+async def test_errors_inside_a_200_answer_make_the_call_a_failure() -> None:
+    answers = [
+        {"fs_F": {"errors": [{"TITLE": "Error: Alpha Name Cannot Be Blank", "CONTROLTITLE": "Alpha Name", "DESC": "long text"},
+                             {"TITLE": "Error: Blanks Invalid", "CONTROLTITLE": "Alpha Name"}], "warnings": []}, "sysErrors": []},
+        {"fs_F": {"errors": [], "warnings": [{"TITLE": "only a warning"}]}, "sysErrors": []},
+        {"fs_F": {"errors": []}, "sysErrors": ["session lost"]},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=answers.pop(0))
+
+    cfg = ApiConnectorConfig(type="api", base_url="https://api.test", endpoints=[
+        EndpointDef(name="save", method="POST", path="/form", body="{}", error_fields=["fs_F.errors", "sysErrors"], response_field="fs_F.errors"),
+    ])
+    conn = _connector(cfg, handler)
+    try:
+        refused = await conn.call("save")
+        assert refused.success is False and refused.status_code == 200
+        # the field is named once: not repeated when the message already says it
+        assert refused.error == "Error: Alpha Name Cannot Be Blank; Error: Blanks Invalid (Alpha Name)"
+        assert refused.json["fs_F"]["warnings"] == []                 # the whole answer is still there
+        assert (await conn.call("save")).success is True               # a warning is not an error field here
+        lost = await conn.call("save")
+        assert lost.success is False and lost.error == "session lost"
+        assert conn.describe()["endpoints"][0]["error_fields"] == ["fs_F.errors", "sysErrors"]
+    finally:
+        await conn.aclose()

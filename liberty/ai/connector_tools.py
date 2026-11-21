@@ -122,14 +122,16 @@ def build_connector_tools(
         if desc["type"] == "sql":
             return [
                 _compact({"name": q["name"], "label": q.get("label"), "description": q.get("description"),
-                          "params": q.get("params"), "bind_params": q.get("bind_params")})
+                          "params": [_compact(p) for p in q.get("params") or []], "bind_params": q.get("bind_params")})
                 for q in flatten_query_metas(desc)
                 if not q.get("writable", False) and may(f"sql:{desc['name']}:{q['name']}")
             ]
         if include_api and desc["type"] == "api":
             return [
                 _compact({"name": e["name"], "label": e.get("label"), "description": e.get("description"),
-                          "method": e.get("method"), "params": e.get("params")})
+                          "method": e.get("method"), "params": [_compact(p) for p in e.get("params") or []],
+                          # an endpoint that changes data is called with api_run, not api_call
+                          "changes_data": True if e.get("writable") else None})
                 for e in desc["endpoints"] if may(f"api:{desc['name']}:{e['name']}")
             ]
         return []
@@ -301,7 +303,8 @@ def build_connector_tools(
         return out
 
     async def api_call(endpoint: str, connector: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Call a named endpoint on a configured API connector.
+        """Call a named endpoint on a configured API connector — one that only reads. An
+        endpoint list_connectors marks ``changes_data`` is called with api_run instead.
 
         Endpoints and their auth are predefined in the connector config; you only
         supply parameter values. Call list_connectors first for the names.
@@ -313,6 +316,9 @@ def build_connector_tools(
         """
         require(f"api:{connector}:{endpoint}", f"the endpoint {connector}.{endpoint}")
         conn = _api(connector)
+        if conn.get_endpoint(endpoint).writable:
+            raise ValueError(f"{connector}.{endpoint} changes data (changes_data): it is called with api_run, which the user confirms — "
+                             "if api_run is not among your tools, tell the user you can only read here")
         result = await conn.call(endpoint, params or {}, untrusted=True)
         return result.to_dict()
 

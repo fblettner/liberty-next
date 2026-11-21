@@ -110,6 +110,20 @@ def test_the_three_steps_build_an_endpoint_the_editor_can_add(env) -> None:
         assert endpoint["name"] == "thing_T1" and endpoint["method"] == "POST" and endpoint["path"] == "/things"
         assert endpoint["body"] == '{"a": "{{A}}", "b": "{{B}}"}' and [p["name"] for p in endpoint["params"]] == ["A", "B"]
         assert "content_type" not in endpoint
+        # where it comes from is kept on it, for "Refresh"
+        assert endpoint["source"] == {"generator": "thing", "candidate": "T1", "options": {"fields": ["a", "b"]}}
+
+
+def test_a_generated_endpoint_whose_generator_is_gone_is_reported(env) -> None:
+    from liberty.connectors.config import EndpointDef, EndpointSource
+    from liberty.web.integrity import check_integrity
+
+    with TestClient(env) as client:
+        cfg = client.app.state.connectors.api("remote").config
+        cfg.endpoints.append(EndpointDef(name="ok", path="/a", source=EndpointSource(generator="thing", candidate="T1")))
+        cfg.endpoints.append(EndpointDef(name="orphan", path="/b", source=EndpointSource(generator="removed", candidate="T9")))
+        found = [i.message for i in check_integrity(client.app.state) if i.category == "Generated endpoint without its generator"]
+        assert len(found) == 1 and "remote.orphan" in found[0] and "'removed'" in found[0]
 
 
 def test_it_is_for_superusers_and_says_what_went_wrong(env) -> None:

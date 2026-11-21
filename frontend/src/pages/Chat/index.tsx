@@ -482,6 +482,26 @@ export default function Chat({ onClose }: { onClose?: () => void }) {
       }
       return
     }
+    if (proposal.kind === 'api_run') {
+      // An API endpoint that changes data: the server calls it as the endpoint's own route does for
+      // this user. The assistant is told whether the other system accepted the call.
+      try {
+        const p = proposal.payload
+        const r = await api.post<{ success?: boolean; status_code?: number; error?: string | null; result?: unknown }>(
+          '/ai/api-run', { connector: p.connector, endpoint: p.endpoint, params: p.params ?? {} },
+        )
+        const failed = r.success === false ? ('HTTP ' + String(r.status_code ?? '') + ' ' + (r.error ?? '')).trim() : ''
+        updateProposal(proposal, failed ? { state: 'error', error: failed } : { state: 'applied' })
+        const answer = JSON.stringify(r.result ?? null)
+        const outcome = failed
+          ? 'FAILED: ' + failed + '. Tell the user exactly this.'
+          : 'accepted (HTTP ' + String(r.status_code ?? '') + '). Answer: ' + (answer.length > 1500 ? answer.slice(0, 1500) + '…' : answer)
+        await runTurn('Applied: ' + toolName + ' (' + proposal.summary + ') — ' + outcome + ' Continue with the next step.', false)
+      } catch (e) {
+        updateProposal(proposal, { state: 'error', error: e instanceof ApiError ? e.message : String(e) })
+      }
+      return
+    }
     if (proposal.kind === 'screen_write_many') {
       // Several records of one screen on one card: all checked again, then written in order. A list
       // that stops part-way stays on the card as an error, and the assistant is told how far it went.

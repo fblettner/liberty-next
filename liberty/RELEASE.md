@@ -46,8 +46,33 @@
   `api:<connector>:<endpoint>`, so a role can be allowed one report or one orchestration, not all of them.
   The generator is the application's (a `j_` function under plugins/, called in three steps: `search`,
   `options`, `build`); the framework runs it against the saved connector (`POST /admin/config/api/generate`,
-  superuser) and validates the endpoint it built. The connector's generators are edited at the bottom of the
-  Endpoints tab.
+  superuser) and validates the endpoint it built. The connector's generators are edited from the Endpoints
+  tab.
+  A generated endpoint remembers what it was created from: **Refresh from the server**, on the endpoint,
+  builds it again and shows what changes before applying it — the address, the body, which parameters exist
+  follow the server; your name, label, description and what you wrote on a parameter that stays are kept.
+  **Check generated** asks the server for every generated endpoint and lists those that no longer match. The
+  integrity checks warn about a generated endpoint whose generator the connector no longer declares.
+
+- **AI assistant: an API endpoint that changes data is not called like one that reads.** With the API tool on
+  (`[ai] api_tool`), `api_call` called any endpoint the user was allowed — a report submitted, an orchestration
+  run — with no card, without `ai:write`, and over MCP without `[ai] mcp_changes`. An endpoint now says it
+  **changes data** (a checkbox in the endpoint editor, `writable = true`; a "changes data" tag in the list):
+  - `api_call` refuses it and lists it as `changes_data`;
+  - a new tool, **`api_run`**, calls it — offered when both `[ai] api_tool` and `[ai] write_tools` are on, to
+    a user holding `ai:write` and the endpoint's own `api:<connector>:<endpoint>`. In the Liberty chat it
+    checks everything (the endpoint, the permission, each value) and proposes a **card**; nothing is sent until
+    the user applies it (`POST /ai/api-run`). Over MCP it makes the call, and needs `[ai] mcp_changes`;
+  - the call is in the usage record like the other changes made through the assistant.
+  An endpoint not marked is treated as a read, as before: **mark the endpoints that write** on your API
+  connectors.
+
+- **API connectors: a server that answers 200 with its errors inside.** Some servers report a refusal in the
+  body of a successful answer (a JD Edwards form that refuses a save answers 200 with an `errors` list).
+  The call was then a success for Liberty: the test pane said so, an action went on to its next step. An
+  endpoint now names its **error fields** (dot-paths, in the endpoint editor): when one of them holds
+  something, the call is a failure and its error is that content ("Alpha Name Cannot Be Blank"). The whole
+  answer is still returned.
 
 ## 7.0.83 — 2026-11-19
 

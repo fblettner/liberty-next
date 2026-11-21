@@ -175,4 +175,7 @@ async def generate_api_endpoint(body: EndpointGenerateBody, request: Request, _:
         endpoint = EndpointDef.model_validate(out.get("endpoint"))
     except ValidationError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"{generator.callable} built an invalid endpoint: {exc}") from exc
+    # where it comes from, kept on the endpoint: "Refresh" asks the same thing again later
+    from liberty.connectors.config import EndpointSource
+    endpoint.source = EndpointSource(generator=body.generator, candidate=body.candidate or "", options=dict(body.options or {}))
     return {"endpoint": endpoint.model_dump(mode="json", exclude_defaults=True)}

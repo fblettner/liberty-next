@@ -260,6 +260,54 @@ async def perform_job_run(
             "follow": "job_form on this job shows the run's state; the user sees it under Nomaflow → Job Runs"}
 
 
+async def perform_api_run(
+    state: Any, principal: Any, *, connector: str, endpoint: str, params: dict[str, Any] | None = None, dry_run: bool = False,
+) -> dict[str, Any]:
+    """Call an API endpoint that changes data, for the user — what the endpoint's own route does
+    (``POST /api/http/{connector}/{endpoint}``: the ``api:`` permission, the change-package
+    capture), on a connector the assistant may use. With *dry_run* nothing is sent: the endpoint
+    is found, the caller's permission and the values are checked (a value the connector would
+    refuse, one outside a parameter's allowed values), and the answer says what would be called."""
+    from fastapi import HTTPException
+
+    from liberty.connectors.api import ApiParamError
+    from liberty.connectors.base import ConnectorError
+    from liberty.web.connectors import call_http
+
+    ai = getattr(getattr(state, "settings", None), "ai", None)
+    allowed = frozenset(getattr(ai, "allowed_connectors", None) or ())
+    permission = f"api:{connector}:{endpoint}"
+    # the permission first, and one answer for "not allowed" and "not there": no name is confirmed
+    if not principal.has_permission(permission) or (allowed and connector not in allowed):
+        raise ScreenWriteError(f"permission denied: you may not call the endpoint {connector}.{endpoint}")
+    try:
+        conn = state.connectors.api(connector)
+        ep = conn.get_endpoint(endpoint)
+    except ConnectorError as exc:
+        raise ScreenWriteError(f"{connector}.{endpoint}: no such endpoint ({exc})") from exc
+    if not ep.writable:
+        raise ScreenWriteError(f"{connector}.{endpoint} only reads: call it with api_call")
+    values = {str(k): v for k, v in (params or {}).items()}
+    unknown = sorted(k for k in values if k not in {p.name for p in ep.params})
+    if unknown:
+        raise ScreenWriteError(f"{', '.join(unknown)}: not a parameter of {connector}.{endpoint} — its parameters: "
+                               + (", ".join(p.name for p in ep.params) or "none"))
+    try:
+        preview = conn.preview(endpoint, values)
+    except ApiParamError as exc:
+        raise ScreenWriteError(str(exc)) from exc
+    what = {"connector": connector, "endpoint": endpoint, "label": ep.label, "description": ep.description,
+            "method": preview["method"], "params": preview["params"]}
+    if dry_run:
+        return {**what, "called": False}
+    try:
+        out = await call_http(state, principal, state.connectors, getattr(state, "screens", None), connector, endpoint, values)
+    except HTTPException as exc:
+        raise ScreenWriteError(str(exc.detail)) from exc
+    return {**what, "called": True, "success": bool(out.get("success")), "status_code": out.get("status_code"), "error": out.get("error"),
+            "result": out.get("extracted") if out.get("extracted") is not None else (out.get("mapped") or out.get("json") or out.get("body"))}
+
+
 def _summary(operation: str, app: str, screen: str, preview: dict[str, Any]) -> str:
     key = ", ".join(f"{k}={v}" for k, v in (preview.get("key") or {}).items())
     values = preview.get("values") or {}
@@ -272,7 +320,7 @@ def _summary(operation: str, app: str, screen: str, preview: dict[str, Any]) -> 
     return f"Add to {app}/{screen} — " + ", ".join(f"{k}={v!r}" for k, v in values.items())
 
 
-def build_write_tools(state: Callable[[], Any]) -> list[Tool]:
+def build_write_tools(state: Callable[[], Any], *, include_api: bool = False) -> list[Tool]:
     def _ctx() -> WriteContext:
         who = caller()
         if who is None:
@@ -584,7 +632,46 @@ def build_write_tools(state: Callable[[], Any]) -> list[Tool]:
             message="Checked and proposed to the user, who applies or skips the whole list on one card: nothing is written yet. Stop here and wait.",
         )
 
+    async def api_run(connector: str, endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Call an API endpoint that CHANGES data (list_connectors marks it ``changes_data``): it
+        submits, creates or runs something on the other system. Use it only for what the user
+        asked, and say which endpoint and which values before you call it. An endpoint that only
+        reads is called with api_call.
+
+        In the Liberty chat nothing is sent until the user accepts the card. A refusal (a
+        permission, a value that is not allowed) comes back with its reason: give it to the user,
+        do not try another way.
+
+        Args:
+            connector: the connector's name (from list_connectors).
+            endpoint: the endpoint's name on that connector.
+            params: {parameter: value} among the endpoint's parameters; leave one out for its default.
+        """
+        who = caller()
+        if who is None:
+            raise ToolPermissionError("permission denied: a change needs a signed-in user")
+        proposing = current_channel.get() != "mcp"
+        try:
+            out = await perform_api_run(state(), who, connector=connector, endpoint=endpoint, params=params, dry_run=proposing)
+        except ScreenWriteError as exc:
+            if str(exc).startswith("permission denied"):
+                raise ToolPermissionError(str(exc)) from exc
+            raise ValueError(str(exc)) from exc
+        if not proposing:
+            return out
+        from liberty.ai.proposal import Proposal, wrap
+
+        shown = ", ".join(f"{k}={v}" for k, v in (out.get("params") or {}).items() if v not in (None, ""))
+        return wrap(
+            Proposal(kind="api_run", summary=f"Call {connector}.{endpoint}" + (f" ({out['label']})" if out.get("label") else "") + (f" — {shown}" if shown else ""),
+                     target_path=f"endpoint {connector}.{endpoint}", connector=connector,
+                     payload={"connector": connector, "endpoint": endpoint, "params": params or {}, "preview": out},
+                     notes=[*([out["description"]] if out.get("description") else [])]),
+            message="Checked and proposed to the user, who applies or skips it on the card: nothing has been sent yet. Stop here and wait.",
+        )
+
     return [
+        *([tool(api_run, summary_keys=("connector", "endpoint", "params"), permission=WRITE_PERMISSION, read_only=False)] if include_api else []),
         tool(job_form, summary_keys=("job",), permission=WRITE_PERMISSION),
         tool(job_run, summary_keys=("job", "params", "preset"), permission=WRITE_PERMISSION, read_only=False),
         tool(screen_form, summary_keys=("app", "screen"), permission=WRITE_PERMISSION),
