@@ -5,119 +5,87 @@
 [![Docker](https://img.shields.io/badge/ghcr.io-liberty--next-blue?logo=docker)](https://github.com/fblettner/liberty-next/pkgs/container/liberty-next)
 [![Release](https://github.com/fblettner/liberty-next/actions/workflows/release.yml/badge.svg)](https://github.com/fblettner/liberty-next/actions/workflows/release.yml)
 [![Docs](https://img.shields.io/badge/docs-nomana--it.fr-blue)](https://docs.nomana-it.fr/liberty/getting-started/)
+[![License](https://img.shields.io/badge/license-BUSL--1.1-orange)](LICENSE)
 
-**A connector-driven low-code platform for business applications.** You describe your
-data sources, screens, dashboards, jobs and rules in TOML, or build them in the Settings
-editors; Liberty Next runs them: a React workspace, a REST API, a scheduler, a data
-explorer, row-level security and an AI assistant that works on your configuration and
-your data. Nothing is generated and nothing is stored as metadata tables: the form of a
-screen comes from the query it runs, discovered at query time.
+### Build business applications from configuration, not code.
 
-Three applications run on it in production, shipped as a separate licensed bundle:
-**nomasx1** (JD Edwards security, segregation of duties and licence auditing), **nomajde**
-(JD Edwards administration) and **nomaflow** (the ETL and scheduler). A demo application,
-**nomademo** (sales analytics from spreadsheets), shows the whole platform on one case.
+Connect your databases and APIs, then describe the screens, dashboards, jobs and rules you
+need — in the browser, or in TOML files you keep in Git. Liberty Next runs them: a React
+workspace, a REST API, a scheduler, a data explorer, row-level security and an AI assistant
+that works on your configuration and your data.
 
-- 📚 Documentation — <https://docs.nomana-it.fr/liberty/getting-started/>
-- 🐳 Image — <https://github.com/fblettner/liberty-next/pkgs/container/liberty-next>
-- 🚀 Deployment (Compose, Swarm, TLS, backups, upgrades) — [`release/`](release/)
-- 📦 Releases — <https://github.com/fblettner/liberty-next/releases> · 🐛 Issues — <https://github.com/fblettner/liberty-next/issues>
+Nothing is generated and nothing is stored as metadata tables: a screen takes its shape from
+the query it runs.
 
----
+![A dashboard of the demo application](https://raw.githubusercontent.com/fblettner/liberty-next/main/docs/images/dashboard.png)
 
-## What it does
-
-**Connectors.** SQL pools on PostgreSQL and Oracle (thin driver, optional thick mode for
-network encryption and LOBs over database links) with named queries, tables with their
-read and write statements, schema and dblink placeholders, server-side filters, sequences
-and audit mirrors; one connector over several environments (JD Edwards instances), the
-environment picked in the menu; API connectors over HTTP with five authentication kinds and
-one server per environment (AIS per JD Edwards instance), followed without anyone picking
-it — an environment without its server is refused, never sent to another. Secrets are
-`ENC:` values encrypted at rest or `${ENV}` references, never plain text.
-
-**Screens.** A screen is the business object: the columns and their rules, the filters
-(cascading through lookups), the dialog with its tabs, nested forms and nested tables,
-row actions and toolbar actions (chains of query, confirm, prompt, navigate, notify, open an
-external address — the install's named addresses, so shipped screens carry none),
-lifecycle hooks, row-level edit rules, bulk edit, Excel import and workbook export,
-summary, tree and chart views, saved grid views shared or per user, record locks. The grid
-streams large results and draws only the visible rows; its column filters follow the
-column's type (several coded values at once), a date filters by a period (presets and a
-calendar, the default per column), dates and date-times are picked in a themed calendar,
-`url` / `email` / `color` values show as a link, a mail link or a swatch, long text can wrap,
-and each screen sets its page size. Module catalogues describe a whole application module once (its tables, keys,
-grid and dialog, detail tabs, menu); the Screen Assistant previews it against the live
-schema and applies it — queries, read-only screens, menu and dictionary in one go.
-
-**Dictionary, menus, dashboards.** One dictionary of data items (labels in every
-language, formats, enums, lookups, sequences, rules) shared by every screen. Per-app
-menus with a start page per role, a sidebar that folds to its icons. Dashboards of KPIs,
-charts, tables, links and job status with a filter bar and a period picker, compared with
-the period before.
-
-**Data Explorer.** A model per app (a hub table and its dimensions) explored without SQL:
-rows, measures, filters, a period, pivots, charts, drill to the detail and to the
-screen's dialog, calculated fields, saved analyses and dashboards of analyses, shared or
-private, exported to Excel and PDF. Apps ship analyses as a bundled catalogue.
-
-**nomaflow.** Jobs made of steps: run a query, copy a table between databases,
-load a spreadsheet or a CSV into a table (replacing the partitions the file carries,
-refusing a closed period, checking a control total, reporting the rejected rows),
-call an API, sync from LDAP, run a Python callable, call another job, export a query to
-Excel or CSV, render a saved analysis or a report to Excel or PDF and send it with the
-run's files attached. Cron schedules with presets and parameters (a run per value when a
-parameter holds several), retries, steps that let the job go on when they fail (the run
-ends failed, naming them), steps turned off for an install, pause and resume, deadline alerts, missed-schedule
-detection, retention of runs and files, the upcoming runs day by day, a run history with
-the step detail, the log and the files (the uploaded spreadsheet included).
-
-**Notifications.** Rules on screen events, job events and actions deliver to the portal
-inbox (live), by e-mail or through a connector; recipients are users, roles or addresses.
-
-**AI assistant.** An Anthropic-backed assistant in a drawer over every page. It sees what
-you are looking at (the screen, its filters, the row you clicked), knows what the
-installation holds, queries your data read-only, follows the procedures the apps ship
-(playbooks), proposes new queries, dictionary items, screens and menu items that you
-apply with one click, and reads the server's jobs, log and integrity checks when the
-operator allows it. Where the operator turns it on, it also changes data — a record
-through its screen, one of the screen's actions, a job run — proposed as a card you
-apply, with the screen's own rules; columns flagged sensitive are never sent. It answers for the signed-in user: each tool checks the permission
-the screens check, under the same row-level scope, and totals or rankings come from the
-Data Explorer models. Starter questions per app and screen, follow-up suggestions, a
-model picker, a conversation that stays; every question is recorded for the
-administrators (who, model, tokens, tools — never the question, the answer or a row).
-The same tools are served over **MCP** (`/mcp`): Claude Desktop, claude.ai or Claude Code
-connect by signing the user in to Liberty (OAuth — give the client the address only) or with
-a personal access token, and act with that user's rights; for a server that is not on the
-internet, a downloadable Claude Desktop extension connects from the user's own computer.
-
-**Access.** Local users or OpenID Connect (any provider), roles with colon-glob
-permissions, superusers, and **row-level data scope**: a role's rules on a dictionary
-item or a column, with values from a user attribute, narrow every query, export,
-explorer, digest and write. Login throttling, rotating refresh tokens, a temporary password
-changed at the first sign-in (enforced by the server), "Forgot password?" with a single-use
-mailed link.
-
-**Operations.** The Liberty Next workspace (superusers) groups the framework's pages by
-purpose — Build, Administer, Operate, Deploy, Document. Every configuration file is edited
-by its own page there, validated,
-snapshotted before each save (version history with diff and restore), hot-reloaded, and
-packaged with its dependencies for deployment to another install. The apps bundle merges
-into the live configuration without clobbering the operator's changes; upgrades are
-journaled with the release notes of each version. Health, readiness, request ids. A
-Monitoring page: the live view (connected users, locks, pools, the log tail), the server
-log kept on disk (rotated, searched, exported, levels per module changed at run time) and
-a retention center (what every store keeps, its size, a preview and a purge). A developer
-reference read from the running code (every setting, every API route with its access and
-its documented response, the data model, every command, and the impact of a change across
-the configuration) and documentation reports of the release and of the install, each copy
-kept on the server. Runs at the
-site root or under a reverse-proxy sub-path (`[app] base_path`); installable as a web app.
+**[Documentation](https://docs.nomana-it.fr/liberty/getting-started/)** ·
+**[Install](#try-it)** ·
+**[Releases](https://github.com/fblettner/liberty-next/releases)** ·
+**[Image](https://github.com/fblettner/liberty-next/pkgs/container/liberty-next)** ·
+**[Issues](https://github.com/fblettner/liberty-next/issues)**
 
 ---
 
-## Install
+## Why Liberty Next
+
+- **Configuration is the application.** Connectors, screens, menus, dashboards, jobs and
+  rules are TOML — validated, versioned before every save, hot-reloaded, and packaged with
+  their dependencies to move from one installation to another.
+- **Everything is built in the browser.** Each file has its own editor; nobody edits TOML by
+  hand unless they want to.
+- **Security is not an add-on.** Roles and permissions, single sign-on, and row-level data
+  scope applied to every query, export, analysis and write.
+- **An assistant that acts as you.** It sees the page you are on, queries your data with
+  your rights, proposes screens and queries you apply with one click — and serves the same
+  tools to Claude over MCP.
+- **Proven.** Three applications run on it in production — JD Edwards security and licence
+  auditing, JD Edwards administration, and an ETL scheduler — on PostgreSQL and Oracle.
+
+## What you get
+
+| | |
+|---|---|
+| **Connectors** | SQL on PostgreSQL and Oracle (named queries, tables with their read and write statements, sequences, audit mirrors), and HTTP APIs with five kinds of authentication. One connector can serve several environments. Secrets are encrypted at rest, never plain text. |
+| **Screens** | Grids that stream large results, record forms with tabs and nested tables, cascading filters, row and toolbar actions, bulk edit, Excel import and export, summary, tree and chart views, saved views, record locks. |
+| **Dictionary and menus** | One dictionary of data items — labels in every language, formats, lists of values, rules — shared by every screen. A menu per application, a start page per role. |
+| **Dashboards and Data Explorer** | KPIs, charts and tables with a period compared with the one before. Explore a model without SQL: rows, measures, filters, pivots, charts, drill to the detail, calculated fields, saved analyses, Excel and PDF. |
+| **Jobs** | Steps that run a query, copy a table between databases, load a spreadsheet, call an API, sync from LDAP, run Python, render a report and send it. Schedules, retries, alerts, missed-run detection, a history with logs and files. |
+| **Services and tests** | Chain queries, endpoints and conditions into a service, run it, expose it as an API endpoint. Write non-regression tests as a flow of calls, record a reference run, compare. |
+| **Notifications** | Rules on screen, job and action events, delivered to the inbox, by e-mail or through a connector. |
+| **AI assistant and MCP** | Anthropic-backed, in a drawer over every page: reads with the user's permissions and data scope, writes through a screen as a card you apply, follows the procedures your applications ship. The same tools over MCP for Claude Desktop, claude.ai and Claude Code. |
+| **Access** | Local users or OpenID Connect, roles with permissions, row-level data scope from user attributes, login throttling, password reset by mail. |
+| **Operations** | Version history with diff and restore, integrity checks, deployment packages, promotion to another instance, monitoring, server log, retention, health and readiness endpoints. |
+
+## How an application is built
+
+The **Studio** shows one application as a whole — its menu, its screens, the data and the
+services each one uses, and what nothing uses — and opens every editor in place.
+
+![The Studio: an application's map](https://raw.githubusercontent.com/fblettner/liberty-next/main/docs/images/studio.png)
+
+Eight steps, each with its own page in the Liberty Next menu:
+
+1. **Connect the data** — a pool, a connector, its queries.
+2. **Name the fields** — the dictionary: labels, formats, lists of values.
+3. **Build the screens** — the designer reads like the screen: data, grid, record form, actions.
+4. **Organise the menu.**
+5. **Add the logic** — services, notifications, tests.
+6. **Show the figures** — dashboards, charts, Explorer models.
+7. **Give access** — roles, permissions, data scope.
+8. **Check and deliver** — integrity, a package, promotion.
+
+| The screen designer | A job, drawn as its flow |
+|---|---|
+| ![The screen designer](https://raw.githubusercontent.com/fblettner/liberty-next/main/docs/images/designer.png) | ![A job as a flow](https://raw.githubusercontent.com/fblettner/liberty-next/main/docs/images/job.png) |
+
+The screenshots show **nomademo**, the demo application (sales analytics loaded from
+spreadsheets). The repository also ships a Claude Code skill, `/build-app`, that assembles
+an application from a description of the need.
+
+---
+
+## Try it
 
 **Full guide:** <https://docs.nomana-it.fr/liberty/getting-started/> and
 [`release/README.md`](release/README.md).
@@ -139,8 +107,7 @@ ssl | apps | db | upgrade | rollback | backup | restore | migrate`. The database
 external PostgreSQL server — at install (`--db external --db-host …`) or later
 (`./liberty db external --host …`). An upgrade is
 `./liberty upgrade [--tag X.Y.Z]` (doctor → backup → pull → recreate → migrations → report),
-undone by `./liberty rollback`. The install prints the `admin` password once; the license key
-is set in Settings → App → License (encrypted at rest).
+undone by `./liberty rollback`. The install prints the `admin` password once.
 
 ### PyPI
 
@@ -165,7 +132,7 @@ python3.12 -m venv .venv && .venv/bin/pip install -c requirements.txt -e ".[dev]
 ./start.sh init-db                    # first run
 ./start.sh                            # builds the frontend when stale, serves on :8000
 ./start.sh dev                        # backend auto-reload · ./start.sh frontend → Vite on :5173
-.venv/bin/pytest -q                   # 1 600+ tests, no live database needed
+.venv/bin/pytest -q                   # 1 800+ tests, no live database needed
 (cd frontend && npm ci && npm run lint && npm test && npm run build)
 # browser regression tests against a running server (test records only; frontend/e2e/README.md)
 (cd frontend && LIBERTY_E2E_USER=… LIBERTY_E2E_PASSWORD=… npm run e2e)
@@ -175,89 +142,77 @@ python3.12 -m venv .venv && .venv/bin/pip install -c requirements.txt -e ".[dev]
 
 ## Configuration
 
-Everything is TOML under `config/`, or under `LIBERTY_APPS_DIR` when the apps bundle is
-installed. Every file has a Pydantic model, a Settings editor, a version history and
-hot reload.
+Everything is TOML under `config/`, or under `LIBERTY_APPS_DIR` when an applications bundle
+is installed. Every file has a Pydantic model, an editor in the Liberty Next menu, a version
+history and hot reload.
 
 | File | What it carries | Editor |
 |---|---|---|
-| `app.toml` | Server, auth, AI, notifications, reports branding, license, OIDC, jobs settings; encrypted secrets | Settings → App |
-| `connectors.toml` | Pools, SQL connectors (tables, queries, sequences, lookups), API connectors | Settings → Pools, Connectors |
-| `dictionary.toml` | Data items: labels, formats, enums, lookups, sequences, rules | Settings → Dictionary |
-| `screens.toml` | Screens: columns, dialogs, actions, hooks, views, exports | Settings → Screens (Visual Designer) |
-| `menus.toml` | Per-app navigation and the app's home | Settings → Menus |
-| `charts.toml` / `dashboards.toml` | Saved charts; dashboards of KPIs, charts and tables with filters and a period | Settings → Charts, Dashboards |
-| `explorer.toml` | Data Explorer models and their bundled analyses and dashboards | Settings → Explorer |
-| `actions.toml` | Shared workflows reused by screens | Settings → Actions |
-| `notifications.toml` | Notification rules on screen, job and action events | Settings → Notifications |
-| `ai.toml` | What the apps ship for the assistant: starter questions and playbooks | Settings → AI |
-| `theme.toml` / `reports.toml` | Branding; operator report templates | Settings → Theme, Reports |
-| `jobs.toml` | nomaflow jobs, schedules, presets, retention and missed-schedule policies | Nomaflow → Jobs |
-| `auth.toml` | Local users and roles (or the database backend) | Settings → Access |
+| `app.toml` | Server, sign-in, AI, notifications, reports branding, license, OIDC, jobs settings; encrypted secrets | Administer → App |
+| `connectors.toml` | Pools, SQL connectors (tables, queries, sequences, lookups), API connectors | Administer → Pools · Data → Connectors |
+| `dictionary.toml` | Data items: labels, formats, enums, lookups, sequences, rules | Data → Dictionary |
+| `screens.toml` | Screens: columns, record forms, actions, hooks, views, exports | Screens → Screens |
+| `menus.toml` | Per-application navigation and its start page | Screens → Menus |
+| `charts.toml` / `dashboards.toml` | Saved charts; dashboards of KPIs, charts and tables with filters and a period | Insight → Charts, Dashboards |
+| `explorer.toml` | Data Explorer models and their bundled analyses and dashboards | Insight → Explorer |
+| `actions.toml` | Services: shared workflows reused by screens, exposed as endpoints | Logic → Services |
+| `notifications.toml` | Notification rules on screen, job and action events | Logic → Notifications |
+| `ai.toml` | What the applications ship for the assistant: starter questions, playbooks, tools | Logic → AI |
+| `theme.toml` / `reports.toml` | Branding; operator report templates | Administer → Theme · Insight → Report templates |
+| `jobs.toml` | Jobs, schedules, presets, retention and missed-schedule policies | Operate → Jobs |
+| `auth.toml` | Local users and roles (or the database backend) | Administer → Access |
 
 Two secrets stay in the environment: `LIBERTY_JWT_SECRET` and `LIBERTY_MASTER_KEY` (the
 AES-256-GCM key behind every `ENC:` value).
 
----
-
 ## Framework and applications
 
-The framework is open. The applications live in a separate repository and ship as a
-wheel; connectors flagged `licensed = true` load only under an RS256 license key, set in
-Settings → App → License and checked with `liberty-license verify`. Without a key the
-framework runs in restricted mode. An installed bundle is merged into the live
-configuration per entity: new entities are added, untouched ones refreshed, the
-operator's overrides kept.
+The framework is this repository. Applications are configuration plus optional Python, and
+ship as a wheel that is merged into the live configuration per entity: new entities are
+added, untouched ones refreshed, the operator's own changes kept.
 
-Building a new application on the framework is a configuration job, not a project. The
-`nomademo` app is the worked example, and the repository ships a Claude Code skill,
-`/build-app`, that assembles an application from a description of the need.
-
----
+Nomana-IT's applications — **nomasx1** (JD Edwards security, segregation of duties and
+licence auditing), **nomajde** (JD Edwards administration) and **nomaflow** (the ETL and
+scheduler jobs) — are separate products: their connectors are flagged `licensed = true` and
+load only under a license key, set in Administer → App → License and checked with
+`liberty-license verify`. Without a key the framework runs with everything that is not
+licensed. Your own applications need no key.
 
 ## Operating it
 
 | URL | Purpose |
 |---|---|
-| `/` | The workspace: sign-in, tabs, Settings, the assistant drawer |
+| `/` | The workspace: sign-in, tabs, the Liberty Next menu, the assistant drawer |
 | `/docs`, `/redoc`, `/openapi.json` | The API reference |
 | `/api/*`, `/admin/*` | The API; the operator endpoints (superuser) |
+| `/mcp` | The assistant's tools for an MCP client (when enabled) |
 | `/health`, `/ready`, `/info` | Liveness, readiness (pool ping), public counts and versions |
 | `/monitoring` | Live view, server log, retention (superuser) |
 
-Settings → History holds the per-file version history, the screen bundles and the
-upgrade timeline with each version's release notes; Settings → Release notes the full
-changelog in English and French (also in the wheel as `liberty/RELEASE.md` and
-`RELEASE.fr.md`).
+Deploy → History holds the version history of every file and the upgrade timeline;
+Document → Release notes the full changelog in English and French (also in the wheel as
+`liberty/RELEASE.md` and `RELEASE.fr.md`).
 
 ---
 
-## Releasing
+## Develop
 
-`develop` is the working branch; `main` is release-only. Every push to `develop` and
-every pull request to `main` runs the CI (ruff, pytest, eslint, vitest, the build). A push
-to `main` runs [`release.yml`](.github/workflows/release.yml): it reads the version in
-`pyproject.toml` (and bumps the patch when that version is already tagged), requires a
-real `## <version>` section in `liberty/RELEASE.md`, builds the wheel and the multi-arch
-image, tags, and publishes to PyPI and GitHub. Bump the version in `pyproject.toml` before
-merging for a minor or major release. If the PyPI publish fails, the version is burned:
-bump and push again.
+`develop` is the working branch; `main` is release-only. Every push to `develop` and every
+pull request to `main` runs the CI (ruff, pytest, eslint, vitest, the build). A push to
+`main` runs [`release.yml`](.github/workflows/release.yml): it reads the version in
+`pyproject.toml` (and bumps the patch when that version is already tagged), requires a real
+`## <version>` section in `liberty/RELEASE.md`, builds the wheel and the multi-arch image,
+tags, and publishes to PyPI and GitHub.
 
----
-
-## Stack
-
-Python 3.12 · FastAPI · SQLAlchemy 2.0 async · asyncpg · oracledb · Pydantic 2 · PyJWT ·
-authlib · argon2 · APScheduler · python-socketio · tomlkit / tomli-w · openpyxl · WeasyPrint
-(optional) · Anthropic SDK — React 19 · Vite · TypeScript · emotion · react-i18next ·
-TanStack Table · Recharts · Monaco.
-
-## Repository layout
+**Stack.** Python 3.12 · FastAPI · SQLAlchemy 2.0 async · asyncpg · oracledb · Pydantic 2 ·
+PyJWT · authlib · argon2 · APScheduler · python-socketio · tomlkit / tomli-w · openpyxl ·
+WeasyPrint (optional) · Anthropic SDK — React 19 · Vite · TypeScript · emotion ·
+react-i18next · TanStack Table · Recharts · Monaco.
 
 ```
 liberty/        the framework: main.py (create_app), runtime.py (the reload path), config.py,
                 connectors/ auth/ screens/ menus/ charts/ dashboards/ actions/ explorer/ ai/
-                jobs/ etl/ reports/ notify/ changesets/ versioning/ userviews/ web/ (the HTTP layer)
+                jobs/ etl/ reports/ notify/ apptests/ changesets/ versioning/ userviews/ web/ (the HTTP layer)
                 RELEASE.md · RELEASE.fr.md · the CLIs (cli, admin_cli, ops_cli, migrate_cli, license_cli, crypto_cli)
 frontend/       React 19 + Vite + TypeScript; dist/ is served by the backend; e2e/ = Playwright regression tests
 config/         app.toml and the *.toml.example templates
@@ -267,7 +222,8 @@ tests/          pytest, SQLite fixtures, no live database
 .claude/skills/ Claude Code skills shared with the repository (build-app)
 ```
 
-See [`CLAUDE.md`](CLAUDE.md) for the map of the code and the rules of the house.
+See [`CLAUDE.md`](CLAUDE.md) for the map of the code and the rules of the house, and
+[`CONTRIBUTING.md`](CONTRIBUTING.md) to contribute.
 
 ---
 

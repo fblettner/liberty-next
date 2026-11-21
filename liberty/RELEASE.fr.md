@@ -343,6 +343,25 @@
 - **Les longs flux passent à la ligne, et se zooment.** Le flux d'un service, d'un job et d'un point d'accès
   continue sur la ligne suivante au lieu de partir à droite, et chaque canevas a un zoom (− / % / +, gardé par
   nature de flux sur l'appareil).
+- **La page App est une liste de sections avec, à côté, celle qui est choisie.** Les dix à treize accordéons en
+  ordre alphabétique sont maintenant quatre groupes dans l'ordre où une installation se règle —
+  **L'installation** (serveur, affichage, adresses externes, charte des PDF, licence), **La connexion**
+  (comptes, OpenID Connect), **Ce qui est activé** (assistant IA, notifications par e-mail, nomaflow, paquets
+  de changements), **L'exploitation** (journal du serveur, ce que le déploiement fixe) — chaque ligne disant
+  son état (le modèle, « désactivé », « pas de SMTP », « redémarrage après un changement »). Une section est
+  ouverte à la fois, sur toute la hauteur ; la page retient laquelle. Chaque réglage est toujours là, et **les
+  champs s'alignent** : une seule grille de colonnes pour toutes les sections, chaque libellé au-dessus de son
+  champ, à la place de lignes de champs dimensionnés un par un. Un libellé redevient court : l'explication
+  qu'il portait entre parenthèses est une ligne sous le champ, en texte simple.
+- **Enregistrer et Annuler sont dans l'en-tête de la page**, à côté de « Recharger la config », sur les pages
+  App et Thème (et sur chaque éditeur au fur et à mesure qu'il est refait) — plus sur une ligne à part dans la
+  page (`common/HeaderActions` : une page montrée sans en-tête les garde sur une ligne).
+- **La page Thème montre ce qu'elle change.** Les palettes sont des pastilles à cliquer, les polices des cartes
+  écrites dans leur propre police, et l'aperçu est un petit morceau de l'application — son menu, des chiffres,
+  une grille avec une ligne choisie, un champ actif, les boutons — dessiné **en sombre et en clair** côte à
+  côte, quel que soit le mode où vous êtes. Les deux listes natives ont disparu. **Avancé : variables CSS**
+  modifie les variables brutes de `theme.toml` (`[theme.vars]`), que la page ne montrait pas — et **perdait à
+  chaque enregistrement** : une variable réglée à la main est maintenant conservée, listée et modifiable.
 - **L'intégrité et « Rechercher les usages » voient ce que nomment les traitements, les modèles de l'Explorer
   et les règles de notification.** Une requête que seul un traitement exécute (la requête d'une étape, le
   `refuse_query` d'un chargement de fichier, les choix d'un paramètre de lancement), qu'une entité de

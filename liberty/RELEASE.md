@@ -290,6 +290,24 @@
   Deploy folder: check, then deliver.
 - **Long flows wrap, and zoom.** A service's, a job's and an endpoint's flow continue on the next row instead
   of running off to the right, and each canvas has a zoom (− / % / +, kept per kind of flow on the device).
+- **The App page is a list of sections with the picked one beside it.** The ten to thirteen accordions in
+  alphabetical order are now four groups in the order an installation is set up — **The installation** (server,
+  display, external addresses, PDF branding, licence), **Signing in** (accounts, OpenID Connect), **What is
+  switched on** (AI assistant, email notifications, nomaflow, change packages), **Running it** (server log, what
+  the deployment sets) — each line saying its state (the model, "disabled", "no SMTP", "restart after a
+  change"). One section is open at a time, at full height; the page remembers which. Every setting is still
+  there, and **the fields line up**: one grid of columns for every section, each label above its field, in
+  place of rows of inputs sized one by one. A label is short again: the explanation it carried in parentheses
+  is a line under the field, in plain text.
+- **Save and Discard are in the page header**, beside Reload config, on the App and Theme pages (and on each
+  editor as it is redone) — no longer a row of their own in the page (`common/HeaderActions`: a page shown
+  without a header keeps them in a row).
+- **The Theme page shows what it changes.** The palettes are swatches to click, the fonts are cards written in
+  their own font, and the preview is a small piece of the application — its menu, figures, a grid with a picked
+  row, a field in focus, the buttons — drawn **in dark and in light** side by side, whatever mode you are in.
+  The two native dropdowns are gone. **Advanced: CSS variables** edits the raw variables of `theme.toml`
+  (`[theme.vars]`), which the page did not show — and **dropped on every save**: a variable set by hand is now
+  kept, listed and editable.
 - **Integrity and "Find usages" see what the jobs, the Explorer models and the notification rules name.** A
   query that only a job runs (a step's query, a file load's `refuse_query`, the choices of a run parameter), an
   Explorer entity reads or a notification rule's action calls was reported **unused** — and "Find usages" said

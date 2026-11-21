@@ -5,21 +5,23 @@
 // (``ENC:…`` on disk). The other secrets (jwt_secret, master_key) stay env-only. Saving
 // rewrites only the edited tables on disk; other sections are preserved verbatim. Changes
 // don't take effect live — app.toml is loaded once at startup — so a restart banner is shown.
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+// The sections are a list on the left, in the order an installation is set up (services/appSections.ts), each
+// line saying its state; the picked one's fields are beside.
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import {
   Save, Undo2, Settings as SettingsIcon, Sparkles, AlertTriangle, X,
-  ChevronDown, ChevronRight, KeyRound, ShieldCheck, FileText, RefreshCw, Bell, ScrollText, Workflow, GitCompare, Lock, Plus,
+  KeyRound, ShieldCheck, FileText, RefreshCw, Bell, ScrollText, Workflow, GitCompare, Lock, Plus,
   Monitor, ExternalLink,
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
-  Banner, Button, Card, Checkbox, Field, Input, PasswordInput, SearchSelect, SpinnerRing, Tag, Textarea,
+  Banner, Button, Card, HeaderActions, Checkbox, FieldLabel, Input, PasswordInput, SearchSelect, SpinnerRing, Tag, Textarea,
 } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { AiStartersEditor, ModelsPicker } from './AiStartersEditor'
-import { BuilderToolbar as Toolbar } from '../../common/builderShell'
+import { groupedSections, pickedSection, splitLabel, type AppSectionKey } from '../../services/appSections'
 
 interface AppSection {
   name: string
@@ -167,27 +169,32 @@ interface BrandingResponse {
 }
 
 const Shell = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0;`
-const ToolbarLeft = styled.div`display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;`
-const ToolbarRight = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap;`
-const Stack = styled.div`display: flex; flex-direction: column; gap: 10px; align-items: stretch;`
-const Panel = styled(Card)`padding: 0; display: flex; flex-direction: column; overflow: hidden;`
-const PanelHeader = styled.button`
-  display: flex; align-items: center; gap: 8px; padding: 12px 14px;
-  border: 0; border-bottom: 1px solid ${colors.border}; background: ${colors.bg.input};
-  font-family: ${fonts.sans}; font-size: ${fontSize.sm}; font-weight: 600;
-  color: ${colors.text.primary};
-  text-transform: uppercase; letter-spacing: 0.06em;
-  text-align: left; cursor: pointer; width: 100%;
-  & > .chev { color: ${colors.text.muted}; display: inline-flex; }
-  & > .icon { color: ${colors.blue.main}; display: inline-flex; }
-  & > .title { flex: 1; }
-  & > .badge { font-weight: 500; font-size: ${fontSize.sm}; text-transform: none; letter-spacing: 0; color: ${colors.text.muted}; }
-  &:hover { background: ${colors.blue.bg}; }
-`
 const PanelBody = styled.div`padding: 14px; display: flex; flex-direction: column; gap: 12px;`
 const Hint = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans};`
 const Chips = styled.div`display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 32px;`
 const RowFlex = styled.div`display: flex; gap: 10px; align-items: center; flex-wrap: wrap;`
+// The fields of a section sit on one grid: the same columns in every row, and — in each row — three lines shared
+// by its fields: the labels, the controls, the explanations. So the controls line up from one field to the next
+// whatever a label or an explanation takes, and from one section to the next.
+const Fields = styled.div`display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px 14px;`
+const Cell = styled.div`
+  display: grid; grid-template-rows: subgrid; grid-row: span 3; row-gap: 4px; min-width: 0;
+  & > label { align-self: end; margin: 0; }
+  & > .help { font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans}; }
+`
+const Wide = styled.div`grid-column: span 2; grid-row: span 3; display: grid; grid-template-rows: subgrid; min-width: 0;`
+
+/** A field of the page: its label above (short — what it carried in parentheses is the line under the control). */
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  const { label: short, help } = splitLabel(label)
+  return (
+    <Cell>
+      <FieldLabel>{short}</FieldLabel>
+      <div>{children}</div>
+      <div className="help">{help}</div>
+    </Cell>
+  )
+}
 const ColorRow = styled.div`display: flex; align-items: center; gap: 8px;`
 const ColorSwatch = styled.span<{ $color: string }>`
   width: 28px; height: 28px; border-radius: ${radius.sm};
@@ -235,24 +242,12 @@ const DEFAULTS: {
   changesets: { enabled: true, pool: 'default', retention_days: 0 },
 }
 
-type SectionKey = 'app' | 'display' | 'links' | 'license' | 'ai' | 'oidc' | 'notify' | 'branding' | 'log' | 'auth' | 'jobs' | 'changesets' | 'readonly'
-const OPEN_STORAGE_KEY = 'liberty:appbuilder:open'
-const DEFAULT_OPEN: Record<SectionKey, boolean> = {
-  app: true, display: false, links: false, license: false, ai: false, oidc: false, notify: false, branding: false,
-  log: false, auth: false, jobs: false, changesets: false, readonly: false,
-}
-
-function loadOpenState(): Record<SectionKey, boolean> {
-  try {
-    const raw = localStorage.getItem(OPEN_STORAGE_KEY)
-    if (!raw) return DEFAULT_OPEN
-    const parsed = JSON.parse(raw) as Partial<Record<SectionKey, boolean>>
-    return { ...DEFAULT_OPEN, ...parsed }
-  } catch { return DEFAULT_OPEN }
-}
+type SectionKey = AppSectionKey
+const PICKED_STORAGE_KEY = 'liberty:appbuilder:picked'
+const rememberedSection = (): string | null => { try { return localStorage.getItem(PICKED_STORAGE_KEY) } catch { return null } }
 
 export default function AppBuilder() {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const [app, setApp] = useState<AppSection>(DEFAULTS.app)
   const [ai, setAi] = useState<AiSection>(DEFAULTS.ai)
   const [license, setLicense] = useState<LicenseSection>(DEFAULTS.license)
@@ -275,14 +270,10 @@ export default function AppBuilder() {
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [restartHint, setRestartHint] = useState(false)
-  const [open, setOpen] = useState<Record<SectionKey, boolean>>(loadOpenState)
-
-  const toggleSection = (k: SectionKey) => {
-    setOpen((prev) => {
-      const next = { ...prev, [k]: !prev[k] }
-      try { localStorage.setItem(OPEN_STORAGE_KEY, JSON.stringify(next)) } catch { /* ignore */ }
-      return next
-    })
+  const [remembered, setRemembered] = useState<string | null>(rememberedSection)
+  const pick = (k: SectionKey) => {
+    setRemembered(k)
+    try { localStorage.setItem(PICKED_STORAGE_KEY, k) } catch { /* ignore */ }
   }
 
   const load = useCallback(async () => {
@@ -379,43 +370,30 @@ export default function AppBuilder() {
 
   if (loading) return <SpinnerRing size={16} thickness={2} />
 
-  // each section with its title, so the page lists them in alphabetical order of the current language
+  // a section: its title, its icon, what it says of its state, and its fields — listed on the left in the
+  // order an installation is set up (services/appSections.ts), the picked one beside
   const renderSection = (
     key: SectionKey, title: string, icon: ReactNode, badge: string, body: ReactNode,
-  ): { key: SectionKey; title: string; node: ReactNode } => ({ key, title, node: (
-    <Panel key={key}>
-      <PanelHeader type="button" onClick={() => toggleSection(key)} aria-expanded={open[key]}>
-        <span className="chev">{open[key] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
-        <span className="icon">{icon}</span>
-        <span className="title">{title}</span>
-        <span className="badge">{badge}</span>
-      </PanelHeader>
-      {open[key] && <PanelBody>{body}</PanelBody>}
-    </Panel>
-  ) })
+  ): AppSectionView => ({ key, title, icon, badge, body })
 
   return (
     <Shell>
-      <Toolbar>
-        <ToolbarLeft>
-          {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
-          {status && !restartHint && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
-        </ToolbarLeft>
-        <ToolbarRight>
-          <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
-            <Undo2 size={13} /> {t('common.discard')}
-          </Button>
-          <Button $variant="primary" $size="sm" onClick={() => void save()} disabled={busy || !dirty}>
-            {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
-          </Button>
-        </ToolbarRight>
-      </Toolbar>
+      {/* Save / Discard sit in the page header, before Reload config (in a row here when there is no header) */}
+      <HeaderActions>
+        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+        <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
+          <Undo2 size={13} /> {t('common.discard')}
+        </Button>
+        <Button $variant="primary" $size="sm" onClick={() => void save()} disabled={busy || !dirty}>
+          {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+        </Button>
+      </HeaderActions>
 
       <Hint>
-        {t('settings.app.intro',
-        )}
+        {t('settings.app.intro')}
         {path && <> · <span style={{ fontFamily: fonts.mono }}>{path}</span></>}
       </Hint>
+      {status && !restartHint && <Banner $tone="ok">{status}</Banner>}
       {error && <Banner $tone="error">{error}</Banner>}
       {restartHint && (
         <Banner $tone="info">
@@ -424,48 +402,51 @@ export default function AppBuilder() {
         </Banner>
       )}
 
-      <Stack>
-        {[
+      <SectionsSplit sections={[
         renderSection(
           'app',
           t('settings.app.serverSection'),
           <SettingsIcon size={14} />,
           `${app.name} · :${app.port} · ${app.log_level}`,
           <>
-            <Field label={t('settings.app.name')}>
-              <Input value={app.name} onChange={(e) => setApp({ ...app, name: e.target.value })} />
-            </Field>
-            <Field label={t('settings.app.environment')}>
-              <Input value={app.environment ?? ''} onChange={(e) => setApp({ ...app, environment: e.target.value })} placeholder="production" style={{ width: 260 }} />
-            </Field>
-            <RowFlex>
+            <Fields>
+              <Field label={t('settings.app.name')}>
+                <Input value={app.name} onChange={(e) => setApp({ ...app, name: e.target.value })} />
+              </Field>
+              <Field label={t('settings.app.environment')}>
+                <Input value={app.environment ?? ''} onChange={(e) => setApp({ ...app, environment: e.target.value })} placeholder="production" />
+              </Field>
+            </Fields>
+            <Fields>
               <Field label={t('settings.app.host')}>
-                <Input value={app.host} onChange={(e) => setApp({ ...app, host: e.target.value })} style={{ width: 200 }} />
+                <Input value={app.host} onChange={(e) => setApp({ ...app, host: e.target.value })} />
               </Field>
               <Field label={t('settings.app.port')}>
                 <Input type="number" min={1} max={65535} value={app.port}
-                  onChange={(e) => setApp({ ...app, port: Number(e.target.value) || 0 })} style={{ width: 110 }} />
+                  onChange={(e) => setApp({ ...app, port: Number(e.target.value) || 0 })} />
               </Field>
-            </RowFlex>
-            <RowFlex>
+            </Fields>
+            <Fields>
               <Field label={t('settings.app.logLevel')}>
-                <div style={{ minWidth: 160 }}>
+                <div>
                   <SearchSelect value={app.log_level} options={choices.log_levels.map((l) => ({ value: l, label: l }))} onChange={(v) => setApp({ ...app, log_level: v })} />
                 </div>
               </Field>
-            </RowFlex>
+            </Fields>
             <Checkbox label={t('settings.app.hotReload')}
               checked={app.hot_reload} onChange={(c) => setApp({ ...app, hot_reload: c })} />
             <Checkbox label={t('settings.app.oracleThick')}
               checked={app.oracle_thick} onChange={(c) => setApp({ ...app, oracle_thick: c })} />
-            <Field label={t('settings.app.basePath')}>
-              <Input value={app.base_path} onChange={(e) => setApp({ ...app, base_path: e.target.value })}
-                placeholder="/liberty" style={{ width: 220, fontFamily: fonts.mono }} />
-            </Field>
-            <Field label={t('settings.app.publicUrl')}>
-              <Input value={app.public_url ?? ''} onChange={(e) => setApp({ ...app, public_url: e.target.value })}
-                placeholder="https://liberty.example.com" style={{ width: 360, fontFamily: fonts.mono }} />
-            </Field>
+            <Fields>
+              <Field label={t('settings.app.basePath')}>
+                <Input value={app.base_path} onChange={(e) => setApp({ ...app, base_path: e.target.value })}
+                  placeholder="/liberty" style={{ fontFamily: fonts.mono }} />
+              </Field>
+              <Wide><Field label={t('settings.app.publicUrl')}>
+                <Input value={app.public_url ?? ''} onChange={(e) => setApp({ ...app, public_url: e.target.value })}
+                  placeholder="https://liberty.example.com" style={{ fontFamily: fonts.mono }} />
+              </Field></Wide>
+            </Fields>
           </>,
         ),
 
@@ -475,39 +456,38 @@ export default function AppBuilder() {
           <Monitor size={14} />,
           `${app.default_language} · ${t(`period.${app.default_period}`)} · ${app.default_page_size}`,
           <>
-            <RowFlex>
+            <Fields>
               <Field label={t('settings.app.defaultLanguage')}>
                 <Input value={app.default_language}
-                  onChange={(e) => setApp({ ...app, default_language: e.target.value })} style={{ width: 110 }} />
+                  onChange={(e) => setApp({ ...app, default_language: e.target.value })} />
               </Field>
-            </RowFlex>
-            <RowFlex>
+            </Fields>
+            <Fields>
               <Field label={t('settings.app.defaultPeriod')}>
-                <div style={{ width: 200 }}>
+                <div>
                   <SearchSelect value={app.default_period} onChange={(v) => setApp({ ...app, default_period: v })}
                     options={PERIOD_PRESETS.map((k) => ({ value: k, label: t(`period.${k}`) }))} />
                 </div>
               </Field>
               <Field label={t('settings.app.defaultPageSize')}>
                 <Input type="number" min={10} max={10000} value={app.default_page_size}
-                  onChange={(e) => setApp({ ...app, default_page_size: Number(e.target.value) || 50 })} style={{ width: 110 }} />
+                  onChange={(e) => setApp({ ...app, default_page_size: Number(e.target.value) || 50 })} />
               </Field>
               <Field label={t('settings.app.dashboardCache')}>
                 <Input type="number" min={0} max={3600} value={app.dashboard_cache_seconds}
-                  onChange={(e) => setApp({ ...app, dashboard_cache_seconds: Math.max(0, Number(e.target.value) || 0) })} style={{ width: 110 }} />
+                  onChange={(e) => setApp({ ...app, dashboard_cache_seconds: Math.max(0, Number(e.target.value) || 0) })} />
               </Field>
-            </RowFlex>
-            <RowFlex>
-              <Checkbox label={t('settings.app.tabsMulti')}
-                checked={app.tabs_multi} onChange={(c) => setApp({ ...app, tabs_multi: c })} />
-              <Checkbox label={t('settings.app.tabsCloseOnSwitch')}
-                checked={app.tabs_close_on_app_switch} onChange={(c) => setApp({ ...app, tabs_close_on_app_switch: c })} />
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                <span>{t('settings.app.tabsMax')}</span>
+            </Fields>
+            <Checkbox label={t('settings.app.tabsMulti')}
+              checked={app.tabs_multi} onChange={(c) => setApp({ ...app, tabs_multi: c })} />
+            <Checkbox label={t('settings.app.tabsCloseOnSwitch')}
+              checked={app.tabs_close_on_app_switch} onChange={(c) => setApp({ ...app, tabs_close_on_app_switch: c })} />
+            <Fields>
+              <Field label={t('settings.app.tabsMax')}>
                 <Input type="number" min={1} max={50} value={app.tabs_max} disabled={!app.tabs_multi}
-                  onChange={(e) => setApp({ ...app, tabs_max: Math.min(50, Math.max(1, Number(e.target.value) || 5)) })} style={{ width: 72 }} />
-              </label>
-            </RowFlex>
+                  onChange={(e) => setApp({ ...app, tabs_max: Math.min(50, Math.max(1, Number(e.target.value) || 5)) })} />
+              </Field>
+            </Fields>
             <Checkbox label={t('settings.app.drillInline')}
               checked={app.drill_inline} onChange={(c) => setApp({ ...app, drill_inline: c })} />
           </>,
@@ -531,12 +511,14 @@ export default function AppBuilder() {
           <ScrollText size={14} />,
           `${app.log_format} · ${app.log_file === '' ? '—' : `${app.log_file_max_mb} MB × ${app.log_file_backups}`} · ${t('settings.app.restartSection')}`,
           <>
-            <Field label={t('settings.app.logFormat')}>
-              <div style={{ width: 160 }}>
-                <SearchSelect value={app.log_format} onChange={(v) => setApp({ ...app, log_format: v || 'text' })}
-                  options={[{ value: 'text', label: 'text' }, { value: 'json', label: 'json' }]} />
-              </div>
-            </Field>
+            <Fields>
+              <Field label={t('settings.app.logFormat')}>
+                <div>
+                  <SearchSelect value={app.log_format} onChange={(v) => setApp({ ...app, log_format: v || 'text' })}
+                    options={[{ value: 'text', label: 'text' }, { value: 'json', label: 'json' }]} />
+                </div>
+              </Field>
+            </Fields>
             <Checkbox label={t('settings.app.logKeep')} checked={app.log_file !== ''}
               onChange={(c) => setApp({ ...app, log_file: c ? null : '' })} />
             {app.log_file !== '' && (
@@ -545,16 +527,16 @@ export default function AppBuilder() {
                   <Input value={app.log_file ?? ''} onChange={(e) => setApp({ ...app, log_file: e.target.value || null })}
                     style={{ fontFamily: fonts.mono }} />
                 </Field>
-                <RowFlex>
+                <Fields>
                   <Field label={t('settings.app.logMaxMb')}>
                     <Input type="number" min={1} max={1024} value={app.log_file_max_mb}
-                      onChange={(e) => setApp({ ...app, log_file_max_mb: Math.max(1, Number(e.target.value) || 10) })} style={{ width: 110 }} />
+                      onChange={(e) => setApp({ ...app, log_file_max_mb: Math.max(1, Number(e.target.value) || 10) })} />
                   </Field>
                   <Field label={t('settings.app.logBackups')}>
                     <Input type="number" min={0} max={100} value={app.log_file_backups}
-                      onChange={(e) => setApp({ ...app, log_file_backups: Math.max(0, Number(e.target.value) || 0) })} style={{ width: 110 }} />
+                      onChange={(e) => setApp({ ...app, log_file_backups: Math.max(0, Number(e.target.value) || 0) })} />
                   </Field>
-                </RowFlex>
+                </Fields>
               </>
             )}
           </>,
@@ -566,9 +548,9 @@ export default function AppBuilder() {
           <ShieldCheck size={14} />,
           `${auth.backend === 'db' ? t('settings.app.authBackendDb') : t('settings.app.authBackendToml')} · ${t('settings.app.restartSection')}`,
           <>
-            <RowFlex>
+            <Fields>
               <Field label={t('settings.app.authBackend')}>
-                <div style={{ width: 240 }}>
+                <div>
                   <SearchSelect value={auth.backend} onChange={(v) => setAuth({ ...auth, backend: v || 'toml' })}
                     options={[{ value: 'toml', label: t('settings.app.authBackendToml') }, { value: 'db', label: t('settings.app.authBackendDb') }]} />
                 </div>
@@ -578,20 +560,20 @@ export default function AppBuilder() {
                   <PoolSelect value={auth.pool} pools={choices.pools} onChange={(v) => setAuth({ ...auth, pool: v })} />
                 </Field>
               )}
-            </RowFlex>
+            </Fields>
             <Hint>{t('settings.app.authBackendHint')}</Hint>
-            <RowFlex>
+            <Fields>
               <Field label={t('settings.app.authIssuer')}>
-                <Input value={auth.jwt_issuer} onChange={(e) => setAuth({ ...auth, jwt_issuer: e.target.value })} style={{ width: 220 }} />
+                <Input value={auth.jwt_issuer} onChange={(e) => setAuth({ ...auth, jwt_issuer: e.target.value })} />
               </Field>
               <NumField label={t('settings.app.authAccessTtl')} value={auth.access_token_ttl} min={60} onChange={(v) => setAuth({ ...auth, access_token_ttl: v })} />
               <NumField label={t('settings.app.authRefreshTtl')} value={auth.refresh_token_ttl} min={300} onChange={(v) => setAuth({ ...auth, refresh_token_ttl: v })} />
               <NumField label={t('settings.app.authGrace')} value={auth.refresh_reuse_grace} min={0} onChange={(v) => setAuth({ ...auth, refresh_reuse_grace: v })} />
-            </RowFlex>
-            <RowFlex>
+            </Fields>
+            <Fields>
               <NumField label={t('settings.app.authMaxFailures')} value={auth.login_max_failures} min={1} onChange={(v) => setAuth({ ...auth, login_max_failures: v })} />
               <NumField label={t('settings.app.authWindow')} value={auth.login_window_seconds} min={10} onChange={(v) => setAuth({ ...auth, login_window_seconds: v })} />
-            </RowFlex>
+            </Fields>
           </>,
         ),
 
@@ -602,13 +584,13 @@ export default function AppBuilder() {
           `${jobs.enabled ? jobs.pool : t('settings.app.oidcDisabled')} · ${t('settings.app.restartSection')}`,
           <>
             <Checkbox label={t('settings.app.jobsEnabled')} checked={jobs.enabled} onChange={(c) => setJobs({ ...jobs, enabled: c })} />
-            <RowFlex>
+            <Fields>
               <Field label={t('settings.app.jobsPool')}>
                 <PoolSelect value={jobs.pool} pools={choices.pools} onChange={(v) => setJobs({ ...jobs, pool: v })} />
               </Field>
               <NumField label={t('settings.app.jobsLogLines')} value={jobs.run_log_max_lines} min={100} onChange={(v) => setJobs({ ...jobs, run_log_max_lines: v })} />
               <NumField label={t('settings.app.jobsMaxUpload')} value={jobs.max_upload_mb} min={1} onChange={(v) => setJobs({ ...jobs, max_upload_mb: v })} />
-            </RowFlex>
+            </Fields>
             <Field label={t('settings.app.jobsFilesDir')}>
               <Input value={jobs.files_dir ?? ''} onChange={(e) => setJobs({ ...jobs, files_dir: e.target.value || null })} style={{ fontFamily: fonts.mono }} />
             </Field>
@@ -622,12 +604,12 @@ export default function AppBuilder() {
           `${changesets.enabled ? changesets.pool : t('settings.app.oidcDisabled')} · ${t('settings.app.restartSection')}`,
           <>
             <Checkbox label={t('settings.app.changesetsEnabled')} checked={changesets.enabled} onChange={(c) => setChangesets({ ...changesets, enabled: c })} />
-            <RowFlex>
+            <Fields>
               <Field label={t('settings.app.changesetsPool')}>
                 <PoolSelect value={changesets.pool} pools={choices.pools} onChange={(v) => setChangesets({ ...changesets, pool: v })} />
               </Field>
               <NumField label={t('settings.app.changesetsRetention')} value={changesets.retention_days} min={0} onChange={(v) => setChangesets({ ...changesets, retention_days: v })} />
-            </RowFlex>
+            </Fields>
           </>,
         ),
 
@@ -675,7 +657,7 @@ export default function AppBuilder() {
                 style={{ fontFamily: fonts.mono }} />
             </Field>
 
-            <RowFlex>
+            <Fields>
               <Field label={t('settings.app.aiModel')}>
                 {/* The dropdown always includes the saved value, even when it isn't in the
                     canonical list — useful for experimental / legacy ids the operator may
@@ -686,7 +668,7 @@ export default function AppBuilder() {
                     ? choices.models
                     : [{ id: ai.model, label: `${ai.model} (custom)` }, ...choices.models]
                   return (
-                    <div style={{ minWidth: 260 }}>
+                    <div>
                       <SearchSelect value={ai.model} options={options.map((m) => ({ value: m.id, label: m.label, mono: m.id }))} allowCustom
                         onChange={(v) => { if (v) setAi({ ...ai, model: v }) }} />
                     </div>
@@ -694,26 +676,26 @@ export default function AppBuilder() {
                 })()}
               </Field>
               <Field label={t('settings.app.aiEffort')}>
-                <div style={{ minWidth: 140 }}>
+                <div>
                   <SearchSelect value={ai.effort} options={choices.effort_levels.filter(Boolean).map((l) => ({ value: l, label: l }))}
                     anyLabel={t('settings.app.aiEffortDefault')} onChange={(v) => setAi({ ...ai, effort: v })} />
                 </div>
               </Field>
-            </RowFlex>
-            <RowFlex>
+            </Fields>
+            <Fields>
               <Field label={t('settings.app.aiMaxTokens')}>
                 <Input type="number" min={1} value={ai.max_tokens}
-                  onChange={(e) => setAi({ ...ai, max_tokens: Number(e.target.value) || 0 })} style={{ width: 130 }} />
+                  onChange={(e) => setAi({ ...ai, max_tokens: Number(e.target.value) || 0 })} />
               </Field>
               <Field label={t('settings.app.aiMaxIter')}>
                 <Input type="number" min={1} value={ai.max_iterations}
-                  onChange={(e) => setAi({ ...ai, max_iterations: Number(e.target.value) || 0 })} style={{ width: 130 }} />
+                  onChange={(e) => setAi({ ...ai, max_iterations: Number(e.target.value) || 0 })} />
               </Field>
               <Field label={t('settings.app.aiTimeout')}>
                 <Input type="number" min={1} value={ai.request_timeout}
-                  onChange={(e) => setAi({ ...ai, request_timeout: Number(e.target.value) || 0 })} style={{ width: 130 }} />
+                  onChange={(e) => setAi({ ...ai, request_timeout: Number(e.target.value) || 0 })} />
               </Field>
-            </RowFlex>
+            </Fields>
             <Checkbox label={t('settings.app.aiThinking')}
               checked={ai.thinking} onChange={(c) => setAi({ ...ai, thinking: c })} />
             <Field label={t('settings.app.aiSystemPrompt')}>
@@ -724,18 +706,20 @@ export default function AppBuilder() {
             <Hint>{t('settings.app.aiTools')}</Hint>
             <Checkbox label={t('settings.app.aiConnectorTools')}
               checked={ai.connector_tools} onChange={(c) => setAi({ ...ai, connector_tools: c })} />
-            <Field label={t('settings.app.aiSqlMaxRows')}>
-              <Input type="number" min={1} max={10000} value={ai.sql_max_rows}
-                onChange={(e) => setAi({ ...ai, sql_max_rows: Number(e.target.value) || 200 })} style={{ width: 130 }} />
-            </Field>
-            <Field label={t('settings.app.aiAttachmentMaxMb')}>
-              <Input type="number" min={0} max={30} value={ai.attachment_max_mb}
-                onChange={(e) => setAi({ ...ai, attachment_max_mb: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })} style={{ width: 130 }} />
-            </Field>
-            <Field label={t('settings.app.aiUsageRetention')}>
-              <Input type="number" min={0} value={ai.usage_retention_days}
-                onChange={(e) => setAi({ ...ai, usage_retention_days: Math.max(0, Number(e.target.value) || 0) })} style={{ width: 130 }} />
-            </Field>
+            <Fields>
+              <Field label={t('settings.app.aiSqlMaxRows')}>
+                <Input type="number" min={1} max={10000} value={ai.sql_max_rows}
+                  onChange={(e) => setAi({ ...ai, sql_max_rows: Number(e.target.value) || 200 })} />
+              </Field>
+              <Field label={t('settings.app.aiAttachmentMaxMb')}>
+                <Input type="number" min={0} max={30} value={ai.attachment_max_mb}
+                  onChange={(e) => setAi({ ...ai, attachment_max_mb: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })} />
+              </Field>
+              <Field label={t('settings.app.aiUsageRetention')}>
+                <Input type="number" min={0} value={ai.usage_retention_days}
+                  onChange={(e) => setAi({ ...ai, usage_retention_days: Math.max(0, Number(e.target.value) || 0) })} />
+              </Field>
+            </Fields>
             <Checkbox label={t('settings.app.aiApiTool')}
               checked={ai.api_tool} onChange={(c) => setAi({ ...ai, api_tool: c })} />
             <Checkbox label={t('settings.app.aiScaffoldTools')}
@@ -756,10 +740,12 @@ export default function AppBuilder() {
               checked={ai.mcp_enabled} onChange={(c) => setAi({ ...ai, mcp_enabled: c })} />
             <Checkbox label={t('settings.app.aiMcpChanges')}
               checked={ai.mcp_changes} onChange={(c) => setAi({ ...ai, mcp_changes: c })} />
-            <Field label={t('settings.app.aiMcpTokenDays')}>
-              <Input type="number" min={1} value={ai.mcp_token_max_days}
-                onChange={(e) => setAi({ ...ai, mcp_token_max_days: Math.max(1, Number(e.target.value) || 1) })} style={{ width: 130 }} />
-            </Field>
+            <Fields>
+              <Field label={t('settings.app.aiMcpTokenDays')}>
+                <Input type="number" min={1} value={ai.mcp_token_max_days}
+                  onChange={(e) => setAi({ ...ai, mcp_token_max_days: Math.max(1, Number(e.target.value) || 1) })} />
+              </Field>
+            </Fields>
 
             <Field label={t('settings.app.aiAllowedConnectors')}>
               <ConnectorPicker
@@ -785,10 +771,12 @@ export default function AppBuilder() {
                 placeholder="example.com"
               />
             </Field>
-            <Field label={t('settings.app.aiWebMaxUses')}>
-              <Input type="number" min={1} value={ai.web_fetch_max_uses}
-                onChange={(e) => setAi({ ...ai, web_fetch_max_uses: Number(e.target.value) || 0 })} style={{ width: 130 }} />
-            </Field>
+            <Fields>
+              <Field label={t('settings.app.aiWebMaxUses')}>
+                <Input type="number" min={1} value={ai.web_fetch_max_uses}
+                  onChange={(e) => setAi({ ...ai, web_fetch_max_uses: Number(e.target.value) || 0 })} />
+              </Field>
+            </Fields>
           </>,
         ),
 
@@ -800,15 +788,15 @@ export default function AppBuilder() {
           <>
             <Checkbox label={t('settings.app.notifyEnabled')} checked={notify.enabled} onChange={(c) => setNotify({ ...notify, enabled: c })} />
             <Hint>{t('settings.app.smtpServer')}</Hint>
-            <RowFlex>
+            <Fields>
               <Field label={t('settings.app.smtpHost')}>
-                <Input value={notify.smtp_host} onChange={(e) => setNotify({ ...notify, smtp_host: e.target.value })} placeholder="smtp.example.com" style={{ width: 280 }} />
+                <Input value={notify.smtp_host} onChange={(e) => setNotify({ ...notify, smtp_host: e.target.value })} placeholder="smtp.example.com" />
               </Field>
               <Field label={t('settings.app.smtpPort')}>
-                <Input type="number" min={1} max={65535} value={notify.smtp_port} onChange={(e) => setNotify({ ...notify, smtp_port: Number(e.target.value) || 587 })} style={{ width: 110 }} />
+                <Input type="number" min={1} max={65535} value={notify.smtp_port} onChange={(e) => setNotify({ ...notify, smtp_port: Number(e.target.value) || 587 })} />
               </Field>
               <Field label={t('settings.app.smtpEncryption')}>
-                <div style={{ width: 240 }}>
+                <div>
                   <SearchSelect
                     value={notify.smtp_ssl ? 'ssl' : notify.smtp_tls ? 'starttls' : 'none'}
                     onChange={(v) => setNotify({ ...notify, smtp_tls: v === 'starttls', smtp_ssl: v === 'ssl', smtp_port: v === 'ssl' && notify.smtp_port === 587 ? 465 : v === 'starttls' && notify.smtp_port === 465 ? 587 : notify.smtp_port })}
@@ -820,30 +808,30 @@ export default function AppBuilder() {
                 </div>
               </Field>
               <Field label={t('settings.app.smtpTimeout')}>
-                <Input type="number" min={1} value={notify.smtp_timeout} onChange={(e) => setNotify({ ...notify, smtp_timeout: Number(e.target.value) || 20 })} style={{ width: 90 }} />
+                <Input type="number" min={1} value={notify.smtp_timeout} onChange={(e) => setNotify({ ...notify, smtp_timeout: Number(e.target.value) || 20 })} />
               </Field>
-            </RowFlex>
+            </Fields>
             <Hint>{t('settings.app.smtpAccount')}</Hint>
-            <RowFlex>
+            <Fields>
               <Field label={t('settings.app.smtpUser')}>
-                <Input value={notify.smtp_user} onChange={(e) => setNotify({ ...notify, smtp_user: e.target.value })} style={{ width: 280 }} />
+                <Input value={notify.smtp_user} onChange={(e) => setNotify({ ...notify, smtp_user: e.target.value })} />
               </Field>
               <Field label={t('settings.app.smtpPassword')}>
-                <PasswordInput value={notify.smtp_password} onChange={(e) => setNotify({ ...notify, smtp_password: e.target.value })} placeholder="…" style={{ fontFamily: fonts.mono, width: 280 }} />
+                <PasswordInput value={notify.smtp_password} onChange={(e) => setNotify({ ...notify, smtp_password: e.target.value })} placeholder="…" style={{ fontFamily: fonts.mono }} />
               </Field>
-            </RowFlex>
+            </Fields>
             <Hint>{t('settings.app.smtpSending')}</Hint>
-            <RowFlex>
+            <Fields>
               <Field label={t('settings.app.smtpFrom')}>
-                <Input value={notify.smtp_from} onChange={(e) => setNotify({ ...notify, smtp_from: e.target.value })} placeholder="liberty@example.com" style={{ width: 280 }} />
+                <Input value={notify.smtp_from} onChange={(e) => setNotify({ ...notify, smtp_from: e.target.value })} placeholder="liberty@example.com" />
               </Field>
               <Field label={t('settings.app.notifyRetention')}>
-                <Input type="number" min={0} value={notify.retention_days} onChange={(e) => setNotify({ ...notify, retention_days: Math.max(0, Number(e.target.value) || 0) })} style={{ width: 110 }} />
+                <Input type="number" min={0} value={notify.retention_days} onChange={(e) => setNotify({ ...notify, retention_days: Math.max(0, Number(e.target.value) || 0) })} />
               </Field>
               <Field label={t('settings.app.notifyPool')}>
                 <PoolSelect value={notify.pool} pools={choices.pools} onChange={(v) => setNotify({ ...notify, pool: v })} />
               </Field>
-            </RowFlex>
+            </Fields>
           </>,
         ),
 
@@ -866,16 +854,16 @@ export default function AppBuilder() {
                 onChange={(e) => setOidc({ ...oidc, discovery_url: e.target.value })}
                 placeholder="https://keycloak.example/realms/liberty/.well-known/openid-configuration" />
             </Field>
-            <RowFlex>
+            <Fields>
               <Field label={t('settings.app.oidcClientId')}>
                 <Input value={oidc.client_id}
-                  onChange={(e) => setOidc({ ...oidc, client_id: e.target.value })} style={{ width: 280 }} />
+                  onChange={(e) => setOidc({ ...oidc, client_id: e.target.value })} />
               </Field>
               <Field label={t('settings.app.oidcScopes')}>
                 <Input value={oidc.scopes}
-                  onChange={(e) => setOidc({ ...oidc, scopes: e.target.value })} style={{ width: 240 }} />
+                  onChange={(e) => setOidc({ ...oidc, scopes: e.target.value })} />
               </Field>
-            </RowFlex>
+            </Fields>
             <Field label={t('settings.app.oidcClientSecret')}>
               <PasswordInput value={oidc.client_secret}
                 onChange={(e) => setOidc({ ...oidc, client_secret: e.target.value })}
@@ -884,20 +872,20 @@ export default function AppBuilder() {
             </Field>
 
             <Hint>{t('settings.app.oidcClaims')}</Hint>
-            <RowFlex>
+            <Fields>
               <Field label={t('settings.app.oidcUsernameClaim')}>
                 <Input value={oidc.username_claim}
-                  onChange={(e) => setOidc({ ...oidc, username_claim: e.target.value })} style={{ width: 200 }} />
+                  onChange={(e) => setOidc({ ...oidc, username_claim: e.target.value })} />
               </Field>
               <Field label={t('settings.app.oidcEmailClaim')}>
                 <Input value={oidc.email_claim}
-                  onChange={(e) => setOidc({ ...oidc, email_claim: e.target.value })} style={{ width: 160 }} />
+                  onChange={(e) => setOidc({ ...oidc, email_claim: e.target.value })} />
               </Field>
               <Field label={t('settings.app.oidcNameClaim')}>
                 <Input value={oidc.name_claim}
-                  onChange={(e) => setOidc({ ...oidc, name_claim: e.target.value })} style={{ width: 160 }} />
+                  onChange={(e) => setOidc({ ...oidc, name_claim: e.target.value })} />
               </Field>
-            </RowFlex>
+            </Fields>
 
             <Hint>{t('settings.app.oidcRedirects')}</Hint>
             <Field label={t('settings.app.oidcRedirectUrl')}>
@@ -915,7 +903,7 @@ export default function AppBuilder() {
             </Field>
             <Field label={t('settings.app.oidcSessionSecret')}>
               <PasswordInput value={oidc.session_secret ?? ''} onChange={(e) => setOidc({ ...oidc, session_secret: e.target.value })}
-                style={{ fontFamily: fonts.mono, width: 320 }} />
+                style={{ fontFamily: fonts.mono }} />
             </Field>
           </>,
         ),
@@ -935,25 +923,25 @@ export default function AppBuilder() {
                 <RefreshCw size={13} /> {t('settings.reports.resetDefaults')}
               </Button>
             </InlineActions>
-            <RowFlex>
+            <Fields>
               <Field label={t('settings.reports.fields.author')}>
                 <Input value={branding.author}
                   onChange={(e) => setBranding({ ...branding, author: e.target.value })}
-                  placeholder={brandingDefaults.author || 'NOMANA-IT'} style={{ width: 280 }} />
+                  placeholder={brandingDefaults.author || 'NOMANA-IT'} />
               </Field>
               <Field label={t('settings.reports.fields.coverEyebrow')}>
                 <Input value={branding.cover_eyebrow}
                   onChange={(e) => setBranding({ ...branding, cover_eyebrow: e.target.value })}
-                  placeholder={brandingDefaults.cover_eyebrow} style={{ width: 280 }} />
+                  placeholder={brandingDefaults.cover_eyebrow} />
               </Field>
-            </RowFlex>
-            <RowFlex>
+            </Fields>
+            <Fields>
               <Field label={t('settings.reports.fields.primaryColor')}>
                 <ColorRow>
                   <Input value={branding.primary_color}
                     onChange={(e) => setBranding({ ...branding, primary_color: e.target.value })}
                     placeholder={brandingDefaults.primary_color}
-                    style={{ width: 130, fontFamily: fonts.mono }} />
+                    style={{ fontFamily: fonts.mono }} />
                   <ColorSwatch $color={branding.primary_color} />
                 </ColorRow>
               </Field>
@@ -962,23 +950,23 @@ export default function AppBuilder() {
                   <Input value={branding.primary_color_light}
                     onChange={(e) => setBranding({ ...branding, primary_color_light: e.target.value })}
                     placeholder={brandingDefaults.primary_color_light}
-                    style={{ width: 130, fontFamily: fonts.mono }} />
+                    style={{ fontFamily: fonts.mono }} />
                   <ColorSwatch $color={branding.primary_color_light} />
                 </ColorRow>
               </Field>
-            </RowFlex>
-            <RowFlex>
+            </Fields>
+            <Fields>
               <Field label={t('settings.reports.fields.coverRef')}>
                 <Input value={branding.cover_ref}
                   onChange={(e) => setBranding({ ...branding, cover_ref: e.target.value })}
-                  placeholder={brandingDefaults.cover_ref} style={{ width: 280 }} />
+                  placeholder={brandingDefaults.cover_ref} />
               </Field>
               <Field label={t('settings.reports.fields.footerLeft')}>
                 <Input value={branding.footer_left}
                   onChange={(e) => setBranding({ ...branding, footer_left: e.target.value })}
-                  placeholder={brandingDefaults.footer_left} style={{ width: 280 }} />
+                  placeholder={brandingDefaults.footer_left} />
               </Field>
-            </RowFlex>
+            </Fields>
           </>,
         ),
 
@@ -1000,12 +988,69 @@ export default function AppBuilder() {
             </ReadonlyGrid>
           </>,
         ),
-        ].filter((x) => !!x)
-          // the read-only list stays last
-          .sort((x, y) => Number(x.key === 'readonly') - Number(y.key === 'readonly') || x.title.localeCompare(y.title, i18n.language))
-          .map((x) => x.node)}
-      </Stack>
+        ].filter((x): x is AppSectionView => !!x)} remembered={remembered} onPick={pick} />
     </Shell>
+  )
+}
+
+// ── the sections: a list, the picked one beside ──────────────────────────────────────────
+
+interface AppSectionView { key: SectionKey; title: string; icon: ReactNode; badge: string; body: ReactNode }
+
+const Split = styled.div`display: flex; gap: 14px; flex: 1; min-height: 0; align-items: flex-start;`
+const SectionList = styled(Card)`
+  flex: 0 0 min(300px, 34%); min-width: 0; padding: 0 10px 10px; display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; overflow: hidden;
+`
+const GroupTitle = styled.div`
+  padding: 12px 4px 4px; font-family: ${fonts.sans}; font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.muted};
+`
+const SectionLine = styled.button<{ $on: boolean }>`
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; text-align: left; cursor: pointer; font-family: ${fonts.sans};
+  border: 1px solid ${(p) => (p.$on ? colors.blue.main : colors.border)}; border-radius: ${radius.md};
+  background: ${(p) => (p.$on ? colors.blue.bg : colors.bg.input)};
+  & .icon { flex-shrink: 0; display: inline-flex; color: ${colors.blue.main}; }
+  & .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  & .title { font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.primary}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .badge { font-size: ${fontSize.micro}; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  &:hover { border-color: ${(p) => (p.$on ? colors.blue.main : colors.blue.border)}; }
+`
+const SectionSide = styled(Card)`flex: 1; min-width: 0; padding: 0; display: flex; flex-direction: column; overflow: hidden;`
+const SideHead = styled.div`
+  display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid ${colors.border}; background: ${colors.bg.input};
+  font-family: ${fonts.sans}; font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.primary}; text-transform: uppercase; letter-spacing: 0.06em;
+  & .icon { color: ${colors.blue.main}; display: inline-flex; }
+  & .title { flex: 1; }
+  & .badge { font-weight: 500; text-transform: none; letter-spacing: 0; color: ${colors.text.muted}; }
+`
+// a readable width for a form; the read-only list (long paths, three columns) takes the whole panel
+const SideBody = styled(PanelBody)<{ $wide?: boolean }>`max-width: ${(p) => (p.$wide ? 'none' : '1120px')};`
+
+function SectionsSplit({ sections, remembered, onPick }: { sections: AppSectionView[]; remembered: string | null; onPick: (k: SectionKey) => void }) {
+  const { t } = useTranslation()
+  const picked = pickedSection(sections, remembered)
+  const current = sections.find((x) => x.key === picked)
+  return (
+    <Split>
+      <SectionList>
+        {groupedSections(sections).map((g) => (
+          <Fragment key={g.id}>
+            <GroupTitle>{t(`settings.app.group.${g.id}`)}</GroupTitle>
+            {g.sections.map((x) => (
+              <SectionLine key={x.key} type="button" $on={x.key === picked} data-section={x.key} onClick={() => onPick(x.key)}>
+                <span className="icon">{x.icon}</span>
+                <span className="text"><span className="title">{x.title}</span><span className="badge">{x.badge}</span></span>
+              </SectionLine>
+            ))}
+          </Fragment>
+        ))}
+      </SectionList>
+      {current && (
+        <SectionSide>
+          <SideHead><span className="icon">{current.icon}</span><span className="title">{current.title}</span><span className="badge">{current.badge}</span></SideHead>
+          <SideBody data-section-body={current.key} $wide={current.key === 'readonly'}>{current.body}</SideBody>
+        </SectionSide>
+      )}
+    </Split>
   )
 }
 
@@ -1076,7 +1121,7 @@ function ChipsInput({ value, onChange, placeholder }: { value: string[]; onChang
 function NumField({ label, value, min, onChange }: { label: string; value: number; min: number; onChange: (v: number) => void }) {
   return (
     <Field label={label}>
-      <Input type="number" min={min} value={value} onChange={(e) => onChange(Math.max(min, Number(e.target.value) || min))} style={{ width: 130 }} />
+      <Input type="number" min={min} value={value} onChange={(e) => onChange(Math.max(min, Number(e.target.value) || min))} />
     </Field>
   )
 }
@@ -1084,7 +1129,7 @@ function NumField({ label, value, min, onChange }: { label: string; value: numbe
 function PoolSelect({ value, pools, onChange }: { value: string; pools?: string[]; onChange: (v: string) => void }) {
   const names = [...new Set([...(pools ?? []), value].filter(Boolean))]
   return (
-    <div style={{ width: 200 }}>
+    <div>
       <SearchSelect value={value} onChange={(v) => onChange(v || 'default')} options={names.map((n) => ({ value: n, label: n, mono: n }))} />
     </div>
   )

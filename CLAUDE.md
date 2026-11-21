@@ -305,7 +305,7 @@ api/client.ts          fetch wrapper: X-Liberty-Lang / X-Liberty-Pool headers, s
 auth/ workspace/ tabs/ sio/ branding/   the contexts (AuthContext, WorkspaceContext = connectors +
                        menus + screens + license + current app / pool, TabsContext, SioContext)
 common/                shared primitives: Button Card Input SearchSelect Checkbox FileInput Tag Banner Spinner
-                       PageLayout Modal Modals(useModals) ErrorDetails ErrorBoundary SchemaForm
+                       PageLayout HeaderActions (a page's Save / Discard placed in the page header) Modal Modals(useModals) ErrorDetails ErrorBoundary SchemaForm
                        SchemaNavigator SubNav EditorModalShell DateRangeFilter (presets + two-month
                        calendar + date basis; logic in services/period.ts) DatePicker (one date, typed or picked;
                        both on the shared MonthGrid) PortalPanel (fixed popover); NOT barrelled (heavy): DataTable
@@ -326,7 +326,9 @@ pages/Settings/        one *Builder per config section + the Visual Designer (Sc
                        AccessBuilder (+ Access/: RoleEditor panel, MenuTree inherit|allow|deny, OtherAccess,
                        permissions.ts = strings ⇄ tree model + the backend's glob matcher, ScopeRulesEditor +
                        scopeRules.ts = data-scope rules / attributes helpers, both tested),
-                       AppBuilder, ReportsBuilder, ThemeBuilder, TechnicalDashboard,
+                       AppBuilder (its sections as a grouped list, the picked one beside: services/appSections.ts, tested),
+                       ReportsBuilder, ThemeBuilder (+ ThemePreview: a piece of the app in dark and light;
+                       services/themeDraft.ts, tested), TechnicalDashboard,
                        Package / ChangePackages / IntegrityBuilder (reached from nomaflow pages)
 pages/Nomaflow/        JobsList, JobEditor, StepEditor, RunDetail, Schedule, RetentionPanel
 pages/Explorer/        the Data Explorer page: index (model, the AnalysisDefinition, runs, drill, views), FieldsPane

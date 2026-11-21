@@ -4,7 +4,8 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-:root {
+/* `.theme-dark` scopes the dark values to a subtree (the Theme editor's preview, shown beside the light one). */
+:root, .theme-dark {
   /* Backgrounds */
   --bg-base:        #07060e;
   --bg-card:        rgba(255,255,255,0.06);
