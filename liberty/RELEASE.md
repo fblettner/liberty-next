@@ -290,6 +290,13 @@
   Deploy folder: check, then deliver.
 - **Long flows wrap, and zoom.** A service's, a job's and an endpoint's flow continue on the next row instead
   of running off to the right, and each canvas has a zoom (− / % / +, kept per kind of flow on the device).
+- **An Explorer model is drawn.** The Explorer builder shows the model as a diagram: the hub, the entities it
+  reaches placed by how far they are from it, each relation a line carrying the columns it joins on — and,
+  set apart in orange, the entities that do **not** reach the hub (an analysis cannot use them) and the
+  relations that have no column pair yet. A click on an entity shows what it is (its query or table, key,
+  measures), its relations, and Edit, Make it the hub, Delete; a click on a line edits that relation's column
+  pairs; with nothing picked the panel holds the model's own settings (label, hub, description, preset). The
+  layout is computed from the model — nothing is placed by hand — and the canvas zooms.
 - **A screen that reads or saves through an API travels whole.** In a package and in a screen's history, the
   endpoints a screen reads (its rows) or saves through (its own connector's, or its "Saves through"
   connector's) were looked up as SQL queries on the API connector, not found, and listed as **missing

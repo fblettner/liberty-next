@@ -1,10 +1,12 @@
-// Explorer settings — `config/explorer.toml`, one model per app: the hub entity, the entities
-// around it (each a query with a cardinality, a key, measures) and the relations joining them.
-// A scope bar picks the app; the page edits that app's model in place and saves it whole
-// (PUT /admin/config/explorer/parsed + reload). Entities open ExplorerEntityModal.
+// Explorer settings — `config/explorer.toml`, the models of an app: the hub entity, the entities around it
+// (each a query or a table with a cardinality, a key, measures) and the relations joining them.
+// A scope bar picks the app, a picker its model. The model is DRAWN (ExplorerDiagram: the hub in the middle,
+// the details on its left, its dimensions on its right, what does not reach the hub set apart); a click on a
+// card or on a line picks it and the panel beside edits it — the model's own settings when nothing is picked.
+// Saved whole (PUT /admin/config/explorer/parsed + reload). An entity's columns open ExplorerEntityModal.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Plus, Trash2, Edit3, Database, Link2, Save, Boxes } from 'lucide-react'
+import { Plus, Trash2, Edit3, Database, Link2, Save, Boxes, Star, ArrowLeft } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Centered, Field, Input, SearchSelect, SpinnerRing, Tag, useModals, type SearchSelectOption, HeaderActions } from '../../common'
@@ -16,26 +18,51 @@ import { AddScopeModal } from './AddScopeModal'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { BuilderShell as Shell, BuilderToolbar as Toolbar } from '../../common/builderShell'
+import { FlowCanvas } from './flowKit'
+import ExplorerDiagram, { type DiagramPick } from './ExplorerDiagram'
+import { modelDiagram } from '../../services/explorerDiagram'
 
 type Models = Record<string, Record<string, ExplorerModelBody>>   // app → model id → body
 
-const Body = styled.div`flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px;`
-const Head = styled(Card)`display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; padding: 12px 14px;`
-const PresetNote = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans}; padding: 0 2px;`
-const Section = styled(Card)`padding: 10px 14px; display: flex; flex-direction: column; gap: 6px;`
-const SectionHead = styled.div`display: flex; align-items: center; gap: 8px; font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.primary}; & .spacer { flex: 1; }`
-const Item = styled.div`
-  display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: ${radius.md};
-  border: 1px solid ${colors.border}; background: ${colors.bg.input}; cursor: pointer; min-width: 0;
-  & > .icon { flex-shrink: 0; color: ${colors.blue.main}; }
-  & .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  & .name { font-family: ${fonts.mono}; font-size: ${fontSize.base}; color: ${colors.text.primary}; }
-  & .meta { font-family: ${fonts.sans}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  & .actions { flex-shrink: 0; display: flex; gap: 4px; }
-  &:hover { border-color: ${colors.blue.border}; background: ${colors.blue.bg}; }
+// the diagram on the left, the picked thing's settings beside it
+const Split = styled.div`flex: 1; min-height: 0; display: flex; gap: 14px; align-items: stretch;`
+const CanvasSide = styled.div`flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 8px;`
+const CanvasBar = styled.div`
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex-shrink: 0; font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans};
+  & .spacer { flex: 1; }
+  & .warn { color: ${colors.orange.main}; }
 `
-const RelRow = styled.div`display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 8px; align-items: start; padding: 6px 0; border-bottom: 1px solid ${colors.border}; &:last-child { border-bottom: 0; }`
-const Pairs = styled.div`grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; padding-left: 12px;`
+const SidePanel = styled(Card)`flex: 0 0 min(420px, 36%); min-width: 0; min-height: 0; padding: 0; display: flex; flex-direction: column; overflow: hidden;`
+const SideHead = styled.div`
+  display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid ${colors.border}; background: ${colors.bg.input}; flex-wrap: wrap;
+  & > svg { color: ${colors.blue.main}; flex-shrink: 0; }
+  & .name { flex: 1; min-width: 80px; font-weight: 600; color: ${colors.text.primary}; font-family: ${fonts.mono}; font-size: ${fontSize.sm}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+`
+const SideBody = styled.div`flex: 1; min-height: 0; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px;`
+const Facts = styled.div`
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 12px; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  & .k { color: ${colors.text.muted}; }
+  & .v { color: ${colors.text.primary}; overflow-wrap: anywhere; }
+  & .v.mono { font-family: ${fonts.mono}; }
+`
+const SubTitle = styled.div`font-size: ${fontSize.micro}; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: ${colors.text.muted};`
+const RelLink = styled.button`
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 10px; text-align: left; cursor: pointer; font-family: ${fonts.mono}; font-size: ${fontSize.sm};
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; color: ${colors.text.primary};
+  & .on { flex: 1; min-width: 0; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: ${fontSize.micro}; }
+  &:hover { border-color: ${colors.blue.border}; }
+`
+const StartBox = styled.div`
+  max-width: 560px; margin: 24px auto; display: flex; flex-direction: column; gap: 12px; font-family: ${fonts.sans};
+  & .title { font-size: ${fontSize.md}; font-weight: 600; color: ${colors.text.primary}; }
+  & .way { display: flex; gap: 12px; padding: 12px 14px; border: 1px solid ${colors.border}; border-radius: ${radius.lg}; background: var(--bg-modal); }
+  & .way > svg { flex-shrink: 0; color: ${colors.blue.main}; margin-top: 2px; }
+  & .way .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; font-size: ${fontSize.sm}; color: ${colors.text.muted}; }
+  & .way strong { color: ${colors.text.primary}; font-weight: 600; }
+`
+const PresetNote = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans}; padding: 0 2px;`
+const RelRow = styled.div`display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center;`
+const Pairs = styled.div`display: flex; flex-direction: column; gap: 6px;`
 const PairRow = styled.div`display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 8px; align-items: center;`
 const Arrow = styled.span`color: ${colors.text.muted}; font-family: ${fonts.mono};`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 12px 4px; text-align: center;`
@@ -54,6 +81,9 @@ export default function ExplorerBuilder() {
   const [busy, setBusy] = useState(false)
   const [addScopeOpen, setAddScopeOpen] = useState(false)
   const [editing, setEditing] = useState<ExplorerEntityRecord | null | undefined>(undefined)
+  const [pick, setPick] = useState<DiagramPick>(null)
+  // where Back returns from a relation: the entity it was opened from (else the model)
+  const [cameFrom, setCameFrom] = useState<string | null>(null)
   const [presets, setPresets] = useState<{ id: string; label?: string; connector?: string; tables?: { name: string }[] }[]>([])
   // Column names per entity query (`connector.query` → names), discovered once for the relation pickers.
   const [entityColumns, setEntityColumns] = useState<Record<string, string[]>>({})
@@ -85,6 +115,7 @@ export default function ExplorerBuilder() {
   const modelIds = useMemo(() => Object.keys(doc?.[scope] ?? {}).sort(), [doc, scope])
   useEffect(() => { setModelId((cur) => (cur && modelIds.includes(cur) ? cur : (modelIds[0] ?? ''))) }, [modelIds])
   const model = modelId ? doc?.[scope]?.[modelId] : undefined
+  useEffect(() => { setPick(null); setCameFrom(null) }, [scope, modelId])      // another model: nothing of it is picked yet
   const columnsOf = useCallback((entityId: string): string[] => {
     const e = model?.entities[entityId]
     return e ? (entityColumns[`${e.connector || scope}.${e.query}`] ?? []) : []
@@ -194,84 +225,166 @@ export default function ExplorerBuilder() {
       {status && <Banner $tone="ok">{status}</Banner>}
       {error && <Banner $tone="error">{error}</Banner>}
       {scope && modelIds.length === 0 && <Empty>{t('settings.explorer.noModels')}</Empty>}
-      {model && (
-        <Body>
-          <Head>
-            <Field label={t('settings.explorer.label')}><Input value={model.label ?? ''} onChange={(e) => update({ label: e.target.value || undefined })} placeholder={scope} /></Field>
-            <Field label={t('settings.explorer.hub')}><SearchSelect value={model.hub ?? ''} onChange={(v) => update({ hub: v })} options={entityOpts} placeholder={t('settings.access.pickItem')} /></Field>
-            <Field label={t('settings.explorer.description')}><Input value={model.description ?? ''} onChange={(e) => update({ description: e.target.value || undefined })} /></Field>
-            <Field label={t('settings.explorer.preset')}>
-              <SearchSelect sort value={model.preset ?? ''} anyLabel={t('settings.explorer.noPreset')} options={presets.map((p) => ({ value: p.id, label: p.label || p.id, mono: `${p.connector ? `${p.connector} · ` : ''}${(p.tables ?? []).map((x) => x.name).join(', ')}` }))}
-                onChange={(v) => void applyPreset(v)} disabled={busy} />
-            </Field>
-          </Head>
-          {model.preset && <PresetNote>{t('settings.explorer.presetNote', { preset: model.preset })}</PresetNote>}
-          <Section>
-            <SectionHead><Database size={14} /> {t('settings.explorer.entities')} <span className="spacer" />
-              <Button $variant="ghost" $size="sm" onClick={() => setEditing(null)} disabled={busy}><Plus size={13} /> {t('settings.explorer.addEntity')}</Button>
-            </SectionHead>
-            {entityIds.length === 0 && <Empty>{t('settings.explorer.noEntities')}</Empty>}
-            {entityIds.map((id) => {
-              const e = model.entities[id]
-              const measures = Object.keys(e.measures ?? {})
-              const meta = [e.query ? `${e.connector || scope}.${e.query}` : `${t('settings.explorer.table')} ${e.schema ? `${e.schema}.` : ''}${e.table ?? ''}`, e.key?.length ? `${t('settings.explorer.key')}: ${e.key.join(', ')}` : null,
-                measures.length ? `Σ ${measures.join(', ')}` : null, e.default_date ? `${t('settings.explorer.defaultDate')}: ${e.default_date}` : null].filter(Boolean).join(' · ')
-              return (
-                <Item key={id} onClick={() => setEditing({ ...e, id })}>
-                  <Database className="icon" size={16} />
-                  <span className="text">
-                    <span className="name">{id}{e.label ? <span style={{ color: colors.text.secondary, fontFamily: fonts.sans }}> — {e.label}</span> : null}
-                      {model.hub === id && <Tag $tone="blue" style={{ marginLeft: 8, fontSize: fontSize.micro }}>{t('settings.explorer.hub')}</Tag>}
-                      <Tag $tone={e.cardinality === 'many' ? 'orange' : 'neutral'} style={{ marginLeft: 6, fontSize: fontSize.micro }}>{model.hub === id || e.cardinality !== 'many' ? '1..1' : '1..n'}</Tag>
-                    </span>
-                    <span className="meta">{meta}</span>
-                  </span>
-                  <span className="actions" onClick={(ev) => ev.stopPropagation()}>
-                    <Button $variant="ghost" $size="sm" onClick={() => setEditing({ ...e, id })} disabled={busy}><Edit3 size={13} /> {t('common.edit')}</Button>
-                    <Button $variant="ghost" $size="sm" onClick={() => void removeEntity(id)} disabled={busy} style={{ color: colors.red.main }}><Trash2 size={13} /> {t('common.delete')}</Button>
-                  </span>
-                </Item>
-              )
-            })}
-          </Section>
-          <Section>
-            <SectionHead><Link2 size={14} /> {t('settings.explorer.relations')} <span className="spacer" />
-              <Button $variant="ghost" $size="sm" disabled={busy || entityIds.length < 2}
-                onClick={() => update({ relations: [...(model.relations ?? []), { from: entityIds.find((x) => x !== model.hub) ?? entityIds[0], to: model.hub, on: [] }] })}>
-                <Plus size={13} /> {t('settings.explorer.addRelation')}
-              </Button>
-            </SectionHead>
-            {(model.relations ?? []).length === 0 && <Empty>{t('settings.explorer.noRelations')}</Empty>}
-            {(model.relations ?? []).map((r, i) => {
-              const fromCols = columnsOf(r.from).map((c) => ({ value: c, label: c }))
-              const toCols = columnsOf(r.to).map((c) => ({ value: c, label: c }))
-              const pairs = (r.on ?? []).length ? r.on : [['', '']]
-              const setPair = (k: number, side: 0 | 1, v: string) => setRelation(i, { on: pairs.map((p, j) => (j === k ? (side === 0 ? [v, p[1]] : [p[0], v]) : p)) })
-              return (
-                <RelRow key={i}>
-                  <SearchSelect value={r.from} onChange={(v) => setRelation(i, { from: v, on: [] })} options={entityOpts} />
-                  <Arrow>→</Arrow>
-                  <SearchSelect value={r.to} onChange={(v) => setRelation(i, { to: v, on: [] })} options={entityOpts} />
-                  <Button $variant="ghost" $size="sm" style={{ color: colors.red.main }} onClick={() => update({ relations: (model.relations ?? []).filter((_, k) => k !== i) })}><Trash2 size={13} /></Button>
-                  <Pairs>
-                    {pairs.map((p, k) => (
-                      <PairRow key={k}>
-                        <SearchSelect value={p[0]} onChange={(v) => setPair(k, 0, v.toUpperCase())} options={fromCols} allowCustom placeholder={t('settings.explorer.columnOf', { entity: r.from })} />
-                        <Arrow>=</Arrow>
-                        <SearchSelect value={p[1]} onChange={(v) => setPair(k, 1, v.toUpperCase())} options={toCols} allowCustom placeholder={t('settings.explorer.columnOf', { entity: r.to })} />
-                        <span style={{ display: 'flex', gap: 2 }}>
-                          {k === pairs.length - 1 && <Button $variant="ghost" $size="sm" onClick={() => setRelation(i, { on: [...pairs, ['', '']] })}><Plus size={13} /></Button>}
-                          {pairs.length > 1 && <Button $variant="ghost" $size="sm" onClick={() => setRelation(i, { on: pairs.filter((_, j) => j !== k) })}><Trash2 size={13} /></Button>}
-                        </span>
-                      </PairRow>
-                    ))}
-                  </Pairs>
-                </RelRow>
-              )
-            })}
-          </Section>
-        </Body>
-      )}
+      {model && (() => {
+        const diagram = modelDiagram(model)
+        const relations = model.relations ?? []
+        const pickedEntity = pick?.kind === 'entity' && model.entities[pick.id] ? pick.id : null
+        const pickedRelation = pick?.kind === 'relation' && relations[pick.index] ? pick.index : null
+        const unfinished = diagram.edges.filter((e) => !e.complete).length
+        const addRelation = (from?: string) => {
+          const a = from ?? entityIds.find((x) => x !== model.hub) ?? entityIds[0]
+          const b = a === model.hub ? (entityIds.find((x) => x !== model.hub) ?? model.hub) : model.hub
+          update({ relations: [...relations, { from: a, to: b, on: [] }] })
+          setPick({ kind: 'relation', index: relations.length })
+        }
+        const pairsText = (r: ExplorerRelationBody) => (r.on ?? []).filter((p) => p[0] && p[1]).map((p) => (p[0] === p[1] ? p[0] : `${p[0]} = ${p[1]}`)).join(', ')
+        return (
+          <Split>
+            <CanvasSide>
+              <CanvasBar>
+                <Button $variant="ghost" $size="sm" onClick={() => setEditing(null)} disabled={busy}><Plus size={13} /> {t('settings.explorer.addEntity')}</Button>
+                <Button $variant="ghost" $size="sm" onClick={() => addRelation()} disabled={busy || entityIds.length < 2}><Link2 size={13} /> {t('settings.explorer.addRelation')}</Button>
+                <span className="spacer" />
+                <span>{t('settings.explorer.diagram.counts', { entities: entityIds.length, relations: relations.length })}</span>
+                {diagram.loose.length > 0 && <span className="warn">· {t('settings.explorer.diagram.looseCount', { n: diagram.loose.length })}</span>}
+                {unfinished > 0 && <span className="warn">· {t('settings.explorer.diagram.unfinished', { n: unfinished })}</span>}
+              </CanvasBar>
+              <FlowCanvas zoomKey="explorer">
+                {entityIds.length === 0
+                  ? (
+                    // an empty model: the two ways to start — a prebuilt one (a preset: its tables, hub and joins), or by hand
+                    <StartBox data-start>
+                      <div className="title">{t('settings.explorer.start.title')}</div>
+                      <div className="way">
+                        <Boxes size={16} />
+                        <div className="text">
+                          <strong>{t('settings.explorer.start.preset')}</strong>
+                          <span>{t('settings.explorer.start.presetHint')}</span>
+                          <div style={{ maxWidth: 380 }}>
+                            <SearchSelect sort value={model.preset ?? ''} placeholder={t('settings.explorer.start.pickPreset')} disabled={busy || presets.length === 0}
+                              options={presets.map((p) => ({ value: p.id, label: p.label || p.id, mono: `${p.connector ? `${p.connector} · ` : ''}${(p.tables ?? []).map((x) => x.name).join(', ')}` }))}
+                              onChange={(v) => void applyPreset(v)} />
+                          </div>
+                          {presets.length === 0 && <span>{t('settings.explorer.start.noPreset')}</span>}
+                        </div>
+                      </div>
+                      <div className="way">
+                        <Database size={16} />
+                        <div className="text">
+                          <strong>{t('settings.explorer.start.byHand')}</strong>
+                          <span>{t('settings.explorer.noEntities')}</span>
+                          <Button $variant="ghost" $size="sm" style={{ alignSelf: 'flex-start' }} onClick={() => setEditing(null)} disabled={busy}><Plus size={13} /> {t('settings.explorer.addEntity')}</Button>
+                        </div>
+                      </div>
+                    </StartBox>
+                  )
+                  : <ExplorerDiagram model={model} app={scope} picked={pick} onPick={(p) => { setCameFrom(null); setPick(p) }} />}
+              </FlowCanvas>
+            </CanvasSide>
+            <SidePanel>
+              {pickedEntity ? (() => {
+                const id = pickedEntity, e = model.entities[id]
+                const measures = Object.entries(e.measures ?? {})
+                const mine = relations.map((r, index) => ({ r, index })).filter(({ r }) => r.from === id || r.to === id)
+                return (
+                  <>
+                    <SideHead>
+                      <Button $variant="ghost" $size="sm" data-back onClick={() => { setCameFrom(null); setPick(null) }}><ArrowLeft size={13} /> {modelId}</Button>
+                      {model.hub === id ? <Star size={15} /> : <Database size={15} />}
+                      <span className="name">{id}</span>
+                      {model.hub === id ? <Tag $tone="blue">{t('settings.explorer.hub')}</Tag> : <Tag $tone={e.cardinality === 'many' ? 'orange' : 'neutral'}>{e.cardinality === 'many' ? '1..n' : '1..1'}</Tag>}
+                    </SideHead>
+                    <SideBody data-side="entity">
+                      <Facts>
+                        {e.label && <><span className="k">{t('settings.explorer.label')}</span><span className="v">{e.label}</span></>}
+                        <span className="k">{e.query ? t('settings.explorer.query') : t('settings.explorer.table')}</span>
+                        <span className="v mono">{e.query ? `${e.connector || scope}.${e.query}` : `${e.schema ? `${e.schema}.` : ''}${e.table ?? ''}`}</span>
+                        {(e.key?.length ?? 0) > 0 && <><span className="k">{t('settings.explorer.key')}</span><span className="v mono">{e.key?.join(', ')}</span></>}
+                        {measures.length > 0 && <><span className="k">{t('settings.explorer.diagram.measures')}</span><span className="v mono">{measures.map(([k]) => k).join(', ')}</span></>}
+                        {e.default_date && <><span className="k">{t('settings.explorer.defaultDate')}</span><span className="v mono">{e.default_date}</span></>}
+                        {e.screen && <><span className="k">{t('settings.explorer.screen')}</span><span className="v mono">{e.screen}</span></>}
+                      </Facts>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        <Button $variant="primary" $size="sm" onClick={() => setEditing({ ...e, id })} disabled={busy}><Edit3 size={13} /> {t('common.edit')}</Button>
+                        {model.hub !== id && <Button $variant="ghost" $size="sm" onClick={() => update({ hub: id })} disabled={busy}><Star size={13} /> {t('settings.explorer.diagram.makeHub')}</Button>}
+                        <Button $variant="ghost" $size="sm" onClick={() => void removeEntity(id).then(() => setPick(null))} disabled={busy} style={{ color: colors.red.main }}><Trash2 size={13} /> {t('common.delete')}</Button>
+                      </div>
+                      <SubTitle>{t('settings.explorer.relations')}</SubTitle>
+                      {mine.length === 0 && <Empty style={{ padding: '4px 0', textAlign: 'left' }}>{model.hub === id ? t('settings.explorer.noRelations') : t('settings.explorer.diagram.notLinked')}</Empty>}
+                      {mine.map(({ r, index }) => (
+                        <RelLink key={index} type="button" onClick={() => { setCameFrom(id); setPick({ kind: 'relation', index }) }}>
+                          <Link2 size={13} /> {r.from === id ? r.to : r.from}<span className="on">{pairsText(r) || t('settings.explorer.diagram.noPair')}</span>
+                        </RelLink>
+                      ))}
+                      <Button $variant="ghost" $size="sm" style={{ alignSelf: 'flex-start' }} onClick={() => { setCameFrom(id); addRelation(id) }} disabled={busy || entityIds.length < 2}>
+                        <Plus size={13} /> {t('settings.explorer.addRelation')}
+                      </Button>
+                    </SideBody>
+                  </>
+                )
+              })() : pickedRelation != null ? (() => {
+                const i = pickedRelation, r = relations[i]
+                const fromCols = columnsOf(r.from).map((c) => ({ value: c, label: c }))
+                const toCols = columnsOf(r.to).map((c) => ({ value: c, label: c }))
+                const pairs = (r.on ?? []).length ? r.on : [['', '']]
+                const setPair = (k: number, side: 0 | 1, v: string) => setRelation(i, { on: pairs.map((p, j) => (j === k ? (side === 0 ? [v, p[1]] : [p[0], v]) : p)) })
+                // Back: to the entity this relation was opened from when it still exists, else to the model
+                const backEntity = cameFrom && model.entities[cameFrom] ? cameFrom : null
+                const goBack = () => { setCameFrom(null); setPick(backEntity ? { kind: 'entity', id: backEntity } : null) }
+                return (
+                  <>
+                    <SideHead>
+                      <Button $variant="ghost" $size="sm" data-back onClick={goBack}><ArrowLeft size={13} /> {backEntity ?? modelId}</Button>
+                      <Link2 size={15} />
+                      <span className="name">{r.from} → {r.to}</span>
+                    </SideHead>
+                    <SideBody data-side="relation">
+                      <RelRow>
+                        <SearchSelect value={r.from} onChange={(v) => setRelation(i, { from: v, on: [] })} options={entityOpts} />
+                        <Arrow>→</Arrow>
+                        <SearchSelect value={r.to} onChange={(v) => setRelation(i, { to: v, on: [] })} options={entityOpts} />
+                      </RelRow>
+                      <SubTitle>{t('settings.explorer.diagram.joinedOn')}</SubTitle>
+                      <Pairs>
+                        {pairs.map((p, k) => (
+                          <PairRow key={k}>
+                            <SearchSelect value={p[0]} onChange={(v) => setPair(k, 0, v.toUpperCase())} options={fromCols} allowCustom placeholder={t('settings.explorer.columnOf', { entity: r.from })} />
+                            <Arrow>=</Arrow>
+                            <SearchSelect value={p[1]} onChange={(v) => setPair(k, 1, v.toUpperCase())} options={toCols} allowCustom placeholder={t('settings.explorer.columnOf', { entity: r.to })} />
+                            <span style={{ display: 'flex', gap: 2 }}>
+                              {k === pairs.length - 1 && <Button $variant="ghost" $size="sm" onClick={() => setRelation(i, { on: [...pairs, ['', '']] })}><Plus size={13} /></Button>}
+                              {pairs.length > 1 && <Button $variant="ghost" $size="sm" onClick={() => setRelation(i, { on: pairs.filter((_, j) => j !== k) })}><Trash2 size={13} /></Button>}
+                            </span>
+                          </PairRow>
+                        ))}
+                      </Pairs>
+                      <Button $variant="ghost" $size="sm" style={{ alignSelf: 'flex-start', color: colors.red.main }}
+                        onClick={() => { update({ relations: relations.filter((_, k) => k !== i) }); goBack() }}>
+                        <Trash2 size={13} /> {t('settings.explorer.diagram.deleteRelation')}
+                      </Button>
+                    </SideBody>
+                  </>
+                )
+              })() : (
+                <>
+                  <SideHead><Boxes size={15} /><span className="name">{modelId}</span></SideHead>
+                  <SideBody data-side="model">
+                    <Field label={t('settings.explorer.label')}><Input value={model.label ?? ''} onChange={(e) => update({ label: e.target.value || undefined })} placeholder={scope} /></Field>
+                    <Field label={t('settings.explorer.hub')}><SearchSelect value={model.hub ?? ''} onChange={(v) => update({ hub: v })} options={entityOpts} placeholder={t('settings.access.pickItem')} /></Field>
+                    <Field label={t('settings.explorer.description')}><Input value={model.description ?? ''} onChange={(e) => update({ description: e.target.value || undefined })} /></Field>
+                    <Field label={t('settings.explorer.preset')}>
+                      <SearchSelect sort value={model.preset ?? ''} anyLabel={t('settings.explorer.noPreset')} options={presets.map((p) => ({ value: p.id, label: p.label || p.id, mono: `${p.connector ? `${p.connector} · ` : ''}${(p.tables ?? []).map((x) => x.name).join(', ')}` }))}
+                        onChange={(v) => void applyPreset(v)} disabled={busy} />
+                    </Field>
+                    {model.preset && <PresetNote>{t('settings.explorer.presetNote', { preset: model.preset })}</PresetNote>}
+                    <PresetNote>{t('settings.explorer.diagram.hint')}</PresetNote>
+                  </SideBody>
+                </>
+              )}
+            </SidePanel>
+          </Split>
+        )
+      })()}
       {editing !== undefined && model && (
         <ExplorerEntityModal initial={editing} app={scope} takenIds={entityIds.filter((x) => x !== editing?.id)} onSave={onEntitySave} onClose={() => setEditing(undefined)} />
       )}

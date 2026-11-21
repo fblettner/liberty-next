@@ -343,6 +343,14 @@
 - **Les longs flux passent à la ligne, et se zooment.** Le flux d'un service, d'un job et d'un point d'accès
   continue sur la ligne suivante au lieu de partir à droite, et chaque canevas a un zoom (− / % / +, gardé par
   nature de flux sur l'appareil).
+- **Un modèle de l'Explorer est dessiné.** L'éditeur de l'Explorer montre le modèle en schéma : le pivot, les
+  entités qu'il atteint placées selon leur distance, chaque relation un trait portant les colonnes de la
+  jointure — et, à part en orange, les entités qui n'atteignent **pas** le pivot (une analyse ne peut pas les
+  utiliser) et les relations qui n'ont pas encore de paire de colonnes. Un clic sur une entité montre ce
+  qu'elle est (sa requête ou sa table, sa clé, ses mesures), ses relations, et Modifier, En faire le pivot,
+  Supprimer ; un clic sur un trait modifie les paires de colonnes de cette relation ; sans rien de choisi, le
+  panneau porte les réglages du modèle (libellé, pivot, description, préréglage). La disposition est calculée
+  à partir du modèle — rien n'est placé à la main — et le canevas se zoome.
 - **Un écran qui lit ou enregistre par une API voyage en entier.** Dans un paquet et dans l'historique d'un
   écran, les points d'accès qu'un écran lit (ses lignes) ou par lesquels il enregistre (ceux de son
   connecteur, ou de son connecteur « Enregistre par ») étaient cherchés comme des requêtes SQL sur le
