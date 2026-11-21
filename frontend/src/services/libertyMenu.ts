@@ -11,7 +11,7 @@ export const isLibertyApp = (app: string | null | undefined): boolean => app ===
 
 /** The pages served at `/liberty/<page>`, in menu order. */
 export const LIBERTY_PAGES = [
-  'connectors', 'dictionary', 'screens', 'menus', 'actions', 'charts', 'dashboards', 'explorer',
+  'studio', 'connectors', 'dictionary', 'screens', 'menus', 'actions', 'charts', 'dashboards', 'explorer',
   'report-templates', 'notifications', 'ai', 'integrity',
   'app', 'pools', 'access', 'theme',
   'package', 'changes', 'versions',
@@ -56,6 +56,8 @@ export function libertyMenu(t: T): AppMenuTree {
     label: t('liberty.name'),
     items: [
       { id: 'build', label: t('liberty.build'), icon: 'wrench', items: [
+        // the builder's home first: what exists, what needs attention, where to go
+        page('studio', t('studio.title'), 'workflow'),
         { id: 'assistant', label: t('nav.assistant'), action: 'assistant', icon: 'wand' },
         // in the order an application is built: the data (queries, then their labels), what the users
         // see and do with it, the analyses on top, the automations — and the check of the whole last

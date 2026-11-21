@@ -258,3 +258,44 @@ def test_the_configuration_knows_about_it(env) -> None:
         assert len(issues) == 1 and "studio.missing" in issues[0] and "'nope'" in issues[0]
         described = {e["name"]: e.get("action") for c in client.get("/api/connectors", headers=h).json()["connectors"] if c["name"] == "studio" for e in c["endpoints"]}
         assert described["describe_code"] == "describe_code"
+
+
+def test_the_studio_lists_runs_and_exposes_a_service(env, monkeypatch) -> None:
+    with TestClient(env) as client:
+        h = _h(client, "admin")
+        listed = client.get("/admin/studio/services", headers=h).json()
+        by_id = {s["id"]: s for s in listed["services"]}
+        assert listed["connectors"] == ["studio"] and by_id["describe_code"]["label"] == "Describe a code"
+        assert by_id["describe_code"]["inputs"] == [{"name": "KY", "label": None, "default": None, "required": False},
+                                                     {"name": "suffix", "label": None, "default": "!", "required": False}]
+        assert by_id["describe_code"]["endpoints"] == [{"connector": "studio", "endpoint": "describe_code", "label": None, "writable": False}]
+        assert by_id["broken"]["steps"] == 1
+        home = client.get("/admin/studio/overview", headers=h).json()
+        assert home["counts"]["services"] == 6 and home["counts"]["exposed"] == 6 and home["counts"]["queries"] == 2
+        assert home["counts"]["sql_connectors"] == 1 and home["counts"]["api_connectors"] == 1 and home["counts"]["endpoints"] == 7
+        assert home["integrity"]["errors"] >= 1 and isinstance(home["recent"], list)       # the endpoint whose action is not defined
+        # Run: the answer it would give as an endpoint, the steps it ran; a failing step is reported
+        ran = client.post("/admin/studio/run", headers=h, json={"action": "describe_code", "inputs": {"KY": "001", "suffix": ""}}).json()
+        assert ran["ok"] is True and ran["returned"] == {"code": "001", "label": "one", "suffix": "!"} and ran["steps"] == ["read: main.codes_get"]
+        failed = client.post("/admin/studio/run", headers=h, json={"action": "broken"}).json()
+        assert failed["ok"] is False and "no_such_query" in failed["error"]
+        assert client.post("/admin/studio/run", headers=h, json={"action": "nope"}).status_code == 404
+        assert client.post("/admin/studio/run", headers=_h(client, "caller"), json={"action": "describe_code"}).status_code == 403
+        # Expose: the endpoint is created with the action's inputs as its parameters, and answers at once
+        made = client.post("/admin/studio/expose", headers=h, json={"action": "describe_code", "name": "code_card"})
+        assert made.status_code == 200 and made.json() == {"connector": "studio", "endpoint": "code_card", "permission": "api:studio:code_card",
+                                                            "path": "/api/http/studio/code_card"}
+        out = client.post("/api/http/studio/code_card", headers=h, json={"KY": "002"}).json()
+        assert out["success"] is True and out["json"]["label"] == "two"
+        assert client.post("/admin/studio/expose", headers=h, json={"action": "describe_code", "name": "code_card"}).status_code == 409
+        assert client.post("/admin/studio/expose", headers=h, json={"action": "describe_code", "connector": "main"}).status_code == 422
+        assert client.post("/admin/studio/expose", headers=h, json={"action": "describe_code", "connector": "elsewhere"}).status_code == 404
+        # an installation without an API connector of its own: the studio's connector is created
+        from liberty.web.admin import studio
+        monkeypatch.setattr(studio, "STUDIO_CONNECTOR", "services")
+        made = client.post("/admin/studio/expose", headers=h, json={"action": "first_label", "connector": "services"}).json()
+        assert made["path"] == "/api/http/services/first_label"
+        # (first_label declares no input: the one its steps read, INPUT.KY, became the endpoint's parameter)
+        assert client.post("/api/http/services/first_label", headers=h, json={"KY": "001"}).json()["json"] == {"label": "one", "code": "001"}
+        served = {s["id"]: s["endpoints"] for s in client.get("/admin/studio/services", headers=h).json()["services"]}
+        assert {"connector": "services", "endpoint": "first_label", "label": "first_label", "writable": False} in served["first_label"]

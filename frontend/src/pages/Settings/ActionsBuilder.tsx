@@ -1,10 +1,11 @@
-// Shared actions (actions.toml) — the reusable named-action registry referenced by screens via
-// `call_action`. A list page (same shell + row operations as the Screens list): click a row to edit
-// it in the full-height ActionDesignerModal; per-row Find usages / Clone / Delete; Add up top.
+// The studio — shared actions (actions.toml): named sequences of steps a screen calls (`call_action`) and an
+// API endpoint can be SERVED by (`EndpointDef.action`). A list page (same shell + row operations as the Screens
+// list): click a row to design it in the full-height ActionDesignerModal; per row: Run (inputs → the answer),
+// Expose as an endpoint, Find usages / Clone / Delete; the endpoints a service already serves are shown on it.
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Plus, Trash2, Copy, GitBranch, GitMerge, Edit3, Link2 } from 'lucide-react'
+import { Plus, Trash2, Copy, GitBranch, GitMerge, Edit3, Link2, Play, Share2 } from 'lucide-react'
 import { Banner, Button, useModals } from '../../common'
 import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -12,6 +13,8 @@ import { validateId } from '../../services/idValidator'
 import ActionDesignerModal from './ActionDesignerModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { FindDependenciesModal, type DependencySeed } from './FindDependenciesModal'
+import { StudioExposeModal, StudioRunModal, type StudioService } from './StudioModals'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 
 type Row = Record<string, unknown>
 
@@ -39,11 +42,20 @@ export default function ActionsBuilder() {
   const [depsSeeds, setDepsSeeds] = useState<DependencySeed[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // the services as the server runs them: their inputs, the endpoints they serve, where one can be exposed
+  const [studio, setStudio] = useState<{ services: StudioService[]; connectors: string[]; default_connector: string } | null>(null)
+  const [running, setRunning] = useState<StudioService | null>(null)
+  const [exposing, setExposing] = useState<StudioService | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const { refresh } = useWorkspace()
 
-  const load = () =>
-    api.get<{ actions: Record<string, Row> }>('/admin/config/actions/parsed')
+  const load = () => {
+    api.get<{ services: StudioService[]; connectors: string[]; default_connector: string }>('/admin/studio/services')
+      .then(setStudio).catch(() => setStudio(null))
+    return api.get<{ actions: Record<string, Row> }>('/admin/config/actions/parsed')
       .then((d) => setDoc(d.actions))
       .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
+  }
   useEffect(() => { void load() }, [])
 
   // List-level ops persist the whole actions.toml + reload (per-action editing is in the modal).
@@ -53,6 +65,7 @@ export default function ActionsBuilder() {
       await api.put<{ saved: boolean }>('/admin/config/actions/parsed', { actions: next })
       await api.post('/admin/reload')
       setDoc(next)
+      void load()
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
     } finally { setBusy(false) }
@@ -137,6 +150,7 @@ export default function ActionsBuilder() {
         </Button>
         {error && <Banner $tone="error">{error}</Banner>}
       </Bar>
+      {notice && <Banner $tone="ok">{notice}</Banner>}
       <Sub>{t('settings.actions.hint')}</Sub>
 
       <List>
@@ -149,6 +163,7 @@ export default function ActionsBuilder() {
             t('settings.actions.summary.steps', { n: stepCount }),
             paramCount > 0 && t('settings.actions.summary.inputs', { n: paramCount }),
           ].filter(Boolean).join(' · ')
+          const service = studio?.services.find((x) => x.id === id) ?? null
           return (
             <Item key={id} onClick={() => setEditing(id)}>
               <Link2 className="icon" size={18} />
@@ -156,8 +171,17 @@ export default function ActionsBuilder() {
                 <span className="name">{id}</span>
                 {label && <span className="label">{label}</span>}
                 <span className="meta">{meta}</span>
+                {(service?.endpoints ?? []).map((e) => (
+                  <span key={`${e.connector}.${e.endpoint}`} className="meta" style={{ fontFamily: fonts.mono }}>POST /api/http/{e.connector}/{e.endpoint}</span>
+                ))}
               </span>
               <span className="actions" onClick={(e) => e.stopPropagation()}>
+                <Button $variant="ghost" $size="sm" disabled={busy || !service} onClick={() => service && setRunning(service)}>
+                  <Play size={13} /> {t('settings.studio.run')}
+                </Button>
+                <Button $variant="ghost" $size="sm" disabled={busy || !service} onClick={() => service && setExposing(service)}>
+                  <Share2 size={13} /> {t('settings.studio.expose')}
+                </Button>
                 <Button $variant="ghost" $size="sm" disabled={busy}
                   onClick={() => setUsagesTarget({ kind: 'action', name: id, label: `shared action ${id}` })}>
                   <GitBranch size={13} /> {t('findUsages.button')}
@@ -183,6 +207,13 @@ export default function ActionsBuilder() {
       </List>
 
       {editing && <ActionDesignerModal actionId={editing} onClose={() => setEditing(null)} onSaved={() => void load()} />}
+      {running && <StudioRunModal service={running} onClose={() => setRunning(null)} />}
+      {exposing && studio && (
+        <StudioExposeModal
+          service={exposing} connectors={studio.connectors} defaultConnector={studio.default_connector} onClose={() => setExposing(null)}
+          onDone={(message) => { setExposing(null); setNotice(message); void load(); refresh() }}
+        />
+      )}
       {usagesTarget && <FindUsagesModal target={usagesTarget} onClose={() => setUsagesTarget(null)} />}
       {depsSeeds && <FindDependenciesModal seeds={depsSeeds} onClose={() => setDepsSeeds(null)} />}
     </>

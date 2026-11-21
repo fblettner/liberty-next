@@ -480,6 +480,56 @@ async def run_chain(
     return result
 
 
+def shared_inputs(shared: Any) -> list[dict[str, Any]]:
+    """The inputs a shared action declares — its ``params`` (with their default) then its prompt
+    fields — as ``{name, label, default, required}``: what a caller of the action may give."""
+    out: dict[str, dict[str, Any]] = {}
+    for p in getattr(shared, "params", None) or []:
+        out[p.name] = {"name": p.name, "label": None, "default": p.default, "required": False}
+    for f in getattr(shared, "prompt_fields", None) or []:
+        entry = out.setdefault(f.name, {"name": f.name, "label": None, "default": None, "required": False})
+        entry["label"] = getattr(f, "label", None) or entry["label"]
+        entry["default"] = entry["default"] if entry["default"] is not None else getattr(f, "default", None)
+        entry["required"] = bool(getattr(f, "required", False))
+    # an input the steps read (``INPUT.<name>``) without the action declaring it: still an input
+    import json as _json
+    import re as _re
+
+    steps = _json.dumps([s.model_dump(mode="json") if hasattr(s, "model_dump") else s for s in getattr(shared, "steps", None) or []], default=str)
+    for name in dict.fromkeys(_re.findall(r"INPUT\.([A-Za-z_][A-Za-z0-9_]*)", steps)):
+        out.setdefault(name, {"name": name, "label": None, "default": None, "required": False})
+    return list(out.values())
+
+
+async def run_shared_action(state: Any, connectors: Any, ref: str, given: Mapping[str, Any], principal: Any, *,
+                            default_connector: str = "", origin: str | None = None) -> ChainResult:
+    """Run the shared action *ref* on its own — not from a screen: an endpoint it serves, the
+    studio's "Run". *given* are its inputs (``INPUT.<name>``; one not given takes the action's
+    default), *principal* whoever its steps run as. Raises ``KeyError`` when it is not defined,
+    :class:`ActionInputError` when a required prompt has no value."""
+    shared = _shared(state, ref)
+    if shared is None:
+        raise KeyError(ref)
+    ctx = WriteContext(
+        connectors=connectors, screens=getattr(state, "screens", None), principal=principal,
+        changesets=getattr(state, "changesets_db", None),
+        notify_ctx=(getattr(state, "notification_rules", None), getattr(state, "notify", None)),
+        state=state, origin=origin,
+    )
+    deps = ChainDeps(ctx=ctx, default_connector=default_connector, inputs=dict(given), navigates=False,
+                     origin=shared.label or ref, stack=(ref,))
+    defaults: Row = {}
+    for p in shared.params or []:
+        if p.default is not None:
+            d = p.default
+            built = _builtin(d[1:-1], deps) if (d.startswith("#") and d.endswith("#") and len(d) > 2) else None
+            defaults[p.name] = built if built is not None else d
+    seed: Row = {**defaults, **given}
+    if shared.prompt_fields:
+        seed = {**seed, **_prompt_values(shared.prompt_fields, deps), **given}
+    return await run_chain(shared.steps, {}, deps, initial_input=seed)
+
+
 def entity_key(screen: Any, row: Mapping[str, Any]) -> dict[str, Any] | None:
     """``entityKeyOf``: the firing row's natural key, from the columns flagged ``key``."""
     out = {c.name.upper(): v for c in screen.columns if c.key and (v := _ci(row, c.name)) not in (None, "")}

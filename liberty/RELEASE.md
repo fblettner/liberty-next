@@ -230,6 +230,26 @@
   columns (`row_map`) — what it binds is those rows: the next step reads `<step>.first_row.<COLUMN>` and
   `<step>.rows`, instead of a path into the server's raw answer. An endpoint without `rows_field`, or with a
   `response_field`, binds what it did before. `POST /api/http/...` returns the same rows as `rows`.
+- **The Studio — a home for whoever builds.** A new first page of the Liberty menu, **Studio**: what the
+  installation is made of, in the order an application is built — **Data** (connectors with their queries and
+  endpoints, the dictionary), **Screens** (screens, those with a record form, menus), **Logic** (services,
+  jobs, notifications), **Insight** (dashboards, charts, Explorer models) — each a tile with its count that
+  opens its editor; beside them what the integrity check finds now, the last changes of the configuration, and
+  the tools (integrity, history, package, change packages, monitoring, developer reference, release notes).
+  `GET /admin/studio/overview`.
+- **Services, and their flow.** The Actions page is now **Services**: a shared action is a service. Its
+  designer opens on a **graphical view** — the steps drawn as a flow read left to right: the start with the
+  inputs, a card per step (query, endpoint, function, service, message…), a condition forking into its True
+  and False lanes, a loop or a group framing its own steps, the answer at the end. A click on a card edits
+  that step in the side panel (its target, its input mapping); a **+** on any link adds a step there; the
+  former list is one click away (Flow / List). The layout follows the action's structure: nothing is placed
+  by hand.
+  On each service: **Run** — fill its inputs, see the answer it would give as an endpoint, the steps that ran and
+  the time taken (the steps really run); **Expose** — create the API endpoint it serves, on an API connector of
+  the installation or on the studio's own (`studio`, created on first use), with the service's inputs as the
+  endpoint's parameters (an input the steps read as `INPUT.<name>` counts even when the action does not declare
+  it). The endpoints a service already serves are listed on it. Routes: `GET /admin/studio/services`,
+  `POST /admin/studio/run`, `POST /admin/studio/expose` (superuser).
 
 ## 7.0.83 — 2026-11-19
 

@@ -703,8 +703,7 @@ class APIConnector:
         import dataclasses
 
         from liberty.auth.principal import Principal, current_principal
-        from liberty.screens.actions import ActionInputError, ChainDeps, _builtin, run_chain
-        from liberty.screens.save import WriteContext
+        from liberty.screens.actions import ActionInputError, run_shared_action
 
         ref = endpoint.action or ""
         url = f"action:{ref}"
@@ -714,9 +713,6 @@ class APIConnector:
                              duration_ms=(time.perf_counter() - started) * 1000.0 if started is not None else 0.0)
 
         state = getattr(self.registry, "state", None)
-        shared = (getattr(getattr(state, "actions", None), "actions", None) or {}).get(ref)
-        if shared is None:
-            return failed(f"{endpoint.name}: the shared action '{ref}' is not defined (actions.toml)")
         key = (self.name, endpoint.name)
         serving = _serving.get()
         if key in serving:
@@ -731,23 +727,13 @@ class APIConnector:
         caller = current_principal.get()
         runner = (dataclasses.replace(caller, permissions=("*",)) if caller is not None
                   else Principal(id="system", username="system", is_superuser=True))
-        ctx = WriteContext(
-            connectors=self.registry, screens=getattr(state, "screens", None), principal=runner,
-            changesets=getattr(state, "changesets_db", None),
-            notify_ctx=(getattr(state, "notification_rules", None), getattr(state, "notify", None)),
-            state=state, origin=f"endpoint {self.name}.{endpoint.name}",
-        )
-        deps = ChainDeps(ctx=ctx, default_connector=self.name, inputs=given, navigates=False, origin=shared.label or ref, stack=(ref,))
-        defaults: dict[str, Any] = {}
-        for p in shared.params or []:
-            if p.default is not None:
-                d = p.default
-                built = _builtin(d[1:-1], deps) if (d.startswith("#") and d.endswith("#") and len(d) > 2) else None
-                defaults[p.name] = built if built is not None else d
         started = time.perf_counter()
         token = _serving.set((*serving, key))
         try:
-            result = await run_chain(shared.steps, {}, deps, initial_input={**defaults, **given})
+            result = await run_shared_action(state, self.registry, ref, given, runner, default_connector=self.name,
+                                             origin=f"endpoint {self.name}.{endpoint.name}")
+        except KeyError:
+            return failed(f"{endpoint.name}: the shared action '{ref}' is not defined (actions.toml)")
         except ActionInputError as exc:
             return failed(str(exc), started)
         except Exception as exc:  # noqa: BLE001 — a step's failure outside the chain's own handling is the endpoint's

@@ -68,7 +68,7 @@ import {
   Sparkles,
   Palette,
   History,
-  type LucideIcon,
+  type LucideIcon, Workflow,
 } from 'lucide-react'
 import { colors, fontSize, fonts, radius } from '../theme'
 import type { AppMenuTree, MenuNode } from '../types/menus'
@@ -86,7 +86,7 @@ const ICONS: Record<string, LucideIcon> = {
   user: User, usercheck: UserCheck, users: Users,
   play: Play, upload: Upload, refreshcw: RefreshCw,
   layoutdashboard: LayoutDashboard, compass: Compass, filebarchart: FileBarChart, code: Code2,
-  rocket: Rocket, receipt: Receipt, wand: Wand2, gitcompare: GitCompare, sparkles: Sparkles, palette: Palette, history: History, book: BookOpen, shieldcheck: ShieldCheck, shieldalert: ShieldAlert, wrench: Wrench,
+  rocket: Rocket, receipt: Receipt, wand: Wand2, gitcompare: GitCompare, sparkles: Sparkles, palette: Palette, history: History, book: BookOpen, shieldcheck: ShieldCheck, shieldalert: ShieldAlert, wrench: Wrench, workflow: Workflow,
 }
 export function iconFor(name: string | undefined): LucideIcon | null {
   return name ? (ICONS[name.toLowerCase().replace(/[^a-z0-9]/g, '')] ?? null) : null

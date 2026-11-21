@@ -271,6 +271,28 @@
   `<étape>.first_row.<COLONNE>` et `<étape>.rows`, au lieu d'un chemin dans la réponse brute du serveur. Un
   point d'accès sans `rows_field`, ou avec un `response_field`, donne ce qu'il donnait. `POST /api/http/...`
   renvoie les mêmes lignes dans `rows`.
+- **Le Studio — un point de départ pour qui construit.** Une nouvelle première page du menu Liberty,
+  **Studio** : ce dont l'installation est faite, dans l'ordre où une application se construit — **Données**
+  (connecteurs avec leurs requêtes et points d'accès, dictionnaire), **Écrans** (écrans, ceux qui ont une
+  fiche, menus), **Logique** (services, jobs, notifications), **Analyse** (tableaux de bord, graphiques,
+  modèles de l'explorateur) — chacun une tuile avec son nombre, qui ouvre son éditeur ; à côté, ce que trouve
+  le contrôle d'intégrité, les dernières modifications de la configuration, et les outils (intégrité,
+  historique, package, lots de modifications, supervision, référence développeur, notes de version).
+  `GET /admin/studio/overview`.
+- **Les services, et leur flux.** La page Actions devient **Services** : une action partagée est un service.
+  Son concepteur s'ouvre sur une **vue graphique** — les étapes dessinées comme un flux lu de gauche à droite :
+  le début avec les entrées, une carte par étape (requête, point d'accès, fonction, service, message…), une
+  condition qui se sépare en voies Vrai et Faux, une boucle ou un groupe qui encadre ses étapes, la réponse à
+  la fin. Un clic sur une carte modifie cette étape dans le panneau latéral (sa cible, la correspondance de
+  ses entrées) ; un **+** sur un lien ajoute une étape à cet endroit ; l'ancienne liste reste à un clic
+  (Flux / Liste). La disposition suit la structure de l'action : rien n'est placé à la main.
+  Sur chacun : **Exécuter** — remplir ses entrées, voir la réponse qu'il donnerait comme point
+  d'accès, les étapes exécutées et le temps pris (les étapes s'exécutent réellement) ; **Exposer** — créer le
+  point d'accès d'API qu'il sert, sur un connecteur d'API de l'installation ou sur celui du studio (`studio`,
+  créé au premier usage), avec les entrées du service comme paramètres du point d'accès (une entrée lue par les
+  étapes sous `INPUT.<nom>` compte même si l'action ne la déclare pas). Les points d'accès qu'un service sert
+  déjà sont listés sur lui. Routes : `GET /admin/studio/services`, `POST /admin/studio/run`,
+  `POST /admin/studio/expose` (superutilisateur).
 
 ## 7.0.83 — 2026-11-19
 
