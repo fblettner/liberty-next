@@ -7,7 +7,7 @@ import styled from '@emotion/styled'
 import { Plus, Trash2, LayoutDashboard, Search, Edit3, Copy, GitMerge } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Centered, SpinnerRing, Tag, useModals } from '../../common'
+import { Banner, Button, Card, Centered, SpinnerRing, Tag, useModals, HeaderActions } from '../../common'
 import type { ChartsDoc, DashboardsDoc } from '../../types/config'
 import type { SavedChartSpec } from '../../types/charts'
 import { DashboardEditorModal } from './DashboardEditorModal'
@@ -19,15 +19,13 @@ import { DeleteWithDepsModal } from './DeleteWithDepsModal'
 import { validateId as validateIdShared } from '../../services/idValidator'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
-import { BuilderEmpty as Empty, BuilderShell as Shell, BuilderToolbar as Toolbar } from '../../common/builderShell'
+import { BuilderEmpty as Empty, BuilderShell as Shell } from '../../common/builderShell'
 
 type Raw = Record<string, unknown>
 type Dashboards = Record<string, Record<string, Raw>>
 type ChartsByScope = Record<string, Record<string, Raw>>
 type DashBody = { label?: string; description?: string | null; widgets?: unknown[]; filters?: unknown[] }
 
-const ToolbarLeft = styled.div`display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;`
-const ToolbarRight = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap;`
 const FilterBar = styled.div`
   display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px;
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; color: ${colors.text.muted};
@@ -182,18 +180,15 @@ export default function DashboardsBuilder() {
       <ScopeBar scopes={scopes} value={scope} onChange={setScope}
         emptyHint={t('settings.dashboards.noScopes')}
         onAddScope={() => setAddScopeOpen(true)} />
-      <Toolbar>
-        <ToolbarLeft>
-          {busy && <SpinnerRing size={14} thickness={2} />}
-          {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
-          {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
-        </ToolbarLeft>
-        <ToolbarRight>
-          <Button $variant="ghost" $size="sm" onClick={addDashboard} disabled={busy || !scope}>
-            <Plus size={13} /> {t('settings.dashboards.add')}
-          </Button>
-        </ToolbarRight>
-      </Toolbar>
+      {/* the page's button is in the header, before Reload config */}
+      <HeaderActions>
+        {busy && <SpinnerRing size={14} thickness={2} />}
+        <Button $variant="ghost" $size="sm" onClick={addDashboard} disabled={busy || !scope}>
+          <Plus size={13} /> {t('settings.dashboards.add')}
+        </Button>
+      </HeaderActions>
+      {status && <Banner $tone="ok">{status}</Banner>}
+      {error && <Banner $tone="error">{error}</Banner>}
 
       {allIds.length > 0 && (
         <FilterBar>

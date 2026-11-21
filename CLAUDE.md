@@ -326,6 +326,9 @@ pages/Settings/        one *Builder per config section + the Visual Designer (Sc
                        AccessBuilder (+ Access/: RoleEditor panel, MenuTree inherit|allow|deny, OtherAccess,
                        permissions.ts = strings ⇄ tree model + the backend's glob matcher, ScopeRulesEditor +
                        scopeRules.ts = data-scope rules / attributes helpers, both tested),
+                       MenusBuilder (the tree moved by drag and drop: services/menuTree.ts, tested),
+                       ConnectorsBuilder (sections as stage cards with counts, a table / query opened BESIDE its list;
+                       ConnectorsTableEditor = a table as stages; services/connectorFigures.ts, tested),
                        DictionaryBuilder (each record's line says what it is: services/dictionaryMarks.ts, tested),
                        DashboardEditorModal (cards moved by drag and drop, sized by their corner: services/dashLayout.ts, tested),
                        PoolsBuilder (a pool as stages — StageStrip, shared with the screen designer —, its URL as fields:

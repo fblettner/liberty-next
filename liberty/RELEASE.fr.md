@@ -343,6 +343,48 @@
 - **Les longs flux passent à la ligne, et se zooment.** Le flux d'un service, d'un job et d'un point d'accès
   continue sur la ligne suivante au lieu de partir à droite, et chaque canevas a un zoom (− / % / +, gardé par
   nature de flux sur l'appareil).
+- **Un écran qui lit ou enregistre par une API voyage en entier.** Dans un paquet et dans l'historique d'un
+  écran, les points d'accès qu'un écran lit (ses lignes) ou par lesquels il enregistre (ceux de son
+  connecteur, ou de son connecteur « Enregistre par ») étaient cherchés comme des requêtes SQL sur le
+  connecteur d'API, non trouvés, et listés comme **références manquantes**. Ils sont maintenant ce qu'ils
+  sont — des points d'accès d'API de l'écran : listés sous « Points d'accès API », cochés par défaut comme ses
+  requêtes, et emportés dans le paquet ; un point d'accès servi par une action partagée emmène cette action.
+  Un écran enregistré désormais les consigne dans son historique (une entrée plus ancienne garde ce qu'elle
+  avait consigné).
+- **Menus : glisser une entrée là où elle va.** Dans l'éditeur de menu, une ligne se glisse sur une autre :
+  au-dessus, en dessous, ou dedans quand c'est un dossier — avec tout ce qu'elle contient ; un trait ou une
+  surbrillance montre où elle se posera. Chaque ligne a l'icône de ce qu'elle ouvre (écran, tableau de bord,
+  traitement, requête, point d'accès, page), l'arbre et l'entrée choisie sont deux panneaux qui commencent sur
+  la même ligne, les actions de l'entrée (Cloner, Rechercher les usages, Rechercher les dépendances) sont sur
+  son panneau, et Dossier, Élément, Annuler et Enregistrer sont dans l'en-tête de la page.
+- **Connecteurs : le SQL est là où l'on regarde.** Avec une table ou une requête ouverte, les sections du
+  connecteur et les étapes de la table se replient sur une ligne chacune et les actions de la table sur une
+  rangée d'icônes : l'instruction commence bien plus haut dans la page. Les dialogues **Construire un
+  SELECT / INSERT / UPDATE / DELETE** sont plus larges et leur aperçu prend la hauteur que le dialogue laisse,
+  au lieu d'une petite boîte au-dessus d'un vide.
+- **Changements, Notifications, IA : le même cadre.** Changements : les paquets et le paquet choisi sont deux
+  panneaux (la liste défile seule), Nouveau paquet et Actualiser sont dans l'en-tête. Notifications : Ajouter
+  une règle est dans l'en-tête, la liste commence donc sur la même ligne que la règle ; une page vide dit
+  comment commencer. IA : Annuler et Enregistrer sont dans l'en-tête.
+- **Les notes de version se lisent une version à la fois.** Les versions sont un panneau à gauche, chacune
+  avec son nombre d'entrées ; la version choisie montre chaque entrée comme une carte titrée par la phrase qui
+  l'ouvre, sur toute la largeur du panneau. Une recherche trouve une entrée par ses mots **dans toutes les versions**
+  et dit à quelle version elle appartient.
+- **Tableaux de bord, Graphiques, Explorer, Modèles de rapport : les boutons là où les autres les ont.** Ajouter
+  un tableau de bord, Ajouter un graphique, Ajouter / Supprimer un modèle et Enregistrer, Nouveau modèle sont
+  dans l'en-tête de la page à côté de « Recharger la config » ; les messages sont des bandeaux en dessous.
+- **Historique et Rapports de documentation : le même cadre.** Historique : les fichiers, écrans et mises à
+  niveau sont un panneau comme toutes les listes des éditeurs, qui défile seul. Rapports de documentation : la
+  carte Réglages a la hauteur de la carte Contenu à côté d'elle.
+- **La page Connecteurs, côté SQL : plus rien ne cache la liste.** La ligne d'un connecteur dit ce qu'il
+  contient (`sql · 117 tables · 34 requêtes`, `api · 68 points d'accès`). Ses sections sont des cartes
+  d'étape avec leur compte — Réglages (son pool), Tables, Requêtes, Séquences, Listes de valeurs. **Ouvrir une
+  table garde la liste à côté** : la liste se réduit à une colonne (les quatre instructions de chaque table en
+  points) et la table s'ouvre à côté, si bien que passer d'une table à la suivante est un clic ; de même pour
+  une requête, une séquence, une liste de valeurs. Une table est dessinée en étapes — Général, puis **Lecture,
+  Mise à jour, Insertion, Suppression** — chaque carte disant si l'instruction est réglée, et en orange quand
+  une instruction d'écriture est là sans être marquée inscriptible (elle serait refusée à l'exécution).
+  Connecteur, Annuler et Enregistrer sont dans l'en-tête de la page. Les champs sont ceux qu'ils étaient.
 - **La page Dictionnaire : un enregistrement dit ce qu'il est dans la liste.** La ligne d'une entrée porte son
   format et sa règle (`LOOKUP` — sa cible dans l'infobulle de la pastille), celle d'une énumération le nombre de ses valeurs, celle d'une liste
   de valeurs ou d'une séquence l'autre connecteur où elle lit ; le filtre trouve un enregistrement par son nom, son

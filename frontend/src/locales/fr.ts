@@ -2046,6 +2046,7 @@ const fr: Resources = {
       },
     },
     menus: {
+      kind: { folder: "dossier", screen: "écran", dashboard: "tableau de bord", job: "traitement", query: "requête", endpoint: "point d'accès", page: "page" },
       saved: 'Enregistré et rechargé.',
       hint: 'Enregistrer valide l\'arborescence (ids uniques, parents existants, sans cycle), écrit menus.toml et recharge.',
       scopeLabel: 'Application :',
@@ -2156,6 +2157,18 @@ const fr: Resources = {
       export: 'Exporter',
     },
     connectors: {
+      stage: {
+        settings: "Réglages",
+      },
+      fig: {
+        pool: "pool {{pool}}",
+        noPool: "pas de pool",
+        tables: "{{n}} table(s)",
+        queries: "{{n}} requête(s)",
+        sequences: "{{n}} séquence(s)",
+        lookups: "{{n}} liste(s) de valeurs",
+        endpoints: "{{n}} point(s) d'accès",
+      },
       addSql: 'Connecteur SQL',
       addApi: 'Connecteur API',
       addConnector: 'Connecteur',
@@ -2857,6 +2870,13 @@ const fr: Resources = {
       addScopeEmpty: 'Chaque connecteur a déjà un périmètre de tableaux de bord.',
     },
     tables: {
+      stage: {
+        set: "réglée",
+        notSet: "non réglée",
+        blank: "pas encore de SQL",
+        writable: "écriture autorisée",
+        notWritable: "non inscriptible : refusée à l'exécution",
+      },
       tablesView: 'Tables',
       looseSectionLabel: 'Requêtes',
       looseSectionHint: 'Requêtes hors du jeu get/put/post/delete d’une table — utilisées par des actions, graphiques, appels AIS ou référencées par des lookups. Cliquez pour modifier.',
@@ -3503,6 +3523,7 @@ const fr: Resources = {
       none: 'Aucune règle pour l\'instant.',
       disabled: 'désactivée',
       pick: 'Choisissez une règle à modifier, ou ajoutez-en une.',
+      pickNone: "Pas encore de règle : « Ajouter une règle », en haut, crée la première.",
     },
     package: {
       buildTab: 'Construire un paquet',
@@ -3759,6 +3780,10 @@ const fr: Resources = {
     deleteMsg: 'Supprimer définitivement {{file}} v{{v}} ? L\'instantané disparaît pour de bon — il ne pourra plus être restauré. Le fichier en service n\'est pas touché.',
   },
   releaseNotes: {
+    entries: "{{n}} entrée(s)",
+    found: "{{n}} entrée(s) trouvée(s)",
+    search: "Chercher dans toutes les versions…",
+    noMatch: "Aucune entrée ne contient ces mots.",
     empty: 'Aucune note de version livrée avec cette version.',
     versions: 'Versions',
   },

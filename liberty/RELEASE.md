@@ -290,6 +290,43 @@
   Deploy folder: check, then deliver.
 - **Long flows wrap, and zoom.** A service's, a job's and an endpoint's flow continue on the next row instead
   of running off to the right, and each canvas has a zoom (− / % / +, kept per kind of flow on the device).
+- **A screen that reads or saves through an API travels whole.** In a package and in a screen's history, the
+  endpoints a screen reads (its rows) or saves through (its own connector's, or its "Saves through"
+  connector's) were looked up as SQL queries on the API connector, not found, and listed as **missing
+  references**. They are now what they are — API endpoints of the screen: listed under "API endpoints", ticked
+  by default like its queries, and carried in the package; an endpoint served by a shared action brings that
+  action with it. A screen saved from now on records them in its history (an older history entry keeps what
+  it recorded).
+- **Menus: drag an entry where it goes.** In the menu editor a row is dragged onto another: above it, below it,
+  or into it when it is a folder — with everything under it; a line or a highlight shows where it will land.
+  Each row has the icon of what it opens (screen, dashboard, job, query, endpoint, page), the tree and the
+  picked entry are two panels that start on the same line, the entry's own actions (Clone, Find usages, Find
+  dependencies) are on its panel, and Folder, Item, Discard and Save are in the page header.
+- **Connectors: the SQL is where you look.** With a table or a query open, the connector's sections and the
+  table's stages fold to one line each and the table's actions to a row of icons, so the statement starts
+  much higher on the page. The **Build a SELECT / INSERT / UPDATE / DELETE** dialogs are wider and their
+  preview takes the height the dialog has left, instead of a small box above an empty space.
+- **Changes, Notifications, AI: the same frame.** Changes: the packages and the picked package are two panels
+  (the list scrolls on its own), New package and Refresh are in the header. Notifications: Add rule is in the
+  header, so the list starts on the same line as the rule; an empty page says how to start. AI: Discard and
+  Save are in the header.
+- **Release notes are read one version at a time.** The versions are a panel on the left, each with its number
+  of entries; the picked version shows each entry as a card titled by the sentence it opens on, across the
+  whole panel. A search finds an entry by its words **across every version** and says which version it belongs to.
+- **Dashboards, Charts, Explorer, Report templates: the buttons where the others have them.** Add dashboard, Add
+  chart, Add / Delete model and Save, New template are in the page header beside Reload config; the messages
+  are banners under it.
+- **History and Documentation reports: the same frame.** History: the files, screens and upgrades are a panel
+  like every list of the editors, scrolling on its own. Documentation reports: the Settings card is as tall as
+  the Content card beside it.
+- **The Connectors page, SQL side: nothing hides the list any more.** A connector's line says what it holds
+  (`sql · 117 tables · 34 queries`, `api · 68 endpoints`). Its sections are stage cards with their counts —
+  Settings (its pool), Tables, Queries, Sequences, Lookups. **Opening a table keeps the list beside it**: the
+  list narrows to a column (each table's four statements as dots) and the table opens next to it, so going
+  from one table to the next is one click; the same for a query, a sequence, a lookup. A table is drawn as
+  its stages — General, then **Read, Update, Insert, Delete** — each card saying whether the statement is
+  set, and in orange when a write statement is there but not marked writable (it would be refused at run
+  time). Connector, Discard and Save are in the page header. The fields are the ones they were.
 - **The Dictionary page: a record says what it is in the list.** An entry's line carries its format and its
   rule (`LOOKUP` — its target in the chip's tooltip), an enum how many values it holds, a lookup or a sequence the other connector it reads from; the
   filter finds a record by its name, its label or one of those (type `lookup` to see every entry ruled by a

@@ -10,12 +10,12 @@
 // re-rendered wholesale — flat items round-trip cleanly), then reloads. No rename of an app's key
 // yet (delete + re-add) but the inspector lets you rename an item's `id` and the tree updates
 // every child's `parent` reference to match.
-import { useEffect, useMemo, useState, type ReactElement } from 'react'
+import { useEffect, useMemo, useState, type ReactElement, useRef } from 'react'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Search, FolderOpen, Folder, FileText, ChevronRight, ChevronDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Copy, Undo2, GitBranch, GitMerge } from 'lucide-react'
+import { Save, Plus, Trash2, Search, FolderOpen, Folder, FileText, ChevronRight, ChevronDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Copy, Undo2, GitBranch, GitMerge, Table, LayoutDashboard, Workflow, Database, Globe, AppWindow, GripVertical } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Row, Stack, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Card, Centered, HeaderActions, Stack, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { AppMenu, ConfigSchemas, ConnectorsDoc, DashboardsDoc, MenuItem, MenusDoc, ScreensDoc } from '../../types/config'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
@@ -25,6 +25,8 @@ import { ScopeBar as ScopeRow } from './ScopeBar'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { BuilderShell as Shell } from '../../common/builderShell'
+import { dropInTree, dropZone, itemKind, type DropWhere } from '../../services/menuTree'
+import { Tag } from '../../common/Tag'
 
 type AppsMap = Record<string, AppMenu>
 
@@ -33,7 +35,6 @@ type AppsMap = Record<string, AppMenu>
 // when app selection moved to the scope-chip strip. The TreeSplit below is now the top-level
 // layout for the selected app's content: tree on the left, inspector on the right.)
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
-const Hint = styled.p`font-size: ${fontSize.sm}; color: ${colors.text.muted}; line-height: 1.5; margin: 0;`
 
 // Layout: outer Shell flex-fills the page, top toolbar is fixed, the per-app stack fills the
 // remaining vertical space, and only the inner panels scroll. Same pattern as PoolsBuilder.
@@ -45,16 +46,21 @@ const TreeSplit = styled.div`
   display: flex; gap: 14px; align-items: stretch; min-height: 0;
   flex: 1 1 auto;
 `
-const TreeCol = styled.div`
-  flex: 0 0 400px; display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 0;
+const TreeCol = styled(Card)`
+  flex: 0 0 min(420px, 36%); padding: 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0;
 `
-const TreeBox = styled.div`
-  flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px;
-  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
+const PanelTitle = styled.div`
+  display: flex; align-items: center; gap: 8px; font-family: ${fonts.sans}; font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.primary};
+  & .count { font-weight: 400; color: ${colors.text.muted}; }
 `
-const InspectorCol = styled.div`
-  flex: 1; min-width: 0; min-height: 0; overflow-y: auto;
+const TreeBox = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 2px;`
+const InspectorCol = styled(Card)`flex: 1; min-width: 0; min-height: 0; padding: 0; display: flex; flex-direction: column; overflow: hidden;`
+const InspectorHead = styled.div`
+  display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid ${colors.border}; background: ${colors.bg.input}; flex-wrap: wrap;
+  & .name { flex: 1; min-width: 120px; font-weight: 600; color: ${colors.text.primary}; font-family: ${fonts.sans}; }
+  & .id { font-family: ${fonts.mono}; font-weight: 400; color: ${colors.text.muted}; font-size: ${fontSize.sm}; margin-left: 8px; }
 `
+const InspectorBody = styled.div`flex: 1; min-height: 0; overflow-y: auto; padding: 14px;`
 // Cap the inspector form's width so on a wide screen the inputs aren't half-a-page wide. The
 // container still flexes (it can be narrower); this is just the upper bound.
 const InspectorInner = styled.div`max-width: 720px;`
@@ -83,6 +89,16 @@ const TreeRow = styled.button<{ $active?: boolean; $depth: number }>`
     background: var(--hover-subtle); border-radius: ${radius.sm}; padding: 2px;
     transition: opacity 0.12s ease;
   }
+  & .grip { flex-shrink: 0; color: ${colors.text.muted}; cursor: grab; opacity: 0.35; }
+  &:hover .grip { opacity: 1; }
+  &[data-dragged='true'] { opacity: 0.4; }
+  /* where a dragged row would land: a line above, a line below, or the whole row (into this folder) */
+  &[data-drop='before']::before, &[data-drop='after']::after {
+    content: ''; position: absolute; left: 6px; right: 6px; height: 3px; border-radius: 2px; background: ${colors.blue.main};
+  }
+  &[data-drop='before']::before { top: -2px; }
+  &[data-drop='after']::after { bottom: -2px; }
+  &[data-drop='into'] { border-color: ${colors.blue.main}; background: ${colors.blue.bg}; }
   &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
   &:hover .id, &:focus-within .id { opacity: 0; }
   &:hover .actions, &:focus-within .actions { opacity: 1; pointer-events: auto; }
@@ -97,8 +113,12 @@ const NavSearch = styled.div`
   border: 1px solid ${colors.border}; border-radius: ${radius.sm}; background: ${colors.bg.input}; color: ${colors.text.muted};
   & input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; &::placeholder { color: ${colors.text.muted}; } }
 `
-const AppHeader = styled(Row)`align-items: center; justify-content: space-between; gap: 10px;`
-const AppLabel = styled.strong`font-family: ${fonts.mono}; color: ${colors.text.primary};`
+
+// what an item opens, as its line's icon
+const KIND_ICON: Record<string, ReactElement> = {
+  screen: <Table size={14} />, dashboard: <LayoutDashboard size={14} />, job: <Workflow size={14} />,
+  query: <Database size={14} />, endpoint: <Globe size={14} />, page: <AppWindow size={14} />,
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const isFolder = (it: MenuItem) => !it.type
@@ -207,6 +227,10 @@ export default function MenusBuilder() {
   const [original, setOriginal] = useState('')
   const [selApp, setSelApp] = useState<string | null>(null)
   const [selItem, setSelItem] = useState<string | null>(null)
+  // drag and drop in the tree: the row being dragged, and where it would land
+  const dragId = useRef<string | null>(null)
+  const [dragged, setDragged] = useState<string | null>(null)
+  const [dropAt, setDropAt] = useState<{ id: string; where: DropWhere } | null>(null)
   const [usagesTarget, setUsagesTarget] = useState<FindUsagesTarget | null>(null)
   const [depsSeeds, setDepsSeeds] = useState<DependencySeed[] | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -502,6 +526,31 @@ export default function MenusBuilder() {
     updateItems(removeSubtree(items, id))
     if (selItem === id) setSelItem(null)
   }
+  // ── drag and drop: a row dragged onto another goes before it, after it, or into it ──
+  const endDrag = () => { dragId.current = null; setDragged(null); setDropAt(null) }
+  const zoneOf = (target: MenuItem, e: React.DragEvent<HTMLElement>): DropWhere | null => {
+    const from = dragId.current
+    if (!from || from === target.id) return null
+    const box = e.currentTarget.getBoundingClientRect()
+    const where = dropZone(e.clientY, box.top, box.height, isFolder(target))
+    return dropInTree(items, from, target.id, where) === items ? null : where      // nothing to do there
+  }
+  const onRowDragOver = (target: MenuItem, e: React.DragEvent<HTMLElement>) => {
+    if (!dragId.current) return
+    const where = zoneOf(target, e)
+    if (where) e.preventDefault()
+    setDropAt((cur) => (!where ? null : cur && cur.id === target.id && cur.where === where ? cur : { id: target.id, where }))
+  }
+  const onRowDrop = (target: MenuItem, e: React.DragEvent<HTMLElement>) => {
+    const from = dragId.current
+    const where = zoneOf(target, e)
+    if (from && where) {
+      e.preventDefault()
+      updateItems(dropInTree(items, from, target.id, where))
+      if (where === 'into') setExpanded((x) => new Set([...x, target.id]))
+    }
+    endDrag()
+  }
   const moveItem = (id: string, dir: 'up' | 'down') => {
     const sib = findSiblings(items, id)
     if (dir === 'up' && sib.previous) updateItems(moveBlock(items, id, sib.previous, 'before'))
@@ -546,16 +595,20 @@ export default function MenusBuilder() {
     const isSel = it.id === selItem
     const icon = folder
       ? (open ? <FolderOpen size={14} /> : <Folder size={14} />)
-      : <FileText size={14} />
+      : (KIND_ICON[itemKind(it)] ?? <FileText size={14} />)
     return (
       <div key={it.id}>
-        <TreeRow type="button" $active={isSel} $depth={depth}
+        <TreeRow type="button" $active={isSel} $depth={depth} data-item={it.id}
+          draggable={!matchedIds} data-dragged={dragged === it.id || undefined} data-drop={dropAt?.id === it.id ? dropAt.where : undefined}
+          onDragStart={(e) => { dragId.current = it.id; setDragged(it.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', it.id) }}
+          onDragOver={(e) => onRowDragOver(it, e)} onDrop={(e) => onRowDrop(it, e)} onDragEnd={endDrag}
           onClick={() => setSelItem(it.id)}
           onDoubleClick={() => { if (folder) setExpanded((s) => { const n = new Set(s); n.has(it.id) ? n.delete(it.id) : n.add(it.id); return n }) }}
         >
           <span className="chev" onClick={(e) => { e.stopPropagation(); if (kids.length) setExpanded((s) => { const n = new Set(s); n.has(it.id) ? n.delete(it.id) : n.add(it.id); return n }) }}>
             {kids.length > 0 ? (open ? <ChevronDown size={12} /> : <ChevronRight size={12} />) : null}
           </span>
+          {!matchedIds && <GripVertical size={12} className="grip" />}
           <span className="icon">{icon}</span>
           <span className="lbl">{it.label || <em style={{ color: colors.text.muted }}>(no label)</em>}</span>
           <span className="id">{it.id}</span>
@@ -590,52 +643,29 @@ export default function MenusBuilder() {
         value={selApp ?? ''}
         onChange={(v) => { setSelApp(v); setStatus(null) }}
         onAddScope={() => setAddScopeOpen(true)}
-        leading={(dirty || status || error) ? (
-          <>
-            {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
-            {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
-            {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
-          </>
-        ) : undefined}
-        right={
-          <>
-            <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
-              <Undo2 size={13} /> {t('common.discard')}
-            </Button>
-            <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
-              {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
-            </Button>
-          </>
-        }
       />
+      <HeaderActions>
+        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+        <Button $variant="ghost" $size="sm" onClick={() => addItem('folder')} disabled={!selApp}>
+          <Plus size={13} /> {t('settings.menus.tree.addFolder')}
+        </Button>
+        <Button $variant="ghost" $size="sm" onClick={() => addItem('leaf')} disabled={!selApp}>
+          <Plus size={13} /> {t('settings.menus.tree.addLeaf')}
+        </Button>
+        <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
+          <Undo2 size={13} /> {t('common.discard')}
+        </Button>
+        <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
+          {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+        </Button>
+      </HeaderActions>
+      {status && <Banner $tone="ok">{status}</Banner>}
+      {error && <Banner $tone="error">{error}</Banner>}
       {selApp && currentApp ? (
         <Stack gap={12} style={{ flex: 1, minHeight: 0 }}>
-          <AppHeader style={{ flexShrink: 0 }}>
-            <AppLabel>[menus.{selApp}] <span style={{ color: colors.text.muted, fontWeight: 400 }}>· {items.length} {t('settings.menus.item.count', { count: items.length })}</span></AppLabel>
-            <Row gap={6}>
-              <Button $variant="ghost" $size="sm" onClick={() => addItem('folder')}>
-                <Plus size={13} /> {t('settings.menus.tree.addFolder')}
-              </Button>
-              <Button $variant="ghost" $size="sm" onClick={() => addItem('leaf')}>
-                <Plus size={13} /> {t('settings.menus.tree.addLeaf')}
-              </Button>
-              <Button $variant="ghost" $size="sm" onClick={() => selItem && cloneItem(selItem)} disabled={!selItem}>
-                <Copy size={13} /> {t('common.clone')}
-              </Button>
-              <Button $variant="ghost" $size="sm" onClick={() => selItem && selApp && setUsagesTarget({
-                kind: 'menu_item', name: selItem, scope: selApp, label: `menu item ${selApp}.${selItem}`,
-              })} disabled={!selItem}>
-                <GitBranch size={13} /> {t('findUsages.button')}
-              </Button>
-              <Button $variant="ghost" $size="sm" onClick={() => selItem && selApp && setDepsSeeds([{
-                kind: 'menu_item', name: selItem, scope: selApp, label: `menu item ${selApp}.${selItem}`,
-              }])} disabled={!selItem}>
-                <GitMerge size={13} /> {t('findDeps.button')}
-              </Button>
-            </Row>
-          </AppHeader>
           <TreeSplit>
                 <TreeCol>
+                  <PanelTitle>{selApp} <span className="count">· {items.length} {t('settings.menus.item.count', { count: items.length })}</span></PanelTitle>
                   <NavSearch>
                     <Search size={13} />
                     <input value={treeQ} onChange={(e) => setTreeQ(e.target.value)} placeholder={t('settings.menus.tree.filterPlaceholder', { count: items.length })} />
@@ -646,10 +676,27 @@ export default function MenusBuilder() {
                   </TreeBox>
                 </TreeCol>
                 <InspectorCol>
-                  <InspectorInner>
-                    {selItemRec && menuItemSchema ? (
-                      <Stack gap={10}>
-                        <Hint>{t('settings.menus.inspector.hint')}</Hint>
+                  {selItemRec && menuItemSchema ? (
+                    <>
+                      <InspectorHead>
+                        <span className="name">{selItemRec.label || selItemRec.id}<span className="id">{selItemRec.id}</span></span>
+                        <Tag $tone={isFolder(selItemRec) ? 'orange' : 'blue'}>{itemKind(selItemRec) === 'folder' || itemKind(selItemRec) in KIND_ICON ? t(`settings.menus.kind.${itemKind(selItemRec)}`) : itemKind(selItemRec)}</Tag>
+                        <Button $variant="ghost" $size="sm" onClick={() => cloneItem(selItemRec.id)}>
+                          <Copy size={13} /> {t('common.clone')}
+                        </Button>
+                        <Button $variant="ghost" $size="sm" onClick={() => selApp && setUsagesTarget({
+                          kind: 'menu_item', name: selItemRec.id, scope: selApp, label: `menu item ${selApp}.${selItemRec.id}`,
+                        })}>
+                          <GitBranch size={13} /> {t('findUsages.button')}
+                        </Button>
+                        <Button $variant="ghost" $size="sm" onClick={() => selApp && setDepsSeeds([{
+                          kind: 'menu_item', name: selItemRec.id, scope: selApp, label: `menu item ${selApp}.${selItemRec.id}`,
+                        }])}>
+                          <GitMerge size={13} /> {t('findDeps.button')}
+                        </Button>
+                      </InspectorHead>
+                      <InspectorBody>
+                        <InspectorInner>
                         <SchemaForm
                           schema={{ ...menuItemSchema, $defs: defs }}
                           defs={defs}
@@ -662,17 +709,12 @@ export default function MenusBuilder() {
                             updateItems(items.map((it) => (it.id === selItemRec.id ? (v as unknown as MenuItem) : it)))
                           }}
                         />
-                        {/* No "Allowed parents:" hint here — the ``parent`` field already renders
-                            as a SearchSelect populated with the valid ids via the
-                            ``MENU_PARENT_IDS`` framework enum (set up in this builder, just
-                            below). Dumping the same list as a hint added a wall of text
-                            without telling the operator anything they couldn't see in the
-                            dropdown. */}
-                      </Stack>
-                    ) : (
-                      <Empty>{items.length ? t('settings.menus.inspector.pickOne') : t('settings.menus.inspector.empty')}</Empty>
-                    )}
-                  </InspectorInner>
+                        </InspectorInner>
+                      </InspectorBody>
+                    </>
+                  ) : (
+                    <Empty style={{ textAlign: 'center' }}>{items.length ? t('settings.menus.inspector.pickOne') : t('settings.menus.inspector.empty')}</Empty>
+                  )}
                 </InspectorCol>
               </TreeSplit>
         </Stack>

@@ -13,7 +13,8 @@ import { copiesOf, defaultSections, deleteReportCopy, docReportPath, getReportCo
 import { formatBytes } from '../../services/serverLog'
 import type { DocReport, DocReportKind, ReportCopy } from '../../types/docReports'
 
-const Grid = styled.div`display: grid; grid-template-columns: minmax(260px, 420px) minmax(0, 1fr); gap: 16px; align-items: start;
+// (stretch: the Settings card is as tall as the Content card beside it)
+const Grid = styled.div`display: grid; grid-template-columns: minmax(260px, 420px) minmax(0, 1fr); gap: 16px; align-items: stretch;
   @media (max-width: 900px) { grid-template-columns: 1fr; }`
 const Box = styled(Card)`display: flex; flex-direction: column; gap: 14px;`
 const BoxTitle = styled.div`display: flex; align-items: baseline; gap: 12px; font-size: ${fontSize.md}; font-weight: 600; color: ${colors.text.primary};

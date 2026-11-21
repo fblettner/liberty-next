@@ -52,16 +52,24 @@ const KIND_ORDER = [
 ]
 
 // ── left rail: the file / screen picker (kept from the original layout) ──────────────────
-const Wrap = styled.div`display: grid; grid-template-columns: 220px 1fr; gap: 16px; align-items: start;`
-const Rail = styled.div`display: flex; flex-direction: column; gap: 2px;`
+// the files (or screens, or upgrades) on the left — a panel like every list of the editors, scrolling on its
+// own — and the versions of the picked one beside
+const Wrap = styled.div`display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 14px; align-items: start;`
+const Rail = styled(Card)`
+  display: flex; flex-direction: column; gap: 4px; padding: 10px; position: sticky; top: 0; max-height: calc(100vh - 250px); overflow-y: auto;
+`
 const RailBtn = styled.button<{ $active: boolean }>`
-  display: flex; justify-content: space-between; gap: 8px; align-items: center; text-align: left;
+  display: flex; justify-content: space-between; gap: 8px; align-items: center; text-align: left; flex-shrink: 0;
   padding: 8px 10px; border-radius: ${radius.md}; cursor: pointer; font-family: ${fonts.mono}; font-size: ${fontSize.sm};
-  border: 1px solid ${(p) => (p.$active ? colors.blue.main : 'transparent')};
-  background: ${(p) => (p.$active ? colors.blue.bg : 'transparent')};
-  color: ${(p) => (p.$active ? colors.blue.main : colors.text.primary)};
-  &:hover { background: ${colors.bg.input}; }
-  .n { color: ${colors.text.muted}; font-size: ${fontSize.micro}; font-family: ${fonts.sans}; }
+  border: 1px solid ${(p) => (p.$active ? colors.blue.main : colors.border)};
+  background: ${(p) => (p.$active ? colors.blue.bg : colors.bg.input)};
+  color: ${colors.text.primary};
+  & > span:first-of-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  &:hover { border-color: ${(p) => (p.$active ? colors.blue.main : colors.blue.border)}; }
+  .n {
+    flex-shrink: 0; color: ${colors.text.muted}; font-size: ${fontSize.micro}; font-family: ${fonts.sans};
+    padding: 1px 7px; border: 1px solid ${colors.border}; border-radius: ${radius.sm}; background: ${colors.bg.card};
+  }
 `
 
 // ── right panel: collapsible version cards (App-tab look & feel) ─────────────────────────

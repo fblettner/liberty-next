@@ -41,7 +41,7 @@ void _pw
 // Shared modal frame size so SELECT / INSERT / UPDATE / DELETE all open at the same width + a floor
 // height — short builders (DELETE) fill to the minimum instead of collapsing; tall ones (SELECT with
 // joins) grow and the body scrolls (Modal caps at max-height: 90vh).
-const WIZARD_MODAL_STYLE = { width: 'min(900px, 95vw)', minHeight: 'min(600px, 82vh)' } as const
+const WIZARD_MODAL_STYLE = { width: 'min(1000px, 95vw)', minHeight: 'min(600px, 82vh)', height: 'min(760px, 88vh)' } as const
 
 const Section = styled.div`
   display: flex; flex-direction: column; gap: 6px;
@@ -490,9 +490,10 @@ function SelectWizard({ connector, initialSql, onInsert, onCancel, forceReadOnly
               <MiniBtn type="button" onClick={() => onOrdersChange([...orders, { col: allColOpts[0]?.value ?? '', dir: 'ASC' }])}><Plus size={12} /> {t('settings.sqlWizard.addOrder')}</MiniBtn>
             </Section>
           )}
-          <Section>
+          {/* the preview takes whatever height the dialog has left */}
+          <Section style={{ flex: '1 1 auto', minHeight: 0 }}>
             <SectionTitle>{t('settings.sqlWizard.preview')}</SectionTitle>
-            <SqlEditor value={previewSql} onChange={() => undefined} rows={6} readOnly />
+            <SqlEditor value={previewSql} onChange={() => undefined} readOnly fill />
           </Section>
         </ModalBody>
         <ModalFooter>
@@ -603,9 +604,10 @@ function MutationWizard({ connector, initialSql, crud, expected, forceReadOnly, 
               </Section>
             </>
           )}
-          <Section>
+          {/* the preview takes whatever height the dialog has left */}
+          <Section style={{ flex: '1 1 auto', minHeight: 0 }}>
             <SectionTitle>{t('settings.sqlWizard.preview')}</SectionTitle>
-            <SqlEditor value={previewSql} onChange={() => undefined} rows={6} readOnly />
+            <SqlEditor value={previewSql} onChange={() => undefined} readOnly fill />
           </Section>
         </ModalBody>
         <ModalFooter>

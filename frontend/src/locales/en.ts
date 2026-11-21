@@ -2048,6 +2048,7 @@ const en = {
       },
     },
     menus: {
+      kind: { folder: "folder", screen: "screen", dashboard: "dashboard", job: "job", query: "query", endpoint: "endpoint", page: "page" },
       saved: 'Saved & reloaded.',
       hint: 'Save validates the menu tree (unique ids, parents exist, no cycles), writes menus.toml, and reloads.',
       scopeLabel: 'App:',
@@ -2158,6 +2159,18 @@ const en = {
       export: 'Export',
     },
     connectors: {
+      stage: {
+        settings: "Settings",
+      },
+      fig: {
+        pool: "pool {{pool}}",
+        noPool: "no pool",
+        tables: "{{n}} table(s)",
+        queries: "{{n}} query(ies)",
+        sequences: "{{n}} sequence(s)",
+        lookups: "{{n}} lookup(s)",
+        endpoints: "{{n}} endpoint(s)",
+      },
       addSql: 'SQL connector',
       addApi: 'API connector',
       addConnector: 'Connector',
@@ -2864,6 +2877,13 @@ const en = {
       addScopeEmpty: 'Every connector already has a dashboards scope.',
     },
     tables: {
+      stage: {
+        set: "set",
+        notSet: "not set",
+        blank: "no SQL yet",
+        writable: "writes allowed",
+        notWritable: "not writable: refused at run time",
+      },
       tablesView: 'Tables',
       looseSectionLabel: 'Queries',
       looseSectionHint: 'Queries not part of a table’s get/put/post/delete set — used by actions, charts, AIS calls or referenced by lookups. Click one to edit it.',
@@ -3510,6 +3530,7 @@ const en = {
       none: 'No rule yet.',
       disabled: 'disabled',
       pick: 'Pick a rule to edit, or add one.',
+      pickNone: "No rule yet: “Add rule”, at the top, creates the first one.",
     },
     package: {
       buildTab: 'Build package',
@@ -3766,6 +3787,10 @@ const en = {
     deleteMsg: 'Permanently delete {{file}} v{{v}}? This removes the snapshot for good — it cannot be restored afterwards. The live file is untouched.',
   },
   releaseNotes: {
+    entries: "{{n}} entry(ies)",
+    found: "{{n}} entry(ies) found",
+    search: "Search every version…",
+    noMatch: "No entry holds these words.",
     empty: 'No release notes bundled with this build.',
     versions: 'Versions',
   },

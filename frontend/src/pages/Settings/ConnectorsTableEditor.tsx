@@ -12,11 +12,13 @@
 // "Open in Screens" link in this editor's header jumps to the matching screen.
 import { useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
-import { ArrowRightLeft, Copy, Edit3, ExternalLink, GitBranch, Plus, Shuffle, Trash2 } from 'lucide-react'
+import { ArrowRightLeft, Copy, Edit3, ExternalLink, GitBranch, Plus, Shuffle, Trash2, Search, Tag } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button, Row, SchemaForm, SqlConnectorContext, SqlStatementContext, Stack, useModals, type JsonSchema } from '../../common'
 import { SubNav } from '../../common/SubNav'
-import { colors, fontSize, fonts, radius } from '../../theme'
+import { colors, fontSize, fonts } from '../../theme'
+import StageStrip, { type StageTone } from './StageStrip'
+import { tableSlots } from '../../services/connectorFigures'
 import {
   CRUD_KINDS,
   type CrudKind,
@@ -30,23 +32,15 @@ const Title = styled.strong`
   font-family: ${fonts.mono}; color: ${colors.text.primary}; font-size: ${fontSize.base};
   & .muted { color: ${colors.text.muted}; font-weight: 400; margin-left: 6px; }
 `
-const TabsBar = styled.div`display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 14px; border-bottom: 1px solid ${colors.border}; padding-bottom: 6px;`
-const TabBtn = styled.button<{ $active?: boolean; $missing?: boolean }>`
-  height: 30px; padding: 0 12px; border-radius: ${radius.sm}; cursor: pointer; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
-  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
-  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
-  color: ${({ $active, $missing }) => ($active ? colors.blue.main : $missing ? colors.text.muted : colors.text.secondary)};
-  display: inline-flex; align-items: center; gap: 6px;
-  & .badge { font-size: ${fontSize.micro}; color: ${colors.text.muted}; opacity: 0.7; }
-  &:hover { color: ${colors.text.primary}; background: ${({ $active }) => ($active ? colors.blue.bg : 'var(--hover-subtle)')}; }
-`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 30px 6px; text-align: center;`
 const Sub = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; margin-bottom: 10px;`
 
 // ── tabs ──────────────────────────────────────────────────────────────────────
 type TabKey = 'general' | CrudKind
 
-const TAB_ORDER: TabKey[] = ['general', 'get', 'put', 'post', 'delete']
+const SLOT_ICON: Record<CrudKind, ReactNode> = {
+  get: <Search size={15} />, put: <Edit3 size={15} />, post: <Plus size={15} />, delete: <Trash2 size={15} />,
+}
 const TAB_TO_CRUD: Partial<Record<TabKey, CrudKind>> = { get: 'get', put: 'put', post: 'post', delete: 'delete' }
 // Each CRUD slot's statement kind — threaded to the slot's SQL wizard so it builds the right shape.
 const CRUD_TO_STMT: Record<CrudKind, 'SELECT' | 'UPDATE' | 'INSERT' | 'DELETE'> = {
@@ -238,49 +232,53 @@ export default function ConnectorsTableEditor({
             </Button>
           )}
           {onFindUsages && (
-            <Button $variant="ghost" $size="sm" onClick={onFindUsages}>
-              <GitBranch size={13} /> {t('findUsages.button')}
+            <Button $variant="ghost" $size="sm" onClick={onFindUsages} title={t('findUsages.button')} aria-label={t('findUsages.button')}>
+              <GitBranch size={13} />
             </Button>
           )}
           {onRename && (
-            <Button $variant="ghost" $size="sm" onClick={onRename}>
-              <Edit3 size={13} /> {t('settings.rename.button')}
+            <Button $variant="ghost" $size="sm" onClick={onRename} title={t('settings.rename.button')} aria-label={t('settings.rename.button')}>
+              <Edit3 size={13} />
             </Button>
           )}
           {onChangeType && (
-            <Button $variant="ghost" $size="sm" onClick={onChangeType}>
-              <Shuffle size={13} /> {t('settings.connectors.changeTypeButton')}
+            <Button $variant="ghost" $size="sm" onClick={onChangeType} title={t('settings.connectors.changeTypeButton')} aria-label={t('settings.connectors.changeTypeButton')}>
+              <Shuffle size={13} />
             </Button>
           )}
           {onMove && (
-            <Button $variant="ghost" $size="sm" onClick={onMove}>
-              <ArrowRightLeft size={13} /> {t('settings.connectors.moveButton')}
+            <Button $variant="ghost" $size="sm" onClick={onMove} title={t('settings.connectors.moveButton')} aria-label={t('settings.connectors.moveButton')}>
+              <ArrowRightLeft size={13} />
             </Button>
           )}
           {onDuplicate && (
-            <Button $variant="ghost" $size="sm" onClick={onDuplicate}>
-              <Copy size={13} /> {t('settings.tables.duplicate')}
+            <Button $variant="ghost" $size="sm" onClick={onDuplicate} title={t('settings.tables.duplicate')} aria-label={t('settings.tables.duplicate')}>
+              <Copy size={13} />
             </Button>
           )}
-          <Button $variant="ghost" $size="sm" onClick={removeWholeTable} style={{ color: colors.red.main }}>
-            <Trash2 size={13} /> {t('common.delete')}
-          </Button>
+          <Button $variant="ghost" $size="sm" onClick={removeWholeTable} style={{ color: colors.red.main }} title={t('common.delete')} aria-label={t('common.delete')}>
+              <Trash2 size={13} />
+            </Button>
         </Row>
         )}
       />
-      <TabsBar>
-        {TAB_ORDER.map((k) => {
-          const crud = TAB_TO_CRUD[k]
-          // General always applies (it edits table-level metadata). A CRUD tab is "missing" when
-          // that slot doesn't exist yet — the badge invites the operator to create it.
-          const missing = crud ? !table[crud] : false
-          return (
-            <TabBtn key={k} type="button" $active={tab === k} $missing={missing} onClick={() => setTab(k)}>
-              {t(`settings.tables.tab.${k}`)}{missing && <span className="badge">+</span>}
-            </TabBtn>
-          )
-        })}
-      </TabsBar>
+      {/* the table as its stages: what it is, then its four statements — each card says whether it is set */}
+      <StageStrip
+        dense
+        current={tab}
+        onPick={(k) => setTab(k as TabKey)}
+        stages={[
+          { id: 'general', tone: 'blue', icon: <Tag size={15} />, title: t('settings.tables.tab.general'),
+            what: (typeof table.label === 'string' && table.label) || table.name,
+            more: typeof table.description === 'string' ? table.description : '' },
+          ...tableSlots(table).map((sl) => ({
+            id: sl.crud, tone: (sl.crud === 'get' ? 'green' : 'purple') as StageTone, icon: SLOT_ICON[sl.crud], title: t(`settings.tables.tab.${sl.crud}`),
+            what: !sl.set ? t('settings.tables.stage.notSet') : sl.blank ? t('settings.tables.stage.blank') : t('settings.tables.stage.set'),
+            more: sl.crud === 'get' || !sl.set ? '' : sl.writable ? t('settings.tables.stage.writable') : t('settings.tables.stage.notWritable'),
+            warn: sl.set && sl.crud !== 'get' && !sl.writable,
+          })),
+        ]}
+      />
       {renderTab()}
     </div>
     </SqlConnectorContext.Provider>

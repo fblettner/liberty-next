@@ -20,14 +20,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import {
-  FileText, Plus, Trash2, Save, X, Edit3, Database, Play, EyeOff, Sparkles,
+  Plus, Trash2, Save, X, Edit3, Database, Play, EyeOff, Sparkles,
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import {
-  Banner, Button, Card, Field, Input, Select, Tag,
-  Overlay, Modal, ModalHeader, ModalBody, ModalFooter, SpinnerRing, Checkbox,
-  Centered, useIsLight, useModals,
-} from '../../common'
+import { Banner, Button, Card, Field, Input, Select, Tag, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, SpinnerRing, Checkbox, Centered, useIsLight, useModals, HeaderActions, Row } from '../../common'
 import { Markdown } from '../../common/Markdown'
 import {
   attachTemplateContext,
@@ -84,8 +80,6 @@ interface PreviewResponse {
 // Styled bits
 // --------------------------------------------------------------------------- //
 const Shell = styled.div`display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0;`
-const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; flex-wrap: wrap;`
-const ToolbarLeft = styled.div`display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;`
 const Path = styled.code`
   font-family: ${fonts.mono}; font-size: ${fontSize.sm};
   color: ${colors.text.muted}; padding: 2px 6px; border-radius: ${radius.sm};
@@ -369,13 +363,7 @@ export default function ReportTemplatesBuilder() {
 
   return (
     <Shell>
-      <Toolbar>
-        <ToolbarLeft>
-          <FileText size={16} />
-          <strong>{t('settings.templates.title')}</strong>
-          <Path>{path}</Path>
-          {templates && <Tag>{t('settings.templates.count', { count: templates.length })}</Tag>}
-        </ToolbarLeft>
+      <HeaderActions>
         <Button
           $size="sm" $variant="primary"
           onClick={() => setEditing({ tpl: { ...EMPTY_TEMPLATE }, isNew: true })}
@@ -383,7 +371,11 @@ export default function ReportTemplatesBuilder() {
         >
           <Plus size={14} /> {t('settings.templates.add')}
         </Button>
-      </Toolbar>
+      </HeaderActions>
+      <Row gap={8} style={{ alignItems: 'center' }}>
+        <Path>{path}</Path>
+        {templates && <Tag>{t('settings.templates.count', { count: templates.length })}</Tag>}
+      </Row>
 
       <Hint>{t('settings.templates.description')}</Hint>
 

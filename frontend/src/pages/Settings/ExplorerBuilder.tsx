@@ -7,7 +7,7 @@ import styled from '@emotion/styled'
 import { Plus, Trash2, Edit3, Database, Link2, Save, Boxes } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Centered, Field, Input, SearchSelect, SpinnerRing, Tag, useModals, type SearchSelectOption } from '../../common'
+import { Banner, Button, Card, Centered, Field, Input, SearchSelect, SpinnerRing, Tag, useModals, type SearchSelectOption, HeaderActions } from '../../common'
 import type { ExplorerDoc, ExplorerEntityBody, ExplorerModelBody, ExplorerRelationBody } from '../../types/config'
 import type { QueryResult } from '../../types/connectors'
 import { ExplorerEntityModal, type ExplorerEntityRecord } from './ExplorerEntityModal'
@@ -182,14 +182,17 @@ export default function ExplorerBuilder() {
         <div style={{ width: 240 }}>
           <SearchSelect sort value={modelId} onChange={setModelId} options={modelIds.map((id) => ({ value: id, label: doc?.[scope]?.[id]?.label || id, mono: id }))} placeholder={t('settings.explorer.noModel')} disabled={!scope} />
         </div>
+      </Toolbar>
+      {/* the model's buttons are in the page header, before Reload config */}
+      <HeaderActions>
+        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+        {busy && <SpinnerRing size={14} thickness={2} />}
         <Button $variant="ghost" $size="sm" onClick={() => void addModel()} disabled={busy || !scope}><Plus size={13} /> {t('settings.explorer.addModel')}</Button>
         {modelId && <Button $variant="ghost" $size="sm" onClick={() => void removeModel()} disabled={busy} style={{ color: colors.red.main }}><Trash2 size={13} /> {t('settings.explorer.deleteModelBtn')}</Button>}
-        <span style={{ flex: 1 }} />
-        {busy && <SpinnerRing size={14} thickness={2} />}
-        {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
-        {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
         <Button $variant="primary" $size="sm" onClick={() => void persist()} disabled={busy || !dirty}><Save size={13} /> {t('common.save')}</Button>
-      </Toolbar>
+      </HeaderActions>
+      {status && <Banner $tone="ok">{status}</Banner>}
+      {error && <Banner $tone="error">{error}</Banner>}
       {scope && modelIds.length === 0 && <Empty>{t('settings.explorer.noModels')}</Empty>}
       {model && (
         <Body>

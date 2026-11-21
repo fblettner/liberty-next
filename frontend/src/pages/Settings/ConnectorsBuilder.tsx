@@ -11,16 +11,18 @@
 // only; pages/Liberty wraps the page.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers, Undo2, GitBranch, Shuffle, ArrowRightLeft } from 'lucide-react'
+import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers, Undo2, GitBranch, Shuffle, ArrowRightLeft, Hash, List as ListIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, Mono, SchemaForm, SearchSelect, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Input, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
+import { Button, Banner, Centered, Card, HeaderActions, Row, Stack, SpinnerRing, Mono, SchemaForm, SearchSelect, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Input, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc } from '../../types/config'
 import ApiConnectorEditor, { type ApiConnector as ApiConnectorEditorValue } from './ApiConnectorEditor'
 import type { SqlPools } from '../../services/apiTargets'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import ConnectorsTableEditor from './ConnectorsTableEditor'
+import StageStrip, { type StageView } from './StageStrip'
+import { connectorFigures } from '../../services/connectorFigures'
 import { ScreenDesignerModal } from './ScreenDesignerModal'
 import { CRUD_KINDS, type TableEntry, duplicateTableEntry, findTableIndex, newEmptyTable, pickSchemaProperties, removeTableByName, replaceTableByName, tableEntryFromFlatQueries, tableExistsByName } from './connectorTables'
 import { ScaffoldQueryModal, type ScaffoldKind } from './ScaffoldQueryModal'
@@ -29,22 +31,17 @@ import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { MoveQueryModal } from './MoveQueryModal'
 import { validateId, suggestCloneId } from '../../services/idValidator'
 import { DictionaryScan } from './DictionaryScan'
-import { BuilderShell as Shell, BuilderToolbar as Toolbar } from '../../common/builderShell'
+import { BuilderShell as Shell } from '../../common/builderShell'
 
 type Connectors = Record<string, Record<string, unknown>>
 
 // Layout: outer Shell flex-fills, top toolbar is fixed, the Split fills remaining height,
 // only the inner panels scroll. Same pattern as PoolsBuilder.
-const ToolbarLeft = styled.div`display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;`
-const ToolbarRight = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap;`
-const ToolbarDivider = styled.span`
-  display: inline-block; width: 1px; height: 18px; background: ${colors.border}; margin: 0 2px;
-`
 const Split = styled.div`display: flex; gap: 14px; flex: 1; min-height: 0; align-items: stretch;`
 // Left nav scrolls on its own (a connector list with dozens of entries shouldn't drag the page
 // along when wheeled). Search row + the two "+ Add" buttons stay pinned outside the scroller —
 // items live in NavList. The flex chain (Shell → Split → NavCol → NavList) caps the list height.
-const NavCol = styled.div`flex: 0 0 210px; display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 0;`
+const NavCol = styled(Card)`flex: 0 0 min(260px, 24%); padding: 10px; display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 0;`
 const NavList = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;`
 const NavSearch = styled.div`
   display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; margin-bottom: 2px;
@@ -52,14 +49,14 @@ const NavSearch = styled.div`
   & input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; &::placeholder { color: ${colors.text.muted}; } }
 `
 const NavItem = styled.button<{ $active?: boolean }>`
-  display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: ${radius.md}; text-align: left;
-  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
-  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
-  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
-  font-size: ${fontSize.sm}; font-family: ${fonts.mono}; cursor: pointer;
-  & svg { flex-shrink: 0; color: ${colors.text.muted}; }
-  & .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+  display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: ${radius.md}; text-align: left; cursor: pointer; flex-shrink: 0;
+  border: 1px solid ${({ $active }) => ($active ? colors.blue.main : colors.border)};
+  background: ${({ $active }) => ($active ? colors.blue.bg : colors.bg.input)};
+  & svg { flex-shrink: 0; color: ${colors.blue.main}; }
+  & .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  & .name { font-size: ${fontSize.sm}; font-family: ${fonts.mono}; font-weight: 600; color: ${colors.text.primary}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .holds { font-size: ${fontSize.micro}; font-family: ${fonts.sans}; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  &:hover { border-color: ${({ $active }) => ($active ? colors.blue.main : colors.blue.border)}; }
 `
 const FormCol = styled(Card)`flex: 1; min-width: 0; min-height: 0; overflow-y: auto;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
@@ -67,23 +64,29 @@ const NavGroupLabel = styled.div`
   font-size: ${fontSize.micro}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
   color: ${colors.text.muted}; padding: 8px 6px 3px;
 `
-const ModeBar = styled.div`display: inline-flex; gap: 4px; padding: 3px; border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};`
-const ModeBtn = styled.button<{ $active?: boolean }>`
-  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: ${radius.sm};
-  border: none; cursor: pointer; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
-  background: ${({ $active }) => ($active ? colors.bg.card : 'transparent')};
-  color: ${({ $active }) => ($active ? colors.text.primary : colors.text.muted)};
-  & svg { color: ${({ $active }) => ($active ? colors.blue.main : colors.text.muted)}; }
-  &:hover { color: ${colors.text.primary}; }
-`
 // Same idea as NavList — a connector with dozens of tables (jdedwards has 52) needs its own
 // scroller so wheeling doesn't drag the whole Settings page along. With the FormCol now scrolling
 // internally (overflow-y: auto + min-height: 0), the table list rides that scroll naturally — but
 // we keep min-height: 0 here so the gap collapses cleanly when the Stack flexes.
 const TableList = styled.div`display: flex; flex-direction: column; gap: 6px; min-height: 0; padding-right: 4px;`
-const TableRow = styled.button`
+// A section's list and — beside it once an item is picked — that item: the list narrows to a column that
+// scrolls on its own, it never leaves the page.
+const ListSplit = styled.div`display: flex; gap: 14px; align-items: flex-start; min-width: 0;`
+const ListSide = styled.div<{ $narrow: boolean }>`
+  flex: ${({ $narrow }) => ($narrow ? '0 0 min(300px, 30%)' : '1 1 auto')}; min-width: 0;
+  ${({ $narrow }) => ($narrow ? 'position: sticky; top: 0; max-height: calc(100vh - 330px); overflow-y: auto; padding-right: 4px;' : '')}
+  ${({ $narrow }) => ($narrow ? '& .slot-chip, & .row-action { display: none; }' : '& .slot-dots { display: none; }')}
+`
+const ListBeside = styled.div`flex: 1; min-width: 0;`
+const SlotDots = styled.span`
+  display: inline-flex; gap: 3px; flex-shrink: 0;
+  & i { width: 7px; height: 7px; border-radius: 50%; background: ${colors.border}; }
+  & i[data-on='true'] { background: ${colors.green.main}; }
+`
+const TableRow = styled.button<{ $on?: boolean }>`
   display: flex; align-items: center; gap: 10px; padding: 9px 11px; width: 100%; text-align: left;
-  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; cursor: pointer;
+  border: 1px solid ${({ $on }) => ($on ? colors.blue.main : colors.border)}; border-radius: ${radius.md};
+  background: ${({ $on }) => ($on ? colors.blue.bg : colors.bg.input)}; cursor: pointer;
   color: ${colors.text.primary};
   & .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   & .base { font-family: ${fonts.mono}; font-size: ${fontSize.sm}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -754,6 +757,14 @@ export default function ConnectorsBuilder() {
   // (Sequences / Lookups tabs now filter by each query's explicit ``type`` — see ``sequenceQueries``
   // / ``lookupQueries`` below — so the old dictionary-reference scan that determined them is gone.)
 
+
+  // what a connector's line says: its kind and how much it holds
+  const holds = (c: Record<string, unknown>): string => {
+    const f = connectorFigures(c)
+    if (f.api) return `api · ${t('settings.connectors.fig.endpoints', { n: f.endpoints })}`
+    return ['sql', f.tables ? t('settings.connectors.fig.tables', { n: f.tables }) : '', f.queries + f.sequences + f.lookups ? t('settings.connectors.fig.queries', { n: f.queries + f.sequences + f.lookups }) : '']
+      .filter(Boolean).join(' · ')
+  }
   if (error && !conns) return <Banner $tone="error">{error}</Banner>
   if (!conns || !schemas) return <Centered />
   // Alphabetical sort — operators expect a stable name-sorted list (the v1 ``apps_seq``
@@ -864,28 +875,22 @@ export default function ConnectorsBuilder() {
           right. Replaces the old "config path at top + bottom Save Row" split — the operator
           never has to scroll past a long connectors list to reach Save / Reload. Add (sql/api)
           and Delete actions live on the connector list / detail panes since they're per-row. */}
-      <Toolbar>
-        <ToolbarLeft>
-          {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
-          {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
-          {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
-        </ToolbarLeft>
-        <ToolbarRight>
-          {/* One "+ Connector" entry — the kind (sql / api) is chosen in the modal. Per-connector
-              actions (Clone, Rename, Delete) live in the right panel's Settings tab where they
-              target the selected connector. */}
-          <Button $variant="ghost" $size="sm" onClick={openAddConnector} disabled={busy}>
-            <Plus size={13} /> {t('settings.connectors.addConnector')}
-          </Button>
-          <ToolbarDivider />
-          <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty} title={t('common.discard')}>
-            <Undo2 size={13} /> {t('common.discard')}
-          </Button>
-          <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
-            {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
-          </Button>
-        </ToolbarRight>
-      </Toolbar>
+      <HeaderActions>
+        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+        {/* One "+ Connector" entry — the kind (sql / api) is chosen in the modal. Per-connector
+            actions (Clone, Rename, Delete) live in the right panel where they target the selected one. */}
+        <Button $variant="ghost" $size="sm" onClick={openAddConnector} disabled={busy}>
+          <Plus size={13} /> {t('settings.connectors.addConnector')}
+        </Button>
+        <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty} title={t('common.discard')}>
+          <Undo2 size={13} /> {t('common.discard')}
+        </Button>
+        <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
+          {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+        </Button>
+      </HeaderActions>
+      {status && <Banner $tone="ok">{status}</Banner>}
+      {error && <Banner $tone="error">{error}</Banner>}
       <Split>
         <NavCol>
           {names.length > 6 && (
@@ -897,14 +902,16 @@ export default function ConnectorsBuilder() {
           <NavList>
             {shownAppNames.length > 0 && <NavGroupLabel>{t('settings.connectors.groupApps')}</NavGroupLabel>}
             {shownAppNames.map((n) => (
-              <NavItem key={n} $active={n === sel} onClick={() => { setSel(n); setStatus(null) }}>
-                {conns[n].type === 'api' ? <Globe size={13} /> : <Database size={13} />} <span className="name">{n}</span>
+              <NavItem key={n} $active={n === sel} data-connector={n} onClick={() => { setSel(n); setStatus(null) }}>
+                {conns[n].type === 'api' ? <Globe size={14} /> : <Database size={14} />}
+                <span className="text"><span className="name">{n}</span><span className="holds">{holds(conns[n])}</span></span>
               </NavItem>
             ))}
             {shownDataNames.length > 0 && <NavGroupLabel>{t('settings.connectors.groupData')}</NavGroupLabel>}
             {shownDataNames.map((n) => (
-              <NavItem key={n} $active={n === sel} onClick={() => { setSel(n); setStatus(null) }}>
-                {conns[n].type === 'api' ? <Globe size={13} /> : <Database size={13} />} <span className="name">{n}</span>
+              <NavItem key={n} $active={n === sel} data-connector={n} onClick={() => { setSel(n); setStatus(null) }}>
+                {conns[n].type === 'api' ? <Globe size={14} /> : <Database size={14} />}
+                <span className="text"><span className="name">{n}</span><span className="holds">{holds(conns[n])}</span></span>
               </NavItem>
             ))}
             {shownNames.length === 0 && <div style={{ color: colors.text.muted, fontSize: fontSize.sm, padding: '2px 4px' }}>no match</div>}
@@ -927,25 +934,6 @@ export default function ConnectorsBuilder() {
                       (queries referenced by ``[sequences.*]``), lookups (queries referenced by
                       ``[lookups.*]``). Loose queries that don't fit any of the three stay in
                       the Settings… modal. */}
-                  {isSql && (
-                    <ModeBar>
-                      <ModeBtn type="button" $active={mode === 'settings'} onClick={() => setMode('settings')}>
-                        <FileCog size={13} /> {t('settings.connectors.settings')}
-                      </ModeBtn>
-                      <ModeBtn type="button" $active={mode === 'tables'} onClick={() => setMode('tables')}>
-                        {t('settings.tables.tablesView')}
-                      </ModeBtn>
-                      <ModeBtn type="button" $active={mode === 'custom'} onClick={() => setMode('custom')}>
-                        {t('settings.tables.looseSectionLabel')}
-                      </ModeBtn>
-                      <ModeBtn type="button" $active={mode === 'sequences'} onClick={() => setMode('sequences')}>
-                        {t('settings.connectors.sequencesView')}
-                      </ModeBtn>
-                      <ModeBtn type="button" $active={mode === 'lookups'} onClick={() => setMode('lookups')}>
-                        {t('settings.connectors.lookupsView')}
-                      </ModeBtn>
-                    </ModeBar>
-                  )}
                 </Row>
                 <Row gap={8}>
                   {/* Per-mode Add button — Tables / Sequences / Lookups each need their own
@@ -1003,6 +991,24 @@ export default function ConnectorsBuilder() {
                   )}
                 </Row>
               </Row>
+              {isSql && (
+                <StageStrip
+                  dense={!!(selTable || selQuery)}
+                  current={mode}
+                  onPick={(k) => setMode(k as typeof mode)}
+                  stages={(() => {
+                    const f = connectorFigures(selConn as Record<string, unknown>)
+                    return [
+                      { id: 'settings', tone: 'blue', icon: <FileCog size={15} />, title: t('settings.connectors.stage.settings'),
+                        what: f.pool ? t('settings.connectors.fig.pool', { pool: f.pool }) : t('settings.connectors.fig.noPool'), warn: !f.pool },
+                      { id: 'tables', tone: 'green', icon: <Database size={15} />, title: t('settings.tables.tablesView'), what: t('settings.connectors.fig.tables', { n: f.tables }) },
+                      { id: 'custom', tone: 'green', icon: <Search size={15} />, title: t('settings.tables.looseSectionLabel'), what: t('settings.connectors.fig.queries', { n: f.queries }) },
+                      { id: 'sequences', tone: 'purple', icon: <Hash size={15} />, title: t('settings.connectors.sequencesView'), what: t('settings.connectors.fig.sequences', { n: f.sequences }) },
+                      { id: 'lookups', tone: 'purple', icon: <ListIcon size={15} />, title: t('settings.connectors.lookupsView'), what: t('settings.connectors.fig.lookups', { n: f.lookups }) },
+                    ] as StageView[]
+                  })()}
+                />
+              )}
               {!isSql && (
                 // API connectors get a dedicated 5-tab editor (Connection / Authentication /
                 // Endpoints / Webhooks / Test) — matches the nomaubl shape, with conditional
@@ -1016,13 +1022,63 @@ export default function ConnectorsBuilder() {
               {/* Tables view = CRUD-grouped tables ONLY. Custom (non-CRUD) queries live in their
                   own tab now, so this list isn't mixed with them anymore. */}
               {isSql && mode === 'tables' && (
-                selTable && tableDefSchema && crudSlotSchema ? (() => {
-                  const table = tablesArr.find((tb) => tb.name === selTable)
-                  if (!table) return <Empty>{t('settings.tables.emptyConnector')}</Empty>
-                  // The corresponding Screen (if any) is keyed by (connector, get-slot name).
-                  const getName = table.get ? `${table.name}_get` : undefined
+                (() => {
+                  // the list of tables, and — beside it once one is picked — that table (the list narrows, it does not go)
+                  const table = selTable ? tablesArr.find((tb) => tb.name === selTable) : undefined
+                  const open = !!(table && tableDefSchema && crudSlotSchema)
+                  const getName = table?.get ? `${table.name}_get` : undefined
                   const matchedScreen = sel && getName ? findScreen(sel, getName) : null
                   return (
+                    <ListSplit>
+                      <ListSide $narrow={open}>
+                  <Stack gap={10} style={{ minHeight: 0 }}>
+                    {tablesArr.length > 6 && (
+                      <NavSearch>
+                        <Search size={13} />
+                        <input value={tq} onChange={(e) => setTq(e.target.value)} placeholder={`filter ${tablesArr.length}…`} />
+                      </NavSearch>
+                    )}
+                    {shownTables.length === 0 && tablesArr.length > 0 && (
+                      <Empty>{t('common.noMatches')}</Empty>
+                    )}
+                    {tablesArr.length === 0 && (
+                      <Empty>{t('settings.tables.emptyConnector')}</Empty>
+                    )}
+                    <TableList>
+                      {shownTables.map((tb) => {
+                        // Friendly subtitle — the table's own `description` (else `label`), which
+                        // lives on the TableEntry itself (not stranded on a `_get` slot).
+                        const desc = (typeof tb.description === 'string' && tb.description)
+                                  || (typeof tb.label === 'string' && tb.label)
+                                  || null
+                        return (
+                          <TableRow key={tb.name} type="button" $on={tb.name === selTable} data-table={tb.name} onClick={() => setSelTable(tb.name)}>
+                            <span className="text">
+                              <span className="base">{tb.name}</span>
+                              {desc && <span className="desc">{desc}</span>}
+                            </span>
+                            {CRUD_KINDS.map((c) => (
+                              <Slot key={c} className="slot-chip" $on={!!tb[c]} title={tb[c] ? `${tb.name}_${c}` : `${tb.name}_${c} (missing)`}>{c.toUpperCase().slice(0, 3)}</Slot>
+                            ))}
+                            <SlotDots className="slot-dots">{CRUD_KINDS.map((c) => <i key={c} data-on={!!tb[c]} title={c} />)}</SlotDots>
+                            <RowAction
+                              className="row-action"                              role="button"
+                              aria-label={t('settings.tables.duplicate')}
+                              title={t('settings.tables.duplicate')}
+                              onClick={(e) => { e.stopPropagation(); if (sel) duplicateTable(sel, tb.name) }}
+                            >
+                              <Copy size={13} />
+                            </RowAction>
+                          </TableRow>
+                        )
+                      })}
+                    </TableList>
+                    {/* "Add table" lives in the top toolbar (per-mode Add cluster). Custom queries
+                        moved to their own tab — this view is CRUD tables only now. */}
+                  </Stack>
+                      </ListSide>
+                      {open && table && tableDefSchema && crudSlotSchema && selTable && (
+                        <ListBeside>
                     <ConnectorsTableEditor
                       table={table}
                       connectorName={sel!}
@@ -1047,53 +1103,11 @@ export default function ConnectorsBuilder() {
                       screenLink={matchedScreen ? { app: matchedScreen.app, id: matchedScreen.id } : null}
                       onOpenScreen={(app, id) => setScreenDesigner({ app, id })}
                     />
+                        </ListBeside>
+                      )}
+                    </ListSplit>
                   )
-                })() : (
-                  <Stack gap={10}>
-                    {tablesArr.length > 6 && (
-                      <NavSearch>
-                        <Search size={13} />
-                        <input value={tq} onChange={(e) => setTq(e.target.value)} placeholder={`filter ${tablesArr.length}…`} />
-                      </NavSearch>
-                    )}
-                    {shownTables.length === 0 && tablesArr.length > 0 && (
-                      <Empty>{t('common.noMatches')}</Empty>
-                    )}
-                    {tablesArr.length === 0 && (
-                      <Empty>{t('settings.tables.emptyConnector')}</Empty>
-                    )}
-                    <TableList>
-                      {shownTables.map((tb) => {
-                        // Friendly subtitle — the table's own `description` (else `label`), which
-                        // lives on the TableEntry itself (not stranded on a `_get` slot).
-                        const desc = (typeof tb.description === 'string' && tb.description)
-                                  || (typeof tb.label === 'string' && tb.label)
-                                  || null
-                        return (
-                          <TableRow key={tb.name} type="button" onClick={() => setSelTable(tb.name)}>
-                            <span className="text">
-                              <span className="base">{tb.name}</span>
-                              {desc && <span className="desc">{desc}</span>}
-                            </span>
-                            {CRUD_KINDS.map((c) => (
-                              <Slot key={c} $on={!!tb[c]} title={tb[c] ? `${tb.name}_${c}` : `${tb.name}_${c} (missing)`}>{c.toUpperCase().slice(0, 3)}</Slot>
-                            ))}
-                            <RowAction
-                              role="button"
-                              aria-label={t('settings.tables.duplicate')}
-                              title={t('settings.tables.duplicate')}
-                              onClick={(e) => { e.stopPropagation(); if (sel) duplicateTable(sel, tb.name) }}
-                            >
-                              <Copy size={13} />
-                            </RowAction>
-                          </TableRow>
-                        )
-                      })}
-                    </TableList>
-                    {/* "Add table" lives in the top toolbar (per-mode Add cluster). Custom queries
-                        moved to their own tab — this view is CRUD tables only now. */}
-                  </Stack>
-                )
+                })()
               )}
               {/* Custom / Sequences / Lookups views — a flat list of single queries, each opening
                   the same per-query SchemaForm (QueryDef) on click. Each tab shows the queries whose
@@ -1107,11 +1121,11 @@ export default function ConnectorsBuilder() {
                 const qNeedle = tq.trim().toLowerCase()
                 const shown = qNeedle ? matches.filter((q) => String(q.name).toLowerCase().includes(qNeedle)) : matches
                 const picked = selQuery ? matches.find((q) => q.name === selQuery) : null
-                if (picked && queryDefSchema) {
-                  return renderQueryEditor(picked as Record<string, unknown>)
-                }
+                const open = !!(picked && queryDefSchema)
                 return (
-                  <Stack gap={10}>
+                  <ListSplit>
+                  <ListSide $narrow={open}>
+                  <Stack gap={10} style={{ minHeight: 0 }}>
                     {matches.length > 6 && (
                       <NavSearch>
                         <Search size={13} />
@@ -1136,7 +1150,7 @@ export default function ConnectorsBuilder() {
                               ? q.label
                               : null
                           return (
-                            <TableRow key={name} type="button" onClick={() => setSelQuery(name)}>
+                            <TableRow key={name} type="button" $on={name === selQuery} data-query={name} onClick={() => setSelQuery(name)}>
                               <span className="text">
                                 <span className="base">{name}</span>
                                 {desc && <span className="desc">{desc}</span>}
@@ -1147,6 +1161,9 @@ export default function ConnectorsBuilder() {
                       </TableList>
                     )}
                   </Stack>
+                  </ListSide>
+                  {open && picked && <ListBeside>{renderQueryEditor(picked as Record<string, unknown>)}</ListBeside>}
+                  </ListSplit>
                 )
               })()}
               {/* Settings tab — connector-wide config (pool / licensed / max_rows). ``type`` is the

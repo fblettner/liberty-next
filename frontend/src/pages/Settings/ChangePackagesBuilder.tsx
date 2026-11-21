@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Layers, ArrowRight, Send, Check, X, EyeOff, Eye, Download, Upload, Rocket, ChevronRight, ChevronDown, RefreshCw, Trash2, Search, Inbox, Plus, FolderInput } from 'lucide-react'
-import { Banner, Button, useModals } from '../../common'
+import { Banner, Button, Card, HeaderActions, useModals } from '../../common'
 import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { ApplyBundlePanel } from './ApplyBundleModal'
@@ -57,8 +57,12 @@ const APPLIED_OP_TONE: Record<string, string> = {
   unverified: colors.orange.main, conflict: colors.red.main, error: colors.red.main,
   skipped: colors.text.muted,
 }
-const Wrap = styled.div`display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start;`
-const List = styled.div`display: flex; flex-direction: column; gap: 6px;`
+// the packages on the left, the picked one beside: two panels that start on the same line, each scrolling on its own
+const Wrap = styled.div`display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); gap: 14px; align-items: start;`
+const List = styled(Card)`
+  display: flex; flex-direction: column; gap: 6px; padding: 10px; position: sticky; top: 0; max-height: calc(100vh - 250px); overflow-y: auto;
+`
+const DetailCard = styled(Card)`padding: 14px; min-width: 0; overflow: hidden;`
 const FilterBox = styled.div`
   display: flex; align-items: center; gap: 6px; padding: 5px 9px; margin-bottom: 4px;
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
@@ -133,7 +137,8 @@ const Diff = styled.div`
 `
 
 const DetailHead = styled.div`
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -14px -14px 12px; padding: 10px 14px;
+  border-bottom: 1px solid ${colors.border}; background: ${colors.bg.input};
   & .title { font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.primary}; }
   & .who { font-size: ${fontSize.micro}; color: ${colors.text.muted}; }
   & .actions { display: flex; gap: 6px; margin-left: auto; }
@@ -436,11 +441,17 @@ export default function ChangePackagesBuilder() {
         <TabBtn $active={mode === 'apply'} onClick={() => setMode('apply')}>
           <Upload size={13} /> {t('settings.changes.applyTab')}
         </TabBtn>
-        <div style={{ flex: 1 }} />
+      </Tabs>
+      <HeaderActions>
+        <Button $size="sm" $variant="ghost" disabled={busy || !(detail?.application ?? visiblePackages[0]?.application)}
+          onClick={() => { const app = detail?.application ?? visiblePackages[0]?.application; if (app) void createCustom(app) }}
+          title={t('settings.changes.newPkgTip')}>
+          <Plus size={13} /> {t('settings.changes.newPkg')}
+        </Button>
         <Button $size="sm" $variant="ghost" disabled={busy} onClick={() => void refresh()}>
           <RefreshCw size={13} /> {t('common.refresh')}
         </Button>
-      </Tabs>
+      </HeaderActions>
       {error && <Banner $tone="error">{error}</Banner>}
 
       {mode === 'apply' ? (
@@ -491,11 +502,6 @@ export default function ChangePackagesBuilder() {
       ) : (
         <Wrap>
           <List>
-            <Button $size="sm" $variant="ghost" disabled={busy || !(detail?.application ?? visiblePackages[0]?.application)}
-              onClick={() => { const app = detail?.application ?? visiblePackages[0]?.application; if (app) void createCustom(app) }}
-              title={t('settings.changes.newPkgTip')}>
-              <Plus size={13} /> {t('settings.changes.newPkg')}
-            </Button>
             <FilterBox>
               <Search size={13} />
               <input
@@ -522,7 +528,7 @@ export default function ChangePackagesBuilder() {
               )
             })}
           </List>
-          <div>
+          <DetailCard>
             {detail && (
               <DetailHead>
                 <span className="title">{detail.name}</span>
@@ -703,7 +709,7 @@ export default function ChangePackagesBuilder() {
               </Group>
               )
             })}
-          </div>
+          </DetailCard>
         </Wrap>
       )}
         <PostApplyEditor />

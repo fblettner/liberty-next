@@ -31,10 +31,13 @@ import { colors, fontSize, fonts, radius, EDITOR_FONT_PX } from '../theme'
 // `resize: vertical` lets the operator drag-resize the editor; Monaco's `automaticLayout: true`
 // repaints as the box grows / shrinks. The default `$h` is the *initial* height — after the user
 // drags it, the browser remembers the new height per-mount.
-const Frame = styled.div<{ $h: number }>`
+// `$fill`: the editor takes the height its container leaves (a dialog's remaining room) instead of a set one.
+const Frame = styled.div<{ $h: number; $fill?: boolean }>`
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; overflow: hidden;
-  background: ${colors.bg.input}; height: ${({ $h }) => $h}px; min-height: 120px; max-height: 80vh;
-  resize: vertical;
+  background: ${colors.bg.input};
+  ${({ $h, $fill }) => ($fill
+    ? 'flex: 1 1 auto; min-height: 160px;'
+    : `height: ${$h}px; min-height: 120px; max-height: 80vh; resize: vertical;`)}
 `
 const Toolbar = styled.div`
   display: flex; gap: 6px; justify-content: flex-end; margin-bottom: 4px;
@@ -84,6 +87,8 @@ export interface SqlEditorProps {
   onChange: (v: string) => void
   /** Pixel height per row, matched to `<Textarea rows={n}>`'s feel. Default ~6 rows. */
   rows?: number
+  /** Take the height the container leaves (the container must be a flex column) instead of `rows`. */
+  fill?: boolean
   readOnly?: boolean
   /** When set, schema-aware autocomplete kicks in: tables after FROM/JOIN/INTO/UPDATE,
    *  columns after `<table>.`, plus the columns of any table referenced earlier in the
@@ -101,7 +106,7 @@ export interface SqlEditorProps {
 const ROW_PX = 20
 const CHROME_PX = 18
 
-export function SqlEditor({ value, onChange, rows = 6, readOnly, connector, statementType }: SqlEditorProps) {
+export function SqlEditor({ value, onChange, rows = 6, readOnly, connector, statementType, fill }: SqlEditorProps) {
   const { t } = useTranslation()
   const isLight = useIsLight()
   const [wizardOpen, setWizardOpen] = useState(false)
@@ -185,7 +190,7 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector, stat
   const isWriteSql = /^\s*(insert|update|delete|merge|truncate|create|drop|alter|replace|upsert|call)\b/i.test(value)
   const canRun = !isWriteSql
   return (
-    <div>
+    <div style={fill ? { display: 'flex', flexDirection: 'column', flex: '1 1 auto', minHeight: 0 } : undefined}>
       {showToolbar && (
         <Toolbar>
           <MenuWrap ref={tokenWrapRef}>
@@ -229,7 +234,7 @@ export function SqlEditor({ value, onChange, rows = 6, readOnly, connector, stat
           )}
         </Toolbar>
       )}
-      <Frame $h={rows * ROW_PX + CHROME_PX}>
+      <Frame $h={rows * ROW_PX + CHROME_PX} $fill={fill}>
         <MonacoEditor
           height="100%"
           language="sql"

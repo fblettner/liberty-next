@@ -181,9 +181,12 @@ function BuildPanel() {
       .then((r) => {
         if (cancelled) return
         setManifest(r)
-        // Pre-tick everything except the default-excluded kinds (connector / pool / api_endpoint).
+        // Pre-tick everything except the default-excluded kinds (connector / pool / api_endpoint) — but an
+        // endpoint a screen READS or SAVES through is that screen's data, as a query is: it goes with it.
+        const screenData = (d: (typeof r.deps)[number]) => d.kind === 'api_endpoint'
+          && (d.reasons ?? []).some((why) => /\.(read|update|insert|delete)_query$/.test(why))
         const init = new Set<string>()
-        for (const d of r.deps) if (!DEFAULT_EXCLUDED_KINDS.has(d.kind)) init.add(depKey(d))
+        for (const d of r.deps) if (!DEFAULT_EXCLUDED_KINDS.has(d.kind) || screenData(d)) init.add(depKey(d))
         setIncluded(init)
       })
       .catch((e) => { if (!cancelled) { setDepError(e instanceof ApiError ? e.message : String(e)); setManifest(null) } })

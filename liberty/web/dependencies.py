@@ -113,6 +113,7 @@ def collect_dependencies(state: Any, seeds: Iterable[Seed], *, max_depth: int = 
             warnings.append(f"dependency walk exceeded {max_depth * 200} iterations — partial result")
             break
         seed, reason = work.pop(0)
+        seed = _as_endpoint(state, seed)
         key = (seed.kind, seed.scope, seed.name)
         if key in visited:
             # Already collected — just add the new reason if it's informative.
@@ -138,6 +139,24 @@ def collect_dependencies(state: Any, seeds: Iterable[Seed], *, max_depth: int = 
 
 
 # ── per-kind resolvers ───────────────────────────────────────────────────────────────────
+
+
+def _as_endpoint(state: Any, seed: Seed) -> Seed:
+    """A "query" named on an API connector is one of its ENDPOINTS: a screen reads an endpoint's rows as it
+    reads a query and saves through endpoints (its own connector's, or ``save_connector``'s), a lookup may read
+    one too — all written in the same ``*_query`` settings. Without this the walk looked for a SQL query on the
+    API connector, found none, and reported a screen's own data as a missing reference (in a package, and in
+    the screen's history)."""
+    if seed.kind != "query" or not seed.scope:
+        return seed
+    cr = getattr(state, "connectors", None)
+    try:
+        cfg = getattr(cr.get(seed.scope), "config", None) if cr is not None and seed.scope in cr.names() else None
+    except Exception:  # noqa: BLE001 — an unknown connector is reported by the resolver
+        return seed
+    if cfg is None or hasattr(cfg, "iter_named_queries") or getattr(cfg, "endpoints", None) is None:
+        return seed
+    return Seed("api_endpoint", seed.name, seed.scope)
 
 
 def _resolve(state: Any, seed: Seed) -> tuple[Dependency | None, list[tuple[Seed, str]]]:
@@ -498,7 +517,12 @@ def _resolve_api_endpoint(state: Any, seed: Seed) -> tuple[Dependency | None, li
     dep = Dependency(kind="api_endpoint", name=seed.name, scope=seed.scope, config=_dump(ep))
     # The endpoint's connector must come too (the api_call action already enqueues it but for
     # standalone api_endpoint seeds we add it ourselves).
-    return dep, [(Seed("connector", seed.scope), f"api_endpoint {seed.scope}.{seed.name}")]
+    refs = [(Seed("connector", seed.scope), f"api_endpoint {seed.scope}.{seed.name}")]
+    # An endpoint SERVED by a shared action needs that action (and what its steps use) at the destination.
+    action = getattr(ep, "action", None)
+    if action:
+        refs.append((Seed("action", action), f"api_endpoint {seed.scope}.{seed.name} action"))
+    return dep, refs
 
 
 def _resolve_pool(state: Any, seed: Seed) -> tuple[Dependency | None, list[tuple[Seed, str]]]:

@@ -4,10 +4,10 @@
 // + reload). The operator's own questions live in App → AI Assistant and win over these.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, Sparkles, LayoutList, Trash2, BookOpen, Plus, Edit3, Wrench } from 'lucide-react'
+import { Save, Sparkles, LayoutList, Trash2, BookOpen, Plus, Edit3, Wrench, Undo2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Centered, SearchSelect, SpinnerRing, useModals, type SearchSelectOption } from '../../common'
+import { Banner, Button, Card, Centered, SearchSelect, SpinnerRing, useModals, type SearchSelectOption, HeaderActions } from '../../common'
 import type { AiDoc, AiToolBody, AppAiBody, PlaybookBody, ScreensDoc } from '../../types/config'
 import { QuestionsList } from './AiStartersEditor'
 import { AiPlaybookModal } from './AiPlaybookModal'
@@ -16,7 +16,7 @@ import { ScopeBar, type ScopeOption } from './ScopeBar'
 import { AddScopeModal } from './AddScopeModal'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts } from '../../theme'
-import { BuilderShell as Shell, BuilderToolbar as Toolbar } from '../../common/builderShell'
+import { BuilderShell as Shell } from '../../common/builderShell'
 
 const Body = styled.div`flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px;`
 const Section = styled(Card)`padding: 10px 14px; display: flex; flex-direction: column; gap: 8px;`
@@ -121,15 +121,17 @@ export default function AiBuilder() {
     <Shell>
       <ScopeBar scopes={scopes} value={scope} onChange={setScope} label={t('settings.ai.app')}
         emptyHint={t('settings.ai.noScopes')} onAddScope={() => setAddScopeOpen(true)} />
-      <Toolbar>
-        <Sparkles size={14} style={{ color: colors.text.muted }} />
-        <Hint>{t('settings.ai.hint')}</Hint>
-        <span style={{ flex: 1 }} />
-        {busy && <SpinnerRing size={14} thickness={2} />}
-        {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
-        {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
-        <Button $variant="primary" $size="sm" onClick={() => void persist()} disabled={busy || !dirty}><Save size={13} /> {t('common.save')}</Button>
-      </Toolbar>
+      {/* Discard / Save are in the page header, before Reload config */}
+      <HeaderActions>
+        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+        <Button $variant="ghost" $size="sm" onClick={() => { setDoc(saved); setStatus(null) }} disabled={busy || !dirty}><Undo2 size={13} /> {t('common.discard')}</Button>
+        <Button $variant="primary" $size="sm" onClick={() => void persist()} disabled={busy || !dirty}>
+          {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+        </Button>
+      </HeaderActions>
+      <Hint>{t('settings.ai.hint')}</Hint>
+      {status && <Banner $tone="ok">{status}</Banner>}
+      {error && <Banner $tone="error">{error}</Banner>}
       {scope && (
         <Body>
           <Section>

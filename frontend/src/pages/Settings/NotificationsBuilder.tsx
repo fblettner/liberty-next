@@ -8,7 +8,7 @@ import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Bell, Plus, Send, Trash2, X } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Centered, Checkbox, Field, Input, SearchSelect, SpinnerRing, Tag, Textarea, useModals, type SearchSelectOption, PlaceholderPicker, SearchSelectMulti } from '../../common'
+import { Banner, Button, Card, Centered, Checkbox, Field, HeaderActions, Input, SearchSelect, SpinnerRing, Tag, Textarea, useModals, type SearchSelectOption, PlaceholderPicker, SearchSelectMulti } from '../../common'
 import { JOB_EVENT_TOKENS, SCREEN_EVENT_TOKENS } from '../../services/placeholders'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { validateId } from '../../services/idValidator'
@@ -272,7 +272,10 @@ export default function NotificationsBuilder() {
   return (
     <Split>
       <Side>
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}><Button $size="sm" $variant="primary" onClick={() => setEditing(null)}><Plus size={13} /> {t('settings.notify.addRule')}</Button></div>
+        {/* "Add rule" is in the page header: the list starts on the same line as the rule beside it */}
+        <HeaderActions>
+          <Button $size="sm" $variant="primary" onClick={() => setEditing(null)}><Plus size={13} /> {t('settings.notify.addRule')}</Button>
+        </HeaderActions>
         {error && <Banner $tone="error">{error}</Banner>}
         <List>
           {ids.length === 0 && <span style={{ fontSize: fontSize.sm, color: colors.text.muted, padding: 8 }}>{t('settings.notify.none')}</span>}
@@ -298,7 +301,7 @@ export default function NotificationsBuilder() {
         <RuleEditor key={editing ?? '__new__'} id={editing ?? ''} initial={editing ? doc[editing] : blank} isNew={editing == null} takenIds={ids} jobIds={jobIds}
           onSaved={onSaved} onCancel={() => setEditing(undefined)} onDelete={editing ? () => void remove(editing) : undefined} />
       ) : (
-        <Placeholder>{t('settings.notify.pick')}</Placeholder>
+        <Placeholder>{ids.length ? t('settings.notify.pick') : t('settings.notify.pickNone')}</Placeholder>
       )}
     </Split>
   )
