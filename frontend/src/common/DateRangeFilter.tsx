@@ -6,8 +6,9 @@ import { useEffect, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Calendar, ChevronDown } from 'lucide-react'
-import { colors, fontSize, fonts, radius } from '../theme'
+import { colors, fontSize, fonts, media, radius } from '../theme'
 import { PortalPanel } from './PortalPanel'
+import { useViewport } from './useViewport'
 import { MonthGrid } from './MonthGrid'
 import { DATE_PRESETS, EMPTY_RANGE, formatRange, fromIso, rangeForPreset, toIso, type DatePreset, type DateRange } from '../services/period'
 
@@ -39,10 +40,18 @@ const Trigger = styled.button<{ $open: boolean; $block?: boolean }>`
   & svg { flex-shrink: 0; color: ${colors.text.muted}; }
   &:hover { border-color: ${colors.blue.border}; }
 `
-const Body = styled.div`display: flex; min-width: 0;`
+// Phone-width window: the presets are a row that scrolls above ONE month (the arrows reach the others).
+const Body = styled.div`
+  display: flex; min-width: 0;
+  ${media.tablet} { flex-direction: column; }
+`
 const Presets = styled.div`
   width: 176px; flex-shrink: 0; padding: 8px; border-right: 1px solid ${colors.border};
   display: flex; flex-direction: column; gap: 1px;
+  ${media.tablet} {
+    width: auto; flex-direction: row; overflow-x: auto; gap: 4px; border-right: none; border-bottom: 1px solid ${colors.border};
+    & > button { flex-shrink: 0; white-space: nowrap; }
+  }
 `
 const PresetBtn = styled.button<{ $active?: boolean }>`
   text-align: left; height: 32px; padding: 0 10px; border: none; border-radius: ${radius.md}; cursor: pointer;
@@ -52,7 +61,10 @@ const PresetBtn = styled.button<{ $active?: boolean }>`
   font-weight: ${({ $active }) => ($active ? 600 : 400)};
   &:hover { background: ${({ $active }) => ($active ? colors.blue.bg : 'var(--hover-subtle)')}; color: ${colors.text.primary}; }
 `
-const Calendars = styled.div`display: flex; gap: 24px; padding: 14px 18px; min-width: 0;`
+const Calendars = styled.div`
+  display: flex; gap: 24px; padding: 14px 18px; min-width: 0;
+  ${media.tablet} { justify-content: center; padding: 12px; }
+`
 const Footer = styled.div`
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
   padding: 10px 14px; border-top: 1px solid ${colors.border};
@@ -82,6 +94,7 @@ export function DateRangeFilter({ preset, range, onChange, basis, block }: Props
   const lang = i18n.language || 'en'
   const [open, setOpen] = useState(false)
   const [pending, setPending] = useState<DateRange>(EMPTY_RANGE)      // the custom range being picked
+  const { compact } = useViewport()
   const [view, setView] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() } })
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
@@ -134,9 +147,13 @@ export function DateRangeFilter({ preset, range, onChange, basis, block }: Props
                 ))}
               </Presets>
               <Calendars>
-                <MonthGrid year={left.y} month={left.m} from={pending.dateFrom} to={pending.dateTo} today={today} lang={lang} onPick={pickDay} nav={{ prev: () => shift(-1) }}
-                  onJump={(y, m) => { const d = new Date(y, m + 1, 1); setView({ y: d.getFullYear(), m: d.getMonth() }) }} />
-                <MonthGrid year={view.y} month={view.m} from={pending.dateFrom} to={pending.dateTo} today={today} lang={lang} onPick={pickDay} nav={{ next: () => shift(1) }}
+                {/* two months side by side; on a phone-width window one, with both arrows */}
+                {!compact && (
+                  <MonthGrid year={left.y} month={left.m} from={pending.dateFrom} to={pending.dateTo} today={today} lang={lang} onPick={pickDay} nav={{ prev: () => shift(-1) }}
+                    onJump={(y, m) => { const d = new Date(y, m + 1, 1); setView({ y: d.getFullYear(), m: d.getMonth() }) }} />
+                )}
+                <MonthGrid year={view.y} month={view.m} from={pending.dateFrom} to={pending.dateTo} today={today} lang={lang} onPick={pickDay}
+                  nav={compact ? { prev: () => shift(-1), next: () => shift(1) } : { next: () => shift(1) }}
                   onJump={(y, m) => setView({ y, m })} />
               </Calendars>
             </Body>

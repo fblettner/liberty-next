@@ -169,7 +169,7 @@ async def test_column_hints_reorder_label_and_hide(pools: PoolRegistry) -> None:
             sql="SELECT id, name, status FROM item ORDER BY id"),
     )
     result = await conn.execute("all", column_hints=[
-                ColumnHint(name="name", label="Item Name", align="left", wrap=True,
+                ColumnHint(name="name", label="Item Name", align="left", wrap=True, card="title",
                            filter_from=[FilterDep(source="status", column="ST")]),  # cascading dep
                 ColumnHint(name="status", hidden=True),
                 ColumnHint(name="id", visible_when=VisibleWhen(field="status", value=["on", "off"])),  # conditional
@@ -187,6 +187,7 @@ async def test_column_hints_reorder_label_and_hide(pools: PoolRegistry) -> None:
     # the hints surface in to_dict() (only when non-default)
     cols = {c["name"]: c for c in result.to_dict()["columns"]}
     assert cols["name"]["label"] == "Item Name" and cols["name"]["align"] == "left" and cols["name"]["wrap"] is True
+    assert cols["name"]["card"] == "title" and "card" not in cols["id"]          # its place in a row's card on a phone
     assert cols["name"]["filter_from"] == [{"source": "status", "column": "ST"}]
     assert cols["status"]["hidden"] is True
     assert cols["id"]["visible_when"] == [{"field": "status", "value": ["on", "off"]}]

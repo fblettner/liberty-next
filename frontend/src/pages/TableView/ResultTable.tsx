@@ -24,6 +24,7 @@ import type { Action, ScreenDetail } from '../../types/screens'
 import { api, apiDownload, ApiError } from '../../api/client'
 import { Banner, ErrorDetails } from '../../common'
 import { DataTable } from '../../common/DataTable'
+import type { FilterMeta } from '../../common/DataTableFilter'
 import type { SharedGridView } from '../../services/gridViews'
 import { ValueDiffPanel } from './ValueDiffPanel'
 import { enumMap, formatLink, ruleCell } from '../../services/cells'
@@ -921,6 +922,20 @@ export function ResultTable({
           )
         }
       }
+    }
+    // A row as a CARD (phone-width window, DataTable): a column's own ``card`` hint, and ONE line for
+    // a field shown as a code and its label — the label to read, the code (its picker) to edit. In
+    // edit mode every column is a line: all of them must be reachable.
+    const hintOf = new Map(result.columns.map((c) => [c.name, c.card]))
+    const pairName = (id: string) => id.replace(/__(lookup|enum)$/, '')
+    const paired = new Set(out.map((d) => String(d.id ?? '')).filter((id) => pairName(id) !== id).map(pairName))
+    for (const d of out) {
+      const id = String(d.id ?? '')
+      const base = pairName(id)
+      const isLabel = base !== id
+      const half = paired.has(base) && (editMode ? isLabel : !isLabel)
+      const card = half ? 'hide' : (hintOf.get(base) ?? (editMode ? 'show' : undefined))
+      if (card) d.meta = { ...(d.meta as FilterMeta | undefined), card }
     }
     return out
     // ``editTick`` is deliberately NOT in the dep list — including it would rebuild the column

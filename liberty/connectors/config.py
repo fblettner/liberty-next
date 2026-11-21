@@ -404,6 +404,15 @@ class ColumnHint(BaseModel):
     )
     width: int | None = Field(default=None, json_schema_extra={"x_group": "Display"}, description="Fixed column width in pixels (blank = auto-size).")
     wrap: bool = Field(default=False, json_schema_extra={"x_group": "Display"}, description="Wrap long text over several lines in the grid (default: one line, cut with an ellipsis).")
+    card: Literal["title", "show", "hide"] | None = Field(
+        default=None, json_schema_extra={"x_group": "Display"},
+        description=(
+            "On a phone, where the grid is a list of cards: ``title`` puts this column in the card's "
+            "heading, ``show`` always gives it a line, ``hide`` never shows it there. Blank = the grid "
+            "decides: the first two columns are the heading, the next four are lines, the others open "
+            "with \"+N\"."
+        ),
+    )
     drill: str | None = Field(
         default=None,
         json_schema_extra={"x_group": "Display", "x_enum_ref": "ROW_MENU_ACTIONS"},

@@ -44,7 +44,7 @@ import { useTranslation } from 'react-i18next'
 import {
   ArrowUp, ArrowDown, ChevronsUpDown, Search, Filter, FilterX, Columns3, Group, Download, FileText,
   Table as TableIcon, ChevronDown, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Check,
-  LayoutGrid, Trash2, MoreHorizontal, CornerDownRight,
+  LayoutGrid, Trash2, MoreHorizontal, CornerDownRight, ChevronUp,
 } from 'lucide-react'
 import { colors, radius, fontSize, fonts, shadow, media } from '../theme'
 import { ColumnFilterControl, type FilterMeta } from './DataTableFilter'
@@ -317,11 +317,13 @@ const Table = styled.table`
     display: block; width: 100% !important; min-width: 0 !important;
     & thead { display: none; }
     & tbody { display: block; }
-    & tbody tr { display: block; padding: 8px 12px; }
+    /* a card: its heading on the first line (the row's button, then the title columns), then a line per column */
+    & tbody tr { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; padding: 8px 12px; }
     & tbody tr:not(:last-child) { border-bottom: 1px solid ${colors.border}; }
     /* the virtualizer's spacer rows keep the exact height it gives them */
-    & tbody tr[aria-hidden='true'] { padding: 0; border: none; }
+    & tbody tr[aria-hidden='true'] { display: block; padding: 0; border: none; }
     & tbody td {
+      flex: 1 0 100%;
       display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
       width: auto !important; min-width: 0 !important; max-width: none !important;
       padding: 3px 0 !important; border-bottom: none !important;
@@ -334,11 +336,23 @@ const Table = styled.table`
     }
     /* the value — or, in edit mode, its input — takes the rest of the line */
     & tbody td[data-label] > * { min-width: 0; }
-    & tbody td[data-label] > input { flex: 1 1 0; text-align: start; }
-    /* no label: a group's heading, the selection box, the row's menu */
-    & tbody td:not([data-label]) { justify-content: flex-start; text-align: left !important; }
+    /* … as tall as the pickers next to it: a finger's target */
+    & tbody td[data-label] > input:not([type='checkbox']) { flex: 1 1 0; text-align: start; min-height: 30px; }
+    /* no label: a group's heading, the selection box, the row's menu — they start the heading line */
+    & tbody td:not([data-label]) { flex: 0 0 auto; justify-content: flex-start; text-align: left !important; }
+    /* the heading: the title columns side by side, no label, the value larger */
+    & tbody td[data-card='title'] {
+      flex: 0 1 auto; justify-content: flex-start; text-align: left !important;
+      font-family: ${fonts.sans}; font-size: ${fontSize.md}; font-weight: 600; color: ${colors.text.primary};
+    }
+    & tbody td[data-card='title']::before { content: none; }
+    & tbody td[data-card='title'] + td:not([data-card='title']) { margin-top: 2px; }
+    /* a column kept out of the card: never shown (hide), or shown once the card is opened (more) */
+    & tbody td[data-card='hide'], & tbody td[data-card='more'] { display: none; }
+    /* the "+N" that opens the rest of the card */
+    & tbody td[data-card='toggle'] { flex: 1 0 100%; justify-content: flex-end; padding-top: 4px !important; }
     /* a cell spanning the table (no result, a row's detail panel) is a plain block */
-    & tbody td[colspan] { display: block; }
+    & tbody td[colspan] { display: block; flex: 1 0 100%; }
     & tbody td:empty { display: none; }
     /* a value-less line: the grid's cells wrap their text in a span, empty for a null or a blank */
     & tbody td[data-label]:has(> span:only-child:empty) { display: none; }
@@ -347,6 +361,9 @@ const Table = styled.table`
 // The height the virtualizer assumes for a row before measuring it: a table line, or — as a card
 // on a phone-width window — a line per visible column plus the card's padding and border.
 const ROW_H = 26
+// A card shows its heading and this many lines; the other columns open with "+N" (a column says
+// otherwise with its ``card`` hint).
+const CARD_LINES = 4
 const CARD_LINE_H = 26
 const CARD_PAD_H = 17
 // ``STICKY_BG`` composites the (light-theme-translucent) dropdown tint over the opaque base, so a
@@ -417,6 +434,12 @@ const RowExpandBtn = styled.button`
 const DetailTr = styled.tr` td { background: ${colors.bg.card}; padding: 0; } `
 // The row's action handle (``rowMenuButton``): barely there until the row is hovered, then a
 // clear affordance; blue under the pointer.
+const CardMoreBtn = styled.button`
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid ${colors.border};
+  border-radius: 999px; background: ${colors.bg.input}; color: ${colors.text.muted}; cursor: pointer;
+  font-family: ${fonts.sans}; font-size: ${fontSize.micro};
+  &:hover { color: ${colors.blue.main}; border-color: ${colors.blue.border}; }
+`
 const RowMenuBtn = styled.button`
   display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0;
   border: 1px solid ${colors.border}; border-radius: ${radius.sm}; background: ${colors.bg.input}; cursor: pointer; color: ${colors.text.secondary};
@@ -863,7 +886,35 @@ export function DataTable<T extends object>({
   // measure corrects it).
   const tableScrollRef = useRef<HTMLDivElement | null>(null)
   const visibleRows = table.getRowModel().rows
-  const cardHeight = CARD_PAD_H + CARD_LINE_H * Math.max(1, table.getVisibleLeafColumns().length + (rowMenuButton != null ? 1 : 0))
+  // What each visible column is in a card: the heading, a line, kept for "+N", or out. A column's own
+  // ``card`` hint wins; without any title named, the first two columns are the heading.
+  const cardRoles = (() => {
+    const roles = new Map<string, 'title' | 'more' | 'hide'>()
+    if (!compact) return roles
+    const hintOf = (c: { columnDef: { meta?: unknown } }) => (c.columnDef.meta as FilterMeta | undefined)?.card
+    const data = table.getVisibleLeafColumns().filter((c) => !isInternal(c))
+    const shown = data.filter((c) => hintOf(c) !== 'hide')
+    for (const c of data) if (hintOf(c) === 'hide') roles.set(c.id, 'hide')
+    let titles = shown.filter((c) => hintOf(c) === 'title')
+    if (!titles.length) titles = shown.filter((c) => !hintOf(c)).slice(0, 2)
+    for (const c of titles) roles.set(c.id, 'title')
+    let lines = 0
+    for (const c of shown) {
+      if (roles.has(c.id) || hintOf(c) === 'show') continue
+      if (++lines > CARD_LINES) roles.set(c.id, 'more')
+    }
+    return roles
+  })()
+  const cardMore = [...cardRoles.values()].filter((r) => r === 'more').length
+  const cardLinesShown = [...table.getVisibleLeafColumns()].filter((c) => !isInternal(c) && !cardRoles.has(c.id)).length
+  // the cards opened with "+N" (by row id): theirs to close again
+  const [openCards, setOpenCards] = useState<Set<string>>(new Set())
+  const toggleCard = (id: string) => setOpenCards((was) => {
+    const next = new Set(was)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+  const cardHeight = CARD_PAD_H + CARD_LINE_H * (1 + cardLinesShown + (cardMore ? 1 : 0))
   const rowVirtualizer = useVirtualizer({
     count: visibleRows.length,
     getScrollElement: () => tableScrollRef.current,
@@ -984,6 +1035,9 @@ export function DataTable<T extends object>({
             // the line's label when the row reads as a card (phone-width window): a data column's
             // header — not on the selection / status columns, nor on a group's heading
             data-label={isInternal(cell.column) || cell.getIsGrouped() ? undefined : colHeaderText(cell.column)}
+            // its place in the card: heading, out, or behind "+N" until the card is opened
+            data-card={groupLike ? undefined
+              : cardRoles.get(cell.column.id) === 'more' && openCards.has(row.id) ? undefined : cardRoles.get(cell.column.id)}
             style={{
               ...(cell.column.columnDef.size != null ? { width: cell.column.getSize(), minWidth: cell.column.columnDef.minSize }
                 : !cell.getIsGrouped() && colWrap(cell.column) ? { maxWidth: WRAP_MAX_W } : null),
@@ -1025,6 +1079,13 @@ export function DataTable<T extends object>({
             )}
           </Td>
         ))}
+        {compact && cardMore > 0 && !groupLike && (
+          <Td data-card="toggle">
+            <CardMoreBtn type="button" onClick={(e) => { e.stopPropagation(); toggleCard(row.id) }}>
+              {openCards.has(row.id) ? <ChevronUp size={12} /> : `+${cardMore}`}
+            </CardMoreBtn>
+          </Td>
+        )}
       </RowEl>
     )
   }

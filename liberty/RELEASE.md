@@ -122,8 +122,15 @@
   full-screen, a page's margins shrink — and **a grid is shown as a list**: each row a card, each column a
   "label · value" line, the search, the pager, the row menu and Bulk edit still there (sorting and the header
   filters are a wide-screen gesture). A record form shows its fields in one column, its tabs scroll. Above
-  768 px nothing changes. First step (shell, dialogs, pages, grids, record forms); the builders, the Explorer's
-  authoring and the date pickers are still desktop layouts.
+  768 px nothing changes for a mouse; the builders and the Explorer's authoring are still desktop layouts.
+- On a phone, **a row's card has a heading**: the first two columns side by side, larger, then four lines, and
+  "+N" opens the rest — blank values give no line, and a field shown as a code and its label is ONE line (the
+  label to read, its picker in Bulk edit). A column says otherwise with its new **Card** setting (`card`:
+  `title` = in the heading, `show` = always a line, `hide` = never). The filter panel's fields take the whole
+  width, the period picker shows its presets as a row above one month, a field no longer makes iOS zoom the page.
+- **On a tablet in portrait** (768 to 1100 px) the menu is the icon rail whatever the saved mode, opened over the
+  page by its button (a finger does not hover) and folded back by a tap elsewhere; the header's buttons take
+  their short form so the tabs keep their room.
 - **A screen read by a query can save through another connector's endpoints** — the screen's **Saves through**
   (`save_connector`, Screens → Queries). The screen keeps its query, its columns, its form; its update / insert /
   delete name endpoints of an API connector, so the save goes through the application that owns the data (a

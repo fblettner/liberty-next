@@ -187,6 +187,8 @@ export interface Column {
   width?: number
   /** Wrap long text over several lines in the grid (`ColumnHint.wrap`). */
   wrap?: boolean
+  /** What the column is in a row's card on a phone (`ColumnHint.card`): the heading, always a line, never. */
+  card?: 'title' | 'show' | 'hide'
   align?: 'left' | 'right' | 'center' | string
   format?: string
   /** The row-menu action a click on the value fires (`ColumnHint.drill`): the cell renders as a link. */

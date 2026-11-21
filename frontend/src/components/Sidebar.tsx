@@ -158,11 +158,21 @@ export default function Sidebar({ drawerOpen = false, onDrawerClose }: {
     }, on ? 120 : 250)
   }
   useEffect(() => () => window.clearTimeout(timer.current), [])
-  // a phone-width window: a drawer, always in full; the saved mode applies again above that width
-  const { compact: drawer } = useViewport()
-  const floating = !drawer && mode === 'hover'
+  // a phone-width window: a drawer, always in full. A tablet-width one: the icon rail, whatever the
+  // saved mode — the page needs the width — opened over the page by the mouse or by its button (a
+  // finger does not hover). The saved mode applies again on a wide window.
+  const { compact: drawer, narrow } = useViewport()
+  const rail = narrow && !drawer
+  const floating = !drawer && (mode === 'hover' || rail)
   const collapsed = drawer ? false : floating ? !hover : mode === 'collapsed'
   const toggle = () => setMode(mode === 'collapsed' ? 'open' : 'collapsed')
+  // opened by its button on a tablet: a tap anywhere else folds it back
+  useEffect(() => {
+    if (!rail || !hover) return
+    const away = (e: PointerEvent) => { if (!navRef.current?.contains(e.target as Node)) setHover(false) }
+    document.addEventListener('pointerdown', away)
+    return () => document.removeEventListener('pointerdown', away)
+  }, [rail, hover])
   // a page picked from the floating navigation folds it back at once; from the drawer, closes it
   const onPick = (e: React.MouseEvent) => {
     if (!(e.target as HTMLElement).closest('a')) return
@@ -201,7 +211,15 @@ export default function Sidebar({ drawerOpen = false, onDrawerClose }: {
             {!collapsed && t('common.collapse')}
           </CollapseBtn>
         )}
-        {!collapsed && (
+        {/* tablet width: one button, it opens the menu over the page and folds it back */}
+        {rail && (
+          <CollapseBtn $collapsed={collapsed} onClick={() => { window.clearTimeout(timer.current); setHover(collapsed) }}
+            title={collapsed ? t('common.expand') : undefined}>
+            {collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
+            {!collapsed && t('common.collapse')}
+          </CollapseBtn>
+        )}
+        {!collapsed && !rail && (
           <CollapseBtn $collapsed={false} onClick={() => setMode(floating ? 'open' : 'hover')} title={t(floating ? 'nav.keepOpenHint' : 'nav.openOnHoverHint')}>
             <PanelLeftDashed size={15} style={{ color: floating ? colors.blue.main : undefined }} />
             {t(floating ? 'nav.keepOpen' : 'nav.openOnHover')}

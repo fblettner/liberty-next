@@ -13,7 +13,7 @@ import { ChevronDown, ChevronRight, Check, Filter, FilterX } from 'lucide-react'
 import type { Column } from '../../types/connectors'
 import { DateRangeFilter, Input, SearchSelect, Field, Row, type SearchSelectOption } from '../../common'
 import { lookupKey, useLookupTables, lookupOptions, lookupCellColumns, type LookupSpec } from '../../services/lookups'
-import { colors, radius, fontSize, fonts, shadow } from '../../theme'
+import { colors, radius, fontSize, fonts, shadow, media } from '../../theme'
 import { isActiveFilter, isDateColumn, type ServerFilter } from '../../services/serverFilters'
 
 type LookupRule = Extract<NonNullable<Column['rule']>, { kind: 'lookup' }>
@@ -82,6 +82,11 @@ const OpItem = styled.button<{ $active?: boolean }>`
   & svg { flex-shrink: 0; }
 `
 const FieldRow = styled.div`display: flex; gap: 4px; align-items: stretch;`
+// One filter: a fixed minimum on a wide window (they sit side by side), the whole line on a phone.
+const FilterCell = styled.div`
+  min-width: 210px;
+  ${media.tablet} { flex: 1 0 100%; min-width: 0; }
+`
 
 function OpPicker({ value, onChange }: { value: string; onChange: (op: string) => void }) {
   const { t } = useTranslation()
@@ -185,7 +190,7 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
               const opts = isEnum && c.rule?.kind === 'enum' ? c.rule.values.map((v) => ({ value: v.value, label: v.label, mono: v.value }))
                 : isLookup ? lookupOptionsFor(c) : undefined
               return (
-                <div key={c.name} style={{ minWidth: 210 }}>
+                <FilterCell key={c.name}>
                   <Field label={c.label ?? c.name}>
                     <FieldRow>
                       {!isChoice && !isPeriod && <OpPicker value={cur.op} onChange={(op) => onChange(c.name, { ...cur, op })} />}
@@ -218,7 +223,7 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
                       )}
                     </FieldRow>
                   </Field>
-                </div>
+                </FilterCell>
               )
             })}
           </Row>

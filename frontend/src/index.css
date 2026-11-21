@@ -164,3 +164,9 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 
 ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 * { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+
+/* A phone: a field under 16px makes iOS zoom the page when it takes the focus, and the page stays
+   zoomed. Touch screens of phone width only — a mouse-driven window keeps the compact sizes. */
+@media (max-width: 768px) and (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']), select, textarea { font-size: 16px !important; }
+}

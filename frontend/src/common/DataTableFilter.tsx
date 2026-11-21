@@ -33,6 +33,10 @@ export interface FilterMeta {
   }
   /** cell text wraps over several lines instead of one line cut with an ellipsis */
   wrap?: boolean
+  /** what the column is in a row's CARD (a grid shown as a list on a phone-width window): ``title`` =
+   *  in the card's heading, ``show`` = always a line, ``hide`` = never. Unset = the grid decides — the
+   *  first two columns are the heading, the next few are lines, the rest open with "+N". */
+  card?: 'title' | 'show' | 'hide'
   /** header + cell text alignment (numbers → right, booleans → center, …); default left */
   align?: 'left' | 'right' | 'center'
   /** an internal helper column (the edit-mode select / status columns) — excluded from search, the Columns menu, etc. */

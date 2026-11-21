@@ -182,7 +182,9 @@ export default function Layout() {
   // in the utility bar below.
   const [aiOpen, setAiOpen] = useState(false)
   // Phone-width window: the navigation is a drawer opened from the top row, where the pill sits too.
-  const { compact } = useViewport()
+  // compact: a phone — the pill in its own row; narrow: a tablet — the pill stays where it is, in its
+  // short form (one language toggle, no label on the assistant), so the tabs keep some room
+  const { compact, narrow } = useViewport()
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   // The utility pill is position:fixed over the top-right, so it floats above the tab strip. Publish
@@ -198,7 +200,7 @@ export default function Layout() {
     const ro = new ResizeObserver(set)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [compact])
+  }, [compact, narrow])
 
   useEffect(() => {
     document.documentElement.classList.toggle('theme-light', !dark)
@@ -286,7 +288,7 @@ export default function Layout() {
           <Sep />
         </>
       )}
-      {compact ? (
+      {narrow ? (
         // one button for the two languages: it shows the current one and switches to the other
         <UtilBtn onClick={() => switchLang(lang === 'en' ? 'fr' : 'en')} title={lang === 'en' ? 'Français' : 'English'}>
           {lang.toUpperCase()}
@@ -343,7 +345,7 @@ export default function Layout() {
       <Sep />
       {/* AI assistant — labeled pill at the end of the bar; toggles the right-side drawer. */}
       <AiBtn $active={aiOpen} onClick={() => setAiOpen((v) => !v)} title={t('nav.assistant')}>
-        <Sparkles size={14} /> {!compact && t('nav.assistant')}
+        <Sparkles size={14} /> {!narrow && t('nav.assistant')}
       </AiBtn>
     </UtilityBar>
   )

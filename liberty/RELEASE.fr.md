@@ -137,9 +137,18 @@
   est en plein écran, les marges des pages se réduisent — et **une grille s'affiche en liste** : chaque ligne une
   carte, chaque colonne une ligne « libellé · valeur », avec la recherche, la pagination, le menu de ligne et la
   modification en masse (le tri et les filtres d'en-tête restent un geste d'écran large). Un formulaire montre
-  ses champs sur une colonne, ses onglets défilent. Au-dessus de 768 px rien ne change. Première étape (cadre,
-  dialogues, pages, grilles, formulaires) ; les éditeurs de paramétrage, la construction dans l'Explorateur et
-  les calendriers restent des mises en page de bureau.
+  ses champs sur une colonne, ses onglets défilent. Au-dessus de 768 px rien ne change à la souris ; les
+  éditeurs de paramétrage et la construction dans l'Explorateur restent des mises en page de bureau.
+- Sur un téléphone, **la carte d'une ligne a un titre** : les deux premières colonnes côte à côte, en plus
+  grand, puis quatre lignes, et « +N » ouvre le reste — une valeur vide ne donne pas de ligne, et un champ
+  montré par son code et son libellé tient sur UNE ligne (le libellé en lecture, sa liste en modification en
+  masse). Une colonne en décide autrement avec son nouveau réglage **Carte** (`card` : `title` = dans le titre,
+  `show` = toujours une ligne, `hide` = jamais). Les filtres avancés prennent toute la largeur, le choix d'une
+  période montre ses raccourcis sur une ligne au-dessus d'un seul mois, un champ ne fait plus zoomer la page
+  sous iOS.
+- **Sur une tablette en portrait** (768 à 1100 px), le menu est la barre d'icônes quel que soit le mode
+  enregistré, ouverte par-dessus la page par son bouton (un doigt ne survole pas) et refermée en touchant
+  ailleurs ; les boutons de l'en-tête prennent leur forme courte pour laisser leur place aux onglets.
 - **Un écran lu par une requête peut enregistrer par les points d'accès d'un autre connecteur** — **Enregistre
   par** (`save_connector`, Écrans → Requêtes). L'écran garde sa requête, ses colonnes, son formulaire ; ses
   requêtes de modification / ajout / suppression nomment des points d'accès d'un connecteur API : l'enregistrement
