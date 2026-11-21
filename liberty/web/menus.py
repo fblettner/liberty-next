@@ -81,7 +81,7 @@ def _app_settings(connectors: ConnectorRegistry, app: str, roles: tuple[str, ...
     return bool(getattr(cfg, "show_in_switcher", True)), home
 
 
-def _screen_perm(screens: "ScreensFile | None", app: str, screen_id: str | None) -> str | None:
+def _screen_perm(screens: "ScreensFile | None", app: str, screen_id: str | None, connectors: Any = None) -> str | None:
     """The ``sql:<connector>:<read_query>`` permission gating a ``screen`` menu leaf — resolved
     from the designed screen ``(app, screen_id)``. Returns ``None`` when the screen can't be
     resolved (no catalog / unknown id), so the caller falls back to the menu-allow check."""
@@ -90,7 +90,9 @@ def _screen_perm(screens: "ScreensFile | None", app: str, screen_id: str | None)
     scr = (screens.screens.get(app) or {}).get(screen_id)
     if scr is None:
         return None
-    return f"sql:{scr.connector or app}:{scr.read_query}"
+    from liberty.connectors.api_rows import read_permission
+
+    return read_permission(connectors, scr.connector or app, scr.read_query)      # sql:… or, for an endpoint a screen reads, api:…
 
 
 EXPLORER_PAGE = "/explorer"
@@ -117,7 +119,7 @@ def _open_to_all(item: MenuItem, dashboards: DashboardsFile, explorer: Any, app:
 
 def _keeper(
     principal: Principal, dashboards: DashboardsFile, app: str, screens: "ScreensFile | None" = None,
-    *, charts: Any = None, explorer: Any = None,
+    *, charts: Any = None, explorer: Any = None, connectors: Any = None,
 ):
     """A ``keep(item, connector)`` predicate, with the first-class ``menu:<app>:<id>`` /
     ``dashboard:<id>`` RBAC overlay on top of the query-derived visibility:
@@ -178,7 +180,7 @@ def _keeper(
             # A screen leaf's target is a screen id — resolve it to the screen's read query and
             # gate on that (same ``sql:<connector>:<read_query>`` the screen catalog uses). When
             # the screen can't be resolved, a menu-allow can still surface it.
-            perm = _screen_perm(screens, app, item.target)
+            perm = _screen_perm(screens, app, item.target, connectors)
             if perm is None:
                 return principal.has_permission(menu_perm)
             return principal.has_permission(perm) or principal.has_permission(menu_perm)
@@ -234,7 +236,7 @@ def _app_tree(
     dashboards: DashboardsFile, connectors: ConnectorRegistry, screens: "ScreensFile | None" = None,
     charts: Any = None, explorer: Any = None,
 ) -> dict[str, Any] | None:
-    keep = _keeper(principal, dashboards, app, screens, charts=charts, explorer=explorer)
+    keep = _keeper(principal, dashboards, app, screens, charts=charts, explorer=explorer, connectors=connectors)
     items = build_menu_tree(app_menu, app=app, language=language, keep=keep)
     if not items or not app_is_theirs(principal, app, app_menu, keep, dashboards, explorer):
         return None  # nothing of the caller's → no menu for this app

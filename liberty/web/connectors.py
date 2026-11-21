@@ -447,6 +447,45 @@ async def _run_sql(
     return result.to_dict()
 
 
+def _api_reader(connectors: ConnectorRegistry, connector: str, query: str) -> Any:
+    """The API connector *connector* when *query* names one of its endpoints a screen can read
+    (it has a ``rows_field``), else ``None`` — an unknown connector included: the SQL path then
+    answers as it always did."""
+    from liberty.connectors.api import APIConnector
+    from liberty.connectors.api_rows import rows_endpoint
+
+    try:
+        conn = connectors.get(connector)
+    except Exception:  # noqa: BLE001 — unknown / unlicensed connector: not ours to report here
+        return None
+    return conn if isinstance(conn, APIConnector) and rows_endpoint(conn, query) is not None else None
+
+
+async def _api_rows_result(
+    connectors: ConnectorRegistry, connector: str, query: str, params: dict[str, Any], **kwargs: Any,
+) -> dict[str, Any]:
+    """An endpoint's rows as a query's whole result (the non-streamed read: a lookup, a small list)."""
+    from liberty.connectors.api_rows import ApiRowsError
+
+    _conn, events = select_events(connectors, connector, query, params, **kwargs)
+    columns: list[Any] = []
+    rows: list[dict[str, Any]] = []
+    truncated, duration = False, 0.0
+    try:
+        async for ev in events():
+            if isinstance(ev, StreamMeta):
+                columns = ev.columns
+            elif isinstance(ev, StreamRows):
+                rows.extend(ev.rows)
+            elif isinstance(ev, StreamDone):
+                truncated, duration = ev.truncated, ev.duration_ms
+    except ApiRowsError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return {"connector": connector, "query": query, "statement_type": "SELECT", "columns": [c.to_dict() for c in columns],
+            "rows": rows, "row_count": len(rows), "rowcount": -1, "truncated": truncated, "duration_ms": round(duration, 3),
+            "resolved_binds": {}}
+
+
 def select_events(
     connectors: ConnectorRegistry, connector: str, query: str, params: dict[str, Any], *,
     language: str | None = None, max_rows: int | None = None, user: str | None = None,
@@ -476,6 +515,24 @@ def select_events(
     column_hints = _column_hints_for(screen)
     screen_max_rows = screen.max_rows if screen else None
     dict_scope = screen_app if screen is not None else None
+    # An endpoint a screen can read (an API connector's endpoint that says where its rows are):
+    # the same events, from the endpoint's answer — see liberty/connectors/api_rows.py.
+    from liberty.connectors.api_rows import api_row_events, rows_endpoint
+    if _api_reader(connectors, connector, query) is not None:
+        try:
+            api_conn = connectors.api(connector)          # the server of the request's environment (targets)
+        except (ConnectorError, ScopeDeniedError) as exc:
+            raise http_for_connector_error(exc) from exc
+        if rows_endpoint(api_conn, query) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"{connector}.{query}: not an endpoint a screen can read")
+
+        def api_events() -> AsyncIterator[Any]:
+            return api_row_events(
+                api_conn, query, params, dictionary=connectors.dictionary, language=language, max_rows=max_rows,
+                column_hints=column_hints, screen_max_rows=screen_max_rows, dictionary_scope=dict_scope,
+                chunk_size=chunk_size or 100, scope=scope,
+            )
+        return api_conn, api_events
     try:
         conn = connectors.sql(connector)
         if pool and pool in conn.allowed_pools:  # X-Liberty-Pool hint → apply only if this connector has it
@@ -579,7 +636,7 @@ def _stream_sql_ndjson(
                 "kind": "error",
                 "detail": db_error_detail(exc, context=f"query {connector}.{query} failed mid-stream",
                                           verbose=verbose_errors, log=_log,
-                                          log_full=connectors.pools.debug_sql(conn.pool_name)),
+                                          log_full=bool(getattr(conn, "pool_name", None)) and connectors.pools.debug_sql(conn.pool_name)),
             }) + "\n").encode("utf-8")
 
     return StreamingResponse(
@@ -738,6 +795,22 @@ async def sql_query_get(
     automatically — that's how the same query has Settings-rich behaviour from the
     screen runtime (the AI assistant's ``sql_query`` runs it the same way, through
     :func:`select_events`) and stays a bare SQL runner for a query no screen reads."""
+    if _api_reader(connectors, connector, query) is not None:
+        # An endpoint a screen can read: the endpoint's own permission, its rows as a query's. The
+        # answer to a caller without it is the same 403 an SQL name gets — no name is confirmed.
+        require_permission(principal, f"api:{connector}:{query}")
+        qp = dict(request.query_params)
+        stream = _streaming_requested(qp)
+        limit, chunk_size = _as_int(qp.pop("_limit", None)), _as_int(qp.pop("_chunk_size", None))
+        sid, sapp = qp.pop("_screen", None), qp.pop("_app", None)
+        for reserved in [k for k in qp if k.startswith("_")]:
+            qp.pop(reserved)                       # _stream, _summary, _group…: a query's own options
+        kwargs = {"language": request_language(request), "max_rows": limit, "user": principal.username, "scope": principal.data_scope,
+                  "screens": screens, "chunk_size": chunk_size, "screen_hint": (sapp, sid) if (sid and sapp) else None,
+                  "pool": _request_pool(request)}
+        if stream:
+            return _stream_sql_ndjson(connectors, connector, query, qp, verbose_errors=principal.is_superuser, **kwargs)
+        return await _api_rows_result(connectors, connector, query, qp, **kwargs)
     require_permission(principal, f"sql:{connector}:{query}")
     # GET must not mutate — only SELECTs are allowed here; everything else uses POST.
     try:

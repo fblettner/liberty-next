@@ -353,6 +353,8 @@ class APIConnector:
                     "writable": e.writable,
                     "path": e.path,
                     "content_type": e.content_type,
+                    "rows_field": e.rows_field,
+                    "limit_param": e.limit_param,
                     "error_fields": list(e.error_fields),
                     "warning_fields": list(e.warning_fields),
                     "response_field": e.response_field,

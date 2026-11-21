@@ -20,6 +20,11 @@ export interface GeneratedEndpoint {
   path?: string
   body?: string | null
   writable?: boolean
+  rows_field?: string | null
+  row_map?: Record<string, string> | null
+  labels_field?: string | null
+  more_field?: string | null
+  limit_param?: string | null
   error_fields?: string[] | null
   warning_fields?: string[] | null
   params?: GeneratedParam[]
@@ -64,13 +69,15 @@ export function mergeGenerated<T extends GeneratedEndpoint>(current: T, fresh: G
   if ((current.path ?? '') !== (fresh.path ?? '')) changes.push(`path: ${current.path ?? ''} → ${fresh.path ?? ''}`)
   if (bodyKey(current.body) !== bodyKey(fresh.body)) changes.push('body')
   if (!!current.writable !== !!fresh.writable) changes.push(fresh.writable ? 'changes data: yes' : 'changes data: no')
+  if (!same([current.rows_field, current.row_map, current.labels_field, current.more_field, current.limit_param], [fresh.rows_field, fresh.row_map, fresh.labels_field, fresh.more_field, fresh.limit_param])) changes.push('rows')
   if (!same(current.error_fields ?? [], fresh.error_fields ?? [])) changes.push('error fields')
   if (!same(current.warning_fields ?? [], fresh.warning_fields ?? [])) changes.push('warning fields')
   const choicesChanged = wanted.filter((p) => had.has(p.name) && !same(had.get(p.name)?.choices, p.choices ?? had.get(p.name)?.choices)).map((p) => p.name)
   if (choicesChanged.length) changes.push(`allowed values: ${choicesChanged.join(', ')}`)
 
   const next: Record<string, unknown> = { ...current, method: fresh.method, path: fresh.path }
-  for (const [key, value] of Object.entries({ body: fresh.body, writable: fresh.writable || undefined, error_fields: fresh.error_fields?.length ? fresh.error_fields : undefined, warning_fields: fresh.warning_fields?.length ? fresh.warning_fields : undefined, params: params.length ? params : undefined })) {
+  for (const [key, value] of Object.entries({ body: fresh.body, writable: fresh.writable || undefined, rows_field: fresh.rows_field, row_map: fresh.row_map && Object.keys(fresh.row_map).length ? fresh.row_map : undefined, labels_field: fresh.labels_field, more_field: fresh.more_field, limit_param: fresh.limit_param,
+    error_fields: fresh.error_fields?.length ? fresh.error_fields : undefined, warning_fields: fresh.warning_fields?.length ? fresh.warning_fields : undefined, params: params.length ? params : undefined })) {
     if (value === undefined || value === null || value === '') delete next[key]
     else next[key] = value
   }

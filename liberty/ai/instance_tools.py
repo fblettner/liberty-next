@@ -38,7 +38,8 @@ def build_instance_tools(state: Callable[[], Any], *, allowed: list[str] | None 
 
         st = state()
         explorer = getattr(st, "explorer", None)
-        keep = _keeper(who, dashboards, app, screens_file, charts=getattr(st, "charts", None), explorer=explorer)
+        keep = _keeper(who, dashboards, app, screens_file, charts=getattr(st, "charts", None), explorer=explorer,
+                       connectors=getattr(st, "connectors", None))
         if not app_is_theirs(who, app, menu, keep, dashboards, explorer):
             return []      # links that need no permission do not make the application theirs
         kept = {it.id for it in menu.items if it.type is not None and keep(it, it.connector or app)}

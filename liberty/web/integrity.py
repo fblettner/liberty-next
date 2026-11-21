@@ -63,6 +63,16 @@ def _sql_query_names(conn: Any) -> set[str] | None:
         return set()
 
 
+def _rows_endpoint_names(state: Any, connector: str) -> set[str]:
+    """The endpoints of *connector* a screen can read (an API connector's endpoints with a ``rows_field``)."""
+    connectors = getattr(state, "connectors", None)
+    try:
+        cfg = connectors.get(connector).config if connectors is not None else None
+    except Exception:  # noqa: BLE001 — unknown connector: reported by the caller
+        return set()
+    return {e.name for e in getattr(cfg, "endpoints", None) or [] if getattr(e, "rows_field", None)}
+
+
 def _api_endpoint_names(conn: Any) -> set[str] | None:
     cfg = getattr(conn, "config", None)
     eps = getattr(cfg, "endpoints", None)
@@ -212,8 +222,12 @@ def _check_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
                 out.append(Issue("error", "Missing connector",
                                  f"{app}.{sid} · connector '{conn}' does not exist", link))
             sql = idx.sql_by_conn.get(conn, set())
+            # a screen may read an API connector's endpoint that says where its rows are (api_rows)
+            readable = _rows_endpoint_names(state, conn)
             for attr in ("read_query", "update_query", "insert_query", "delete_query"):
                 q = getattr(s, attr, None)
+                if q and attr == "read_query" and q in readable:
+                    continue
                 if q and conn in idx.conn_names and q not in sql:
                     out.append(Issue("error", "Missing query",
                                      f"{app}.{sid} · {attr} '{q}' does not exist on {conn}", link))

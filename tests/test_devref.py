@@ -76,7 +76,9 @@ def test_api_reference_reads_access_from_the_code(env) -> None:  # noqa: F811
                       "/oauth/register", "/oauth/token"}
     assert by[("POST", "/oauth/approve")]["permissions"] == ["mcp:use"] and by[("GET", "/oauth/client")]["access"] == "signed-in"
     sql = by[("GET", "/api/sql/{connector}/{query}")]
-    assert sql["access"] == "permission" and sql["permissions"] == ["sql:{connector}:{query}"] and sql["file"] == "liberty/web/connectors.py"
+    # a query's permission — or, for an endpoint a screen reads, the endpoint's
+    assert sql["access"] == "permission" and sql["permissions"] == ["api:{connector}:{query}", "sql:{connector}:{query}"]
+    assert sql["file"] == "liberty/web/connectors.py"
     assert by[("POST", "/admin/reload")]["access"] == "superuser"
     assert by[("POST", "/ai/chat")]["permissions"] == ["ai:chat"]
     assert by[("GET", "/admin/config/screens/parsed")]["group"] == "settings · screens"

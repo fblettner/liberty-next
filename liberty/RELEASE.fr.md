@@ -92,6 +92,30 @@
   peut se terminer par un filtre sur les éléments d'une liste, `result.errors[errorLevel=1]`, pour un serveur
   qui place ses erreurs et ses avertissements dans une même liste.
 
+- **Un écran peut lire un point d'accès API.** Un écran lisait une requête nommée d'un connecteur SQL, rien
+  d'autre ; la réponse d'un point d'accès était du JSON dans l'exécuteur HTTP. Un point d'accès dont la réponse
+  contient une liste d'enregistrements indique maintenant où elle se trouve — **Lignes** dans l'éditeur du
+  point d'accès (`rows_field`), avec la correspondance entre les clés des enregistrements et les noms de
+  colonnes (`row_map`), l'emplacement des titres de colonnes (`labels_field`) et de l'indicateur « il y en a
+  d'autres » du serveur (`more_field`) — et un écran le désigne comme sa lecture : `connector` = le connecteur
+  API, `read_query` = le point d'accès. La grille ne change pas : la même adresse sert les deux, avec les
+  mêmes colonnes, les libellés de l'écran, puis du dictionnaire, puis les titres du serveur.
+  Ce qui diffère d'une requête, par conception : les **filtres de l'écran sont les paramètres du point
+  d'accès** (un filtre sur une colonne pour laquelle le point d'accès n'a pas de paramètre n'est pas proposé ;
+  les opérateurs du panneau de filtres ne sont pas traduits) ; la **limite de lignes est celle du point
+  d'accès**, plafonnée à nouveau par l'écran, sans pagination — l'écran signale un résultat tronqué quand le
+  serveur indique qu'il y en a d'autres ; un point d'accès peut désigner le paramètre qui
+  porte sa limite (**Paramètre du nombre de lignes**, `limit_param`) : l'écran le remplit alors avec son
+  propre « Max lignes » et ne l'affiche plus comme une saisie ; les autres paramètres restent au-dessus de la
+  grille (leur exemple en indication, leur aide en infobulle) sauf si une colonne filtre du même nom les place
+  dans le panneau de filtres ; une valeur choisie dans une liste est envoyée sans ses blancs de remplissage ; le tri et le regroupement se font dans le navigateur sur ce qui a été
+  retourné ; le **périmètre de données** de l'appelant s'applique aux lignes retournées, chaque règle avec son
+  propre mode comme pour une requête. La permission est celle du point d'accès
+  (`api:<connecteur>:<point d'accès>`), dans la route de la grille, le catalogue des écrans et les menus.
+  En lecture seule dans cette version : l'enregistrement par des points d'accès, l'export Excel, le résumé côté
+  serveur, le miroir d'audit, le Data Explorer et le `sql_query` de l'assistant ne prennent pas encore un point
+  d'accès.
+
 ## 7.0.83 — 2026-11-19
 
 - **Corrections d'affichage après la passe de documentation.** Les réglages de l'extension Claude Desktop

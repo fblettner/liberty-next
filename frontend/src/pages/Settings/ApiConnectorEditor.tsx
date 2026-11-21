@@ -58,6 +58,12 @@ type Endpoint = {
   source?: { generator: string; candidate: string; options?: Record<string, unknown> } | null
   response_field?: string | null
   /** Where the server puts its errors when it answers 200 all the same: something there = the call failed. */
+  /** A screen can read the endpoint: where its rows are, how their keys become columns, the titles, the "more" flag. */
+  rows_field?: string | null
+  row_map?: Record<string, string> | null
+  labels_field?: string | null
+  more_field?: string | null
+  limit_param?: string | null
   error_fields?: string[] | null
   /** Where the server puts its warnings: reported with the answer, the call stands. */
   warning_fields?: string[] | null
@@ -730,6 +736,33 @@ function EndpointsTab({
 }
 
 // ── per-endpoint editor ────────────────────────────────────────────────────────────────────
+// The column → record key map of an endpoint a screen reads, typed as ``AN8=z_AN8_19, ALPH=z_ALPH_20``.
+// Kept as text while it is typed (a half-written pair must not vanish), parsed on every change.
+function RowMapInput({ value, onChange, hint }: { value?: Record<string, string>; onChange: (m: Record<string, string> | undefined) => void; hint: string }) {
+  const asText = (m?: Record<string, string>) => Object.entries(m ?? {}).map(([k, v]) => `${k}=${v}`).join(', ')
+  const [text, setText] = useState(asText(value))
+  const shown = asText(value)
+  useEffect(() => { setText((cur) => (asText(parse(cur)) === shown ? cur : shown)) }, [shown])
+  return (
+    <Input
+      value={text}
+      onChange={(e) => { setText(e.target.value); onChange(parse(e.target.value)) }}
+      placeholder="ID=id, NAME=name"
+      title={hint}
+    />
+  )
+}
+function parse(text: string): Record<string, string> | undefined {
+  const out: Record<string, string> = {}
+  for (const part of text.split(',')) {
+    const eq = part.indexOf('=')
+    const k = (eq < 0 ? '' : part.slice(0, eq)).trim()
+    const v = (eq < 0 ? '' : part.slice(eq + 1)).trim()
+    if (k && v) out[k] = v
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
 function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }: {
   value: Endpoint
   onChange: (v: Endpoint) => void
@@ -873,6 +906,49 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
           placeholder="pageSize={{pageSize}}&page={{page}}"
         />
       </FieldRow>
+      <FieldRow>
+        <label title={t('settings.api.endpoint.rowsFieldHint')}>{t('settings.api.endpoint.rowsField')}</label>
+        <Input
+          value={value.rows_field ?? ''}
+          onChange={(e) => set({ rows_field: e.target.value || undefined })}
+          placeholder="data.items"
+          title={t('settings.api.endpoint.rowsFieldHint')}
+        />
+      </FieldRow>
+      {value.rows_field && (
+        <>
+          <FieldRow>
+            <label title={t('settings.api.endpoint.rowMapHint')}>{t('settings.api.endpoint.rowMap')}</label>
+            <RowMapInput value={value.row_map ?? undefined} onChange={(m) => set({ row_map: m })} hint={t('settings.api.endpoint.rowMapHint')} />
+          </FieldRow>
+          <FieldRow>
+            <label title={t('settings.api.endpoint.labelsFieldHint')}>{t('settings.api.endpoint.labelsField')}</label>
+            <Input
+              value={value.labels_field ?? ''}
+              onChange={(e) => set({ labels_field: e.target.value || undefined })}
+              placeholder="data.columns"
+              title={t('settings.api.endpoint.labelsFieldHint')}
+            />
+          </FieldRow>
+          <FieldRow>
+            <label title={t('settings.api.endpoint.limitParamHint')}>{t('settings.api.endpoint.limitParam')}</label>
+            <SearchSelect
+              value={value.limit_param ?? ''}
+              onChange={(v) => set({ limit_param: v || undefined })}
+              options={[{ value: '', label: t('settings.api.endpoint.limitParamNone') }, ...(value.params ?? []).map((p) => ({ value: p.name, label: p.label ? `${p.name} — ${p.label}` : p.name }))]}
+            />
+          </FieldRow>
+          <FieldRow>
+            <label title={t('settings.api.endpoint.moreFieldHint')}>{t('settings.api.endpoint.moreField')}</label>
+            <Input
+              value={value.more_field ?? ''}
+              onChange={(e) => set({ more_field: e.target.value || undefined })}
+              placeholder="data.hasMore"
+              title={t('settings.api.endpoint.moreFieldHint')}
+            />
+          </FieldRow>
+        </>
+      )}
       <FieldRow>
         <label title={t('settings.api.endpoint.errorFieldsHint')}>{t('settings.api.endpoint.errorFields')}</label>
         <Input

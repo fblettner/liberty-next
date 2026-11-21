@@ -18,6 +18,8 @@ export interface SqlQueryMeta {
   statement_type: string
   params: ParamDef[]
   bind_params: string[]
+  /** An API endpoint a screen reads, shown as a query (its inputs are parameters, not SQL binds). */
+  endpoint?: boolean
   /** Phase 3 — these per-screen fields used to live on the connector's describe(). They now
    *  ride on the matching Screen (``GET /api/screens/{app}/{id}``) only. The TableView reads
    *  them from ``ScreenListItem`` / ``ScreenDetail`` when a Screen exists for this
@@ -39,6 +41,10 @@ export interface ApiEndpointMeta {
   method: string
   path: string
   params: ParamDef[]
+  /** Where the endpoint's rows are: with it, a screen can read the endpoint as it reads a query. */
+  rows_field?: string | null
+  limit_param?: string | null   // the parameter a screen fills from its own row limit
+  writable?: boolean
 }
 
 /** One CRUD slot of a table in the runtime connector meta — a query-meta plus which CRUD verb

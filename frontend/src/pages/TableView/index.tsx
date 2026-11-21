@@ -134,8 +134,18 @@ export default function TableView({ connector, query, screenApp, screenId, embed
     api
       .get<ConnectorMeta>(`/api/connectors/${encodeURIComponent(connector)}`)
       .then((c) => {
-        if (c.type !== 'sql') throw new Error(`${connector} is not a SQL connector`)
-        const q = c.queries.find((x) => x.name === query)
+        // A screen reads a query of an SQL connector — or an API connector's endpoint that says where
+        // its rows are (liberty/connectors/api_rows.py): the same route serves both. Such an endpoint
+        // is shown as a read-only query whose parameters are the endpoint's.
+        let q: SqlQueryMeta | undefined
+        if (c.type === 'sql') {
+          q = c.queries.find((x) => x.name === query)
+        } else {
+          const e = c.endpoints.find((x) => x.name === query && x.rows_field)
+          if (e) q = { name: e.name, label: e.label, description: e.description, writable: false, statement_type: 'SELECT', bind_params: [],
+            // the parameter that carries the row limit is the grid's "Max rows", not an input of its own
+            params: e.params.filter((p) => p.name.toLowerCase() !== (e.limit_param ?? '').toLowerCase()), endpoint: true }
+        }
         if (!q) throw new Error(`query ${query} not found on ${connector}`)
         setMeta(q)
         // Seed the param form: declared `default`s first, then overlay any matching URL search
@@ -590,7 +600,9 @@ export default function TableView({ connector, query, screenApp, screenId, embed
                   <Field label={def?.label ?? name}>
                     <Input
                       type="text"
-                      placeholder={def?.default != null ? t('table.defaultPrefix', { v: def.default }) : t('table.nullIfBlank')}
+                      placeholder={def?.default != null ? t('table.defaultPrefix', { v: def.default })
+                        : meta.endpoint ? (def?.example ? t('table.examplePrefix', { v: def.example }) : '') : t('table.nullIfBlank')}
+                      title={def?.help ?? undefined}
                       value={params[name] ?? ''}
                       onChange={(e) => setParams((p) => ({ ...p, [name]: e.target.value }))}
                     />

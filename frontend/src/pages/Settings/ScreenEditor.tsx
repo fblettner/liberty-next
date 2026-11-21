@@ -193,7 +193,8 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // both reads so the pickers show ``loading`` placeholders instead of crashing on first render.
   const effectiveConnector = (typeof value.connector === 'string' && value.connector.trim() ? value.connector : app)
   const connectorOptions = useMemo<SearchSelectOption[]>(
-    () => (wsConnectors ?? []).filter((c) => c.type === 'sql')
+    // SQL connectors, and the API connectors that have an endpoint a screen can read (one that says where its rows are)
+    () => (wsConnectors ?? []).filter((c) => c.type === 'sql' || c.endpoints.some((e) => e.rows_field))
       .map((c) => ({ value: c.name, label: c.name, mono: c.name })),
     [wsConnectors],
   )
@@ -212,6 +213,14 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       mono: q.name,
     }))
   }, [selectedConnectorMeta])
+  // What a screen can READ on the effective connector: its queries, or — on an API connector — the
+  // endpoints that say where their rows are. (Saving through endpoints is not there yet: the three
+  // write slots stay empty on an API connector.)
+  const readOptions = useMemo<SearchSelectOption[]>(() => {
+    if (selectedConnectorMeta?.type !== 'api') return queryOptions
+    return selectedConnectorMeta.endpoints.filter((e) => e.rows_field)
+      .map((e) => ({ value: e.name, label: e.description || e.label || e.name, mono: e.name }))
+  }, [selectedConnectorMeta, queryOptions])
   // CRUD tables on the effective connector — drives the "pick a table → fill all four queries"
   // shortcut so operators don't wire read / update / insert / delete one by one. Sorted by name.
   const tableOptions = useMemo<SearchSelectOption[]>(() => {
@@ -790,7 +799,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
           <div style={{ flex: 1, minWidth: 0 }}>
             <SearchSelect sort
               value={queryName}
-              options={queryOptions}
+              options={key === 'read_query' ? readOptions : queryOptions}
               onChange={(v) => setProp(key, v || (required ? value[key] ?? '' : null))}
               anyLabel={required ? undefined : t('common.none')}
               placeholder={selectedConnectorMeta ? t('common.pick') : t('settings.screens.editor.queries.pickConnectorFirst')}

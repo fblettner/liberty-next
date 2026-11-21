@@ -299,9 +299,12 @@ def _screen_connector(screen: Screen, *, app: str) -> str:
     return screen.connector or app
 
 
-def _can_read(principal: Principal, screen: Screen, *, app: str) -> bool:
-    perm = f"sql:{_screen_connector(screen, app=app)}:{screen.read_query}"
-    return principal.has_permission(perm)
+def _can_read(principal: Principal, screen: Screen, *, app: str, connectors: Any = None) -> bool:
+    """The caller may read the screen's ``read_query`` — a query (``sql:…``) or an endpoint a
+    screen can read (``api:…``, :mod:`liberty.connectors.api_rows`)."""
+    from liberty.connectors.api_rows import read_permission
+
+    return principal.has_permission(read_permission(connectors, _screen_connector(screen, app=app), screen.read_query))
 
 
 def _label_for(screen: Screen, *, language: str | None) -> str:
@@ -496,7 +499,7 @@ async def list_screens(request: Request, principal: CurrentPrincipal, screens: S
         kept = [
             _list_view(s, app=app, language=lang)
             for s in app_screens.values()
-            if _can_read(principal, s, app=app)
+            if _can_read(principal, s, app=app, connectors=request.app.state.connectors)
         ]
         if kept:
             out[app] = kept
@@ -525,7 +528,7 @@ async def list_app_screens(
     kept = [
         _list_view(s, app=app, language=lang)
         for s in app_screens.values()
-        if _can_read(principal, s, app=app)
+        if _can_read(principal, s, app=app, connectors=request.app.state.connectors)
     ]
     if not kept:
         # The app has screens, but the caller can't read any — keep parity with /api/menus' 404.
@@ -570,7 +573,7 @@ async def get_screen(
     screen = app_screens.get(screen_id)
     if screen is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Unknown screen {app!r}/{screen_id!r}")
-    if not _can_read(principal, screen, app=app):
+    if not _can_read(principal, screen, app=app, connectors=request.app.state.connectors):
         # 404 (not 403) so we don't leak the existence of screens the caller can't open —
         # same convention the connector routes use.
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Unknown screen {app!r}/{screen_id!r}")

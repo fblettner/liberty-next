@@ -77,6 +77,27 @@
   with a filter on a list's items, `result.errors[errorLevel=1]`, for a server that puts its errors and its
   warnings in one list.
 
+- **A screen can read an API endpoint.** A screen read a named query of an SQL connector, nothing else; the
+  answer of an endpoint was JSON in the HTTP runner. An endpoint whose answer holds a list of records now says
+  where it is — **Rows** in the endpoint editor (`rows_field`), with the records' keys mapped to column names
+  (`row_map`), the place of the columns' titles (`labels_field`) and of the server's "there is more" flag
+  (`more_field`) — and a screen names it as its read: `connector` = the API connector, `read_query` = the
+  endpoint. The grid is unchanged: the same address serves both, with the same columns, labels from the
+  screen then the dictionary then the server's own titles.
+  What differs from a query, by design: the screen's **filters are the endpoint's parameters** (a filter on a
+  column the endpoint has no parameter for is not offered; the filter panel's operators are not translated);
+  the **row limit is the endpoint's**, capped again by the screen, without paging — the screen says the result
+  is truncated when the server says there is more; an endpoint can name the parameter that carries its limit
+  (**Row limit parameter**, `limit_param`): the screen then fills it from its own "Max rows" and no longer
+  shows it as an input; the other parameters stay above the grid (their example as a placeholder, their help
+  as a tooltip) unless a filter column of the same name puts them in the filter panel; a value picked from a
+  lookup is sent without its blank padding; sorting and grouping happen in the browser on what was
+  returned; the caller's **data scope** applies to the rows returned, each rule with its own mode as for a
+  query. The permission is the endpoint's (`api:<connector>:<endpoint>`), in the grid's route, the screen
+  catalog and the menus.
+  Read-only in this version: saving through endpoints, the Excel export, the server-side summary, the audit
+  mirror, the Data Explorer and the assistant's `sql_query` do not take an endpoint yet.
+
 ## 7.0.83 — 2026-11-19
 
 - **Display fixes after the documentation pass.** The Claude Desktop extension's settings (address, token, files
