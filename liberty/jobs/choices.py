@@ -1,6 +1,7 @@
 """The choices of a job's user parameter (``UserParam``): fixed ``choices``, an app's Explorer
-models (``choices_from = "explorer_models:<app>"``) or the rows of a read query
-(``"query:<connector>/<query>:<value column>:<label column>"``). Shared by the job pages (the
+models (``choices_from = "explorer_models:<app>"``), the rows of a read query
+(``"query:<connector>/<query>:<value column>:<label column>"``) or the test suites
+(``"test_suites"`` / ``"test_suites:<connector>"``). Shared by the job pages (the
 dropdowns / checkboxes) and the fan-out of a ``for_each`` job, where "all" means every choice."""
 
 from __future__ import annotations
@@ -51,6 +52,18 @@ async def param_choices(p: UserParam, *, connectors: Any, explorer: Any = None, 
             for app, mid, m in (explorer.items() if explorer is not None else []):
                 if app == arg:
                     choices.append({"value": mid, "label": m.label or mid})
+        elif kind == "test_suites":
+            # the test suites of the installation (Liberty Next → Tests) — those of one connector when named
+            try:
+                from liberty.apptests import store
+
+                settings = getattr(connectors, "settings", None)
+                for name in (store.suite_names(settings) if settings is not None else []):
+                    suite = store.read_suite(settings, name)
+                    if not arg or suite.connector == arg:
+                        choices.append({"value": name, "label": f"{suite.label} ({name})" if suite.label else name})
+            except Exception as exc:  # noqa: BLE001 — a choice list never breaks the page
+                _log.warning("nomaflow job choices %s: %s", p.choices_from, exc)
         elif kind == "query":
             if arg not in cache:
                 cache[arg] = await query_choices(connectors, arg)

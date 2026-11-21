@@ -48,6 +48,15 @@ async def studio_services(request: Request, _: Superuser) -> dict[str, Any]:
     }
 
 
+def _tests_totals(state: Any) -> dict[str, Any] | None:
+    try:
+        from liberty.apptests import store
+
+        return store.totals(state.settings)
+    except Exception:  # noqa: BLE001 — the overview opens without them
+        return None
+
+
 def _version() -> str | None:
     try:
         from importlib.metadata import version
@@ -123,6 +132,7 @@ async def studio_overview(request: Request, _: Superuser) -> dict[str, Any]:
         },
         "integrity": {"errors": sum(1 for i in issues if i.severity == "error"), "warnings": sum(1 for i in issues if i.severity == "warning")},
         "apps": await _app_summaries(request, _),
+        "tests": _tests_totals(state),
         "version": _version(),
     }
 

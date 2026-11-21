@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import {
-  AlertTriangle, ArrowRight, BarChart3, BookOpen, Database, Folder, LayoutGrid, Package, ShieldAlert, ShieldCheck, Users, Wand2, Workflow,
+  AlertTriangle, ArrowRight, BarChart3, BookOpen, Database, FlaskConical, Folder, LayoutGrid, Package, ShieldAlert, ShieldCheck, Users, Wand2, Workflow,
 } from 'lucide-react'
 import { Banner, Button, Centered } from '../../common'
 import { api, ApiError } from '../../api/client'
@@ -16,7 +16,8 @@ const ScreenAssistantModal = lazy(() => import('../ScreenAssistant'))
 
 type Tone = 'blue' | 'green' | 'orange' | 'purple' | 'yellow'
 interface AppLine { app: string; screens: number; forms: number; menu: number; data: number; services: number; dashboards: number; unreached: number; unused: number; missing: number }
-interface Overview { counts: Record<string, number>; integrity: { errors: number; warnings: number }; apps: AppLine[]; version: string | null }
+interface Overview { counts: Record<string, number>; integrity: { errors: number; warnings: number }; apps: AppLine[]; version: string | null
+  tests: { cases: number; passed: number; failed: number; changed: number; never: number } | null }
 
 const Wrap = styled.div`display: flex; flex-direction: column; gap: 26px; max-width: 1500px;`
 const Lead = styled.div`color: ${colors.text.secondary}; font-size: ${fontSize.md}; line-height: 1.5; max-width: 880px;`
@@ -96,6 +97,11 @@ export default function LibertyOverview() {
           {issues ? <ShieldAlert size={15} /> : <ShieldCheck size={15} />}
           {issues ? t('studio.checkFound', { errors: data.integrity.errors, warnings: data.integrity.warnings }) : t('studio.checkClean')}
         </State>
+        {data.tests && data.tests.cases > 0 && (
+          <State type="button" $tone={data.tests.failed ? 'red' : data.tests.changed ? 'orange' : 'green'} onClick={() => navigate('/liberty/test-results')}>
+            <FlaskConical size={15} /> {t('overview.tests', data.tests)}
+          </State>
+        )}
         {data.version && <span style={{ color: colors.text.muted, fontSize: fontSize.sm, fontFamily: fonts.mono }}>v{data.version}</span>}
       </Row>
 

@@ -301,6 +301,31 @@
 - **Une seule présentation pour les champs de tous les éditeurs.** Les champs d'un connecteur d'API, d'un point
   d'accès, d'un job et d'une étape de job portent maintenant leur libellé au-dessus du champ, comme une étape
   de service et le concepteur d'écran.
+- **Tests : les tests de non-régression d'une application, dans le framework.** Une nouvelle page,
+  Construire → **Tests**. Une suite désigne un connecteur d'API et contient des cas ; un **cas est dessiné
+  comme un flux d'appels** — chaque carte le point d'accès appelé et ce qui est attendu, colorée par son
+  dernier résultat — et ce qui est choisi se modifie à côté : le cas, ou une étape — son point d'accès (la
+  liste du connecteur), ses paramètres dans le formulaire du point d'accès, ce qu'elle attend (l'appel
+  fonctionne ou doit être refusé, un nombre de lignes, les valeurs de la première ligne par nom de colonne ;
+  les chemins dans la réponse brute sous Avancé). **Remplir depuis la réponse** joue l'appel et propose ce
+  qu'il faut attendre. **Jouer ce cas** / **Jouer la suite** vérifient les cas et les comparent à l'exécution
+  de référence ; **Enregistrer la référence** garde ce que les étapes gardent (`keep`) ; un cas qui modifie
+  des données est ignoré sauf si l'exécution l'autorise. Les suites sont des fichiers TOML
+  (`<config>/tests/<suite>.toml`, empaquetés et versionnés avec la configuration), les dernières exécutions de
+  chaque cas et la référence sont gardées à côté. `liberty.apptests` (exécution, stockage), `/admin/tests`.
+  Né comme les tests JD Edwards de l'application nomajde ; rien n'y est propre à JD Edwards, et les points
+  d'accès de n'importe quelle application se testent.
+- **Résultats des tests.** Exploiter → **Résultats des tests** : combien de cas réussis, en échec, modifiés ou
+  jamais joués, et par suite ses dernières exécutions en barres (la plus récente à droite) avec qui les a
+  lancées et le temps pris, puis chaque cas avec ses derniers résultats en bande, sa dernière exécution, sa
+  durée et ce qui a été trouvé ; un cas s'ouvre dans la page Tests. La vue d'ensemble montre les mêmes totaux
+  et y mène. `GET /admin/test-results`.
+- Le formulaire de lancement d'un job peut lister les suites de tests : `choices_from = "test_suites"` (ou
+  `"test_suites:<connecteur>"`).
+- **Le menu Liberty, dans l'ordre où les choses se construisent.** Construire avait quinze entrées ; c'est
+  maintenant **Construire** (Studio, assistant), **Données** (connecteurs, dictionnaire), **Écrans** (écrans,
+  menus), **Logique** (services, tests, notifications, IA) et **Analyse** (tableaux de bord, graphiques,
+  explorateur, modèles de rapport). L'intégrité ouvre le dossier Déployer : vérifier, puis livrer.
 - **Les longs flux passent à la ligne, et se zooment.** Le flux d'un service, d'un job et d'un point d'accès
   continue sur la ligne suivante au lieu de partir à droite, et chaque canevas a un zoom (− / % / +, gardé par
   nature de flux sur l'appareil).

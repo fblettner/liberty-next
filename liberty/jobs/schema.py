@@ -449,7 +449,7 @@ class UserParam(BaseModel):
     default: str | None = Field(default=None, description="Pre-selected value.")
     required: bool = False
     choices: list[str] = Field(default_factory=list, description="Fixed choices (a dropdown).")
-    choices_from: str | None = Field(default=None, description="A dynamic choice list: ``explorer_models:<app>`` or ``query:<connector>/<query>:<value>:<label>``.")
+    choices_from: str | None = Field(default=None, description="A dynamic choice list: ``explorer_models:<app>``, ``query:<connector>/<query>:<value>:<label>`` or ``test_suites[:<connector>]``.")
     multiple: bool = Field(default=False, description="Several values may be picked (checkboxes, with All); the value is a list — with the job's ``for_each`` naming this parameter, one run per value.")
 
     def label_for(self, language: str | None) -> str:

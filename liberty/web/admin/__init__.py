@@ -289,6 +289,15 @@ from liberty.web.admin.studio import (
     studio_run,
     studio_services,
 )
+from liberty.web.admin.apptests import (
+    tests_delete,
+    tests_list,
+    tests_read,
+    tests_results,
+    tests_run,
+    tests_save,
+    tests_try,
+)
 from liberty.web.admin.rename import (
     MoveBody,
     RenameBody,

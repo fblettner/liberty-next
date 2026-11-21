@@ -176,6 +176,11 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           of explorer.toml once, refreshes untouched copies, keeps deletions),
                           report.py (the server-side reading of a saved AnalysisDefinition: period
                           presets, forced window, build_sections → xlsx / pdf through reports/)
+  apptests/               an application's non-regression tests: runner.py (a suite names an API connector; a case = steps calling its
+                          endpoints, each with what is expected — rows where the endpoint says, `first_row` by column name, raw-answer
+                          paths; captures between steps; a reference run compared value by value), store.py (suites as
+                          `<config>/tests/<suite>.toml`, the last runs in `.results/`, the reference in `.reference/` — files, no table);
+                          web/admin/apptests.py = /admin/tests (list, read, save, delete, run, try); the page = pages/Settings/TestsBuilder.tsx
   notify/                 notifications: store.py (ly2_notification inbox, schema_sync), dispatcher.py
                           (Message → portal rows + Socket.IO push / SMTP email / a connector query or
                           endpoint; recipients user: role: email:; channels isolated), rules.py

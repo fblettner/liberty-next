@@ -11,10 +11,14 @@ export const isLibertyApp = (app: string | null | undefined): boolean => app ===
 
 /** The pages served at `/liberty/<page>`, in menu order. */
 export const LIBERTY_PAGES = [
-  'overview', 'studio', 'connectors', 'dictionary', 'screens', 'menus', 'actions', 'charts', 'dashboards', 'explorer',
-  'report-templates', 'notifications', 'ai', 'integrity',
+  'overview', 'studio',
+  'connectors', 'dictionary',
+  'screens', 'menus',
+  'actions', 'tests', 'notifications', 'ai',
+  'dashboards', 'charts', 'explorer', 'report-templates',
   'app', 'pools', 'access', 'theme',
-  'package', 'changes', 'versions',
+  'test-results',
+  'integrity', 'package', 'changes', 'versions',
   'reports', 'release-notes',
 ] as const
 export type LibertyPage = typeof LIBERTY_PAGES[number]
@@ -57,24 +61,34 @@ export function libertyMenu(t: T): AppMenuTree {
     items: [
       // the first thing seen: the applications and how one is built
       page('overview', t('overview.title'), 'layoutdashboard'),
+      // Build was one long folder; it is now the steps an application is built in, as the overview tells them
       { id: 'build', label: t('liberty.build'), icon: 'wrench', items: [
-        // the Studio first: where an application is built
+        // the Studio: an application as a whole, edited in place — and the assistant that starts a screen
         page('studio', t('studio.title'), 'workflow'),
         { id: 'assistant', label: t('nav.assistant'), action: 'assistant', icon: 'wand' },
-        // in the order an application is built: the data (queries, then their labels), what the users
-        // see and do with it, the analyses on top, the automations — and the check of the whole last
+      ] },
+      { id: 'data', label: t('liberty.data'), icon: 'database', items: [
+        // where the data is and how it is read, then the names of its fields
         page('connectors', tab('connectors'), 'database'),
         page('dictionary', tab('dictionary'), 'book'),
+      ] },
+      { id: 'screens', label: t('liberty.screens'), icon: 'grid', items: [
+        // what the users see, and the menu that leads to it
         page('screens', tab('screens'), 'grid'),
         page('menus', tab('menus'), 'folder'),
+      ] },
+      { id: 'logic', label: t('liberty.logic'), icon: 'workflow', items: [
+        // what runs: services made of steps, the tests that check them, who is told, what the assistant is given
         page('actions', tab('actions'), 'play'),
-        page('charts', tab('charts'), 'barchart'),
-        page('dashboards', tab('dashboards'), 'layoutdashboard'),
-        page('explorer', tab('explorer'), 'compass'),
-        page('report-templates', t('liberty.reportTemplates'), 'filetext'),
+        page('tests', t('tests.title'), 'shieldcheck'),
         page('notifications', tab('notifications'), 'bell'),
         page('ai', tab('ai'), 'sparkles'),
-        page('integrity', tab('integrity'), 'shieldcheck'),
+      ] },
+      { id: 'insight', label: t('liberty.insight'), icon: 'barchart', items: [
+        page('dashboards', tab('dashboards'), 'layoutdashboard'),
+        page('charts', tab('charts'), 'barchart'),
+        page('explorer', tab('explorer'), 'compass'),
+        page('report-templates', t('liberty.reportTemplates'), 'filetext'),
       ] },
       { id: 'administer', label: t('liberty.administer'), icon: 'settings', items: [
         // the install, then its connections, who may sign in, how it looks
@@ -84,10 +98,13 @@ export function libertyMenu(t: T): AppMenuTree {
         page('theme', tab('theme'), 'palette'),
       ] },
       { id: 'operate', label: t('liberty.operate'), icon: 'activity', items: [
+        page('test-results', t('testResults.title'), 'shieldcheck'),
         route('monitoring', t('nav.monitoring'), '/monitoring', 'activity'),
         route('jobs', t('liberty.jobs'), '/nomaflow', 'clock'),
       ] },
       { id: 'deploy', label: t('liberty.deploy'), icon: 'rocket', items: [
+        // check first (what is broken), then deliver
+        page('integrity', tab('integrity'), 'shieldcheck'),
         page('package', tab('package'), 'package'),
         page('changes', tab('changes'), 'gitcompare'),
         page('versions', tab('versions'), 'history'),

@@ -254,6 +254,27 @@
   default, "required") opened to edit its labelled fields, instead of two rows of unlabelled boxes.
 - **One look for every editor's fields.** The fields of an API connector, an endpoint, a job and a job's step
   now carry their label above the control, as a service's step and the screen designer do.
+- **Tests: an application's non-regression tests, in the framework.** A new page, Build → **Tests**. A suite
+  names an API connector and holds cases; a **case is drawn as a flow of calls** — each card the endpoint
+  called and what is expected, coloured by its last result — and what is picked is edited beside it: the case,
+  or a step — its endpoint (the connector's list), its parameters as the endpoint's own form, what it expects
+  (the call works or must be refused, a number of rows, the first row's values by column name; paths into the
+  raw answer under Advanced). **Fill from the answer** plays the call and proposes what to expect. **Run this
+  case** / **Run the suite** check the cases and compare them with the reference run; **Record the reference**
+  keeps what the steps `keep`; a case that changes data is skipped unless the run allows it. Suites are TOML
+  files (`<config>/tests/<suite>.toml`, packaged and versioned with the configuration), the last runs of each
+  case and the reference are kept beside them. `liberty.apptests` (runner, store), `/admin/tests` (list, read,
+  save, delete, run, try). It began as the JD Edwards tests of the nomajde application; nothing in it is JD
+  Edwards', and any application's endpoints can be tested.
+- **Test results.** Operate → **Test results**: how many cases passed, failed, changed or were never run, and
+  per suite its last runs as bars (the latest on the right) with who ran them and the time taken, then each
+  case with its last results as a strip, when it last ran, how long it took and what was found; a case opens
+  in the Tests page. The Overview shows the same totals and links there. `GET /admin/test-results`.
+- A job's run form can list the test suites: `choices_from = "test_suites"` (or `"test_suites:<connector>"`).
+- **The Liberty menu, in the order things are built.** Build had fifteen entries; it is now **Build** (Studio,
+  assistant), **Data** (connectors, dictionary), **Screens** (screens, menus), **Logic** (services, tests,
+  notifications, AI) and **Insight** (dashboards, charts, Explorer, report templates). Integrity opens the
+  Deploy folder: check, then deliver.
 - **Long flows wrap, and zoom.** A service's, a job's and an endpoint's flow continue on the next row instead
   of running off to the right, and each canvas has a zoom (− / % / +, kept per kind of flow on the device).
 - **An overview page.** The Liberty menu now opens on **Overview**: the applications of the installation, each

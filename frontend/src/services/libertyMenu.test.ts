@@ -10,7 +10,7 @@ describe('libertyMenu', () => {
   it('opens on the overview, then groups the framework pages under folders, each leaf a route or an action', () => {
     const m = libertyMenu(t)
     expect(m.app).toBe(LIBERTY_APP)
-    expect(m.items.map((n) => n.id)).toEqual(['overview', 'build', 'administer', 'operate', 'deploy', 'document'])
+    expect(m.items.map((n) => n.id)).toEqual(['overview', 'build', 'data', 'screens', 'logic', 'insight', 'administer', 'operate', 'deploy', 'document'])
     for (const l of leaves(m.items)) expect(l.action ?? leafPath(l, m.app)).toBeTruthy()
   })
   it('lists every Liberty page exactly once, in the menu order', () => {
