@@ -343,6 +343,38 @@
 - **Les longs flux passent à la ligne, et se zooment.** Le flux d'un service, d'un job et d'un point d'accès
   continue sur la ligne suivante au lieu de partir à droite, et chaque canevas a un zoom (− / % / +, gardé par
   nature de flux sur l'appareil).
+- **Le tableau de l'Explorer est la grille commune, et le résultat peut prendre la page.** La vue tableau et
+  les lignes de détail sont dessinées par la grille des écrans de données : recherche, un filtre par colonne,
+  tri sur plusieurs colonnes, regroupement, choix des colonnes et son propre export CSV / Excel de ce qui est
+  affiché ; le code d'une colonne reste à côté de son en-tête ; une ligne ouvre toujours son détail, une ligne
+  de détail sa fiche. Le détail reste paginé par le serveur — la pagination de la grille montre la page et le
+  total du serveur (`serverPaging` sur la grille commune). Un bouton **Définition** à côté du choix de
+  l'analyse masque les champs et les étagères : le résultat prend la page, avec la vue, la période, le Top et
+  Exécuter sur une ligne. Une analyse enregistrée s'ouvre ainsi, une nouvelle sur sa définition ; le bouton
+  reste à la même place dans les deux états. Un tableau dans une tuile de tableau de bord est la même grille
+  sans sa barre d'outils.
+- **Une colonne codée d'une analyse montre son libellé, son code, ou les deux.** Dans l'Explorer, la pastille
+  d'un champ lu par une énumération ou une liste de valeurs porte le choix : **Libellé** (comme avant),
+  **Code + libellé**, **Code**. Dans le tableau, *Code + libellé* donne deux colonnes comme sur un écran de
+  données — `Société (ID)` puis `Société` — chacune triée, filtrée et exportée pour elle-même ; le tableau
+  croisé écrit `101 · Alpine Foods SA` dans son unique cellule de libellé, et un graphique garde les libellés
+  sur son axe sauf si le champ est réglé sur son code. Le choix est enregistré avec l'analyse et suivi par les
+  tuiles des tableaux de bord. Deux conséquences d'une lecture unique pour toutes les vues : le tableau croisé,
+  qui montrait les codes bruts, montre maintenant les libellés par défaut, et un code qui est un nombre (un
+  numéro de société) est lu par sa règle dans le tableau aussi, au lieu d'être écrit comme un chiffre. L'export
+  Excel / PDF d'une analyse par le serveur écrit toujours les codes.
+- **Un tableau de bord d'analyses se met en page comme les tableaux de bord.** Dans **Modifier la
+  disposition** de l'Explorer, une tuile se déplace par glisser-déposer — sa poignée, une barre montrant où elle
+  arrive — et se dimensionne par son coin : des colonnes entières (1 à 4) et la plus proche des trois hauteurs.
+  La poignée prend aussi le clavier (flèches : déplacer ; Maj + flèches : dimensionner). Les quatre petits
+  boutons (gauche, droite, largeur, hauteur) disparaissent.
+- **La pagination d'une grille compte tout le résultat.** À partir de la deuxième page, la ligne sous une
+  grille disait « 51–50 sur 50 » : son total était celui des lignes de la page affichée. Elle compte maintenant
+  toutes les lignes réparties entre les pages, après les filtres et le regroupement (« 51–100 sur 5000 »).
+- **Un export coupé par le Top de l'analyse le dit.** Un tableau limité à ses 20 premiers groupes se
+  terminait, dans le classeur et le PDF, par « truncated at 3000 rows » — le plafond de l'export, qui n'était
+  pas atteint. Il dit maintenant « 20 premiers groupes sur 44 » ; la ligne des 3000 lignes reste pour le
+  plafond de l'export. La ligne du classeur suit la langue du lecteur comme celle du PDF.
 - **La page Explorer a l'allure des éditeurs.** Ce dont une analyse est faite se lit en cinq cartes, chacune
   avec son icône et son titre en couleur — **Vue**, **Période**, **Lignes**, **Mesures**, **Filtres** (et
   **Options** pour un tableau croisé ou un graphique) — avec ses pastilles dans sa couleur ; le résultat est un

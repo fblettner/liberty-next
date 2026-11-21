@@ -290,6 +290,35 @@
   Deploy folder: check, then deliver.
 - **Long flows wrap, and zoom.** A service's, a job's and an endpoint's flow continue on the next row instead
   of running off to the right, and each canvas has a zoom (− / % / +, kept per kind of flow on the device).
+- **The Explorer's table is the shared grid, and the result can take the page.** The table view and the
+  detail rows are drawn by the grid of the data screens: search, a filter per column, sort on several
+  columns, grouping, the column chooser and its own CSV / Excel export of what is shown; a column's code stays
+  beside its heading; a row still drills, a detail row still opens its record. The detail stays paged by the
+  server — the grid's pager shows the server's page and total (`serverPaging` on the shared grid). A
+  **Definition** button beside the analysis picker hides the fields and the shelves: the result takes the
+  page, with the view, the period, the Top and Run on one line. A saved analysis opens that way, a new one
+  on its definition; the button stays at the same place in both states. A table inside a dashboard tile is
+  the same grid without its toolbar.
+- **A coded column of an analysis shows its label, its code, or both.** In the Explorer, the chip of a field
+  read through an enum or a lookup takes the choice: **Label** (as before), **Code + label**, **Code**. In the
+  table, *Code + label* is two columns like on a data screen — `Company (ID)` then `Company` — each sorted,
+  filtered and exported by itself; the pivot writes `101 · Alpine Foods SA` in its one label cell, and a chart
+  keeps the labels on its axis unless the field is set to its code. The choice is saved with the analysis and
+  followed by the dashboard tiles. Two things follow from one reading for every view: the pivot, which showed
+  the raw codes, now shows the labels by default, and a code that is a number (a company number) is read
+  through its rule in the table too instead of being printed as a figure. The server's Excel / PDF export of an
+  analysis still writes the codes.
+- **A dashboard of analyses is laid out like the dashboards.** In the Explorer's **Edit layout**, a tile moves
+  by drag and drop — its grip, a bar showing where it lands — and is sized by its corner: whole columns (1–4)
+  and the closest of the three heights. The grip takes the keyboard too (arrows move, Shift + arrows size).
+  The four small buttons (left, right, width, height) are gone.
+- **A grid's pager counts the whole result.** From the second page on, the line under a grid read "Showing
+  51–50 of 50": its total was the rows of the page in view. It now counts every row the pages share out, after
+  the filters and the grouping ("Showing 51–100 of 5000").
+- **An export cut by the analysis's own Top says so.** A table limited to its first 20 groups ended, in the
+  workbook and the PDF, with "truncated at 3000 rows" — the export's own cap, which had not been reached. It
+  now says "first 20 of 44 groups"; the 3000-row line is kept for the export's cap. The workbook's line
+  follows the reader's language like the PDF's.
 - **The Explorer page has the look of the editors.** What an analysis is made of reads as five cards, each
   with its coloured icon and title — **View**, **Period**, **Rows**, **Measures**, **Filters** (and
   **Options** for a pivot or a chart) — with its chips in its colour; the result is a panel whose head says the

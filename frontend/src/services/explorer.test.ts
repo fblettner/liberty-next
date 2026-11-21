@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   addField, addFilter, buildAggregateRequest, buildDetailRequest, compileFilters, dateFields, defaultOp, dimKey, drillCellsOf,
-  emptyDefinition, fieldIndex, measureKey, moveItem, opsFor, usedKeys, withCalculated,
+  emptyDefinition, fieldIndex, measureKey, moveItem, opsFor, usedKeys, withCalculated, showModes, shownText, withShow,
 } from './explorer'
 import type { AnalysisDefinition, ExplorerField, ExplorerModel } from '../types/explorer'
 
@@ -125,5 +125,24 @@ describe('fields pane helpers', () => {
     expect(moveItem([1, 2, 3], 0, 2)).toEqual([2, 3, 1])
     expect(moveItem([1, 2, 3], 2, 0)).toEqual([3, 1, 2])
     expect(moveItem([1, 2, 3], 1, 5)).toEqual([1, 2, 3])
+  })
+})
+
+describe('a coded column: label, code or both', () => {
+  it('shows what was chosen, and the code when there is no label', () => {
+    expect(shownText('C01', 'Alpine Foods', 'label')).toBe('Alpine Foods')
+    expect(shownText('C01', 'Alpine Foods', 'both')).toBe('C01 · Alpine Foods')
+    expect(shownText('C01', 'Alpine Foods', 'code')).toBe('C01')
+    expect(shownText('X99', undefined, 'label')).toBe('X99')
+    expect(shownText('X99', undefined, 'both')).toBe('X99')
+    expect(shownText('FR', 'FR', 'both')).toBe('FR')                       // a label that is the code: once
+  })
+  it('keeps the choice per column, by its key and by its field', () => {
+    expect(showModes([{ field: 'user.ID', show: 'both' }, { field: 'user.NAME' }, { field: 'user.STATUS', show: 'label' }, { field: 'sales.DAY', bucket: 'month', show: 'code' }]))
+      .toEqual({ 'user.ID': 'both', 'sales.DAY@month': 'code', 'sales.DAY': 'code' })
+  })
+  it('writes the choice on the row, not the default', () => {
+    expect(withShow({ field: 'user.ID' }, 'both')).toEqual({ field: 'user.ID', show: 'both' })
+    expect(withShow({ field: 'user.ID', show: 'code' }, 'label')).toEqual({ field: 'user.ID' })
   })
 })

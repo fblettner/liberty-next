@@ -164,6 +164,7 @@ class Section:
     bold: list[bool] = field(default_factory=list)      # per row: a group / total row
     note: str | None = None
     truncated: bool = False
+    top_of: int | None = None       # a table cut by the analysis's own Top N: the number of groups it was cut from
     chart: str | None = None        # a chart section: bar | line | pie, drawn in the PDF
     subs: list[str | None] = field(default_factory=list)   # a KPI section: the line under each card's figure
     stacked: bool = False
@@ -333,7 +334,10 @@ async def build_sections(
                 totals.append(None if not vals else min(vals) if agg == "min" else max(vals) if agg == "max" else sum(vals) / len(vals) if agg == "avg" else sum(vals))
             out.append(Section(title, "kpi", [_label(c) for c in measures], [totals], note=note))
         else:
-            out.append(Section(title, "table", [_label(c) for c in cols], [[r.get(c["key"]) for c in cols] for r in res["rows"][:MAX_ROWS]], note=note, truncated=res["truncated"] or len(res["rows"]) > MAX_ROWS))
+            # two cuts, two messages: the analysis's own Top N (its "first 20 of 44"), or the export's row cap
+            capped = len(res["rows"]) > MAX_ROWS
+            out.append(Section(title, "table", [_label(c) for c in cols], [[r.get(c["key"]) for c in cols] for r in res["rows"][:MAX_ROWS]], note=note,
+                               truncated=res["truncated"] or capped, top_of=res["groups"] if res["truncated"] and not capped else None))
     return out
 
 
@@ -374,8 +378,8 @@ def common_period(items: list[tuple[str, dict[str, Any]]], window: tuple[date, d
 _MONTHS_FR = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
 _MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 _WORDS = {
-    "en": {"application": "Application", "period": "Period", "no_data": "no data", "truncated": "truncated at {n} rows"},
-    "fr": {"application": "Application", "period": "Période", "no_data": "aucune donnée", "truncated": "tronqué à {n} lignes"},
+    "en": {"application": "Application", "period": "Period", "no_data": "no data", "truncated": "truncated at {n} rows", "top": "first {n} of {total} groups"},
+    "fr": {"application": "Application", "period": "Période", "no_data": "aucune donnée", "truncated": "tronqué à {n} lignes", "top": "{n} premiers groupes sur {total}"},
 }
 
 
@@ -405,7 +409,14 @@ def _xl_value(v: Any) -> Any:
     return str(v)
 
 
-def sections_to_xlsx(sections: list[Section]) -> bytes:
+def cut_line(s: Section, lang: str | None = None) -> str:
+    """What a cut section says under its rows: the analysis's own Top N ("first 20 of 44 groups"),
+    else the export's row cap."""
+    w = _words(lang)
+    return w["top"].format(n=len(s.rows), total=s.top_of) if s.top_of else w["truncated"].format(n=MAX_ROWS)
+
+
+def sections_to_xlsx(sections: list[Section], *, lang: str | None = None) -> bytes:
     from openpyxl import Workbook
     from openpyxl.styles import Font
 
@@ -432,7 +443,7 @@ def sections_to_xlsx(sections: list[Section]) -> bytes:
                 for c in range(1, len(row) + 1):
                     ws.cell(row=ws.max_row, column=c).font = Font(bold=True)
         if s.truncated:
-            ws.append([f"… truncated at {MAX_ROWS} rows"])
+            ws.append([f"… {cut_line(s, lang)}"])
     if not sections:
         wb.create_sheet("Empty")
     buf = io.BytesIO()
@@ -502,7 +513,7 @@ def sections_to_markdown(sections: list[Section], title: str, *, lang: str | Non
             b = k < len(s.bold) and s.bold[k]
             lines.append("| " + " | ".join(_md_cell(v, b, lang) for v in row) + " |")
         if s.truncated:
-            lines.append(f"| … {w['truncated'].format(n=MAX_ROWS)} |" + " |" * (len(s.headers) - 1))
+            lines.append(f"| … {cut_line(s, lang)} |" + " |" * (len(s.headers) - 1))
         lines.append("")
     return "\n".join(lines)
 

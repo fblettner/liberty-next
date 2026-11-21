@@ -15,8 +15,7 @@ import { useAuth } from '../../auth/AuthContext'
 import { Banner, Button, Centered, Checkbox, Input, PageLayout, SearchSelect, SpinnerRing, useModals, type SearchSelectOption, HeaderActions, HeaderSlot, HeaderSlotProvider, Card } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import {
-  addField, addFilter, buildAggregateRequest, buildDetailRequest, dateFields, drillCellsOf, emptyDefinition, fieldIndex, measureKey, usedKeys, withCalculated,
-} from '../../services/explorer'
+  addField, addFilter, buildAggregateRequest, buildDetailRequest, dateFields, drillCellsOf, emptyDefinition, fieldIndex, measureKey, usedKeys, withCalculated, showModes } from '../../services/explorer'
 import { deleteSaved, downloadExport, listSaved, saveSaved, savedOptions, type DashboardDefinition, type SavedAnalysis, type SavedDashboard } from '../../services/explorerSaved'
 import type { AggregateResult, AnalysisDefinition, AnalysisView, CalcDef, DetailResult, DrillCell, ExplorerModel, ExplorerModelSummary, FieldType } from '../../types/explorer'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -32,7 +31,8 @@ import { RecordDialog } from './RecordDialog'
 import { SaveModal } from './SaveModal'
 import { DashboardsView } from './DashboardsView'
 
-const Body = styled.div`display: grid; grid-template-columns: 260px 1fr; gap: 12px; flex: 1; min-height: 0;`
+// $wide: the definition hidden — no fields pane, the result takes the page
+const Body = styled.div<{ $wide?: boolean }>`display: grid; grid-template-columns: ${({ $wide }) => ($wide ? '1fr' : '260px 1fr')}; gap: 12px; flex: 1; min-height: 0;`
 const Canvas = styled.div`display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0;`
 // the result: a panel like the editors' — its head says the view and what the run answered
 const ResultPanel = styled(Card)`flex: 1; min-height: 0; padding: 0; display: flex; flex-direction: column; overflow: hidden;`
@@ -86,6 +86,8 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showSql, setShowSql] = useState(false)
+  // the definition (fields, shelves) beside the result; hidden when a saved analysis is only run
+  const [defOpen, setDefOpen] = useState(true)
   const [dictBusy, setDictBusy] = useState(false)
   const [dictNotice, setDictNotice] = useState<string | null>(null)
   const [calcEditing, setCalcEditing] = useState<CalcDef | null | undefined>(undefined)
@@ -136,7 +138,7 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
     if (!app || !modelId) return
     setModel(null); setDef(null); setResult(null); setDetail(null); setDrill(null); setError(null); setDictNotice(null)
     setCurrentAnalysis(null); setCurrentDashboard(null); setDashDef({ period: null, tiles: [] }); setDashEditing(false)
-    setAnalyses([]); setDashboards([])
+    setAnalyses([]); setDashboards([]); setDefOpen(true)
     const n = ++modelReq.current
     api.get<ExplorerModel>(`/api/explorer/${encodeURIComponent(app)}/${encodeURIComponent(modelId)}/model`)
       .then((m) => { if (n === modelReq.current) { setModel(m); setDef(emptyDefinition(m.hub)) } })
@@ -174,6 +176,7 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
   const fields = useMemo(() => fieldIndex(entities), [entities])
   const used = useMemo(() => (def ? usedKeys(def) : new Set<string>()), [def])
   const dates = useMemo(() => (def ? dateFields(entities, def.entity) : []), [entities, def])
+  const shows = useMemo(() => showModes(def?.rows ?? []), [def?.rows])
   const entityOpts: SearchSelectOption[] = (model?.entities ?? []).map((e) => ({ value: e.id, label: e.label, mono: e.id }))
   const isAgg = (v: AnalysisView) => v !== 'detail'
 
@@ -248,6 +251,7 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
   // ── saved analyses ──────────────────────────────────────────────────────────
   const loadAnalysis = (a: SavedAnalysis | null, handedDrill?: DrillCell[]) => {
     setCurrentAnalysis(a)
+    setDefOpen(!a)                                          // a saved analysis opens on its result, a new one on its definition
     if (handedDrill) pendingDrill.current = handedDrill
     if (a) setDef({ ...emptyDefinition(a.definition.entity || model?.hub || ''), ...a.definition })
     else if (model) setDef(emptyDefinition(model.hub))
@@ -302,6 +306,7 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
   const recordEntity = record ? model.entities.find((e) => e.id === record.entity) : null
   const canOpenRecord = !!model.entities.find((e) => e.id === def.entity)?.screen
   const viewIcon: Record<AnalysisView, React.ReactNode> = { table: <Table2 size={13} />, pivot: <Grid3x3 size={13} />, bar: <BarChart3 size={13} />, line: <LineChart size={13} />, pie: <PieChart size={13} />, kpi: <Gauge size={13} />, detail: <List size={13} /> }
+  const exportName = currentAnalysis?.name || `explorer-${modelId}`
   const canDeleteAnalysis = !!currentAnalysis && (currentAnalysis.owner === user?.username || !!user?.is_superuser)
   const canDeleteDashboard = !!currentDashboard && (currentDashboard.owner === user?.username || !!user?.is_superuser)
 
@@ -317,6 +322,10 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
             <SearchSelect sort value={currentAnalysis?.id ?? ''} options={savedOptions(analyses, t('explorer.mine'))} anyLabel={t('explorer.newAnalysis')} placeholder={t('explorer.pickAnalysis')}
               onChange={(v) => loadAnalysis(analyses.find((a) => a.id === v) ?? null)} />
           </div>
+          {/* on this bar, which never moves: lit while the definition shows, like "Edit layout" on a dashboard */}
+          <Button $size="sm" $variant={defOpen ? 'primary' : 'ghost'} data-definition-toggle onClick={() => setDefOpen((v) => !v)} title={t(defOpen ? 'explorer.enlargeHint' : 'explorer.definitionHint')}>
+            <SlidersHorizontal size={13} /> {t('explorer.definition')}
+          </Button>
           <HeaderActions>
             <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'analyses', asNew: false })} disabled={def.rows.length === 0 && def.measures.length === 0}><Save size={13} /> {t('common.save')}</Button>
             {currentAnalysis && <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'analyses', asNew: true })}><Copy size={13} /> {t('explorer.saveAs')}</Button>}
@@ -351,15 +360,15 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
           onChange={(v) => { const [a, m] = v.split('/'); if (a && m) { setApp(a); setModelId(m) } }} /></div>
       ) : null}</>}>
       <HeaderSlotProvider value={headerSlot}>
-      {model.warnings.length > 0 && user?.is_superuser && <Banner $tone="warning" style={{ marginBottom: 8 }}>{model.warnings.join(' · ')}</Banner>}
-      {user?.is_superuser && (model.undocumented ?? 0) > 0 && (
+      {modeBar}
+      {defOpen && model.warnings.length > 0 && user?.is_superuser && <Banner $tone="warning" style={{ marginBottom: 8 }}>{model.warnings.join(' · ')}</Banner>}
+      {defOpen && user?.is_superuser && (model.undocumented ?? 0) > 0 && (
         <Banner $tone="info" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ flex: 1 }}>{t('explorer.undocumented', { n: model.undocumented })}</span>
           <Button $size="sm" $variant="ghost" disabled={dictBusy} onClick={() => void createDictionary()}>{dictBusy ? <SpinnerRing size={12} thickness={2} /> : <BookOpen size={13} />} {t('explorer.createDictionary')}</Button>
         </Banner>
       )}
       {dictNotice && <Banner $tone="ok" style={{ marginBottom: 8 }}>{dictNotice}</Banner>}
-      {modeBar}
       {mode === 'dashboards' ? (
         <>
           {error && <Banner $tone="error">{error}</Banner>}
@@ -367,19 +376,21 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
             onOpenAnalysis={(a, cells) => loadAnalysis(a, cells)} />
         </>
       ) : (
-        <Body>
-          <FieldsPane entities={entities} primary={def.entity} used={used}
+        <Body $wide={!defOpen} data-definition={defOpen ? 'open' : 'hidden'}>
+          {defOpen && <FieldsPane entities={entities} primary={def.entity} used={used}
             onAdd={(f) => setDef(addField(def, f))} onFilter={(f) => setDef(addFilter(def, f))}
             onPrimary={(e) => setDef({ ...emptyDefinition(e), view: def.view })}
-            onCalcNew={() => setCalcEditing(null)} onCalcEdit={(name) => setCalcEditing(def.calculated.find((c) => c.name === name) ?? null)} onCalcDelete={(name) => void deleteCalc(name)} />
+            onCalcNew={() => setCalcEditing(null)} onCalcEdit={(name) => setCalcEditing(def.calculated.find((c) => c.name === name) ?? null)} onCalcDelete={(name) => void deleteCalc(name)} />}
           <Canvas>
             <ShelfBox $tone="blue" data-shelf="view">
               <ShelfTitle $tone="blue"><span className="chip"><LayoutGrid size={13} /></span>{t('explorer.shelfView')}</ShelfTitle>
-              <div style={{ width: 180 }}><SearchSelect value={def.entity} options={entityOpts} onChange={(e) => setDef({ ...emptyDefinition(e), view: def.view })} /></div>
+              {defOpen && <div style={{ width: 180 }}><SearchSelect value={def.entity} options={entityOpts} onChange={(e) => setDef({ ...emptyDefinition(e), view: def.view })} /></div>}
               <Seg>
                 {AGG_VIEWS.map((v) => <SegBtn key={v} type="button" $active={def.view === v} onClick={() => setView(v)} title={t(`explorer.view.${v}`)}>{viewIcon[v]}</SegBtn>)}
               </Seg>
               <Seg><SegBtn type="button" $active={def.view === 'detail'} onClick={() => setView('detail')}>{viewIcon.detail} {t('explorer.view.detail')}</SegBtn></Seg>
+              {/* the definition hidden: the period and the Top are what a run changes — they sit on this line */}
+              {!defOpen && <PeriodBar bare period={def.period} dateFields={dates} onChange={(p) => setDef({ ...def, period: p })} />}
               {isAgg(def.view) && (
                 <>
                   <Note>{t('explorer.topN')}</Note>
@@ -390,7 +401,7 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
               {running && <SpinnerRing size={14} thickness={2} />}
               <Button $size="sm" $variant="primary" onClick={() => void run(def, { drill, page })} disabled={running}><Play size={13} /> {t('explorer.run')}</Button>
             </ShelfBox>
-            {(def.view === 'pivot' || ['bar', 'line', 'pie'].includes(def.view)) && !showingDetail && (
+            {defOpen && (def.view === 'pivot' || ['bar', 'line', 'pie'].includes(def.view)) && !showingDetail && (
               <ShelfBox $tone="blue" data-shelf="options">
               <ShelfTitle $tone="blue"><span className="chip"><SlidersHorizontal size={13} /></span>{t('explorer.shelfOptions')}</ShelfTitle>
               <Options>
@@ -412,8 +423,8 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
               </Options>
               </ShelfBox>
             )}
-            <PeriodBar period={def.period} dateFields={dates} onChange={(p) => setDef({ ...def, period: p })} />
-            <Shelves def={def} fields={fields} onChange={setDef} />
+            {defOpen && <PeriodBar period={def.period} dateFields={dates} onChange={(p) => setDef({ ...def, period: p })} />}
+            {defOpen && <Shelves def={def} fields={fields} onChange={setDef} />}
             {error && <Banner $tone="error">{error}</Banner>}
             <ResultPanel data-result>
               <ResultHead>
@@ -432,16 +443,16 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
             )}
             {showingDetail ? (
               detail ? (
-                <ResultTable columns={detail.columns} rows={detail.rows} lang={lang} paging={{ page, pageSize: PAGE_SIZE, total: detail.total, onPage }} onRowClick={canOpenRecord ? openRecord : undefined} />
+                <ResultTable columns={detail.columns} rows={detail.rows} lang={lang} shows={shows} exportName={exportName} paging={{ page, pageSize: PAGE_SIZE, total: detail.total, onPage }} onRowClick={canOpenRecord ? openRecord : undefined} />
               ) : <Empty>{running ? t('common.loading') : t('explorer.detailHint')}</Empty>
             ) : !result ? (
               <Empty>{t('explorer.emptyHint')}</Empty>
             ) : def.view === 'table' ? (
-              <ResultTable columns={result.columns} rows={result.rows} lang={lang} onRowClick={def.rows.length > 0 ? onDrill : undefined} />
+              <ResultTable columns={result.columns} rows={result.rows} lang={lang} shows={shows} exportName={exportName} onRowClick={def.rows.length > 0 ? onDrill : undefined} />
             ) : def.view === 'pivot' ? (
-              <PivotView result={result} measureKey={def.pivot?.measure ?? null} pivotKey={def.pivotColumn ?? null} percent={def.pivot?.percent ?? 'none'} lang={lang} onDrill={onDrill} />
+              <PivotView result={result} measureKey={def.pivot?.measure ?? null} pivotKey={def.pivotColumn ?? null} percent={def.pivot?.percent ?? 'none'} lang={lang} onDrill={onDrill} shows={shows} />
             ) : (
-              <ChartView result={result} view={def.view as 'bar' | 'line' | 'pie' | 'kpi'} measureKey={def.chart?.measure ?? null} seriesKey={def.pivotColumn ?? null} stacked={!!def.chart?.stacked} lang={lang} connector={app} />
+              <ChartView result={result} view={def.view as 'bar' | 'line' | 'pie' | 'kpi'} measureKey={def.chart?.measure ?? null} seriesKey={def.pivotColumn ?? null} stacked={!!def.chart?.stacked} lang={lang} connector={app} shows={shows} />
             )}
               </ResultBody>
             </ResultPanel>

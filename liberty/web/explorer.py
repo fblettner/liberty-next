@@ -290,5 +290,5 @@ async def export_model(
         except ReportsUnavailableError as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
         return StreamingResponse(iter([data]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{safe}.pdf"'})
-    data = sections_to_xlsx(sections)
+    data = sections_to_xlsx(sections, lang=language)
     return StreamingResponse(iter([data]), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{safe}.xlsx"'})

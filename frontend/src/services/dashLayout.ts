@@ -29,15 +29,29 @@ export function dropSide(from: number, over: number, pointerX: number, left: num
 const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n))
 
 /** A card's size after its corner was dragged by (dx, dy) pixels: whole columns and rows, never less than one,
- *  never wider than the grid. `colPx` / `rowPx` are one column's and one row's pitch (the gap included). */
-export function resized(colSpan: number, rowSpan: number, dx: number, dy: number, colPx: number, rowPx: number): { col_span: number; row_span: number } {
+ *  never wider than the grid. `colPx` / `rowPx` are one column's and one row's pitch (the gap included);
+ *  `maxCols` / `maxRows` for a grid that is not the dashboards' 12 × 8 (the Explorer's tiles: 4 columns). */
+export function resized(colSpan: number, rowSpan: number, dx: number, dy: number, colPx: number, rowPx: number, maxCols = GRID_COLUMNS, maxRows = MAX_ROWS): { col_span: number; row_span: number } {
   return {
-    col_span: clamp(colSpan + Math.round(dx / Math.max(1, colPx)), 1, GRID_COLUMNS),
-    row_span: clamp(rowSpan + Math.round(dy / Math.max(1, rowPx)), 1, MAX_ROWS),
+    col_span: clamp(colSpan + Math.round(dx / Math.max(1, colPx)), 1, maxCols),
+    row_span: clamp(rowSpan + Math.round(dy / Math.max(1, rowPx)), 1, maxRows),
   }
 }
 
 /** The same by steps (the keyboard: Shift + an arrow). */
-export function stepped(colSpan: number, rowSpan: number, dCol: number, dRow: number): { col_span: number; row_span: number } {
-  return { col_span: clamp(colSpan + dCol, 1, GRID_COLUMNS), row_span: clamp(rowSpan + dRow, 1, MAX_ROWS) }
+export function stepped(colSpan: number, rowSpan: number, dCol: number, dRow: number, maxCols = GRID_COLUMNS, maxRows = MAX_ROWS): { col_span: number; row_span: number } {
+  return { col_span: clamp(colSpan + dCol, 1, maxCols), row_span: clamp(rowSpan + dRow, 1, maxRows) }
+}
+
+/** For a card whose height is one of a few named sizes (small / medium / large): the name whose height is the
+ *  closest to `px`. `sizes` is name → pixels. */
+export function nearestSize<K extends string>(sizes: Record<K, number>, px: number): K {
+  const names = Object.keys(sizes) as K[]
+  return names.reduce((best, k) => (Math.abs(sizes[k] - px) < Math.abs(sizes[best] - px) ? k : best), names[0])
+}
+
+/** The next named size up (`step` 1) or down (-1), in the order of their heights; the ends stay where they are. */
+export function steppedSize<K extends string>(sizes: Record<K, number>, current: K, step: number): K {
+  const names = (Object.keys(sizes) as K[]).sort((a, b) => sizes[a] - sizes[b])
+  return names[clamp(names.indexOf(current) + step, 0, names.length - 1)]
 }

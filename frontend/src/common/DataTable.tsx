@@ -58,12 +58,16 @@ import { Overlay, Modal, ModalHeader, ModalBody, ModalFooter } from './Modal'
 import { Button } from './Button'
 import { Input } from './Input'
 import { useViewport } from './useViewport'
+import { pageWindow } from '../services/pager'
 
 // "All" (Number.MAX_SAFE_INTEGER) renders every loaded row in one virtualised page — the
 // pagination chrome collapses into a single page. Useful for screens with high ``max_rows``
 // where the operator wants to scroll through the whole result without paging.
 const PAGE_SIZE_ALL = Number.MAX_SAFE_INTEGER
 const PAGE_SIZE_OPTIONS: number[] = [25, 50, 100, 200, 500, 1000, PAGE_SIZE_ALL]
+// rows paged by the server: the page received is drawn whole (one stable object: no re-render loop)
+const WHOLE_PAGE = { pageIndex: 0, pageSize: PAGE_SIZE_ALL }
+const keepPagination = () => { /* the server pages: the grid's own pagination never moves */ }
 
 export interface DataTableProps<T extends object> {
   columns: ColumnDef<T, unknown>[]
@@ -128,6 +132,10 @@ export interface DataTableProps<T extends object> {
    *  first pasted row matches column headers, else by POSITION — so it can't drift from what's shown.
    *  The consumer (TableView) turns the rows into new bulk-edit rows. */
   onPasteRows?: (rows: Record<string, unknown>[]) => void
+  /** Rows paged by the SERVER: `data` is one page of `total` rows. The pager then shows the server's
+   *  page and asks for another one; every loaded row is drawn, and the search, the filters, the sort
+   *  and the grouping act on the page in view. */
+  serverPaging?: { page: number; pageSize: number; total: number; onPage: (page: number) => void }
 }
 
 // One-time cleanup of the obsolete `dt-*` localStorage layout (the pre-DB grid state). Grid
@@ -383,6 +391,8 @@ const ThInner = styled.div<{ $align?: FilterMeta['align'] }>`
   display: flex; align-items: center; gap: 4px;
   justify-content: ${({ $align }) => ($align === 'right' ? 'flex-end' : $align === 'center' ? 'center' : 'flex-start')};
 `
+// a column's code beside its heading: as typed, not in capitals, quieter than the heading
+const HeadNote = styled.span`font-family: ${fonts.mono}; font-weight: 400; text-transform: none; letter-spacing: 0; opacity: 0.8;`
 const SortMark = styled.span<{ $active: boolean }>`display: inline-flex; align-items: center; opacity: ${({ $active }) => ($active ? 1 : 0.3)}; color: ${({ $active }) => ($active ? colors.blue.main : 'inherit')};`
 const SortIx = styled.sup`font-size: 8px; color: ${colors.blue.main}; margin-left: 1px;`
 const GroupBadge = styled.span`display: inline-flex; align-items: center; color: ${colors.blue.main};`
@@ -483,7 +493,7 @@ const colHeaderText = (col: { id: string; columnDef: { header?: unknown } }): st
 
 // ── component ───────────────────────────────────────────────────────────────
 export function DataTable<T extends object>({
-  columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize: initialPageSizeProp, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, rowMenuButton, onPasteRows, renderDetail, chromeless, getSubRows, onRowExpand, subRowCount,
+  columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize: initialPageSizeProp, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, rowMenuButton, onPasteRows, renderDetail, chromeless, getSubRows, onRowExpand, subRowCount, serverPaging,
 }: DataTableProps<T>) {
   const { t } = useTranslation()
   // Phone-width window: the rows read as cards (the Table's media rule); what follows it here is the
@@ -748,7 +758,7 @@ export function DataTable<T extends object>({
     data,
     columns,
     getRowId: stableRowId,
-    state: { sorting, columnVisibility, columnOrder: tableColumnOrder, columnFilters, globalFilter, grouping, expanded, pagination },
+    state: { sorting, columnVisibility, columnOrder: tableColumnOrder, columnFilters, globalFilter, grouping, expanded, pagination: serverPaging ? WHOLE_PAGE : pagination },
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
     onColumnOrderChange: (updater) => {
@@ -759,7 +769,7 @@ export function DataTable<T extends object>({
     onGlobalFilterChange: setGlobalFilter,
     onGroupingChange: setGrouping,
     onExpandedChange: setExpanded,
-    onPaginationChange: setPagination,
+    onPaginationChange: serverPaging ? keepPagination : setPagination,
     getSubRows: getSubRows ? (row) => getSubRows(row) : undefined,
     enableColumnResizing: false,
     enableMultiSort: true, // shift-click a header adds it to the sort
@@ -807,6 +817,7 @@ export function DataTable<T extends object>({
   const isInternal = (c: { columnDef: { meta?: unknown } }) => !!(c.columnDef.meta as FilterMeta | undefined)?.internal
   const colAlign = (c: { columnDef: { meta?: unknown } }) => (c.columnDef.meta as FilterMeta | undefined)?.align
   const colWrap = (c: { columnDef: { meta?: unknown } }) => !!(c.columnDef.meta as FilterMeta | undefined)?.wrap
+  const headNote = (c: { columnDef: { meta?: unknown } }) => (c.columnDef.meta as FilterMeta | undefined)?.headerNote
   const exportRows = (allColumns = false) => {
     // ``allColumns`` exports every data column incl. the ones hidden by default — no need to unhide
     // them in the Columns picker, export, then re-hide. Internal columns (select / status) stay out.
@@ -968,7 +979,9 @@ export function DataTable<T extends object>({
   }
 
   const { pageIndex, pageSize } = table.getState().pagination
-  const totalRows = table.getRowModel().rows.length // post-filter, post-group flat-ish count for display
+  // every row the pages share out (after the filters and the grouping) — not the page in view, which made
+  // the line read "Showing 51–50 of 50" from the second page on
+  const totalRows = table.getPrePaginationRowModel().rows.length
   const filteredLeafCount = table.getFilteredRowModel().rows.length
   const totalPages = Math.max(1, table.getPageCount())
   // ``PAGE_SIZE_ALL`` makes `pageIndex * pageSize` overflow into Infinity; clamp to the row
@@ -976,6 +989,10 @@ export function DataTable<T extends object>({
   const showAll = pageSize === PAGE_SIZE_ALL
   const from = totalRows === 0 ? 0 : (showAll ? 1 : pageIndex * pageSize + 1)
   const to = showAll ? totalRows : Math.min((pageIndex + 1) * pageSize, totalRows)
+  // one pager for both: the grid's own pages, or the server's
+  const pager = serverPaging
+    ? { ...pageWindow(serverPaging.page, serverPaging.pageSize, serverPaging.total), go: serverPaging.onPage }
+    : { page: pageIndex + 1, pages: totalPages, from, to, total: totalRows, go: (p: number) => table.setPageIndex(p - 1) }
   const menuCol = rowMenuButton != null
   const visibleColCount = table.getVisibleLeafColumns().length + (menuCol ? 1 : 0)
   const groupableCols = table.getAllLeafColumns().filter((c) => c.getCanGroup())
@@ -1324,6 +1341,7 @@ export function DataTable<T extends object>({
                       <ThInner $align={align}>
                         {h.column.getIsGrouped() && <GroupBadge title={t('table.grouped')}><Group size={11} /></GroupBadge>}
                         {flexRender(h.column.columnDef.header, h.getContext())}
+                        {headNote(h.column) && <HeadNote>{headNote(h.column)}</HeadNote>}
                         {canSort && (
                           <SortMark $active={!!sorted}>
                             {sorted === 'asc' ? <ArrowUp size={11} /> : sorted === 'desc' ? <ArrowDown size={11} /> : <ChevronsUpDown size={11} />}
@@ -1387,8 +1405,8 @@ export function DataTable<T extends object>({
 
       <PaginationRow>
         <PagLeft>
-          <span>{t('table.rowsPerPage')}</span>
-          <PageSizeBox>
+          {!serverPaging && <span>{t('table.rowsPerPage')}</span>}
+          {!serverPaging && <PageSizeBox>
             <SearchSelect size="sm" value={String(pageSize)}
               onChange={(v) => { if (v) { table.setPageSize(+v); table.setPageIndex(0) } }}
               // ``PAGE_SIZE_ALL`` is the sentinel for "no pagination — show every loaded row".
@@ -1398,22 +1416,22 @@ export function DataTable<T extends object>({
               options={(PAGE_SIZE_OPTIONS.includes(pageSize) ? PAGE_SIZE_OPTIONS : [...PAGE_SIZE_OPTIONS, pageSize].sort((a, b) => a - b))
                 .map((n) => ({ value: String(n), label: n === PAGE_SIZE_ALL ? t('table.showAll') : String(n) }))}
             />
-          </PageSizeBox>
+          </PageSizeBox>}
           <span>
-            {t('table.showing', { from, to, total: totalRows })}
+            {t('table.showing', { from: pager.from, to: pager.to, total: pager.total })}
             {grouping.length > 0 ? ` · ${t('table.rowsTotal', { count: filteredLeafCount })}` : ''}
           </span>
         </PagLeft>
         <PagRight>
-          <PagBtn onClick={() => table.setPageIndex(0)} disabled={!table.getCanPreviousPage()} title={t('common.first')}><ChevronsLeft size={13} /></PagBtn>
-          <PagBtn onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()} title={t('common.prev')}><ChevronLeft size={13} /></PagBtn>
-          {pageNumbers(pageIndex + 1, totalPages).map((p, i) =>
+          <PagBtn onClick={() => pager.go(1)} disabled={pager.page <= 1} title={t('common.first')}><ChevronsLeft size={13} /></PagBtn>
+          <PagBtn onClick={() => pager.go(pager.page - 1)} disabled={pager.page <= 1} title={t('common.prev')}><ChevronLeft size={13} /></PagBtn>
+          {pageNumbers(pager.page, pager.pages).map((p, i) =>
             p === '…'
               ? <span key={`e${i}`} style={{ color: colors.text.muted, padding: '0 2px', fontSize: fontSize.sm }}>…</span>
-              : <PagBtn key={p} $active={p === pageIndex + 1} onClick={() => table.setPageIndex((p as number) - 1)}>{p}</PagBtn>,
+              : <PagBtn key={p} $active={p === pager.page} onClick={() => pager.go(p as number)}>{p}</PagBtn>,
           )}
-          <PagBtn onClick={() => table.nextPage()} disabled={!table.getCanNextPage()} title={t('common.next')}><ChevronRight size={13} /></PagBtn>
-          <PagBtn onClick={() => table.setPageIndex(totalPages - 1)} disabled={!table.getCanNextPage()} title={t('common.last')}><ChevronsRight size={13} /></PagBtn>
+          <PagBtn onClick={() => pager.go(pager.page + 1)} disabled={pager.page >= pager.pages} title={t('common.next')}><ChevronRight size={13} /></PagBtn>
+          <PagBtn onClick={() => pager.go(pager.pages)} disabled={pager.page >= pager.pages} title={t('common.last')}><ChevronsRight size={13} /></PagBtn>
         </PagRight>
       </PaginationRow>
       {saveModalOpen && (

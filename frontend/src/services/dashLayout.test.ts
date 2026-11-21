@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dropSide, dropped, resized, stepped } from './dashLayout'
+import { dropSide, dropped, nearestSize, resized, stepped, steppedSize } from './dashLayout'
 
 describe("a dashboard's cards", () => {
   it('drops a card before or after another', () => {
@@ -31,5 +31,20 @@ describe("a dashboard's cards", () => {
     expect(stepped(6, 2, 1, 0)).toEqual({ col_span: 7, row_span: 2 })
     expect(stepped(12, 8, 1, 1)).toEqual({ col_span: 12, row_span: 8 })
     expect(stepped(1, 1, -1, -1)).toEqual({ col_span: 1, row_span: 1 })
+  })
+
+  it('sizes a card on a smaller grid, with named heights', () => {
+    const H = { s: 240, m: 340, l: 500 }
+    expect(resized(2, 1, 900, 0, 300, 100, 4, 3).col_span).toBe(4)          // the Explorer's tiles: 4 columns
+    expect(stepped(4, 1, 1, 0, 4, 3).col_span).toBe(4)
+    expect(nearestSize(H, 240 + 40)).toBe('s')
+    expect(nearestSize(H, 240 + 70)).toBe('m')
+    expect(nearestSize(H, 340 + 120)).toBe('l')
+    expect(nearestSize(H, 0)).toBe('s')
+    expect(nearestSize(H, 9000)).toBe('l')
+    expect(steppedSize(H, 's', 1)).toBe('m')
+    expect(steppedSize(H, 'l', 1)).toBe('l')
+    expect(steppedSize(H, 'm', -1)).toBe('s')
+    expect(steppedSize(H, 's', -1)).toBe('s')
   })
 })

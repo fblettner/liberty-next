@@ -1,111 +1,87 @@
-// The result as a table: aggregate rows (dimension cells rendered through their enum / lookup
-// rule, measures as numbers) sorted on the loaded rows by clicking a header; or detail rows with
-// server paging. A click on an aggregate row drills to its detail rows (the parent decides).
-import { useMemo, useState } from 'react'
-import styled from '@emotion/styled'
+// The result as a table, on the shared grid (search, filters, sort, grouping, column chooser,
+// export): aggregate rows — dimension cells through their enum / lookup rule, measures as numbers —
+// or detail rows paged by the server. A click on a row is the parent's (drill, or the record).
+import { useMemo } from 'react'
+import type { ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight } from 'lucide-react'
-import { Button } from '../../common'
-import { ruleCell } from '../../services/cells'
-import { useLookupBatch, type LookupSpec } from '../../services/lookups'
-import type { Column } from '../../types/connectors'
-import type { ResultColumn } from '../../types/explorer'
-import { colors, fontSize, fonts, radius } from '../../theme'
+import { DataTable } from '../../common/DataTable'
+import type { FilterKind, FilterMeta } from '../../common/DataTableFilter'
+import type { ShowModes } from '../../services/explorer'
+import type { CodeShow, ResultColumn } from '../../types/explorer'
+import { filterPropsFor } from '../TableView/resultColumns'
+import { CellSpan } from '../TableView/styled'
+import { isCoded, ruleOf, showOf, useDimText } from './useDimText'
 
-const Wrap = styled.div`flex: 1; min-height: 0; overflow: auto; border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.card};`
-const Table = styled.table`
-  border-collapse: separate; border-spacing: 0; width: 100%; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
-  /* the heading stays while the rows scroll under it: its background must hide them (bg.card is see-through) */
-  & th { position: sticky; top: 0; z-index: 1; background: ${colors.bg.dropdown}; text-align: left; padding: 8px 10px; border-bottom: 1px solid ${colors.border};
-         font-size: ${fontSize.micro}; color: ${colors.text.muted}; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; cursor: pointer; user-select: none; }
-  & th.num, & td.num { text-align: right; font-variant-numeric: tabular-nums; }
-  & th .code { margin-left: 6px; font-family: ${fonts.mono}; text-transform: none; letter-spacing: 0; color: ${colors.text.muted}; opacity: 0.8; }
-  & td { padding: 6px 10px; border-bottom: 1px solid ${colors.border}; color: ${colors.text.primary}; white-space: nowrap; }
-  & td.null { color: ${colors.text.muted}; font-style: italic; }
-  & tbody tr:hover { background: var(--hover-subtle); }
-  & tbody tr.click { cursor: pointer; }
-`
-const Footer = styled.div`display: flex; align-items: center; gap: 8px; padding: 6px 0 0; font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans};`
+type Row = Record<string, unknown>
 
-export function ResultTable({ columns, rows, lang, onRowClick, paging }: {
+const isNum = (c: ResultColumn) => c.kind === 'measure' || c.type === 'number'
+/** The column's code beside its heading, when the heading is a label and not the code itself. */
+const codeOf = (c: ResultColumn): string | undefined => {
+  if (!c.field || c.entity === 'calc') return undefined
+  const code = c.field.split('.').pop()
+  return code && code !== c.label ? code : undefined
+}
+
+export function ResultTable({ columns, rows, lang, onRowClick, paging, exportName, bare, shows }: {
   columns: ResultColumn[]
-  rows: Record<string, unknown>[]
+  rows: Row[]
   lang: string
-  onRowClick?: (row: Record<string, unknown>) => void
+  onRowClick?: (row: Row) => void
   paging?: { page: number; pageSize: number; total: number; onPage: (p: number) => void }
+  /** the name of the file the grid's own export writes */
+  exportName?: string
+  /** no toolbar: a table inside a dashboard tile */
+  bare?: boolean
+  /** a coded column shown as its label (the default), its code, or both — the choice on the field's chip */
+  shows?: ShowModes
 }) {
   const { t } = useTranslation()
-  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null)
   const nf = useMemo(() => new Intl.NumberFormat(lang, { maximumFractionDigits: 2 }), [lang])
   // a column with dictionary decimals (a JDE amount) shows exactly that many places
   const nfs = useMemo(() => new Map(columns.filter((c) => c.decimals != null).map((c) => [c.key, new Intl.NumberFormat(lang, { minimumFractionDigits: c.decimals, maximumFractionDigits: c.decimals })])), [columns, lang])
-  const specs = useMemo<LookupSpec[]>(() => columns.flatMap((c) => (c.rule?.kind === 'lookup'
-    ? [{ connector: c.rule.connector, query: c.rule.query, value: c.rule.value, label: c.rule.label, params: c.rule.params, sources: c.rule.sources }] : [])), [columns])
-  const lookups = useLookupBatch(specs)
-  const lookupFor = (c: ResultColumn): Map<string, string> | undefined => {
-    const rule = c.rule
-    if (rule?.kind !== 'lookup') return undefined
-    const i = specs.findIndex((s) => s.query === rule.query && s.connector === rule.connector)
-    return i >= 0 ? [...lookups.values()][i] : undefined
-  }
-  const sorted = useMemo(() => {
-    if (!sort || paging) return rows
-    const k = sort.key
-    const nulls = rows.filter((r) => r[k] == null)
-    const rest = rows.filter((r) => r[k] != null).sort((a, b) => {
-      const x = a[k] as string | number, y = b[k] as string | number
-      return (x < y ? -1 : x > y ? 1 : 0) * (sort.dir === 'desc' ? -1 : 1)
+  const dimText = useDimText(columns, shows)
+
+  const defs = useMemo<ColumnDef<Row, unknown>[]>(() => columns.flatMap((c) => {
+    // an enum / lookup column sorts, filters, searches and exports on what it shows (label, code or both);
+    // it is a code even when its values are numbers (a company number): no thousands separator, not a figure
+    const coded = isCoded(c)
+    const num = isNum(c) && !coded
+    const align: FilterMeta['align'] = num ? 'right' : undefined
+    const rule = ruleOf(c)
+    const kind: FilterKind = num ? 'number' : !coded && !c.bucket && (c.type === 'date' || c.type === 'datetime') ? 'date' : 'text'
+    const fp = filterPropsFor(kind, undefined, align)
+    const head = (c.kind === 'measure' ? (c.field ? t(`explorer.aggLabel.${c.aggregate}`, { label: c.label }) : t('explorer.rowCount')) : c.label)
+      + (c.bucket ? ` · ${t(`explorer.bucket.${c.bucket}`)}` : '')
+    const fmt = nfs.get(c.key) ?? nf
+    // one grid column reading the result column *as* a code, a label, or as the field's own choice
+    const column = (id: string, header: string, as: CodeShow | undefined, note: string | undefined): ColumnDef<Row, unknown> => ({
+      id,
+      header,
+      accessorFn: (row) => { const v = row[c.key]; return coded && v !== null && v !== undefined ? dimText(c, v, as).text : v },
+      filterFn: fp.filterFn,
+      meta: { ...fp.meta, headerNote: note } satisfies FilterMeta,
+      cell: (info) => {
+        // a group's heading cell carries the grouped value (already what is shown), a row its raw value
+        const grouped = info.cell.getIsGrouped()
+        const v = grouped ? info.getValue() : (info.row.original as Row)[c.key]
+        if (v === null || v === undefined) return <CellSpan className="null">—</CellSpan>
+        if (num && typeof v === 'number') return <CellSpan style={{ textAlign: 'right' }}>{fmt.format(v)}</CellSpan>
+        if (rule && !grouped) {
+          const r = dimText(c, v, as)
+          return <CellSpan className={r.kind === 'plain' ? undefined : r.kind} title={String(v)}>{r.text}</CellSpan>
+        }
+        return <CellSpan>{String(v)}</CellSpan>
+      },
     })
-    return [...rest, ...nulls]
-  }, [rows, sort, paging])
+    // "code + label": two columns, like a data screen's — the code (ID), then the label
+    if (coded && showOf(c, shows) === 'both') return [column(c.key, `${head} ${t('table.idColumnSuffix')}`, 'code', codeOf(c)), column(`${c.key}__label`, head, 'label', undefined)]
+    return [column(c.key, head, undefined, codeOf(c))]
+  }), [columns, dimText, shows, nf, nfs, t])
 
-  const isNum = (c: ResultColumn) => c.kind === 'measure' || c.type === 'number'
-  const cell = (c: ResultColumn, v: unknown) => {
-    if (v === null || v === undefined) return <td key={c.key} className="null">—</td>
-    if (isNum(c) && typeof v === 'number') return <td key={c.key} className="num">{(nfs.get(c.key) ?? nf).format(v)}</td>
-    if (c.rule && !c.bucket) {
-      const col: Column = { name: c.key, type: null, rule: c.rule }
-      const r = ruleCell(v, col, undefined, lookupFor(c))
-      return <td key={c.key} title={String(v)}>{r.text}</td>
-    }
-    return <td key={c.key}>{String(v)}</td>
-  }
-  const pages = paging ? Math.max(1, Math.ceil(paging.total / paging.pageSize)) : 1
-
+  // another set of columns is another table: its sort, filters and grouping start again
+  const shape = defs.map((d) => d.id).join('|')
   return (
-    <>
-      <Wrap>
-        <Table>
-          <thead>
-            <tr>
-              {columns.map((c) => (
-                <th key={c.key} className={isNum(c) ? 'num' : undefined}
-                  onClick={() => !paging && setSort((s) => (s?.key === c.key ? (s.dir === 'asc' ? { key: c.key, dir: 'desc' } : null) : { key: c.key, dir: 'asc' }))}
-                  title={c.key}>
-                  {c.kind === 'measure' ? (c.field ? t(`explorer.aggLabel.${c.aggregate}`, { label: c.label }) : t('explorer.rowCount')) : c.label}
-                  {c.bucket ? ` · ${t(`explorer.bucket.${c.bucket}`)}` : ''}
-                  {c.field && c.label !== c.field.split('.').pop() && c.entity !== 'calc' && <span className="code">{c.field.split('.').pop()}</span>}
-                  {sort?.key === c.key ? (sort.dir === 'asc' ? <ArrowUp size={10} /> : <ArrowDown size={10} />) : null}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((r, i) => (
-              <tr key={i} className={onRowClick ? 'click' : undefined} onClick={onRowClick ? () => onRowClick(r) : undefined}>
-                {columns.map((c) => cell(c, r[c.key]))}
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </Wrap>
-      {paging && (
-        <Footer>
-          <Button $size="sm" $variant="ghost" disabled={paging.page <= 1} onClick={() => paging.onPage(paging.page - 1)}><ChevronLeft size={13} /></Button>
-          <span>{t('explorer.pageOf', { page: paging.page, pages, total: paging.total })}</span>
-          <Button $size="sm" $variant="ghost" disabled={paging.page >= pages} onClick={() => paging.onPage(paging.page + 1)}><ChevronRight size={13} /></Button>
-        </Footer>
-      )}
-    </>
+    <DataTable<Row> key={shape} columns={defs} data={rows} onRowClick={onRowClick} serverPaging={paging}
+      exportFilename={exportName ?? 'explorer'} chromeless={bare} />
   )
 }

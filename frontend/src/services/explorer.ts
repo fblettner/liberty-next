@@ -1,13 +1,34 @@
 // Pure helpers of the Data Explorer (no React): the analysis definition ⇄ the backend requests,
 // the field catalogue with calculated fields, operators by type, keys. Tested in explorer.test.ts.
 import type {
-  Aggregate, AnalysisDefinition, Bucket, CalcDef, DrillCell, ExplorerEntity, ExplorerField, ExplorerModel, FieldType, FilterOp, FilterRow,
+  Aggregate, AnalysisDefinition, Bucket, CalcDef, DrillCell, ExplorerEntity, ExplorerField, ExplorerModel, FieldType, FilterOp, FilterRow, CodeShow, DimRow,
 } from '../types/explorer'
 import { rangeForPreset, type DateRange } from './period'
 
 export const AGGREGATES: Aggregate[] = ['sum', 'avg', 'min', 'max', 'count', 'count_distinct']
 export const NUMERIC_AGGREGATES: Aggregate[] = ['sum', 'avg', 'min', 'max', 'count', 'count_distinct']
 export const BUCKETS: Bucket[] = ['day', 'week', 'month', 'quarter', 'year']
+
+// ── a coded column: label, code, or both ─────────────────────────────────────
+export const CODE_SHOWS: CodeShow[] = ['label', 'both', 'code']
+/** The choice per result column: by the dimension's key (`field` or `field@bucket`) and by the plain field
+ *  (a detail column). Only the rows that chose something other than the label are in it. */
+export type ShowModes = Record<string, CodeShow>
+export function showModes(rows: DimRow[]): ShowModes {
+  const out: ShowModes = {}
+  for (const r of rows) if (r.show && r.show !== 'label') { out[dimKey(r.field, r.bucket)] = r.show; out[r.field] = r.show }
+  return out
+}
+/** What a code with its label shows. A code without a label (not in the list, still loading) is the code. */
+export function shownText(code: string, label: string | undefined, show: CodeShow): string {
+  if (show === 'code' || !label || label === code) return code
+  return show === 'both' ? `${code} · ${label}` : label
+}
+/** The row with its choice set; "label" is the default and is not written. */
+export function withShow(row: DimRow, show: CodeShow): DimRow {
+  const rest: DimRow = row.bucket ? { field: row.field, bucket: row.bucket } : { field: row.field }
+  return show === 'label' ? rest : { ...rest, show }
+}
 export const DEFAULT_LIMIT = 1000
 
 export function emptyDefinition(entity: string): AnalysisDefinition {

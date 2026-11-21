@@ -21,7 +21,7 @@ const Card = styled.div`
 const Value = styled.div`font-size: clamp(1.6rem, 3.5vw, 2.2rem); font-weight: 700; font-family: ${fonts.sans}; color: ${colors.text.primary}; font-variant-numeric: tabular-nums; letter-spacing: -0.02em;`
 const Sub = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted}; font-family: ${fonts.sans}; text-align: center;`
 
-export function ChartView({ result, view, measureKey, seriesKey, stacked, lang, connector }: {
+export function ChartView({ result, view, measureKey, seriesKey, stacked, lang, connector, shows }: {
   result: AggregateResult
   view: 'bar' | 'line' | 'pie' | 'kpi'
   measureKey: string | null
@@ -29,11 +29,13 @@ export function ChartView({ result, view, measureKey, seriesKey, stacked, lang, 
   stacked: boolean
   lang: string
   connector: string
+  /** a field set to show its code keeps its codes on the axis (label and "both" read the labels) */
+  shows?: Record<string, string>
 }) {
   const { t } = useTranslation()
   const nf = useMemo(() => new Intl.NumberFormat(lang, { maximumFractionDigits: 2 }), [lang])
-  const shaped = useMemo(() => (view === 'kpi' ? null : shapeChart(result, { type: view as ChartType, measure: measureKey, seriesDim: seriesKey, othersLabel: t('explorer.others') })),
-    [result, view, measureKey, seriesKey, t])
+  const shaped = useMemo(() => (view === 'kpi' ? null : shapeChart(result, { type: view as ChartType, measure: measureKey, seriesDim: seriesKey, othersLabel: t('explorer.others'), shows })),
+    [result, view, measureKey, seriesKey, t, shows])
   // The chart gets a measured PIXEL height: Recharts' responsive container reads its parent's
   // height once, and inside a flex column (a dashboard tile, the page) that read lands on 0 while
   // the layout settles — the canvas then stays empty. Observe the box and pass what it has.

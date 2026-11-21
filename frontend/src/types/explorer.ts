@@ -61,7 +61,9 @@ export interface ExplorerModelSummary { app: string; model: string; label: strin
 export type FilterOp = 'contains' | 'equals' | 'notEquals' | 'startsWith' | 'endsWith' | 'in' | 'empty' | 'notEmpty' | 'lt' | 'le' | 'gt' | 'ge' | 'between'
 
 export interface FilterRow { field: string; op: FilterOp; value: string; valueTo?: string }
-export interface DimRow { field: string; bucket?: Bucket | null }
+/** What a coded column (an enum, a lookup) shows: its label (the default), its code, or both. */
+export type CodeShow = 'label' | 'both' | 'code'
+export interface DimRow { field: string; bucket?: Bucket | null; show?: CodeShow }
 export interface MeasureRow { field: string | null; agg: Aggregate }   // field null = count(*)
 export interface CalcDef { name: string; label?: string; expr: string }
 export interface PeriodDef { field: string; preset: DatePreset; range: DateRange }

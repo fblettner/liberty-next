@@ -8,8 +8,8 @@ import { useTranslation } from 'react-i18next'
 import { X, Plus, Rows3, Sigma, Filter } from 'lucide-react'
 import { DatePicker, Input, SearchSelect, type SearchSelectOption } from '../../common'
 import { useLookupBatch, type LookupSpec } from '../../services/lookups'
-import { BUCKETS, NUMERIC_AGGREGATES, moveItem, opsFor } from '../../services/explorer'
-import type { Aggregate, AnalysisDefinition, Bucket, ExplorerField, FilterOp, FilterRow } from '../../types/explorer'
+import { BUCKETS, CODE_SHOWS, NUMERIC_AGGREGATES, moveItem, opsFor, withShow } from '../../services/explorer'
+import type { Aggregate, AnalysisDefinition, Bucket, ExplorerField, FilterOp, FilterRow, CodeShow } from '../../types/explorer'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { FIELD_DND } from './FieldsPane'
 import { ShelfBox, ShelfTitle, type ShelfTone } from './shelfKit'
@@ -71,6 +71,7 @@ export function Shelves({ def, fields, onChange }: {
   }
 
   const bucketOpts: SearchSelectOption[] = BUCKETS.map((b) => ({ value: b, label: t(`explorer.bucket.${b}`) }))
+  const showOpts: SearchSelectOption[] = CODE_SHOWS.map((s) => ({ value: s, label: t(`explorer.show.${s}`) }))
   const aggOpts = (f: ExplorerField | undefined): SearchSelectOption[] =>
     (f && f.type !== 'number' ? (['count', 'count_distinct'] as Aggregate[]) : NUMERIC_AGGREGATES).map((a) => ({ value: a, label: t(`explorer.agg.${a}`) }))
 
@@ -82,12 +83,18 @@ export function Shelves({ def, fields, onChange }: {
         {def.rows.map((r, i) => {
           const f = fields.get(r.field)
           const isDate = f?.type === 'date' || f?.type === 'datetime'
+          // a coded field (an enum, a lookup): its label, its code, or both
+          const coded = !isDate && (f?.rule?.kind === 'enum' || f?.rule?.kind === 'lookup')
           return (
             <Chip key={r.field} data-index={i} draggable onDragStart={chipDrag('rows', i)} onDragEnd={() => setDrag(null)} $dragging={drag?.shelf === 'rows' && drag.index === i}>
               <span>{label(r.field)}</span>
               {isDate && def.view !== 'detail' && (
                 <span className="sel"><SearchSelect value={r.bucket ?? ''} anyLabel={t('explorer.bucket.none')} options={bucketOpts}
                   onChange={(v) => onChange({ ...def, rows: def.rows.map((x, k) => (k === i ? { field: x.field, ...(v ? { bucket: v as Bucket } : {}) } : x)) })} /></span>
+              )}
+              {coded && (
+                <span className="sel" data-show={r.field} title={t('explorer.showHint')}><SearchSelect value={r.show ?? 'label'} options={showOpts}
+                  onChange={(v) => onChange({ ...def, rows: def.rows.map((x, k) => (k === i ? withShow(x, (v || 'label') as CodeShow) : x)) })} /></span>
               )}
               <button type="button" className="x" onClick={() => onChange({ ...def, rows: def.rows.filter((_, k) => k !== i) })}><X size={12} /></button>
             </Chip>

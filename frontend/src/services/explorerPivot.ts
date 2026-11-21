@@ -93,7 +93,7 @@ export interface Shaped { result: QueryResult; spec: ChartSpec; series: string[]
  *  measures; the top 10 series by value plus "Others"; x in chronological order for a bucketed
  *  date, by value otherwise; extra dimensions summed. */
 export function shapeChart(
-  res: AggregateResult, opts: { type: ChartType; measure?: string | null; seriesDim?: string | null; othersLabel: string },
+  res: AggregateResult, opts: { type: ChartType; measure?: string | null; seriesDim?: string | null; othersLabel: string; shows?: Record<string, string> },
 ): Shaped | null {
   const dims = res.columns.filter((c) => c.kind === 'dimension')
   const measures = res.columns.filter((c) => c.kind === 'measure')
@@ -157,7 +157,8 @@ export function shapeChart(
   })
   const names = series.map((s) => (s === OTHERS ? opts.othersLabel : s))
   const columns = [
-    { name: xName, type: null, ...(xCol?.rule && !xCol.bucket ? { rule: xCol.rule } : {}) },
+    // the axis reads its codes through the column's rule (their labels) — unless the field was set to show its code
+    { name: xName, type: null, ...(xCol?.rule && !xCol.bucket && opts.shows?.[xCol.key] !== 'code' ? { rule: xCol.rule } : {}) },
     ...names.map((s) => ({ name: s, type: 'number' })),
   ]
   const result: QueryResult = { connector: '', query: 'explorer', statement_type: 'SELECT', columns, rows, row_count: rows.length, rowcount: -1, truncated: false, duration_ms: 0 }

@@ -7,23 +7,31 @@ import type { ExplorerField, PeriodDef } from '../../types/explorer'
 import { ShelfBox, ShelfTitle } from './shelfKit'
 
 
-export function PeriodBar({ period, dateFields, onChange }: {
+export function PeriodBar({ period, dateFields, onChange, bare }: {
   period: PeriodDef | null
   dateFields: ExplorerField[]
   onChange: (next: PeriodDef | null) => void
+  /** the two controls alone, to sit on another card's line (the definition hidden) */
+  bare?: boolean
 }) {
   const { t } = useTranslation()
   if (dateFields.length === 0) return null
   const field = period?.field ?? dateFields[0].key
   const preset: DatePreset = period?.preset ?? 'all'
   const range: DateRange = period?.range ?? { dateFrom: '', dateTo: '' }
-  return (
-    <ShelfBox $tone="purple" data-shelf="period">
-      <ShelfTitle $tone="purple"><span className="chip"><CalendarRange size={13} /></span>{t('explorer.period')}</ShelfTitle>
+  const controls = (
+    <>
       <div style={{ width: 220 }}>
         <SearchSelect value={field} options={dateFields.map((f) => ({ value: f.key, label: f.label, mono: f.key }))} onChange={(v) => onChange({ field: v, preset, range })} />
       </div>
       <DateRangeFilter preset={preset} range={range} onChange={(p, r) => onChange(p === 'all' ? null : { field, preset: p, range: r })} />
+    </>
+  )
+  if (bare) return controls
+  return (
+    <ShelfBox $tone="purple" data-shelf="period">
+      <ShelfTitle $tone="purple"><span className="chip"><CalendarRange size={13} /></span>{t('explorer.period')}</ShelfTitle>
+      {controls}
     </ShelfBox>
   )
 }

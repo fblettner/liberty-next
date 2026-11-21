@@ -36,7 +36,8 @@ def test_period_range_matches_the_frontend_rules() -> None:
 def test_definition_to_requests() -> None:
     d = {
         "entity": "sales", "view": "table",
-        "rows": [{"field": "company.NAME"}, {"field": "sales.SOLD_ON", "bucket": "month"}],
+        # "show" (label / code / both) is the page's display choice: a saved definition carries it, the requests leave it out
+        "rows": [{"field": "company.NAME", "show": "both"}, {"field": "sales.SOLD_ON", "bucket": "month"}],
         "measures": [{"field": "sales.QTY", "agg": "sum"}, {"field": None, "agg": "count"}],
         "filterRows": [{"field": "company.NAME", "op": "startsWith", "value": "C"}, {"field": "sales.QTY", "op": "between", "value": "1", "valueTo": "9"},
                        {"field": "sales.ID", "op": "in", "value": "1, 2"}, {"field": "sales.ID", "op": "gt", "value": ""}],
@@ -99,6 +100,19 @@ async def test_sections_xlsx_and_markdown(env) -> None:  # noqa: F811
     assert ws.cell(row=1, column=1).font.italic and ws.cell(row=2, column=1).font.bold and ws.cell(row=3, column=1).value == "Corp one"
     md = sections_to_markdown(sections, "Sales report")
     assert md.startswith("# Sales report") and "## Revenue pivot" in md and "| **Total** |" in md and "| --- |" in md
+
+
+async def test_a_top_n_cut_is_said_as_such_not_as_the_export_cap(env) -> None:  # noqa: F811
+    """An analysis cut by its own Top N says "first 1 of N groups" — not the export's 3000-row cap."""
+    registry, screens, view = env
+    d = {"entity": "sales", "rows": [{"field": "company.NAME"}], "measures": [{"field": "sales.REVENUE", "agg": "sum"}], "filterRows": [], "sort": [], "calculated": [], "view": "table"}
+    cut, whole = await build_sections(registry, screens, view, [("Top", {**d, "limit": 1}), ("All", {**d, "limit": 100})])
+    assert cut.truncated and len(cut.rows) == 1 and cut.top_of is not None and cut.top_of > 1
+    assert not whole.truncated and whole.top_of is None and len(whole.rows) == cut.top_of
+    ws = load_workbook(io.BytesIO(sections_to_xlsx([cut, whole])))["Top"]
+    assert ws.cell(row=ws.max_row, column=1).value == f"… first 1 of {cut.top_of} groups"
+    assert "3000" not in sections_to_markdown([cut], "T") and f"… 1 premiers groupes sur {cut.top_of}" in sections_to_markdown([cut], "T", lang="fr")
+    assert f"1 premiers groupes sur {cut.top_of}" in str(load_workbook(io.BytesIO(sections_to_xlsx([cut], lang="fr")))["Top"].cell(row=4, column=1).value)
 
 
 def test_chart_svg_draws_each_kind_in_print_colours() -> None:
