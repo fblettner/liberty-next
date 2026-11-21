@@ -895,6 +895,12 @@ def _find_action_usages(state: Any, name: str) -> list[Usage]:
                 for act in _iter_actions(getattr(a, "steps", None) or [])
             ):
                 out.append(Usage(type="action_ref", label=f"action · {aid}", deep_link={"editor": "actions", "action": aid}))
+    # the API endpoints it serves (``EndpointDef.action``)
+    connectors = getattr(state, "connectors", None)
+    for cname in (connectors.names() if connectors is not None else []):
+        for ep in getattr(getattr(connectors.get(cname), "config", None), "endpoints", None) or []:
+            if getattr(ep, "action", None) == name:
+                out.append(Usage(type="action_ref", label=f"endpoint · {cname}.{ep.name}", deep_link=_connector_deep_link(cname)))
     return out
 
 

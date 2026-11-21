@@ -212,6 +212,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         import asyncio
         app.state.runtime_lock = asyncio.Lock()
         app.state.connectors = load_registry(settings, app.state.license)
+        app.state.connectors.state = app.state  # an endpoint served by a shared action runs it on this state
         app.state.menus = load_menus(settings.menus.config_path)
         app.state.screens = load_screens(settings.screens.config_path)
         app.state.charts = load_charts(settings.charts.config_path)

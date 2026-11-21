@@ -191,6 +191,8 @@ def _transport_error(exc: Exception, url: str) -> str:
 
 
 _ABSENT = "\x00absent\x00"       # stands for a variable the caller did not give, while a function's body is filled
+# the endpoints an action is serving right now, outermost first — an action that calls its own endpoint is refused
+_serving: ContextVar[tuple[tuple[str, str], ...]] = ContextVar("liberty_endpoint_actions", default=())
 
 
 def _absent_as_none(value: Any) -> Any:
@@ -394,6 +396,7 @@ class APIConnector:
                     "skip_blank_query": True if e.skip_blank_query else None,
                     "rows_field": e.rows_field,
                     "callable": e.callable,
+                    "action": e.action,
                     "limit_param": e.limit_param,
                     "error_fields": list(e.error_fields),
                     "warning_fields": list(e.warning_fields),
@@ -534,9 +537,11 @@ class APIConnector:
         except ApiParamError as exc:
             return ApiResult(connector=self.name, endpoint=endpoint_name, success=False, status_code=0,
                              url=self.config.base_url, error=f"{type(exc).__name__}: {exc}")
-        if endpoint.callable:
+        if endpoint.callable or endpoint.action:
             # what the caller did not give and no default fills: the function sees ``None`` there, not ""
             absent = {q.name for q in endpoint.params if q.name not in (params or {}) and merged.get(q.name) == ""}
+            if endpoint.action:
+                return await self._call_action(endpoint, merged, absent)
             return await self._call_plugin(endpoint, merged, absent)
 
         token = await self._get_token(merged)
@@ -638,13 +643,7 @@ class APIConnector:
                              duration_ms=(time.perf_counter() - started) * 1000.0 if started is not None else 0.0)
 
         try:
-            if endpoint.body:
-                marked = {**merged, **{name: _ABSENT for name in absent or ()}}
-                kwargs = _absent_as_none(json.loads(substitute_json(endpoint.body, marked)))
-                if not isinstance(kwargs, dict):
-                    return failed(f"{endpoint.name}: the body of an endpoint served by a function must be a JSON object (its arguments)")
-            else:
-                kwargs = {p.name: merged.get(p.name) for p in endpoint.params if merged.get(p.name) not in (None, "")}
+            kwargs = self._arguments(endpoint, merged, absent)
         except (ApiParamError, ValueError) as exc:
             return failed(f"{type(exc).__name__}: {exc}")
         # only a real plugin entry point: the module:function text cannot import anything else
@@ -664,6 +663,23 @@ class APIConnector:
         parsed: Any = dict(answer.extras or {})
         if answer.rows_affected is not None:
             parsed.setdefault("rows_affected", answer.rows_affected)
+        return self._answered(endpoint, parsed, url, started)
+
+    @staticmethod
+    def _arguments(endpoint: EndpointDef, merged: dict[str, Any], absent: set[str] | None) -> dict[str, Any]:
+        """What an endpoint served by a function or an action hands it: its parameters that hold
+        something — or the JSON object its ``body`` gives once filled (fixed values and variables
+        mixed; a variable nobody gave is ``None``). Raises ValueError / ApiParamError."""
+        if not endpoint.body:
+            return {p.name: merged.get(p.name) for p in endpoint.params if merged.get(p.name) not in (None, "")}
+        marked = {**merged, **{name: _ABSENT for name in absent or ()}}
+        kwargs = _absent_as_none(json.loads(substitute_json(endpoint.body, marked)))
+        if not isinstance(kwargs, dict):
+            raise ValueError(f"{endpoint.name}: the body of an endpoint served by a function or an action must be a JSON object (its arguments)")
+        return kwargs
+
+    def _answered(self, endpoint: EndpointDef, parsed: Any, url: str, started: float) -> ApiResult:
+        """The answer of a function or an action, treated as an HTTP answer's JSON."""
         parsed = json.loads(json.dumps(parsed, default=str))
         refused = _errors_in(parsed, endpoint.error_fields)
         return ApiResult(
@@ -672,6 +688,80 @@ class APIConnector:
             mapped={name: extract_path(parsed, path) for name, path in endpoint.response_map.items()} if refused is None and endpoint.response_map else {},
             error=refused, warnings=_errors_in(parsed, endpoint.warning_fields), duration_ms=(time.perf_counter() - started) * 1000.0,
         )
+
+    async def _call_action(self, endpoint: EndpointDef, merged: dict[str, Any], absent: set[str] | None = None) -> ApiResult:
+        """An endpoint served by a shared action (``action``): the steps of ``actions.toml`` run on
+        the server (:mod:`liberty.screens.actions`) with the endpoint's arguments as ``INPUT``;
+        what they ``return`` is the answer.
+
+        **Whose permissions.** The endpoint's: whoever may call it (``api:<connector>:<endpoint>``,
+        checked by the route before this) runs its steps — they are not checked again against the
+        caller, as a step of an orchestration is not. The caller stays the caller for everything
+        else: the row-level data scope of the signed-in user still narrows every query, the name
+        on a change package or a notification is theirs. Without a signed-in user (a job), the
+        steps run unrestricted, as a job's do."""
+        import dataclasses
+
+        from liberty.auth.principal import Principal, current_principal
+        from liberty.screens.actions import ActionInputError, ChainDeps, _builtin, run_chain
+        from liberty.screens.save import WriteContext
+
+        ref = endpoint.action or ""
+        url = f"action:{ref}"
+
+        def failed(message: str, started: float | None = None) -> ApiResult:
+            return ApiResult(connector=self.name, endpoint=endpoint.name, success=False, status_code=0, url=url, error=message,
+                             duration_ms=(time.perf_counter() - started) * 1000.0 if started is not None else 0.0)
+
+        state = getattr(self.registry, "state", None)
+        shared = (getattr(getattr(state, "actions", None), "actions", None) or {}).get(ref)
+        if shared is None:
+            return failed(f"{endpoint.name}: the shared action '{ref}' is not defined (actions.toml)")
+        key = (self.name, endpoint.name)
+        serving = _serving.get()
+        if key in serving:
+            return failed(f"{endpoint.name}: the action '{ref}' calls the endpoint it serves — "
+                          + " → ".join(f"{c}.{e}" for c, e in (*serving, key)))
+        try:
+            given = self._arguments(endpoint, merged, absent)
+        except (ApiParamError, ValueError) as exc:
+            return failed(f"{type(exc).__name__}: {exc}")
+        given = {k: v for k, v in given.items() if v is not None}
+
+        caller = current_principal.get()
+        runner = (dataclasses.replace(caller, permissions=("*",)) if caller is not None
+                  else Principal(id="system", username="system", is_superuser=True))
+        ctx = WriteContext(
+            connectors=self.registry, screens=getattr(state, "screens", None), principal=runner,
+            changesets=getattr(state, "changesets_db", None),
+            notify_ctx=(getattr(state, "notification_rules", None), getattr(state, "notify", None)),
+            state=state, origin=f"endpoint {self.name}.{endpoint.name}",
+        )
+        deps = ChainDeps(ctx=ctx, default_connector=self.name, inputs=given, navigates=False, origin=shared.label or ref, stack=(ref,))
+        defaults: dict[str, Any] = {}
+        for p in shared.params or []:
+            if p.default is not None:
+                d = p.default
+                built = _builtin(d[1:-1], deps) if (d.startswith("#") and d.endswith("#") and len(d) > 2) else None
+                defaults[p.name] = built if built is not None else d
+        started = time.perf_counter()
+        token = _serving.set((*serving, key))
+        try:
+            result = await run_chain(shared.steps, {}, deps, initial_input={**defaults, **given})
+        except ActionInputError as exc:
+            return failed(str(exc), started)
+        except Exception as exc:  # noqa: BLE001 — a step's failure outside the chain's own handling is the endpoint's
+            return failed(str(exc) or type(exc).__name__, started)
+        finally:
+            _serving.reset(token)
+        if not result.ok:
+            return failed(result.error or "the action failed", started)
+        parsed: dict[str, Any] = dict(result.returned)
+        if result.messages:
+            parsed.setdefault("messages", result.messages)
+        if result.errors:
+            parsed.setdefault("errors", result.errors)
+        return self._answered(endpoint, parsed, url, started)
 
     # -- body construction ------------------------------------------------- #
 

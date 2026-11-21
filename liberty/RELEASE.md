@@ -203,6 +203,33 @@
   the value was edited. It is now a multi-line box in both (the form's grows with the text).
 - **A row action says what it did.** The message of a `notify` step in a row's menu action was only written
   to the browser console; it is now shown in the grid's status banner, as a toolbar action's is.
+- **A field of `name = value` lines, shown as fields.** A new format, **Name = value list** (`pairs`): in the
+  record form the text is a list of name / value rows (add, remove), with the text itself one click away. With
+  the column hint **`params_of`** — the column of the screen that names an endpoint of the screen's connector —
+  it becomes that endpoint's own form: one labelled field per declared parameter, its help under it, a dropdown
+  for its choices, a required mark; a name the endpoint does not declare is still shown. For any screen that
+  stores the parameters of a call someone must fill in.
+- A record form opened from another record form (a nested table's row) **no longer overflows it**: when its
+  content is taller than the form behind, it scrolls — its title and its Save button stay in view.
+- `liberty.connectors.api_rows.answer_rows(endpoint, answer)`: the rows of an endpoint's answer as a screen reads
+  them (`rows_field`, `row_map`), for an application's code that checks an answer.
+- **An endpoint served by a shared action — steps composed into one call.** An API endpoint can now name a
+  shared action (**Served by an action**, `action`; Settings → Actions is where it is built): its steps —
+  queries, other endpoints, plugin functions, conditions, loops — run on the server and answer as ONE endpoint,
+  which a screen, an action, a job, the assistant or an outside caller uses like any other. The endpoint's
+  parameters (or the JSON object its body gives once filled) are the action's inputs (`INPUT.<name>`; one not
+  given takes the action's own default); what the action `return`s is the answer, its `notify` messages come
+  as `messages`; a step that fails is the endpoint's error. **It runs with the endpoint's permission**: who
+  holds `api:<connector>:<endpoint>` runs its steps, which are not checked again against the caller — a
+  composed service is granted as a whole, as an orchestration is. The caller's row-level data scope still
+  applies to every query. An action that calls the endpoint it serves is refused; the integrity report names
+  an endpoint whose action is not defined; "find usages" of a shared action lists the endpoints it serves and
+  renaming it follows them. In the endpoint list such an endpoint shows `ACT`.
+- **A step reads an endpoint's rows by column name.** When a `call_api` step (in a screen action or a shared
+  action) calls an endpoint a screen can read — one that says where its rows are (`rows_field`) and names its
+  columns (`row_map`) — what it binds is those rows: the next step reads `<step>.first_row.<COLUMN>` and
+  `<step>.rows`, instead of a path into the server's raw answer. An endpoint without `rows_field`, or with a
+  `response_field`, binds what it did before. `POST /api/http/...` returns the same rows as `rows`.
 
 ## 7.0.83 — 2026-11-19
 

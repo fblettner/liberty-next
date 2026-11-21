@@ -790,10 +790,12 @@ def rename_action(
     *,
     actions_path: Path,
     screens_path: Path | None = None,
+    connectors_path: Path | None = None,
     **_ignored: Any,
 ) -> RenameResult:
     """Rename a shared action ``[actions.<old>]`` → ``<new>`` + every ``call_action`` reference to
-    it — in screens.toml (any hook / tab / row menu) and in other shared actions that compose it.
+    it — in screens.toml (any hook / tab / row menu) and in other shared actions that compose it —
+    and every API endpoint it serves (``action = "<old>"`` in connectors.toml).
     Without this, renaming an action orphaned every screen that called it."""
     if old == new:
         raise RenameError(f"old and new action ids are identical ({old!r}) — nothing to do")
@@ -826,9 +828,24 @@ def rename_action(
         if scr_n:
             _validate("screens", scr_doc, parse_screens, screens_path)
 
+    # connectors.toml — the endpoints the action serves.
+    con_doc = None
+    con_n = 0
+    if connectors_path is not None and connectors_path.exists() and connectors_path.read_text(encoding="utf-8").strip():
+        con_doc = _load_doc("connectors", connectors_path)
+        for conn in (con_doc.get("connectors") or {}).values():
+            for ep in (conn.get("endpoints") or []) if isinstance(conn, dict) else []:
+                if isinstance(ep, dict) and ep.get("action") == old:
+                    ep["action"] = new
+                    con_n += 1
+        if con_n:
+            result.files[str(connectors_path)] = con_n
+
     actions_path.write_text(_dump_doc("actions", act_doc), encoding="utf-8")
     if scr_n and scr_doc is not None:
         screens_path.write_text(_dump_doc("screens", scr_doc), encoding="utf-8")
+    if con_n and con_doc is not None:
+        connectors_path.write_text(_dump_doc("connectors", con_doc), encoding="utf-8")
     return result
 
 

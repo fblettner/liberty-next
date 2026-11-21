@@ -1287,4 +1287,16 @@ async def call_http(
             )
         except Exception as exc:  # noqa: BLE001 — capture must never fail the (committed) call
             _log.error("call_api change capture failed for %s.%s: %s", connector, endpoint, exc)
-    return result.to_dict()
+    out = result.to_dict()
+    # an endpoint a screen can read (``rows_field``): its rows as the screen reads them, named by its
+    # ``row_map`` — what a step that calls it binds, so the next step reads ``<step>.first_row.<COLUMN>``
+    # and not a path into the server's raw answer
+    from liberty.connectors.api_rows import ApiRowsError, answer_rows, rows_endpoint
+
+    definition = rows_endpoint(conn, endpoint)
+    if definition is not None and getattr(result, "success", False) and not definition.response_field:
+        try:
+            out["rows"] = answer_rows(definition, result.json)
+        except ApiRowsError:
+            pass                                 # the rows are not where the endpoint says: the raw answer stands
+    return out

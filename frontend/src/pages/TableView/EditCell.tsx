@@ -197,7 +197,7 @@ export function EditCell({
   const type = ctrl === 'date' ? 'date' : ctrl === 'number' ? 'number' : 'text'
   const dv = ctrl === 'date' && defaultText ? defaultText.slice(0, 10) : defaultText
   if (ctrl === 'date') return <CellDate initial={dv} onChange={(v) => onChange(v === '' ? null : v)} />
-  if (ctrl === 'text' && (column.format ?? '').toLowerCase() === 'textarea') {
+  if (ctrl === 'text' && ['textarea', 'pairs'].includes((column.format ?? '').toLowerCase())) {
     // a long text keeps its lines (an <input> drops them): the same box, a few lines high
     return (
       <EditArea rows={Math.min(4, Math.max(1, dv.split('\n').length))} defaultValue={dv}

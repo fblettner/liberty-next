@@ -90,6 +90,9 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           multi-pool; the pure SQL-text helpers — ORDER BY split, aggregate / filter wraps,
                           #SCHEMA# / #DBLINK# placeholders — in sqltext.py), api.py (APIConnector: httpx, 5 auth kinds, templating — a value stays where its placeholder is: `substitute_path` / `_json` / `_form`, `file_part_path` for a user's values, `call(..., untrusted=True)`; a parameter's help / example / choices; `generators` = the editor's "Create from…", a plugin function run by `web/admin/api_test.py` `POST /admin/config/api/generate`),
                           an endpoint SERVED by a plugin function: `callable` + the body as its arguments, `_call_plugin`),
+                          or by a SHARED ACTION: `action` → `_call_action` (screens/actions.run_chain on `registry.state`, the caller's
+                          permissions replaced by `*` — the endpoint's permission is the gate —, a cycle guard; a `call_api` step binds a
+                          rows endpoint's named rows: `web/connectors.call_http` adds `rows`),
                           api_rows.py (a screen on an API connector — its saves: `api_write`, endpoints marked `writable`, through
                           `web/connectors._run_api`; a screen READ by a query may save through them too: `Screen.save_connector`,
                           `columns_for` = which column feeds a variable (dd / dd_prefix), a save names its screen `?_screen=&_app=`; `query_permission` = api: or sql:; its read: `rows_field` / `row_map` / `labels_field` / `more_field` / `limit_param` →
@@ -307,7 +310,7 @@ pages/TableView/       the data screen: index (params, streaming run), ResultTab
                        + import + row menu + export; EditCell = the inline-edit control, resultColumns.ts = the pure
                        column helpers, tested; useRowMenu = the row context menu: state, runner, popup; useBatchEdit = the Bulk edit
                        state + its Save and row hooks; useImport = file / dialog / paste import into it), ScreenDialog (the form, nested tabs; useRecordLock = its row lock), useActionPrompt
-                       (the prompt_fields dialog, shared by the grid and the form), FormatValue (url / email /
+                       (the prompt_fields dialog, shared by the grid and the form), PairsField (a `pairs` column: name = value lines as fields, an endpoint's parameters with `params_of`; services/pairs.ts, tested), FormatValue (url / email /
                        color: link, mailto, swatch — safe values only, services/cells.formatLink), FilterPanel (a date column = a
                        period, logic in services/serverFilters.ts, tested),
                        actionRunner.ts (chain / if / loop / return runtime), Summary / Tree / Chart views

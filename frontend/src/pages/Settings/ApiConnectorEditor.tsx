@@ -22,6 +22,7 @@
 import { Fragment, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import {
   Activity, ChevronDown, ChevronRight, Plus, RefreshCw, Trash2, Wand2,
 } from 'lucide-react'
@@ -67,6 +68,7 @@ type Endpoint = {
   limit_param?: string | null
   skip_blank_query?: boolean
   callable?: string | null
+  action?: string | null
   error_fields?: string[] | null
   /** Where the server puts its warnings: reported with the answer, the call stands. */
   warning_fields?: string[] | null
@@ -750,7 +752,7 @@ function EndpointsTab({
             <EndpointHead $open={open} onClick={() => setOpenIdx(open ? null : i)} type="button">
               {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
               {/* served by a plugin function: no HTTP method */}
-              <MethodPill $tone={ep.callable ? 'POST' : (ep.method ?? 'GET')}>{ep.callable ? 'FN' : (ep.method ?? 'GET')}</MethodPill>
+              <MethodPill $tone={ep.callable || ep.action ? 'POST' : (ep.method ?? 'GET')}>{ep.action ? 'ACT' : ep.callable ? 'FN' : (ep.method ?? 'GET')}</MethodPill>
               <span className="name">{ep.name || '(unnamed)'}</span>
               {ep.label && <span style={{ color: colors.text.muted, fontFamily: fonts.sans }}>· {ep.label}</span>}
               {ep.writable && <WritesTag title={t('settings.api.endpoint.writableHint')}>{t('settings.api.endpoint.writableTag')}</WritesTag>}
@@ -828,6 +830,8 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
   const [queryText, setQueryText] = useState(queryToString(value.query_params))
   // the plugin functions an endpoint can be served by (the same catalogue as a call_plugin action)
   const [callables, setCallables] = useState<Array<{ callable: string; docstring: string | null }>>([])
+  const { sharedActions } = useWorkspace()
+  const actionIds = useMemo(() => Object.keys(sharedActions ?? {}).sort(), [sharedActions])
   useEffect(() => {
     api.get<{ callables: Array<{ callable: string; docstring: string | null }> }>('/api/plugins/callables')
       .then((r) => setCallables(r.callables)).catch(() => setCallables([]))
@@ -907,6 +911,20 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
         />
       </FieldRow>
       {value.callable && <Banner $tone="info">{t('settings.api.endpoint.callableHint')}</Banner>}
+      {/* …or by a shared action: steps composed in the action designer, exposed as this endpoint */}
+      {!value.callable && (
+        <FieldRow>
+          <label title={t('settings.api.endpoint.actionHint')}>{t('settings.api.endpoint.action')}</label>
+          <SearchSelect
+            value={value.action ?? ''}
+            onChange={(v) => set({ action: v || undefined })}
+            options={[{ value: '', label: t('settings.api.endpoint.callableNone') },
+              ...actionIds.map((id) => ({ value: id, label: sharedActions?.[id]?.label ? `${id} — ${sharedActions[id].label}` : id })),
+              ...(value.action && !actionIds.includes(value.action) ? [{ value: value.action, label: value.action }] : [])]}
+          />
+        </FieldRow>
+      )}
+      {value.action && <Banner $tone="info">{t('settings.api.endpoint.actionHint')}</Banner>}
       <FieldRow>
         <label>{t('settings.api.endpoint.headers')}</label>
         <Input

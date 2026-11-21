@@ -430,6 +430,11 @@ def _check_generated_endpoints(state: Any, idx: _Index, out: list[Issue]) -> Non
                     out.append(Issue("error", "Endpoint function not found",
                                      f"endpoint '{name}.{ep.name}' is served by '{served_by}', which is not a function of an installed "
                                      "plugin — its calls fail", _connector_deep_link(name)))
+            action = getattr(ep, "action", None)
+            if action and action not in idx.shared_action_ids:
+                out.append(Issue("error", "Endpoint action not found",
+                                 f"endpoint '{name}.{ep.name}' is served by the shared action '{action}', which is not defined "
+                                 "— its calls fail", _connector_deep_link(name)))
             source = getattr(ep, "source", None)
             if source is not None and source.generator not in declared:
                 out.append(Issue("warning", "Generated endpoint without its generator",

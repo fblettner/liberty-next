@@ -137,6 +137,7 @@ async def rename_top_level_key(body: RenameBody, request: Request, _: Superuser)
                 body.old_name, body.new_name,
                 actions_path=Path(settings.actions.config_path),
                 screens_path=Path(settings.screens.config_path),
+                connectors_path=Path(settings.connectors.config_path),
             )
         else:
             raise HTTPException(

@@ -240,6 +240,37 @@
 - **Une action de ligne dit ce qu'elle a fait.** Le message d'une étape `notify` dans une action du menu
   d'une ligne n'était écrit que dans la console du navigateur ; il s'affiche maintenant dans le bandeau d'état
   de la grille, comme celui d'une action de la barre d'outils.
+- **Un champ de lignes `nom = valeur`, affiché en champs.** Un nouveau format, **Liste nom = valeur** (`pairs`) :
+  dans la fiche, le texte est une liste de lignes nom / valeur (ajouter, retirer), le texte lui-même restant à
+  un clic. Avec l'indication de colonne **`params_of`** — la colonne de l'écran qui nomme un point d'accès du
+  connecteur de l'écran — il devient le formulaire de ce point d'accès : un champ libellé par paramètre
+  déclaré, son aide en dessous, une liste pour ses valeurs fixes, la marque d'obligation ; un nom que le point
+  d'accès ne déclare pas reste affiché. Pour tout écran qui garde les paramètres d'un appel à remplir.
+- Une fiche ouverte depuis une autre fiche (la ligne d'une table imbriquée) **ne la déborde plus** : quand son
+  contenu est plus haut que la fiche derrière, elle défile — son titre et son bouton Enregistrer restent
+  visibles.
+- `liberty.connectors.api_rows.answer_rows(endpoint, answer)` : les lignes de la réponse d'un point d'accès comme
+  un écran les lit (`rows_field`, `row_map`), pour le code d'une application qui vérifie une réponse.
+- **Un point d'accès servi par une action partagée — des étapes composées en un seul appel.** Un point d'accès
+  d'API peut maintenant désigner une action partagée (**Servi par une action**, `action` ; elle se construit
+  dans Paramètres → Actions) : ses étapes — requêtes, autres points d'accès, fonctions de plugin, conditions,
+  boucles — s'exécutent sur le serveur et répondent comme UN point d'accès, qu'un écran, une action, un job,
+  l'assistant ou un appelant extérieur utilise comme un autre. Les paramètres du point d'accès (ou l'objet JSON
+  que donne son corps une fois rempli) sont les entrées de l'action (`INPUT.<nom>` ; une entrée non fournie
+  prend la valeur par défaut de l'action) ; ce que l'action retourne (`return`) est la réponse, ses messages
+  `notify` arrivent dans `messages` ; une étape en échec est l'erreur du point d'accès. **Elle s'exécute avec
+  la permission du point d'accès** : qui détient `api:<connecteur>:<point d'accès>` exécute ses étapes, qui ne
+  sont pas revérifiées pour l'appelant — un service composé s'accorde en entier, comme une orchestration. Le
+  périmètre de données de l'appelant s'applique toujours à chaque requête. Une action qui appelle le point
+  d'accès qu'elle sert est refusée ; le rapport d'intégrité nomme un point d'accès dont l'action n'est pas
+  définie ; « Rechercher les utilisations » d'une action partagée liste les points d'accès qu'elle sert et son
+  renommage les suit. Dans la liste des points d'accès, un tel point d'accès affiche `ACT`.
+- **Une étape lit les lignes d'un point d'accès par nom de colonne.** Quand une étape `call_api` (dans une
+  action d'écran ou une action partagée) appelle un point d'accès qu'un écran peut lire — qui dit où sont ses
+  lignes (`rows_field`) et nomme ses colonnes (`row_map`) — elle récupère ces lignes : l'étape suivante lit
+  `<étape>.first_row.<COLONNE>` et `<étape>.rows`, au lieu d'un chemin dans la réponse brute du serveur. Un
+  point d'accès sans `rows_field`, ou avec un `response_field`, donne ce qu'il donnait. `POST /api/http/...`
+  renvoie les mêmes lignes dans `rows`.
 
 ## 7.0.83 — 2026-11-19
 

@@ -254,6 +254,7 @@ async def rebuild_runtime(
         if "connectors" in wanted:
             old = getattr(app.state, "connectors", None)
             new = load_registry(settings, result.license)
+            new.state = app.state  # type: ignore[attr-defined] — an endpoint served by an action runs it there
             app.state.connectors = new
             result.connectors = new
             await _rebind_pool_holders(app, settings, new)

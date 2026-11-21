@@ -45,6 +45,7 @@ export interface ApiEndpointMeta {
   /** Where the endpoint's rows are: with it, a screen can read the endpoint as it reads a query. */
   rows_field?: string | null
   limit_param?: string | null   // the parameter a screen fills from its own row limit
+  action?: string | null        // the shared action that serves the endpoint, when one does
   writable?: boolean
 }
 
@@ -189,6 +190,8 @@ export interface Column {
   wrap?: boolean
   /** What the column is in a row's card on a phone (`ColumnHint.card`): the heading, always a line, never. */
   card?: 'title' | 'show' | 'hide'
+  /** A `pairs` column (name = value lines) holding the parameters of the endpoint this other column names. */
+  params_of?: string
   align?: 'left' | 'right' | 'center' | string
   format?: string
   /** The row-menu action a click on the value fires (`ColumnHint.drill`): the cell renders as a link. */

@@ -409,7 +409,9 @@ async def _run_one(a: Any, chain: Row, form: Mapping[str, Any], deps: ChainDeps,
                 return fail(f"{label}: API {resp.get('status_code') or ''} {resp.get('error') or ''}".strip())
             result.ran.append(f"{label}: API {a.connector}.{a.endpoint}")
             if a.bind_result:
-                payload = resp.get("extracted") if resp.get("extracted") is not None else resp.get("json")
+                # the endpoint's own projection first (``response_field``), then its rows when a screen can read it
+                # (``rows_field`` / ``row_map``: columns by name), else the whole answer
+                payload = resp.get("extracted") if resp.get("extracted") is not None else resp.get("rows") if "rows" in resp else resp.get("json")
                 _bind_rows(chain, a.id, payload if isinstance(payload, list) else ([] if payload is None else [payload]))
         elif a.type == "call_plugin":
             from liberty.web.plugins import run_plugin_callable

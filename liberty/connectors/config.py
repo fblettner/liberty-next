@@ -404,6 +404,15 @@ class ColumnHint(BaseModel):
     )
     width: int | None = Field(default=None, json_schema_extra={"x_group": "Display"}, description="Fixed column width in pixels (blank = auto-size).")
     wrap: bool = Field(default=False, json_schema_extra={"x_group": "Display"}, description="Wrap long text over several lines in the grid (default: one line, cut with an ellipsis).")
+    params_of: str | None = Field(
+        default=None, json_schema_extra={"x_group": "Display", "x_enum_ref": "SCREEN_COLUMNS", "x_case": "upper"},
+        description=(
+            "For a column whose format is ``pairs`` (``name = value``, one per line): the column of this "
+            "screen that names an ENDPOINT of the screen's connector. The record form then shows one "
+            "labelled field per parameter of that endpoint (its help, a dropdown for its choices) instead "
+            "of free lines — the parameters of a call someone fills in. Blank = free names."
+        ),
+    )
     card: Literal["title", "show", "hide"] | None = Field(
         default=None, json_schema_extra={"x_group": "Display"},
         description=(
@@ -975,6 +984,7 @@ class EndpointDef(BaseModel):
     body: str | None = Field(default=None, description="Request body template with ``{{placeholders}}``. For multipart: ``name=value`` (text) or ``name=@path;filename=X;contentType=Y`` (file).")
     content_type: str = Field(default="application/json", description="Content-Type of the request body.")
     callable: str | None = Field(default=None, description="``module:function`` of an application's plugin that SERVES this endpoint instead of an HTTP call — for what one call cannot do (several calls in one session: find a row, check it, change it). The function receives the endpoint's parameters as keyword arguments — or, when ``body`` is set, the JSON object the body gives once its ``{{placeholders}}`` are filled — plus ``connectors`` / ``connector`` / ``settings`` when it names them, and returns the answer as an object; an exception is the endpoint's failure. Everything after the call is the endpoint's as usual (rows, error and warning fields, response map, \"changes data\"). Only a function discovered under ``plugins/`` (``j_*``) can be named. ``method`` and ``path`` are then unused.")
+    action: str | None = Field(default=None, description="The id of a SHARED ACTION (actions.toml) that SERVES this endpoint instead of an HTTP call: steps composed in the action designer — queries, endpoints, plugin functions, conditions, loops — exposed as one call. The endpoint's parameters (or, when ``body`` is set, the JSON object the body gives once filled) are the action's inputs (``INPUT.<name>``; one not given takes the action's own default); what the action ``return``s is the answer, with its ``messages``; a step that fails is the endpoint's failure. The action runs with the ENDPOINT's permission: a caller needs ``api:<connector>:<endpoint>`` only — its steps are not checked again against the caller (the caller's row-level data scope still applies). ``method`` and ``path`` are then unused; not with ``callable``.")
     rows_field: str | None = Field(default=None, json_schema_extra={"x_group": "Rows"}, description="Dot-path to the LIST of records in the JSON response (``data.items``, ``fs_P01012_W01012B.data.gridData.rowset``). With it, a screen can read this endpoint as it reads a query: ``connector`` = this connector, ``read_query`` = this endpoint; the screen's filters are the endpoint's parameters and its row limit the endpoint's own.")
     row_map: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Rows"}, description="Column name → key of a record (``AN8 = \"z_AN8_19\"``; a dot-path reaches into a nested record). The columns are these, in this order — named so the dictionary recognises them. Empty = the records' own keys.")
     labels_field: str | None = Field(default=None, json_schema_extra={"x_group": "Rows"}, description="Dot-path to an object giving each record key its title (``fs_….data.gridData.columns``) — a column's label when neither the screen nor the dictionary names it.")
@@ -989,6 +999,12 @@ class EndpointDef(BaseModel):
     label: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Short name shown in listings.")
     description: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Longer description of what this endpoint does.")
     group: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="The heading this endpoint is listed under in the connector's editor (``P01012 — Address Book``, ``Monitoring``): the endpoints of one application, one subject, kept together. Display only.")
+
+    @model_validator(mode="after")
+    def _one_server(self) -> EndpointDef:
+        if self.callable and self.action:
+            raise ValueError(f"endpoint '{self.name}': served by a function (callable) OR by an action — not both")
+        return self
 
 
 class ApiTargetConfig(BaseModel):

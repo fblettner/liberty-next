@@ -293,6 +293,13 @@ def _records(endpoint: EndpointDef, parsed: Any) -> list[dict[str, Any]]:
     return [{column: extract_path(r, key) if "." in key else r.get(key) for column, key in endpoint.row_map.items()} for r in records]
 
 
+def answer_rows(endpoint: EndpointDef, parsed: Any) -> list[dict[str, Any]]:
+    """The rows of an endpoint's answer as a screen reads them — where ``rows_field`` says, named
+    by ``row_map`` — for code that checks an answer rather than shows it (an application's tests).
+    Raises :class:`ApiRowsError` like a read does when the rows are not where the endpoint says."""
+    return _records(endpoint, parsed)
+
+
 def _columns(endpoint: EndpointDef, parsed: Any, rows: list[dict[str, Any]], hints: list[ColumnHint] | None,
              dictionary: DictionaryFile, language: str | None, dictionary_scope: str | None) -> list[Column]:
     names = list(endpoint.row_map) if endpoint.row_map else list(dict.fromkeys(k for r in rows[:50] for k in r))

@@ -896,6 +896,7 @@ export function ScreenDialog({
                             column={colByName.get(f.name.toLowerCase()) ?? null}
                             formValues={formValues}
                             onChange={onFieldChange}
+                            connector={connector}
                             // Foreign-lock wins over per-field rules: every input is
                             // disabled when someone else holds the row's lock. The
                             // banner above the body explains why.

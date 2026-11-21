@@ -37,6 +37,7 @@ FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
             {"value": "currency", "label": "Currency"},
             {"value": "text", "label": "Text"},
             {"value": "textarea", "label": "Long Text"},
+            {"value": "pairs", "label": "Name = value list"},
             {"value": "password", "label": "Password"},
             {"value": "email", "label": "Email"},
             {"value": "url", "label": "URL"},

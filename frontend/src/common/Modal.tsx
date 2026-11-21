@@ -138,7 +138,9 @@ export const VisualBuilderModal = styled(Modal)<{ $fullscreen?: boolean }>`
  *  would hide the parent context that justified showing the nested one in the first place. */
 export const NestedScreenDialogModal = styled(Modal)<{ $fullscreen?: boolean }>`
   width: min(720px, 90vw);
-  max-height: 85vh;
+  /* never taller than what holds it: opened from a record form, its overlay is laid out inside that form's
+     window (a backdrop-filter contains fixed children) — a tall nested form scrolls instead of being cut */
+  max-height: min(85vh, 100%);
   /* Re-enable a small min-height so a single-field dialog still has a sensible footprint. */
   min-width: 0;
   min-height: 240px;

@@ -539,6 +539,7 @@ async function runOneAction(
           json?: unknown
           body?: string | null
           extracted?: unknown
+          rows?: Row[]
         }>(
           `/api/http/${encodeURIComponent(a.connector)}/${encodeURIComponent(a.endpoint)}`,
           // A change-tracked screen CAPTURES every call (so the package shows it for review); the
@@ -561,7 +562,9 @@ async function runOneAction(
           // payload. Wrap whatever we end up with in a single-element ``rows`` array (list
           // payloads pass through) so the chain-context shape stays uniform: ``<id>.first_row.<col>``
           // works for object payloads, ``<id>.rows`` for arrays.
-          const payload = resp?.extracted != null ? resp.extracted : resp?.json
+          // …then the endpoint's rows when a screen can read it (``rows_field`` / ``row_map``: the server
+          // sends them as ``rows``, columns by name), else the whole answer.
+          const payload = resp?.extracted != null ? resp.extracted : resp?.rows !== undefined ? resp.rows : resp?.json
           const rows = Array.isArray(payload) ? (payload as Row[]) : (payload == null ? [] : [payload as Row])
           ctx[a.id] = {
             rows,

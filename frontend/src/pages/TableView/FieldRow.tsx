@@ -16,6 +16,8 @@ import { type LookupSpec, lookupKey, lookupOptions, lookupCellColumns, useLookup
 import { colors, fontSize, fonts, radius, media } from '../../theme'
 import { cssColor, formatLink, isDateTimeColumn, localDateTime } from '../../services/cells'
 import { OpenFormatted } from './FormatValue'
+import { PairsField } from './PairsField'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { type Row, resolveBindList, applyRulesWhen, activeRulesWhen } from './dialogHelpers'
 
 export const CellWrap = styled.div<{ $span: number }>`
@@ -47,8 +49,10 @@ function isDateish(fmt: string, typ: string) { return /^(date|datetime|timestamp
 export function isPassword(c: Column | null): boolean { return (c?.format ?? '').toLowerCase() === 'password' }
 
 export function FieldRow({
-  field, column, formValues, onChange, disabled, required, suppressLookup = false, onLookupPick,
+  field, column, formValues, onChange, disabled, required, suppressLookup = false, onLookupPick, connector,
 }: {
+  /** The screen's connector — where a `pairs` column finds the endpoint whose parameters it holds (`params_of`). */
+  connector?: string
   field: ScreenField
   column: Column | null
   formValues: Row
@@ -101,8 +105,33 @@ export function FieldRow({
   const lookupMaps = useLookupTables(lookupSpec ? [lookupSpec] : [])
   const lookupData = lookupSpec ? lookupMaps.get(lookupKey(lookupSpec)) : undefined
 
+  // a `pairs` column holding an endpoint's parameters (`params_of` = the field naming the endpoint): its declared
+  // parameters, from the connectors the workspace already holds
+  const { connectors } = useWorkspace()
+  const isPairs = (column?.format ?? '').toLowerCase() === 'pairs'
+  const endpointField = isPairs ? column?.params_of : undefined
+  const endpointName = useMemo(() => {
+    if (!endpointField) return ''
+    const key = Object.keys(formValues).find((k) => k.toLowerCase() === endpointField.toLowerCase())
+    return key && formValues[key] != null ? String(formValues[key]) : ''
+  }, [endpointField, formValues])
+  const paramDefs = useMemo(() => {
+    if (!endpointField || !endpointName) return null
+    const conn = (connectors ?? []).find((c) => c.name === connector)
+    const endpoints = conn && 'endpoints' in conn ? conn.endpoints : []
+    return endpoints.find((e) => e.name === endpointName)?.params ?? null
+  }, [connectors, connector, endpointField, endpointName])
+
   let widget: React.ReactNode
-  if (disabled && effectiveRule?.kind === 'boolean') {
+  if (isPairs) {
+    widget = (
+      <PairsField
+        value={textValue} disabled={disabled} required={required}
+        defs={endpointField ? paramDefs : undefined} pickFirst={!!endpointField && !endpointName}
+        onChange={(text) => onChange(field.name, text)}
+      />
+    )
+  } else if (disabled && effectiveRule?.kind === 'boolean') {
     // A disabled boolean still reads as a (read-only) checkbox — matching the grid — not a raw 1/0.
     const checked = textValue === effectiveRule.true_value
     widget = <Checkbox checked={checked} disabled label={checked ? t('common.enabled') : t('common.disabled')} />
