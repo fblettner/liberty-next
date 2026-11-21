@@ -38,9 +38,11 @@ def _dashboards(spec: dict[str, list[str]]):
     })
 
 
-def _state(*, conns, screens=None, menus=None, homes=None, dashboards=None, actions=None):
+def _state(*, conns, screens=None, menus=None, homes=None, dashboards=None, actions=None, ai=None):
     from liberty.actions import parse_actions
+    from liberty.ai.appconfig import parse_ai_config
     return SimpleNamespace(
+        ai_config=parse_ai_config({"ai": ai}) if ai is not None else None,
         connectors=_Registry(conns, homes=homes),
         screens=parse_screens({"screens": screens}) if screens is not None else None,
         menus=parse_menus({"menus": menus}) if menus is not None else None,
@@ -376,3 +378,38 @@ def test_a_lookup_may_read_an_api_endpoint_that_returns_rows() -> None:
         ("Missing endpoint", "app · lookup 'no_rows' → endpoint 'sm.restart' is not an endpoint that returns rows"),
     ]
     assert [(u.type, u.label) for u in find_usages(state, kind="api_endpoint", name="instances", scope="sm")] == [("lookup_endpoint", "app · lookup ok")]
+
+
+def _playbook(body: str) -> dict:
+    return {"playbooks": {"investigate": {"title": "Investigate a failed run", "body": body}}}
+
+
+def test_a_query_an_assistant_playbook_names_is_not_unused() -> None:
+    # the assistant follows the playbook's prose: "query `list_runs`" is a call it will make
+    state = _state(
+        conns={"nomaflow": ["list_runs", "list_steps", "avg_duration", "left_behind"], "other": ["list_runs", "elsewhere"]},
+        ai={"nomaflow": _playbook("1. Query the recent runs (`sql_query` on connector `nomaflow`, query `list_runs`).\n"
+                                  "2. Load its steps (`sql_query` on `nomaflow`, query `list_steps`, parameter `run_id`); compare with (`avg_duration`).\n"
+                                  "3. Elsewhere, `other.elsewhere` says more."),
+            "*": _playbook("For every application: nothing named here.")},
+    )
+    unused = [i.message for i in check_integrity(state) if i.category == "Unused query"]
+    assert not any(f"nomaflow.{q}" in m for q in ("list_runs", "list_steps", "avg_duration") for m in unused)
+    assert any("nomaflow.left_behind" in m for m in unused)
+    # the name alone means the playbook's own application: the same name on another connector is not covered,
+    # a query written with its connector is
+    assert any("other.list_runs" in m for m in unused) and not any("other.elsewhere" in m for m in unused)
+    assert not [i for i in check_integrity(state) if i.category == "Assistant playbook"]
+
+
+def test_a_playbook_that_names_a_query_nobody_has_is_an_error() -> None:
+    state = _state(
+        conns={"nomaflow": ["avg_duration"], "jde": ["f0101_get"]},
+        ai={"nomaflow": _playbook("1. Query `list_runs` on the `nomaflow` connector.\n2. Then query `jde.f0101_get`, and query `jde.gone_get`.\n"
+                                  "3. Open Settings → Connectors and check the query in `connectors.toml`; the query `avg_duration` is fine."),
+            "ghost": _playbook("An application without a connector: query `anything` is not judged.")},
+    )
+    errors = [i.message for i in check_integrity(state) if i.category == "Assistant playbook"]
+    assert errors == ["playbook 'nomaflow.investigate' tells the assistant to run query 'gone_get' (not a query of jde)",
+                      "playbook 'nomaflow.investigate' tells the assistant to run query 'list_runs' (not a query of nomaflow)"]
+    assert all(i.severity == "error" for i in check_integrity(state) if i.category == "Assistant playbook")

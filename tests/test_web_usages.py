@@ -173,3 +173,37 @@ def test_screen_usages_finds_nested_form_reference() -> None:
     state = _state(screens=screens)
     usages = find_usages(state, kind="screen", name="settings_jdedwards", scope="nomasx1")
     assert any(u.type == "nested_table_screen" for u in usages)
+
+
+def test_an_assistant_playbook_that_names_a_query_or_an_endpoint_is_a_usage() -> None:
+    from liberty.ai.appconfig import parse_ai_config
+
+    class _Conn:
+        def __init__(self, queries=(), endpoints=()):
+            self.config = SimpleNamespace(iter_named_queries=lambda: [(q, object()) for q in queries],
+                                          endpoints=[SimpleNamespace(name=e) for e in endpoints])
+
+    class _Connectors:
+        _all = {"nomaflow": _Conn(queries=["list_runs", "list_steps"]), "ais": _Conn(endpoints=["address_book"]), "idle": _Conn(queries=["x"])}
+        dictionary = None
+
+        def names(self):
+            return list(self._all)
+
+        def get(self, name):
+            return self._all[name]
+
+    state = _state()
+    state.connectors = _Connectors()
+    state.ai_config = parse_ai_config({"ai": {"nomaflow": {"playbooks": {"investigate": {
+        "title": "Investigate a failed run",
+        "body": "1. Query `list_runs` on the `nomaflow` connector, then `list_steps` and again `list_runs`.\n2. Call `ais.address_book` (the `api_call` tool)."}}}}})
+    runs = [u for u in find_usages(state, kind="query", name="list_runs", scope="nomaflow") if u.type == "ai_playbook_query"]
+    assert [(u.label, u.deep_link) for u in runs] == [("nomaflow · assistant playbook investigate", {"editor": "ai", "app": "nomaflow", "playbook": "investigate"})]
+    assert [u.type for u in find_usages(state, kind="query", name="list_steps", scope="nomaflow")] == ["ai_playbook_query"]
+    assert [u.type for u in find_usages(state, kind="api_endpoint", name="address_book", scope="ais")] == ["ai_playbook_endpoint"]
+    # the connector is in use — said once, however many of its queries the playbook names
+    assert [u.type for u in find_usages(state, kind="connector", name="nomaflow") if u.type.startswith("ai_")] == ["ai_playbook_connector"]
+    assert [u.type for u in find_usages(state, kind="connector", name="ais") if u.type.startswith("ai_")] == ["ai_playbook_connector"]
+    assert not [u for u in find_usages(state, kind="connector", name="idle") if u.type.startswith("ai_")]
+    assert not find_usages(state, kind="query", name="x", scope="idle")

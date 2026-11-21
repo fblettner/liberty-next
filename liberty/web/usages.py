@@ -33,6 +33,7 @@ Kinds supported:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -68,6 +69,7 @@ UsageType = Literal[
     "nomaflow_param_choices",   # a job parameter's ``choices_from = "query:<connector>/<query>:…"``
     "explorer_entity_query",    # ExplorerEntity.query (an Explorer model's entity)
     "notification_action_query",# a notification rule's action: a connector query
+    "ai_playbook_query",        # an assistant playbook (ai.toml) that names the query in its text
     "dictionary_scan_query",    # read by its NAME by the dictionary's "Scan a table" (web/dictgen.py)
     "menu_target_query",        # MenuItem.target (a query leaf) pointing at this query
     # connector references
@@ -84,6 +86,7 @@ UsageType = Literal[
     "nomaflow_step_connector",  # SQL step's connector
     "explorer_entity_connector",   # ExplorerEntity.connector, else the model's application
     "notification_action_connector",  # a notification rule's action connector
+    "ai_playbook_connector",    # an assistant playbook that names the connector, or one of its queries / endpoints
     # screen references
     "menu_target_screen",       # MenuItem.target where MenuItem.type matches a screen target
     "nested_table_screen",      # NestedTableTab.screen
@@ -94,6 +97,7 @@ UsageType = Literal[
     "screen_save_endpoint",     # Screen.update / insert / delete query naming an endpoint (its own or save_connector's)
     "lookup_endpoint",          # LookupDef.query naming a rows endpoint (its connector is an API one)
     "notification_action_endpoint",  # a notification rule's action: an endpoint
+    "ai_playbook_endpoint",     # an assistant playbook that names the endpoint in its text
     # pool references
     "connector_pool",           # Connector.pool
     # menu_item references
@@ -176,12 +180,12 @@ def _iter_shared_action_steps(state: Any) -> Any:
 @dataclass(slots=True)
 class _Ref:
     """A connector — and its query or endpoint when one is named — referenced from outside the screens:
-    a job, an Explorer model, a notification rule."""
+    a job, an Explorer model, a notification rule, a playbook of the assistant."""
 
     connector: str
     query: str | None
     endpoint: str | None
-    kind: str            # "nomaflow_step" | "nomaflow_param" | "explorer_entity" | "notification_action"
+    kind: str            # "nomaflow_step" | "nomaflow_param" | "explorer_entity" | "notification_action" | "ai_playbook"
     label: str
     deep_link: dict[str, Any]
 
@@ -250,16 +254,92 @@ def _iter_notification_refs(state: Any) -> Any:
                        f"notification rule {rid}", {"editor": "notifications", "rule": rid})
 
 
+_BACKTICKED = re.compile(r"`([^`\n]+)`")
+_PLAYBOOK_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def playbook_names(text: str) -> list[tuple[str | None, str]]:
+    """What a playbook's text names in backticks, as ``(connector or None, name)``: `` `name` ``,
+    `` `connector.name` `` or `` `connector/name` ``. Anything that is not an identifier (a path, a
+    sentence, a setting with spaces) is not a name."""
+    out: list[tuple[str | None, str]] = []
+    for token in _BACKTICKED.findall(text or ""):
+        head, sep, tail = token.strip().replace("/", ".").partition(".")
+        if sep and _PLAYBOOK_NAME.match(head) and _PLAYBOOK_NAME.match(tail):
+            out.append((head, tail))
+        elif not sep and _PLAYBOOK_NAME.match(head):
+            out.append((None, head))
+    return out
+
+
+def _named_on(conn: Any) -> tuple[set[str], set[str]]:
+    """``(queries, endpoints)`` a connector has, by name."""
+    cfg = getattr(conn, "config", None)
+    queries: set[str] = set()
+    it = getattr(cfg, "iter_named_queries", None)
+    if it is not None:
+        try:
+            queries = {name for name, _ in it()}
+        except Exception:  # noqa: BLE001 — a malformed connector names nothing
+            queries = set()
+    return queries, {str(getattr(e, "name", "")) for e in getattr(cfg, "endpoints", None) or []}
+
+
+def playbook_scope(app: str, text: str, known: set[str]) -> set[str]:
+    """The connectors a playbook of *app* can mean when it names a query without saying whose: the
+    application's own, and every connector the text names."""
+    return ({app} & known) | {n for c, n in playbook_names(text) if c is None and n in known}
+
+
+def _iter_playbook_refs(state: Any) -> Any:
+    """What the assistant's playbooks name (ai.toml): a playbook is prose the assistant follows — "query
+    `list_runs` on the `nomaflow` connector" — so a query or an endpoint it names in backticks is one the
+    assistant will call. It counts as a reference when it IS a query or an endpoint of the connector written
+    with it (`` `nomaflow.list_runs` ``), of the playbook's application, or of a connector the text names.
+    Without this a query only a playbook uses read "0 references — safe to delete", and Integrity called it
+    unused."""
+    ai = getattr(state, "ai_config", None)
+    connectors = getattr(state, "connectors", None)
+    lister = getattr(ai, "playbooks", None)
+    if lister is None or connectors is None:
+        return
+    try:
+        known = set(connectors.names())
+        playbooks = list(lister())
+    except Exception:  # noqa: BLE001 — nothing to report from a file that cannot list
+        return
+    for app, pid, playbook in playbooks:
+        text = f"{getattr(playbook, 'description', '') or ''}\n{getattr(playbook, 'body', '') or ''}"
+        label, link = f"{app} · assistant playbook {pid}", {"editor": "ai", "app": app, "playbook": pid}
+        scope = playbook_scope(app, text, known)
+        seen: set[tuple[str, str | None, str | None]] = set()
+        for conn_name in sorted(scope - {app}):                 # a connector the text names
+            seen.add((conn_name, None, None))
+            yield _Ref(conn_name, None, None, "ai_playbook", label, link)
+        for given, name in playbook_names(text):
+            for conn_name in ([given] if given else sorted(scope)):
+                if conn_name not in known:
+                    continue
+                queries, endpoints = _named_on(connectors.get(conn_name))
+                for key in ((conn_name, name, None) if name in queries else None, (conn_name, None, name) if name in endpoints else None):
+                    if key is not None and key not in seen:
+                        seen.add(key)
+                        yield _Ref(key[0], key[1], key[2], "ai_playbook", label, link)
+
+
 def _iter_outside_refs(state: Any) -> Any:
     yield from _iter_job_refs(state)
     yield from _iter_explorer_refs(state)
     yield from _iter_notification_refs(state)
+    yield from _iter_playbook_refs(state)
 
 
 _REF_QUERY_TYPE = {"nomaflow_step": "nomaflow_step_query", "nomaflow_param": "nomaflow_param_choices",
-                   "explorer_entity": "explorer_entity_query", "notification_action": "notification_action_query"}
+                   "explorer_entity": "explorer_entity_query", "notification_action": "notification_action_query",
+                   "ai_playbook": "ai_playbook_query"}
 _REF_CONNECTOR_TYPE = {"nomaflow_step": "nomaflow_step_connector", "nomaflow_param": "nomaflow_step_connector",
-                       "explorer_entity": "explorer_entity_connector", "notification_action": "notification_action_connector"}
+                       "explorer_entity": "explorer_entity_connector", "notification_action": "notification_action_connector",
+                       "ai_playbook": "ai_playbook_connector"}
 
 
 def _dictionary_scan_usage(connector: str, query: str) -> Usage | None:
@@ -280,7 +360,8 @@ def _dictionary_scan_usage(connector: str, query: str) -> Usage | None:
 
 
 def connectors_named_outside(state: Any) -> set[str]:
-    """Every connector a job, an Explorer model or a notification rule names (for Integrity's unused-connector check)."""
+    """Every connector a job, an Explorer model, a notification rule or an assistant playbook names (for
+    Integrity's unused-connector check)."""
     return {r.connector for r in _iter_outside_refs(state)}
 
 
@@ -658,7 +739,7 @@ def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
                             label=f"{scope_name} · dashboard {did} · {getattr(w, 'type', 'widget')}",
                             deep_link=_dashboard_deep_link(did),
                         ))
-    # Jobs, Explorer models, notification rules.
+    # Jobs, Explorer models, notification rules, the assistant's playbooks.
     for ref in _iter_outside_refs(state):
         if ref.connector == connector and ref.query == query:
             out.append(Usage(type=_REF_QUERY_TYPE[ref.kind], label=ref.label, deep_link=ref.deep_link))
@@ -767,10 +848,14 @@ def _find_connector_usages(state: Any, name: str) -> list[Usage]:
                             label=f"{scope_name} · dashboard {did} · {getattr(w, 'type', 'widget')}",
                             deep_link=_dashboard_deep_link(did),
                         ))
-    # Jobs, Explorer models, notification rules.
+    # Jobs, Explorer models, notification rules, the assistant's playbooks (one line per place, however many
+    # of the connector's queries that place names).
+    said: set[tuple[str, str]] = set()
     for ref in _iter_outside_refs(state):
-        if ref.connector == name:
-            out.append(Usage(type=_REF_CONNECTOR_TYPE[ref.kind], label=ref.label, deep_link=ref.deep_link))
+        usage_type = _REF_CONNECTOR_TYPE[ref.kind]
+        if ref.connector == name and (usage_type, ref.label) not in said:
+            said.add((usage_type, ref.label))
+            out.append(Usage(type=usage_type, label=ref.label, deep_link=ref.deep_link))
     return out
 
 
@@ -819,10 +904,13 @@ def _find_api_endpoint_usages(state: Any, connector: str, endpoint: str) -> list
             for lk_id, lk in (section.get("lookups") or {}).items():
                 if (getattr(lk, "connector", None) or (None if s == "shared" else s)) == connector and getattr(lk, "query", None) == endpoint:
                     out.append(Usage(type="lookup_endpoint", label=f"{s} · lookup {lk_id}", deep_link=_dict_deep_link("lookups", s, lk_id)))
-    # A notification rule's action.
+    # A notification rule's action; an assistant playbook that names the endpoint.
     for ref in _iter_notification_refs(state):
         if ref.connector == connector and ref.endpoint == endpoint:
             out.append(Usage(type="notification_action_endpoint", label=ref.label, deep_link=ref.deep_link))
+    for ref in _iter_playbook_refs(state):
+        if ref.connector == connector and ref.endpoint == endpoint:
+            out.append(Usage(type="ai_playbook_endpoint", label=ref.label, deep_link=ref.deep_link))
     return out
 
 

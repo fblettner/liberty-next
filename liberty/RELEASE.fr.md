@@ -396,6 +396,16 @@
   connecteur, et avec `&create=<générateur>&q=<texte>` son dialogue « Créer depuis… » sur ce générateur, le texte
   déjà cherché. Pour une page livrée par une application, une notification, un document. Le contrat des pages
   gagne `useCan` (l'appelant détient-il une permission — pour ne montrer un bouton qu'à qui peut s'en servir).
+- **L'intégrité et « Rechercher les utilisations » lisent les procédures de l'assistant.** Une procédure
+  (`ai.toml`) est un texte que l'assistant suit — « query `list_runs` on the `nomaflow` connector » — donc une
+  requête ou un point d'accès qu'elle nomme sera appelé par l'assistant ; rien d'autre dans la configuration ne
+  le désigne, et l'intégrité signalait une telle requête comme *inutilisée*, la recherche d'utilisations comme
+  « 0 référence — suppression sans risque ». Les deux comptent maintenant un nom écrit entre accents graves
+  dans une procédure lorsqu'il est une requête ou un point d'accès du connecteur écrit avec lui
+  (`` `nomaflow.list_runs` ``), de l'application de la procédure, ou d'un connecteur que le texte nomme ; le
+  connecteur est lui aussi utilisé. Dans l'autre sens, une nouvelle erreur, **Assistant playbook** : une étape
+  qui dit « query `x` » alors qu'aucun connecteur que la procédure peut désigner n'a de requête ou de point
+  d'accès de ce nom — l'étape échouerait.
 - **Une page livrée par une application peut utiliser la grille partagée.** Le contrat des pages (version 2)
   gagne `Grid` : la grille des écrans de données — recherche, filtres par colonne, tri, regroupement, choix des
   colonnes, export, vues enregistrées de l'utilisateur — pour une liste de lignes que la page lui donne. La page

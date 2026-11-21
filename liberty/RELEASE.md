@@ -336,6 +336,14 @@
   `&create=<generator>&q=<text>` its "Create from…" dialog on that generator with the text already searched.
   For a page an application ships, a notification, a document. The page contract gains `useCan` (does the caller
   hold a permission — to show a button only to who may use it).
+- **Integrity and Find usages read the assistant's playbooks.** A playbook (`ai.toml`) is prose the assistant
+  follows — "query `list_runs` on the `nomaflow` connector" — so a query or an endpoint it names is one the
+  assistant will call; nothing else in the configuration points at it, and Integrity reported such a query as
+  *Unused*, Find usages as "0 references — safe to delete". Both now count a name written in backticks in a
+  playbook when it is a query or an endpoint of the connector written with it (`` `nomaflow.list_runs` ``), of
+  the playbook's application, or of a connector the text names; the connector is in use too. The other way
+  round is a new error, **Assistant playbook**: a step that says "query `x`" when no connector the playbook can
+  mean has a query or an endpoint of that name — the step would fail.
 - **A page an application ships can use the shared grid.** The page contract (version 2) gains `Grid`: the
   grid of the data screens — search, filters per column, sort, grouping, the choice of columns, the export, the
   user's saved views — for a list of rows the page hands it. The page describes its columns in a small shape of

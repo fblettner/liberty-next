@@ -11,6 +11,7 @@ Powers ``GET /admin/config/integrity`` → the Liberty Next → Build → Integr
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -26,8 +27,11 @@ from liberty.web.usages import (
     _iter_screen_actions,
     _iter_shared_action_steps,
     _menu_deep_link,
+    _named_on,
     _screen_deep_link,
     connectors_named_outside,
+    playbook_names,
+    playbook_scope,
 )
 
 _CRUD = ("get", "put", "post", "delete")
@@ -480,6 +484,44 @@ def _check_api_targets(state: Any, idx: _Index, out: list[Issue]) -> None:
                                  f"connector '{name}' environment '{pool}' is not a defined pool", _connector_deep_link(name)))
 
 
+# "query `list_runs`", "Query `nomaflow.list_runs`", "queries `a`" — the wording of a step that tells the
+# assistant to run a query
+_PLAYBOOK_QUERY = re.compile(r"\bquer(?:y|ies)\s+(`[^`\n]+`)", re.IGNORECASE)
+
+
+def _check_playbooks(state: Any, idx: _Index, out: list[Issue]) -> None:
+    """A playbook of the assistant (ai.toml) is prose the assistant follows step by step: a step that says
+    "query `list_runs`" sends it to run that query. When no connector the playbook can mean — its application's,
+    one its text names, or the one written with the query — has a query or an endpoint of that name, the step
+    fails: an error. (The other direction — a query only a playbook names is NOT unused — is in Find usages.)"""
+    ai = getattr(state, "ai_config", None)
+    connectors = getattr(state, "connectors", None)
+    lister = getattr(ai, "playbooks", None)
+    if lister is None or connectors is None:
+        return
+    try:
+        playbooks = list(lister())
+    except Exception:  # noqa: BLE001
+        return
+    for app, pid, playbook in playbooks:
+        text = f"{getattr(playbook, 'description', '') or ''}\n{getattr(playbook, 'body', '') or ''}"
+        scope = playbook_scope(app, text, idx.conn_names)
+        missing: set[str] = set()
+        for quoted in _PLAYBOOK_QUERY.findall(text):
+            for given, name in playbook_names(quoted):
+                where = [given] if given else sorted(scope)
+                if not where or (given and given not in idx.conn_names):
+                    continue                                     # nothing says whose query it is: not judged
+                if not any(name in set().union(*_named_on(connectors.get(c))) for c in where):
+                    missing.add(f"'{name}' (not a query of {', '.join(where)})")
+        for what in sorted(missing):
+            out.append(Issue(
+                "error", "Assistant playbook",
+                f"playbook '{app}.{pid}' tells the assistant to run query {what}",
+                {"editor": "ai", "app": app, "playbook": pid},
+            ))
+
+
 def _check_unused_connectors(state: Any, idx: _Index, out: list[Issue]) -> None:
     """A connector referenced by nothing AND with no menu of its own is dead weight."""
     referenced: set[str] = set(idx.menu_items_by_app.keys())  # apps with a menu count as "used"
@@ -639,6 +681,7 @@ def check_integrity(state: Any) -> list[Issue]:
     _check_homes(state, idx, out)
     _check_api_targets(state, idx, out)
     _check_generated_endpoints(state, idx, out)
+    _check_playbooks(state, idx, out)
     _check_unused_connectors(state, idx, out)
     _check_orphan_screens(state, idx, out)
     _check_unused_queries(state, idx, out)
