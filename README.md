@@ -273,5 +273,16 @@ See [`CLAUDE.md`](CLAUDE.md) for the map of the code and the rules of the house.
 
 ## License
 
-The framework is free to use. `nomasx1`, `nomajde` and the other licensed applications
-are sold separately and unlocked by a license key.
+Liberty Next is **source-available** under the [Business Source License 1.1](LICENSE) — not an
+Open Source license. In short (the license is what counts):
+
+- **Free** to read, copy, modify and fork, and to **run in production** for your own organisation
+  and your own applications. Selling the applications, configuration or plugins you built on it is
+  yours to do.
+- **Not without Nomana-IT's written agreement:** selling or reselling Liberty Next (or a modified
+  version of it), or offering it as a paid hosted service.
+- Each version becomes available under the **GNU AGPL v3 or later** four years after its release.
+
+`nomasx1`, `nomajde` and Nomana-IT's other applications are separate products, sold separately
+and unlocked by a license key ([NOTICE](NOTICE)). Contributions come through forks and pull
+requests, under a contributor agreement ([CONTRIBUTING.md](CONTRIBUTING.md)).

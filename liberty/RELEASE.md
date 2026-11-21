@@ -2,6 +2,14 @@
 
 ## 7.0.84 — unreleased
 
+- **Liberty Next has a license: the Business Source License 1.1** (`LICENSE`, `NOTICE`). Source-available,
+  not Open Source: free to read, copy, modify and fork, and to run in production for your own organisation and
+  your own applications — the applications, configuration and plugins you build on it are yours to sell.
+  Selling or reselling Liberty Next itself (or a modified version), or offering it as a paid hosted service,
+  needs Nomana-IT's written agreement. Each version becomes available under the GNU AGPL v3 or later four
+  years after its release. It applies from this version; earlier versions were published without a license.
+  Nomana-IT's applications (nomasx1, nomajde…) are separate products under their own terms. Contributions
+  come through forks and pull requests, under a contributor agreement (`CONTRIBUTING.md`, `CLA.md`).
 - **Security — API connectors: a parameter can no longer redirect an endpoint.** The `{{placeholders}}` of an
   endpoint were filled as plain text, in the path and in the body. A caller holding the permission on one
   endpoint could therefore reach another path of the same connector (a value such as `../other/service`), or
@@ -271,6 +279,11 @@
   case with its last results as a strip, when it last ran, how long it took and what was found; a case opens
   in the Tests page. The Overview shows the same totals and links there. `GET /admin/test-results`.
 - A job's run form can list the test suites: `choices_from = "test_suites"` (or `"test_suites:<connector>"`).
+- **The tests have their own permissions**, so a functional team uses them without being administrators:
+  `tests:view` (the suites and the results), `tests:run` (play them) and `tests:edit` (write them); each
+  includes the one before, a superuser holds them all. They are in the role editor (Other access → Tests), and
+  an application's menu may carry the two pages — `type = "page"`, `target = "/liberty/test-results"` or
+  `"/liberty/tests"` — shown to who holds `tests:view`.
 - **The Liberty menu, in the order things are built.** Build had fifteen entries; it is now **Build** (Studio,
   assistant), **Data** (connectors, dictionary), **Screens** (screens, menus), **Logic** (services, tests,
   notifications, AI) and **Insight** (dashboards, charts, Explorer, report templates). Integrity opens the

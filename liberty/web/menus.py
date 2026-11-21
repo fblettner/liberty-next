@@ -48,9 +48,14 @@ Menus = Annotated[MenusFile, Depends(get_menus)]
 
 # Page routes whose feature area has its own permission: a menu leaf to them is shown only to who
 # may open them (the frontend's Access editor mirrors this — pages/Settings/Access/permissions.ts).
-_PAGE_PERMISSIONS: tuple[tuple[str, str], ...] = (("/nomaflow", "nomaflow:view"),)
-# A permission that includes another (an editor of jobs also sees them — liberty/web/jobs.py).
-_INCLUDED_IN: dict[str, tuple[str, ...]] = {"nomaflow:view": ("nomaflow:edit",)}
+_PAGE_PERMISSIONS: tuple[tuple[str, str], ...] = (
+    ("/nomaflow", "nomaflow:view"),
+    # the tests (liberty/web/admin/apptests.py): their results and their cases, from an application's menu
+    ("/liberty/test-results", "tests:view"), ("/liberty/tests", "tests:view"),
+)
+# A permission that includes another (an editor of jobs also sees them — liberty/web/jobs.py; who runs or edits
+# the tests also sees them).
+_INCLUDED_IN: dict[str, tuple[str, ...]] = {"nomaflow:view": ("nomaflow:edit",), "tests:view": ("tests:run", "tests:edit")}
 
 
 def page_permission(target: str | None) -> str | None:

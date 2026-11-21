@@ -176,7 +176,7 @@ def _more_users(db_url: str) -> None:
         auth = AuthDatabase(pools, "default")
         async with auth.session() as s:
             svc = AuthService(s)
-            await svc.get_or_create_role("studio", permissions=["api:studio:describe_code", "api:studio:rename_code"])
+            await svc.get_or_create_role("studio", permissions=["api:studio:describe_code", "api:studio:rename_code", "tests:view"])
             await svc.create_user("caller", password="callerpw", roles=["studio"])
         await pools.dispose()
     asyncio.run(go())

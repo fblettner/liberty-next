@@ -2,6 +2,15 @@
 
 ## 7.0.84 — non publiée
 
+- **Liberty Next a une licence : la Business Source License 1.1** (`LICENSE`, `NOTICE`). Code source
+  disponible, pas Open Source : libre de lire, copier, modifier et forker, et d'utiliser en production pour
+  votre organisation et vos propres applications — les applications, la configuration et les plugins que vous
+  construisez dessus sont à vous, y compris pour les vendre. Vendre ou revendre Liberty Next lui-même (ou une
+  version modifiée), ou l'offrir en service hébergé payant, demande l'accord écrit de Nomana-IT. Chaque version
+  devient disponible sous GNU AGPL v3 ou ultérieure quatre ans après sa sortie. Elle s'applique à partir de
+  cette version ; les versions antérieures ont été publiées sans licence. Les applications de Nomana-IT
+  (nomasx1, nomajde…) sont des produits distincts, sous leurs propres conditions. Les contributions passent
+  par des forks et des pull requests, sous un accord de contribution (`CONTRIBUTING.md`, `CLA.md`).
 - **Sécurité — connecteurs API : un paramètre ne peut plus détourner un point d'accès.** Les
   `{{paramètres}}` d'un point d'accès étaient remplacés comme du texte brut, dans le chemin et dans le corps.
   Un appelant ayant la permission sur un point d'accès pouvait donc atteindre un autre chemin du même
@@ -322,6 +331,11 @@
   et y mène. `GET /admin/test-results`.
 - Le formulaire de lancement d'un job peut lister les suites de tests : `choices_from = "test_suites"` (ou
   `"test_suites:<connecteur>"`).
+- **Les tests ont leurs propres permissions**, pour qu'une équipe fonctionnelle les utilise sans être
+  administratrice : `tests:view` (les suites et les résultats), `tests:run` (les jouer) et `tests:edit` (les
+  écrire) ; chacune inclut la précédente, un superutilisateur les détient toutes. Elles sont dans l'éditeur de
+  rôles (Autres accès → Tests), et le menu d'une application peut porter les deux pages — `type = "page"`,
+  `target = "/liberty/test-results"` ou `"/liberty/tests"` — montrées à qui détient `tests:view`.
 - **Le menu Liberty, dans l'ordre où les choses se construisent.** Construire avait quinze entrées ; c'est
   maintenant **Construire** (Studio, assistant), **Données** (connecteurs, dictionnaire), **Écrans** (écrans,
   menus), **Logique** (services, tests, notifications, IA) et **Analyse** (tableaux de bord, graphiques,

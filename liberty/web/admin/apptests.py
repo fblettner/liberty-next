@@ -10,7 +10,30 @@ from pydantic import BaseModel, Field
 
 from liberty.apptests import runner as r
 from liberty.apptests import store
-from liberty.web.admin._base import Superuser, router
+from typing import Annotated
+
+from fastapi import Depends
+
+from liberty.auth.dependencies import CurrentPrincipal
+from liberty.auth.principal import Principal
+from liberty.web.admin._base import router
+
+
+def _may(*permissions: str):
+    """Who holds one of *permissions* (a superuser holds them all): the tests are an application's
+    matter, not the installation's — a functional team writes and plays them without being
+    administrators. ``tests:view`` reads suites and results, ``tests:run`` plays them (and may
+    read), ``tests:edit`` writes them (and may read and play)."""
+    def guard(principal: CurrentPrincipal) -> Principal:
+        if not any(principal.has_permission(p) for p in permissions):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail=f"Missing permission: {permissions[0]}")
+        return principal
+    return guard
+
+
+Viewer = Annotated[Principal, Depends(_may("tests:view", "tests:run", "tests:edit"))]
+Runner = Annotated[Principal, Depends(_may("tests:run", "tests:edit"))]
+Editor = Annotated[Principal, Depends(_may("tests:edit"))]
 
 
 def _suite(request: Request, name: str) -> dict[str, Any]:
@@ -26,7 +49,7 @@ def _suite(request: Request, name: str) -> dict[str, Any]:
 
 
 @router.get("/test-results", summary="How the tests went")
-async def tests_results(request: Request, _: Superuser) -> dict[str, Any]:
+async def tests_results(request: Request, _: Viewer) -> dict[str, Any]:
     """Per suite: its last runs (passed / failed / changed / skipped, the time taken, who) and each
     case with its last statuses and what its last run found — and the totals by last result."""
     settings = request.app.state.settings
@@ -34,13 +57,13 @@ async def tests_results(request: Request, _: Superuser) -> dict[str, Any]:
 
 
 @router.get("/tests", summary="List the test suites")
-async def tests_list(request: Request, _: Superuser) -> dict[str, Any]:
+async def tests_list(request: Request, _: Viewer) -> dict[str, Any]:
     """Every suite with its cases and each case's last result."""
     return {"suites": store.overview(request.app.state.settings)}
 
 
 @router.get("/tests/{suite}", summary="Read a test suite")
-async def tests_read(suite: str, request: Request, _: Superuser) -> dict[str, Any]:
+async def tests_read(suite: str, request: Request, _: Viewer) -> dict[str, Any]:
     """The suite whole — its cases and their steps — with the last runs of each case."""
     try:
         return _suite(request, suite)
@@ -55,7 +78,7 @@ class SuiteBody(BaseModel):
 
 
 @router.put("/tests/{suite}", summary="Save a test suite")
-async def tests_save(suite: str, body: SuiteBody, request: Request, _: Superuser) -> dict[str, Any]:
+async def tests_save(suite: str, body: SuiteBody, request: Request, _: Editor) -> dict[str, Any]:
     """Write the suite (created when new): validated as a whole, the former file kept in the
     configuration's history. 422 with what is wrong — nothing is written then."""
     state = request.app.state
@@ -67,7 +90,7 @@ async def tests_save(suite: str, body: SuiteBody, request: Request, _: Superuser
 
 
 @router.delete("/tests/{suite}", summary="Delete a test suite")
-async def tests_delete(suite: str, request: Request, _: Superuser) -> dict[str, Any]:
+async def tests_delete(suite: str, request: Request, _: Editor) -> dict[str, Any]:
     state = request.app.state
     try:
         store.delete_suite(state.settings, suite, versions=getattr(state, "config_versions", None))
@@ -83,7 +106,7 @@ class RunBody(BaseModel):
 
 
 @router.post("/tests/{suite}/run", summary="Play a test suite or one case")
-async def tests_run(suite: str, body: RunBody, request: Request, principal: Superuser) -> dict[str, Any]:
+async def tests_run(suite: str, body: RunBody, request: Request, principal: Runner) -> dict[str, Any]:
     """Play the suite's cases (or one) as saved: checked, compared with the reference run when
     there is one, the results kept. ``mode = record`` keeps what the cases ``keep`` as the new
     reference. A case that writes is skipped unless *allow_writes*."""
@@ -115,7 +138,7 @@ class TryBody(BaseModel):
 
 
 @router.post("/tests/try", summary="Play one call now")
-async def tests_try(body: TryBody, request: Request, _: Superuser) -> dict[str, Any]:
+async def tests_try(body: TryBody, request: Request, _: Runner) -> dict[str, Any]:
     """What the endpoint answers NOW to these parameters — to fill what a step expects from it:
     the number of rows and the first row by column name. A call that changes data is not made
     from here (the case is run for that); a failing call is reported, not raised."""

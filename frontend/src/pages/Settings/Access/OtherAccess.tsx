@@ -28,7 +28,7 @@ const SegBtn = styled.button<{ $active?: boolean; $tone?: 'allow' | 'deny' }>`
 `
 const AddRow = styled.div`display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px;`
 
-type RuleType = 'connector' | 'query' | 'api' | 'dashboard' | 'explorer' | 'job' | 'nomaflow' | 'ai' | 'pattern'
+type RuleType = 'connector' | 'query' | 'api' | 'dashboard' | 'explorer' | 'job' | 'nomaflow' | 'tests' | 'ai' | 'pattern'
 
 interface Props { value: string[]; onChange: (next: string[]) => void; dashboardIds: string[] }
 
@@ -57,6 +57,12 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
       { value: 'nomaflow:view', label: t('settings.access.nomaflowView'), mono: 'nomaflow:view' },
       { value: 'nomaflow:edit', label: t('settings.access.nomaflowEdit'), mono: 'nomaflow:edit' },
     ]
+    // the tests without superuser (liberty/web/admin/apptests.py): see suites and results, play them, write them
+    if (type === 'tests') return [
+      { value: 'tests:view', label: t('settings.access.testsView'), mono: 'tests:view' },
+      { value: 'tests:run', label: t('settings.access.testsRun'), mono: 'tests:run' },
+      { value: 'tests:edit', label: t('settings.access.testsEdit'), mono: 'tests:edit' },
+    ]
     if (type === 'ai') return [
       { value: 'ai:chat', label: t('settings.access.aiChat'), mono: 'ai:chat' },
       // a personal access token + the /mcp endpoint: the assistant's tools from an external client (Claude)
@@ -83,6 +89,7 @@ export default function OtherAccess({ value, onChange, dashboardIds }: Props) {
     { value: 'explorer', label: t('settings.access.tExplorer') },
     { value: 'job', label: t('settings.access.tJob') },
     { value: 'nomaflow', label: t('settings.access.tNomaflow') },
+    { value: 'tests', label: t('tests.title') },
     { value: 'ai', label: t('settings.access.tAi') },
     { value: 'pattern', label: t('settings.access.tPattern') },
   ]

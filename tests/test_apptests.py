@@ -80,7 +80,13 @@ def test_the_suites_are_edited_played_and_kept(env) -> None:  # noqa: F811
         {"name": "card", "endpoint": "describe_code", "params": {"KY": "{{code}}"}, "keep": ["label"], "expect": {"equals": {"label": "one"}}}]}
     with TestClient(env) as client:
         h = _h(client, "admin")
-        assert client.get("/admin/tests", headers=_h(client, "caller")).status_code == 403
+        # the tests have their own permissions: who may see them is not who may play or write them
+        seer = _h(client, "caller")                                        # holds tests:view only
+        assert client.get("/admin/tests", headers=seer).status_code == 200 and client.get("/admin/test-results", headers=seer).status_code == 200
+        assert client.put("/admin/tests/smoke", headers=seer, json={"case": []}).status_code == 403
+        assert client.post("/admin/tests/smoke/run", headers=seer, json={}).status_code == 403
+        assert client.post("/admin/tests/try", headers=seer, json={"connector": "studio", "endpoint": "code_rows"}).status_code == 403
+        assert client.get("/admin/test-results", headers=_h(client, "reader")).status_code == 403
         assert client.get("/admin/tests", headers=h).json() == {"suites": []}
         # saved whole, validated: nothing is written when something is wrong
         bad = client.put("/admin/tests/smoke", headers=h, json={"connector": "studio", "case": [{"id": "x", "steps": [{"name": "a"}]}]})

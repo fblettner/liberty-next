@@ -118,7 +118,8 @@ WORKDIR /app
 
 # Install the framework. Copy the package + build metadata first, install, then drop in the
 # built SPA — keeps the (slow) pip layer cached when only frontend assets change.
-COPY pyproject.toml requirements.txt ./
+# the license travels with every copy of the work
+COPY pyproject.toml requirements.txt LICENSE NOTICE ./
 COPY liberty/ ./liberty/
 # requirements.txt is the pip-compile lock of `.[all]` (every extra: reports, ldap, alembic) —
 # the image, CI and the dev venv resolve to the same versions. Refresh it with:

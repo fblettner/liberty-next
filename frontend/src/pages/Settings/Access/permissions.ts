@@ -43,10 +43,11 @@ export const nodeKey = (app: string, id: string): string => `menu:${app}:${id}`
 export const isLeaf = (n: MenuNode): boolean => !!n.type && !!n.target
 
 /** The permission a `page` leaf's route needs — the nomaflow pages ask `nomaflow:view` (which
- *  `nomaflow:edit` includes); other pages are open (liberty/web/menus.py `page_permission`). */
+ *  `nomaflow:edit` includes), the tests' pages `tests:view` (which `tests:run` / `tests:edit` include); other pages are open (liberty/web/menus.py `page_permission`). */
 export const pagePermission = (target: string): string | null =>
-  target === '/nomaflow' || target.startsWith('/nomaflow/') ? 'nomaflow:view' : null
-const INCLUDED_IN: Record<string, string[]> = { 'nomaflow:view': ['nomaflow:edit'] }
+  target === '/nomaflow' || target.startsWith('/nomaflow/') ? 'nomaflow:view'
+    : target === '/liberty/tests' || target === '/liberty/test-results' ? 'tests:view' : null
+const INCLUDED_IN: Record<string, string[]> = { 'nomaflow:view': ['nomaflow:edit'], 'tests:view': ['tests:run', 'tests:edit'] }
 
 /** The permission a menu leaf's target needs — the same resolution as the backend's `_keeper`:
  *  a `screen` leaf runs its screen's read query on the screen's connector. */

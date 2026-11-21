@@ -1,0 +1,35 @@
+Liberty Next
+Copyright (c) 2026 Nomana-IT
+
+Liberty Next is licensed under the Business Source License 1.1 — see LICENSE for its terms, its
+Additional Use Grant, its Change Date and its Change License. It is source-available, not Open
+Source: each version becomes available under the Change License four years after it was published.
+
+In short (LICENSE is what counts): you may read, copy, modify and fork the code, and run it in
+production for your own organisation and your own applications, free of charge. You may not sell or
+resell Liberty Next, or a modified version of it, or offer it as a paid hosted service, without the
+Licensor's written agreement.
+
+Names
+-----
+"Liberty Next" and "Nomana" and their logos are the Licensor's. The License grants no right to
+them: a modified version must not be distributed under these names, or in a way that suggests it
+is the original or is endorsed by the Licensor.
+
+The Licensor's applications
+---------------------------
+nomasx1, nomajde, nomaflow and the Licensor's other applications that run on Liberty Next are
+separate works, distributed by the Licensor under their own commercial terms and unlocked by a
+license key. They are not covered by this License, and this License does not limit the Licensor's
+own right to sell them, or any other product, or Liberty Next itself under other terms.
+
+Third-party software
+--------------------
+Liberty Next depends on third-party Python and JavaScript packages, each under its own license
+(requirements.txt, frontend/package-lock.json). They are installed from their own sources and are
+not relicensed by this License.
+
+Oracle Instant Client is NOT part of this repository. A container image may be built with it
+(docker/instantclient/README.md says how): it then contains Oracle software, (c) Oracle and/or its
+affiliates, under Oracle's own license terms for Instant Client — not under this License. Whoever
+builds or redistributes such an image is responsible for complying with those terms.
