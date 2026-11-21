@@ -107,6 +107,18 @@
   Not on an API screen: the import of rows, the configured workbook export (the grid's own export works),
   the server-side summary, the audit mirror, change packages on its saves, the dictionary's write rules
   (SEQUENCE, LOGIN, SYSDATE — the server decides), the Data Explorer.
+  Two things a save through an API needs, both there: **a screen's own parameters go with every save** (the
+  values it was read with, under the row's own — the header of a detail form: the product code and the type a
+  row of codes belongs to; in the grid, the record form and the server-side save), and **a parameter can be
+  required** (the endpoint editor's "Required"): a call without it is refused before anything is sent, instead
+  of the server taking a blank and acting on it.
+- **A generator can build a whole screen.** "Create from…" wrote one endpoint. A connector's generator may now
+  answer with a screen: the endpoints it reads and saves through, and the screen itself. The dialog then asks
+  for the application, the screen's id and title and whether to add it to the menu, and creates everything in
+  one validated pass (the Screen Assistant's route, `POST /admin/assistant/scaffold`, which now takes
+  `endpoints`): nothing is written when anything is invalid or an endpoint's name is taken. Each endpoint keeps
+  what it was built from, so "Refresh from the server" works on it. In the endpoint list an endpoint served by
+  a function shows `FN` instead of a method.
 - **An endpoint served by a function.** One HTTP call cannot do everything: changing a row a server only
   exposes through a form means finding it, checking that exactly one was found, then acting — several calls in
   one session. An endpoint can now name a function of an application's plugin (**Served by a function**,

@@ -7,6 +7,10 @@
 // in three steps: search → the candidates; options → what to ask about the one picked; build →
 // the endpoint, handed to the editor which adds it UNSAVED for the operator to review.
 // It runs against the SAVED connector (it needs its credentials).
+//
+// A generator may build a whole SCREEN instead (the endpoints it reads and saves through, and the
+// screen itself): the dialog then asks where to put it and creates everything in one pass through
+// the Screen Assistant's route (POST /admin/assistant/scaffold) — saved, unlike a single endpoint.
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
@@ -14,8 +18,9 @@ import { useTranslation } from 'react-i18next'
 import { Search, Wand2 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
-  Banner, Button, Input, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, SearchSelect, SearchSelectMulti, SpinnerRing,
+  Banner, Button, Checkbox, Input, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, SearchSelect, SearchSelectMulti, SpinnerRing,
 } from '../../common'
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
 export interface EndpointGeneratorDef {
@@ -56,11 +61,13 @@ const Item = styled.button<{ $on: boolean }>`
 export function EndpointGeneratorModal({ connector, generators, onCreate, onClose }: {
   connector: string
   generators: EndpointGeneratorDef[]
-  /** The endpoint the generator built — the editor adds it, unsaved. */
-  onCreate: (endpoint: Record<string, unknown>) => void
+  /** The endpoint(s) the generator built — the editor adds them: unsaved for a single endpoint,
+   *  already *saved* for a screen's endpoints (created with it). */
+  onCreate: (endpoints: Record<string, unknown>[], saved: boolean) => void
   onClose: () => void
 }) {
   const { t } = useTranslation()
+  const { apps, currentApp, lastApp } = useWorkspace()
   const [genId, setGenId] = useState(generators[0]?.id ?? '')
   const [query, setQuery] = useState('')
   const [candidates, setCandidates] = useState<Candidate[] | null>(null)
@@ -71,6 +78,10 @@ export function EndpointGeneratorModal({ connector, generators, onCreate, onClos
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const generator = generators.find((g) => g.id === genId)
+  // a generator that built a whole screen: what it built, and where the operator puts it
+  const [bundle, setBundle] = useState<{ endpoints: Record<string, unknown>[]; screen: Record<string, unknown>; note?: string | null } | null>(null)
+  const [target, setTarget] = useState({ app: '', id: '', label: '', menu: true })
+  const [done, setDone] = useState<string | null>(null)
 
   const step = async <T,>(name: string, extra: Record<string, unknown>): Promise<T | null> => {
     setBusy(true); setError(null)
@@ -101,17 +112,71 @@ export function EndpointGeneratorModal({ connector, generators, onCreate, onClos
   }
   const create = async () => {
     if (!picked) return
-    const r = await step<{ endpoint: Record<string, unknown> }>('build', { candidate: picked.id, options: answers })
-    if (r?.endpoint) onCreate(r.endpoint)
+    const r = await step<{ endpoint?: Record<string, unknown>; endpoints?: Record<string, unknown>[]; screen?: Record<string, unknown>; app?: string | null; note?: string | null }>(
+      'build', { candidate: picked.id, options: answers })
+    if (r?.screen && r.endpoints) {
+      setBundle({ endpoints: r.endpoints, screen: r.screen, note: r.note })
+      // the application the screen goes to: the generator's, else the one the operator works in
+      const known = (apps ?? []).map((a) => a.name)
+      const home = [r.app, currentApp, lastApp].find((a) => a && known.includes(a)) ?? known[0] ?? connector
+      setTarget({ app: home, id: String(r.screen.id ?? ''), label: String(r.screen.label ?? ''), menu: true })
+    } else if (r?.endpoint) onCreate([r.endpoint], false)
   }
+  const createScreen = async () => {
+    if (!bundle) return
+    const app = target.app.trim(), id = target.id.trim(), label = target.label.trim() || id
+    setBusy(true); setError(null)
+    try {
+      await api.post('/admin/assistant/scaffold', {
+        connector, app, endpoints: bundle.endpoints, screen: { ...bundle.screen, id, label },
+        menu: target.menu ? { app, id, label, target: id, connector } : null,
+      })
+      setDone(`${app} / ${id}`)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const finish = () => { if (bundle && done) onCreate(bundle.endpoints, true); else onClose() }
 
   // Portalled to document.body, as the shared confirm is: rendered inside the builder it sits in a
   // stacking context of its own (the panel's backdrop-filter) and a fixed overlay does not show.
   return createPortal(
-    <Overlay onClick={onClose} style={{ zIndex: 600 }}>
+    <Overlay onClick={finish} style={{ zIndex: 600 }}>
       <Box onClick={(e) => e.stopPropagation()}>
-        <ModalHeader>{t('settings.api.generate.title')}</ModalHeader>
-        <ModalBody>
+        <ModalHeader>{t(bundle ? 'settings.api.generate.screenTitle' : 'settings.api.generate.title')}</ModalHeader>
+        {bundle && (
+          <ModalBody>
+            {bundle.note && <Help>{bundle.note}</Help>}
+            <Label>{t('settings.api.generate.screenEndpoints')}</Label>
+            <List>
+              {bundle.endpoints.map((e) => (
+                <Item key={String(e.name)} type="button" $on={false} disabled>
+                  <span className="code">{String(e.name)}</span>
+                  <span className="desc">{String(e.description ?? e.label ?? '')}</span>
+                </Item>
+              ))}
+            </List>
+            <Label>{t('settings.api.generate.screenApp')}</Label>
+            <SearchSelect
+              value={target.app}
+              disabled={!!done}
+              options={[...new Set([...(apps ?? []).map((a) => a.name), target.app])].filter(Boolean).map((a) => ({ value: a, label: a }))}
+              onChange={(v) => setTarget((s) => ({ ...s, app: v ?? '' }))}
+            />
+            <Label>{t('settings.api.generate.screenId')}</Label>
+            <Input value={target.id} disabled={!!done} onChange={(e) => setTarget((s) => ({ ...s, id: e.target.value }))} />
+            <Label>{t('settings.api.generate.screenLabel')}</Label>
+            <Input value={target.label} disabled={!!done} onChange={(e) => setTarget((s) => ({ ...s, label: e.target.value }))} />
+            <div style={{ marginTop: 14 }}>
+              <Checkbox checked={target.menu} disabled={!!done} onChange={(v: boolean) => setTarget((s) => ({ ...s, menu: v }))} label={t('settings.api.generate.screenMenu')} />
+            </div>
+            {error && <div style={{ marginTop: 12 }}><Banner $tone="error">{error}</Banner></div>}
+            {done && <div style={{ marginTop: 12 }}><Banner $tone="ok">{t('settings.api.generate.screenDone', { screen: done })}</Banner></div>}
+          </ModalBody>
+        )}
+        {!bundle && <ModalBody>
           {generators.length > 1 && (
             <SearchSelect
               value={genId}
@@ -174,13 +239,26 @@ export function EndpointGeneratorModal({ connector, generators, onCreate, onClos
               {f.help && <Help>{f.help}</Help>}
             </div>
           ))}
-        </ModalBody>
-        <ModalFooter>
-          <Button $variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
-          <Button $variant="primary" onClick={() => void create()} disabled={!picked || busy}>
-            {busy && picked ? <SpinnerRing size={13} thickness={2} /> : <Wand2 size={13} />} {t('settings.api.generate.create')}
-          </Button>
-        </ModalFooter>
+        </ModalBody>}
+        {bundle ? (
+          <ModalFooter>
+            {!done && <Button $variant="ghost" onClick={() => { setBundle(null); setError(null) }}>{t('settings.api.generate.screenBack')}</Button>}
+            {done
+              ? <Button $variant="primary" onClick={finish}>{t('common.close')}</Button>
+              : (
+                <Button $variant="primary" onClick={() => void createScreen()} disabled={busy || !target.app.trim() || !target.id.trim()}>
+                  {busy ? <SpinnerRing size={13} thickness={2} /> : <Wand2 size={13} />} {t('settings.api.generate.screenCreate')}
+                </Button>
+              )}
+          </ModalFooter>
+        ) : (
+          <ModalFooter>
+            <Button $variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
+            <Button $variant="primary" onClick={() => void create()} disabled={!picked || busy}>
+              {busy && picked ? <SpinnerRing size={13} thickness={2} /> : <Wand2 size={13} />} {t('settings.api.generate.create')}
+            </Button>
+          </ModalFooter>
+        )}
       </Box>
     </Overlay>,
     document.body,

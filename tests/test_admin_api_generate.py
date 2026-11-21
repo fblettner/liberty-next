@@ -4,6 +4,7 @@ validated before the editor adds it. Same app fixture pattern as test_web_plugin
 
 from __future__ import annotations
 
+import json
 import textwrap
 from pathlib import Path
 
@@ -29,6 +30,11 @@ base_url = "https://remote.test/rest"
 id = "thing"
 label = "A thing"
 callable = "genplg.make:j_thing_endpoint"
+
+[[connectors.remote.generators]]
+id = "screen"
+label = "A screen"
+callable = "genplg.make:j_thing_screen"
 
 [[connectors.remote.generators]]
 id = "broken"
@@ -59,6 +65,18 @@ async def j_thing_endpoint(*, connectors, connector, step, query="", candidate="
     return {"endpoint": {"name": f"thing_{candidate}", "method": "POST", "path": "/things",
                          "body": "{" + ", ".join(f'"{f}": "{{{{{f.upper()}}}}}"' for f in wanted) + "}",
                          "params": [{"name": f.upper(), "label": f, "help": "Required."} for f in wanted]}}
+
+
+async def j_thing_screen(*, step, candidate="", **_):
+    if step != "build":
+        return {"candidates": [{"id": "T1"}], "options": []}
+    read = {"name": f"{candidate}_rows", "path": "/things", "rows_field": "items", "params": [{"name": "KIND", "required": True}],
+            "source": {"generator": "thing", "candidate": candidate, "options": {}}}
+    save = {"name": f"{candidate}_save", "method": "POST", "path": "/things", "writable": True,
+            "body": '{"id": "{{ID}}", "kind": "{{KIND}}"}', "params": [{"name": "ID"}, {"name": "KIND", "required": True}]}
+    return {"endpoints": [read, save], "app": "remote", "note": "read + save",
+            "screen": {"id": f"{candidate}_screen", "label": "Things", "connector": "remote", "read_query": read["name"],
+                       "update_query": save["name"], "insert_query": save["name"], "columns": [{"name": "ID", "key": True}]}}
 
 
 async def j_broken_endpoint(*, step, **_):
@@ -144,3 +162,40 @@ def test_it_is_for_superusers_and_says_what_went_wrong(env) -> None:
         # an endpoint the model refuses is not handed to the editor
         r = post(connector="remote", generator="broken", step="build", candidate="1")
         assert r.status_code == 400 and "invalid endpoint" in r.json()["detail"]
+
+
+def test_a_generator_builds_a_whole_screen_and_the_scaffold_creates_it(env) -> None:
+    import httpx
+
+    with TestClient(env) as client:
+        h = _h(client, "admin")
+        built = client.post("/admin/config/api/generate", headers=h, json={"connector": "remote", "generator": "screen", "step": "build", "candidate": "T1"})
+        assert built.status_code == 200, built.text
+        bundle = built.json()
+        assert [e["name"] for e in bundle["endpoints"]] == ["T1_rows", "T1_save"] and bundle["screen"]["read_query"] == "T1_rows"
+        assert bundle["endpoints"][0]["source"]["generator"] == "thing" and bundle["app"] == "remote"
+        # one validated pass: the endpoints on the connector, the screen, a menu item; then a reload
+        made = client.post("/admin/assistant/scaffold", headers=h, json={
+            "connector": "remote", "app": "remote", "endpoints": bundle["endpoints"], "screen": bundle["screen"],
+            "menu": {"app": "remote", "id": "t1", "label": "Things", "target": "T1_screen", "connector": "remote"}})
+        assert made.status_code == 200, made.text
+        assert made.json()["created"]["endpoints"] == ["T1_rows", "T1_save"] and made.json()["created"]["screen"] == "remote.T1_screen"
+        # a second time: the endpoints exist
+        again = client.post("/admin/assistant/scaffold", headers=h, json={"connector": "remote", "app": "remote", "endpoints": bundle["endpoints"],
+                                                                         "screen": {**bundle["screen"], "id": "other"}})
+        assert again.status_code == 409 and "T1_rows" in again.json()["detail"]
+        # the screen works: it reads, it saves with the parameters it was read with, a required one cannot be left out
+        sent: list = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            sent.append((request.method, json.loads(request.content) if request.content else dict(request.url.params)))
+            return httpx.Response(200, json={"items": [{"ID": 1}]})
+
+        client.app.state.connectors.get("remote")._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        assert client.get("/api/sql/remote/T1_rows?KIND=a", headers=h).json()["rows"] == [{"ID": 1}]
+        missing = client.get("/api/sql/remote/T1_rows", headers=h)
+        assert missing.status_code == 502 and "'KIND'" in missing.json()["detail"] and "required" in missing.json()["detail"]
+        saved = client.post("/api/sql/remote/T1_save", headers=h, json={"params": {"KIND": "a", "ID": 7}})
+        assert saved.status_code == 200 and sent[-1] == ("POST", {"id": "7", "kind": "a"})
+        assert client.post("/api/sql/remote/T1_save", headers=h, json={"params": {"ID": 7}}).status_code == 502
+        assert len(sent) == 2                                    # refused before anything was sent

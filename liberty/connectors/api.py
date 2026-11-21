@@ -365,7 +365,7 @@ class APIConnector:
                     "response_map": e.response_map,
                     "params": [
                         {"name": p.name, "label": p.label, "default": p.default, "help": p.help, "example": p.example,
-                         "choices": list(p.choices)}
+                         "choices": list(p.choices), "required": True if p.required else None}
                         for p in e.params
                     ],
                 }
@@ -392,6 +392,8 @@ class APIConnector:
             if value is None or value == "":
                 # left out, or sent blank (a cleared field): the default — never the text "{{name}}"
                 value = merged[p.name] = p.default if p.default is not None else ""
+                if p.required and value == "":
+                    raise ApiParamError(f"parameter {p.name!r} ({p.label or p.name}) is required")
             if p.choices and value != "":
                 # one of the declared values, whatever the letter case it was typed in
                 known = {c.lower(): c for c in p.choices}

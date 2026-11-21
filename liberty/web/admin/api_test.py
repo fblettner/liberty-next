@@ -132,7 +132,10 @@ async def generate_api_endpoint(body: EndpointGenerateBody, request: Request, _:
     * ``search`` → ``{"candidates": [{"id", "label", "description"}]}``
     * ``options`` → ``{"options": [{"name", "label", "kind": "text" | "choice" | "multi",
       "choices": [{"value", "label"}], "default", "help"}]}`` (may be empty)
-    * ``build`` → ``{"endpoint": {…}}``, validated against the endpoint model
+    * ``build`` → ``{"endpoint": {…}}``, validated against the endpoint model — or, from a
+      generator that builds a whole screen, ``{"endpoints": [{…}], "screen": {…}}``: the screen's
+      read and save endpoints and the screen itself, which the editor creates in one pass
+      (``POST /admin/assistant/scaffold``)
     """
     from liberty.connectors.base import ConnectorError
     from liberty.connectors.config import EndpointDef
@@ -172,11 +175,26 @@ async def generate_api_endpoint(body: EndpointGenerateBody, request: Request, _:
         return {"candidates": [c for c in out.get("candidates") or [] if isinstance(c, dict) and c.get("id")]}
     if body.step == "options":
         return {"options": [o for o in out.get("options") or [] if isinstance(o, dict) and o.get("name")], "note": out.get("note")}
+    from liberty.connectors.config import EndpointSource
+    if out.get("screen") is not None:
+        # a whole screen: its endpoints (each may say what it was built from, for "Refresh") and the screen
+        from liberty.screens.config import Screen
+        try:
+            many = [EndpointDef.model_validate(
+                # an endpoint says what it was built from; the generator's own id is ours to fill
+                {**e, "source": {**e["source"], "generator": e["source"].get("generator") or body.generator}}
+                if isinstance(e, dict) and isinstance(e.get("source"), dict) else e) for e in out.get("endpoints") or []]
+            screen = Screen.model_validate(out["screen"])
+        except ValidationError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"{generator.callable} built an invalid screen: {exc}") from exc
+        if not many:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"{generator.callable} built a screen without an endpoint")
+        return {"endpoints": [e.model_dump(mode="json", exclude_defaults=True) for e in many],
+                "screen": screen.model_dump(mode="json", exclude_defaults=True), "app": out.get("app"), "note": out.get("note")}
     try:
         endpoint = EndpointDef.model_validate(out.get("endpoint"))
     except ValidationError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"{generator.callable} built an invalid endpoint: {exc}") from exc
     # where it comes from, kept on the endpoint: "Refresh" asks the same thing again later
-    from liberty.connectors.config import EndpointSource
     endpoint.source = EndpointSource(generator=body.generator, candidate=body.candidate or "", options=dict(body.options or {}))
     return {"endpoint": endpoint.model_dump(mode="json", exclude_defaults=True)}

@@ -144,6 +144,7 @@ class ParamDef(BaseModel):
     help: str | None = Field(default=None, description="What to put in it, in a sentence — shown under the field where the parameter is filled, and given to the AI assistant.")
     example: str | None = Field(default=None, description="An example value (for a JSON parameter, an example of the JSON) — shown with the help and offered as a starting point.")
     choices: list[str] = Field(default_factory=list, description="The only values allowed, when there are a few (table, view) — a dropdown where the parameter is filled. For an endpoint the value is checked: another one is refused, and its letter case is corrected (VIEW → view).")
+    required: bool = Field(default=False, description="A call without a value for it (and without a default) is refused before anything is sent — for a value the server would otherwise take as blank and act on (the key of the record a form changes).")
 
 
 class FilterDep(BaseModel):

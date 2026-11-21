@@ -70,6 +70,8 @@ class ScaffoldBody(BaseModel):
                                                 # points at it); no new connector table/queries are written
     dictionary_scope: str | None = None         # None / "shared" → top-level entries; else connectors.<scope>.entries
     dictionary: list[dict[str, Any]] = []       # each entry: {id, label?, format?, justify?, size?, rules?, ...}
+    endpoints: list[dict[str, Any]] = []        # on an API connector: the endpoints the screen reads and saves through
+                                                # (built by a connector's generator), added to it
     screen: dict[str, Any]                      # a parsed Screen dict (id, label, queries, columns[], dialog{tabs[]})
     menu: ScaffoldMenuItem | None = None
 
@@ -106,6 +108,17 @@ async def assistant_scaffold(body: ScaffoldBody, request: Request, principal: Su
                 table_entry[slot] = {"sql": sql, "writable": True}
                 slots.append(slot)
         tables.append(table_entry)
+
+    if body.endpoints:
+        if target.get("type") != "api":
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"{body.connector!r} is not an API connector: it takes no endpoint")
+        existing = target.setdefault("endpoints", [])
+        taken = {str(e.get("name", "")) for e in existing if isinstance(e, dict)}
+        clash = sorted(str(e.get("name")) for e in body.endpoints if str(e.get("name")) in taken)
+        if clash:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                detail=f"endpoint {', '.join(clash)} already exists on connector {body.connector!r} — rename or remove it first")
+        existing.extend(body.endpoints)
 
     # ── dictionary.toml: merge entries (shared or per-connector scope) ───────────────────────
     dfile = load_dictionary(_dictionary_path(settings))
@@ -163,7 +176,7 @@ async def assistant_scaffold(body: ScaffoldBody, request: Request, principal: Su
 
     # ── write through the existing validated PUT paths (each snapshots its file); reload once ─
     _snapshot_all_config(request)
-    if body.table is not None:
+    if body.table is not None or body.endpoints:
         await put_connectors_parsed(ConnectorsParsedBody(connectors=conns), request, principal)
     if body.dictionary:
         await put_dictionary_parsed(DictionaryBody(dictionary=ddict), request, principal)
@@ -177,6 +190,7 @@ async def assistant_scaffold(body: ScaffoldBody, request: Request, principal: Su
             "connector": body.connector,
             "table": body.table.name if body.table is not None else None,
             "queries": [f"{body.table.name}_{s}" for s in slots] if body.table is not None else [],
+            "endpoints": [str(e.get("name")) for e in body.endpoints],
             "dictionary_entries": created_dd,
             "screen": f"{body.app}.{sid}",
             "menu_item": body.menu.id if body.menu is not None else None,

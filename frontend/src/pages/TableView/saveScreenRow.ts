@@ -37,6 +37,10 @@ export interface SaveScreenRowArgs {
   mainInsertQuery?: string | null
   /** Optional: true when a column name holds a password (its original is never rebound). */
   isPassword?: (name: string) => boolean
+  /** Optional: values every write of this screen carries, UNDER the row's own — the values of the
+   *  parameters the screen was read with, when it reads an API endpoint (a detail form's header:
+   *  the product code and UDC type a row of codes belongs to). */
+  context?: Row
 }
 
 const enc = encodeURIComponent
@@ -72,7 +76,8 @@ export async function saveScreenRow(a: SaveScreenRowArgs): Promise<{ rowcount: n
       mainSaved[k] = v
     }
   }
-  const mainParams = isEdit ? { ...mainSaved, ...mainSent, ...originalKeys(mainSaved) } : mainSent
+  const own = isEdit ? { ...mainSaved, ...mainSent, ...originalKeys(mainSaved) } : mainSent
+  const mainParams = a.context ? { ...a.context, ...own } : own
   const resp = await api.post<{ rowcount?: number; resolved_binds?: Row }>(
     `/api/sql/${enc(a.connector)}/${enc(mainQuery)}`, { params: withUpper(mainParams) },
   )
@@ -127,6 +132,8 @@ export interface DeleteScreenRowArgs {
   /** The screen's related-table write-back groups. */
   columnGroups: ColumnGroup[]
   mainDeleteQuery?: string | null
+  /** Optional: values the delete carries under the row's own (see SaveScreenRowArgs.context). */
+  context?: Row
 }
 
 /** Delete the main row AND each related group's row. Children are deleted FIRST (FK-safe), then
@@ -153,7 +160,7 @@ export async function deleteScreenRow(a: DeleteScreenRowArgs): Promise<{ rowcoun
   // ── main row (parent) ──
   if (!a.mainDeleteQuery) return { rowcount: 0 }
   const resp = await api.post<{ rowcount?: number }>(
-    `/api/sql/${enc(a.connector)}/${enc(a.mainDeleteQuery)}`, { params: withUpper({ ...a.row }) },
+    `/api/sql/${enc(a.connector)}/${enc(a.mainDeleteQuery)}`, { params: withUpper({ ...(a.context ?? {}), ...a.row }) },
   )
   return { rowcount: resp.rowcount ?? 0 }
 }

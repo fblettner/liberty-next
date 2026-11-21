@@ -13,7 +13,7 @@ import { runChain, type ActionRunnerDeps } from './actionRunner'
 import type { DataRow } from './resultColumns'
 
 export function useBatchEdit({
-  result, screen, connector, updateQuery, insertQuery, deleteQuery, addSeed, requestPrompt, confirmStep, sharedActions, onSaved,
+  result, screen, connector, updateQuery, insertQuery, deleteQuery, addSeed, saveContext, requestPrompt, confirmStep, sharedActions, onSaved,
 }: {
   result: QueryResult
   screen?: ScreenDetail | null
@@ -23,6 +23,8 @@ export function useBatchEdit({
   deleteQuery?: string | null
   /** The values a blank "+ Add row" starts with. */
   addSeed?: Record<string, unknown>
+  /** Values every save carries under the row's own (an API screen's parameters). */
+  saveContext?: Record<string, unknown>
   requestPrompt: ActionRunnerDeps['requestPrompt']
   confirmStep: ActionRunnerDeps['confirm']
   sharedActions: ActionRunnerDeps['sharedActions'] | null
@@ -151,7 +153,7 @@ export function useBatchEdit({
     const writeRow = (mode: 'add' | 'edit', sent: Record<string, unknown>, savedRow: DataRow) =>
       saveScreenRow({
         connector, mode, sent, savedRow, columns: result.columns, columnGroups,
-        mainUpdateQuery: updateQuery, mainInsertQuery: insertQuery,
+        mainUpdateQuery: updateQuery, mainInsertQuery: insertQuery, context: saveContext,
       })
     // The values to write for a row = its edits, plus any conditional forced default (default_when)
     // overlaid — so a system-determined value is persisted even though the cell was read-only and
@@ -182,7 +184,7 @@ export function useBatchEdit({
     for (const row of deleted) {
       if (newRows.includes(row)) continue
       if (!deleteQuery) { localErrs.push(t('table.editNoDelete')); break }
-      jobs.push(deleteScreenRow({ connector, row, columnGroups, mainDeleteQuery: deleteQuery }))
+      jobs.push(deleteScreenRow({ connector, row, columnGroups, mainDeleteQuery: deleteQuery, context: saveContext }))
     }
     const settled = await Promise.allSettled(jobs)
     const reqErrs = settled
@@ -255,7 +257,7 @@ export function useBatchEdit({
     setSaving(false)
     if (hookErrs.length) setSaveErrors([...new Set(hookErrs)])
     else { resetEdit(); onSaved?.() }
-  }, [connector, dirtyRows, newRows, deleted, updateQuery, insertQuery, deleteQuery, onSaved, resetEdit, t, screen, sharedActions, confirmStep])
+  }, [connector, dirtyRows, newRows, deleted, updateQuery, insertQuery, deleteQuery, onSaved, resetEdit, t, screen, sharedActions, confirmStep, saveContext])
 
   return {
     editMode, setEditMode, dirtyRows, setDirtyRows, newRows, deleted, selected, setSelected,

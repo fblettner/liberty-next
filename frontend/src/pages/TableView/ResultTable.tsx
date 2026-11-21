@@ -104,7 +104,7 @@ const DrillLink = styled.button`
 `
 
 export function ResultTable({
-  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters, screen, addSeed, nestedDialog, renderDetail, embedded, getSubRows, onRowExpand, subRowCount, tableId: tableIdOverride, onCurrentRow, onDrill,
+  result, connector, query, updateQuery, insertQuery, deleteQuery, keyColumns, onSaved, runControl, maxRowsControl, activeFilters, screen, addSeed, saveContext, nestedDialog, renderDetail, embedded, getSubRows, onRowExpand, subRowCount, tableId: tableIdOverride, onCurrentRow, onDrill,
 }: {
   result: QueryResult
   connector: string
@@ -126,6 +126,8 @@ export function ResultTable({
   /** Default values to pre-fill the Add dialog with — used by a nested table to seed the parent's
    *  FK (e.g. {APPS_ID: 7}) so a new child row opens already tied to its parent. */
   addSeed?: Record<string, unknown>
+  /** Values every save of this screen carries under the row's own: the parameters an API screen was read with. */
+  saveContext?: Record<string, unknown>
   /** Render this grid's Add/Edit ScreenDialog as a NESTED sub-dialog (smaller, raised z-index) —
    *  set when ResultTable is embedded inside a parent dialog's nested-table tab. */
   nestedDialog?: boolean
@@ -376,7 +378,7 @@ export function ResultTable({
   const {
     editMode, setEditMode, dirtyRows, setDirtyRows, newRows, deleted, selected, setSelected, clipboard, saving, saveErrors, setSaveErrors, editsRef, resetEdit, dirtyCount, valuesOf, newRowsRef, editChange, prependNewRows, addRow, duplicateRow, toggleDelete, toggleSelected, deleteSelected, copySelected, pasteRows, save,
   } = useBatchEdit({
-    result, screen, connector, updateQuery, insertQuery, deleteQuery, addSeed, requestPrompt, confirmStep, sharedActions, onSaved,
+    result, screen, connector, updateQuery, insertQuery, deleteQuery, addSeed, saveContext, requestPrompt, confirmStep, sharedActions, onSaved,
   })
   // The row context menu (right-click / the row's handle) — its state, runner and popup.
   const { rowMenu, openRowMenu, runRowAction, rowMenuHandle, rowMenuPopup } = useRowMenu({
@@ -1193,6 +1195,7 @@ export function ResultTable({
           row={dlgRow}
           connector={connector}
           keyColumns={keyColumns}
+          saveContext={saveContext}
           onClose={() => setDlgOpen(false)}
           // refresh only: the form closes itself on success (onClose) and stays open on a failed hook
           onSaved={() => onSaved?.()}

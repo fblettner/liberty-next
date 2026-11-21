@@ -69,7 +69,7 @@ type Endpoint = {
   /** Where the server puts its warnings: reported with the answer, the call stands. */
   warning_fields?: string[] | null
   response_map?: Record<string, string>
-  params?: Array<{ name: string; label?: string | null; default?: string | null; help?: string | null; example?: string | null; choices?: string[] | null }>
+  params?: Array<{ name: string; label?: string | null; default?: string | null; help?: string | null; example?: string | null; choices?: string[] | null; required?: boolean }>
 }
 
 export type ApiConnector = {
@@ -585,13 +585,19 @@ function EndpointsTab({
   const generators = value.generators ?? []
   const [generating, setGenerating] = useState(false)
   const [showGenerators, setShowGenerators] = useState(false)
-  const addGenerated = (raw: Record<string, unknown>) => {
-    const ep = raw as unknown as Endpoint
-    let name = ep.name || 'endpoint'
-    for (let n = 2; endpoints.some((e) => e.name === name); n++) name = `${ep.name}_${n}`
-    setEndpoints([...endpoints, { ...ep, name }])
+  const addGenerated = (raws: Record<string, unknown>[], saved: boolean) => {
+    const next = [...endpoints]
+    for (const raw of raws) {
+      const ep = raw as unknown as Endpoint
+      let name = ep.name || 'endpoint'
+      // a screen's endpoints were saved with it under their own names: one the list already shows is that one
+      if (saved && next.some((e) => e.name === name)) continue
+      for (let n = 2; next.some((e) => e.name === name); n++) name = `${ep.name}_${n}`
+      next.push({ ...ep, name })
+    }
+    setEndpoints(next)
     setSearch('')
-    setOpenIdx(endpoints.length)
+    setOpenIdx(next.length > endpoints.length ? endpoints.length : null)
     setGenerating(false)
   }
   const setGenerators = (next: EndpointGeneratorDef[]) => patch({ generators: next.length ? next : undefined })
@@ -709,7 +715,8 @@ function EndpointsTab({
           <EndpointCard key={`${ep.name}-${i}`} ref={open ? openRef : undefined}>
             <EndpointHead $open={open} onClick={() => setOpenIdx(open ? null : i)} type="button">
               {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-              <MethodPill $tone={ep.method ?? 'GET'}>{ep.method ?? 'GET'}</MethodPill>
+              {/* served by a plugin function: no HTTP method */}
+              <MethodPill $tone={ep.callable ? 'POST' : (ep.method ?? 'GET')}>{ep.callable ? 'FN' : (ep.method ?? 'GET')}</MethodPill>
               <span className="name">{ep.name || '(unnamed)'}</span>
               {ep.label && <span style={{ color: colors.text.muted, fontFamily: fonts.sans }}>· {ep.label}</span>}
               {ep.writable && <WritesTag title={t('settings.api.endpoint.writableHint')}>{t('settings.api.endpoint.writableTag')}</WritesTag>}
@@ -1161,7 +1168,15 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
             }}
             placeholder={t('settings.api.endpoint.paramChoices')}
           />
-          <span />
+          <Checkbox
+            checked={p.required === true}
+            onChange={(v: boolean) => {
+              const next = params.slice()
+              next[i] = { ...p, required: v ? true : undefined }
+              setParams(next)
+            }}
+            label={t('settings.api.endpoint.paramRequired')}
+          />
         </ParamHelpRow>
         </div>
       ))}

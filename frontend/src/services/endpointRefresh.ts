@@ -12,6 +12,7 @@ export interface GeneratedParam {
   help?: string | null
   example?: string | null
   choices?: string[] | null
+  required?: boolean
 }
 
 export interface GeneratedEndpoint {
@@ -60,7 +61,11 @@ export function mergeGenerated<T extends GeneratedEndpoint>(current: T, fresh: G
   const params: GeneratedParam[] = wanted.map((p) => {
     const mine = had.get(p.name)
     // a parameter that stays keeps what the operator wrote on it; only its allowed values follow the server
-    return mine ? { ...p, ...mine, choices: p.choices ?? mine.choices } : p
+    // … and whether it is required: the server's object decides, not a label the operator wrote
+    if (!mine) return p
+    const { required: _was, ...kept } = mine
+    void _was
+    return { ...p, ...kept, choices: p.choices ?? mine.choices }
   })
   const added = wanted.filter((p) => !had.has(p.name)).map((p) => p.name)
   const removed = [...had.keys()].filter((n) => !wanted.some((p) => p.name === n))

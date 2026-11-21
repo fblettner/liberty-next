@@ -781,6 +781,10 @@ async def save_row(
         main_params = {**main_saved, **main_sent, **original_keys(main_saved)}
     else:
         main_params = dict(main_sent)
+    if api_connector(ctx.connectors, connector) is not None:
+        # a screen on an API endpoint: every save carries the parameters it was read with, under
+        # the row's own values (a detail form's header) — as the browser's saveScreenRow does
+        main_params = {**(params or {}), **main_params}
     resp = await _run(ctx, connector, main_query, with_upper(main_params))
     resolved: Row = dict(resp.get("resolved_binds") or {})
     rowcount = int(resp.get("rowcount") or 0)
@@ -858,7 +862,8 @@ async def delete_row(
     for g in plan:
         fk = resolve_bind_list(g.param_binds, row)
         await _run(ctx, g.connector or connector, g.delete_query, with_upper({**row, **fk}))
-    resp = await _run(ctx, connector, screen.delete_query, with_upper(row))
+    context = dict(params or {}) if api_connector(ctx.connectors, connector) is not None else {}
+    resp = await _run(ctx, connector, screen.delete_query, with_upper({**context, **row}))
     rowcount = int(resp.get("rowcount") or 0)
     out = {**preview, "written": True, "rowcount": rowcount}
     out.pop("record", None)

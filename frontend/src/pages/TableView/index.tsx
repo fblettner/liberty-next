@@ -701,6 +701,7 @@ export default function TableView({ connector, query, screenApp, screenId, embed
                 runControl={runBtn}
                 maxRowsControl={maxRowsField}
                 activeFilters={activeFilters}
+                saveContext={meta.endpoint ? summaryParams : undefined}
                 screen={screen}
               />
             )}

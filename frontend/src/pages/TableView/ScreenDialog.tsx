@@ -76,7 +76,7 @@ const FieldGrid = styled.div<{ $cols: number }>`
 `
 
 export function ScreenDialog({
-  open, mode, screen, columns, row, connector, keyColumns, onClose, onSaved, nested = false,
+  open, mode, screen, columns, row, connector, keyColumns, saveContext, onClose, onSaved, nested = false,
 }: {
   open: boolean
   mode: DialogMode
@@ -94,6 +94,8 @@ export function ScreenDialog({
    *  "DISABLED"`` on these columns; v2 derives it from the existing ``key_columns`` metadata
    *  so no operator config is needed). On ``edit`` mode the LOOKUP renders as usual. */
   keyColumns?: string[]
+  /** Values every save carries under the row's own (an API screen's parameters). */
+  saveContext?: Row
   onClose: () => void
   /** The row changed — refresh the grid (the TableView reruns its SELECT). Refresh only: the form
    *  closes itself (``onClose``) after a successful save / delete, and stays open with its error
@@ -565,6 +567,7 @@ export function ScreenDialog({
         connector: targetConn, row: savedRow,
         columnGroups: (screen.column_groups ?? []) as ColumnGroup[],
         mainDeleteQuery: screen.delete_query,
+        context: saveContext,
       })
       if (resp?.rowcount === 0) {
         setDeleting(false)
@@ -593,7 +596,7 @@ export function ScreenDialog({
       setDeleting(false)
       setError(e instanceof ApiError ? e.message : String(e))
     }
-  }, [screen, savedRow, connector, runOnSaveActions, onSaved, onClose, t])
+  }, [screen, savedRow, connector, runOnSaveActions, onSaved, onClose, t, saveContext])
 
   // The active tab's action buttons — shown in the footer (always visible, regardless of
   // body scroll). Each tab kind (form / nested_table) carries its own list via the shared
@@ -672,6 +675,7 @@ export function ScreenDialog({
         mainUpdateQuery: screen.update_query,
         mainInsertQuery: screen.insert_query,
         isPassword: (name) => isPassword(colByName.get(name.toLowerCase()) ?? null),
+        context: saveContext,
       })
       // Values the server assigned for binds we left empty — the SEQUENCE/auto-ID PK on an ADD.
       // Merge into the parent state handed to nested savers so a child insert can bind the new PK.
@@ -758,7 +762,7 @@ export function ScreenDialog({
       setSaving(false)
       setError(e instanceof ApiError ? e.message : String(e))
     }
-  }, [mode, screen, tabs, formValues, savedRow, connector, onClose, onSaved, t, colByName, runOnSaveActions])
+  }, [mode, screen, tabs, formValues, savedRow, connector, onClose, onSaved, t, colByName, runOnSaveActions, saveContext])
 
   // Resolve a field's effective hidden / required / disabled per render — `*_when` lists, when
   // non-empty, override the static flags. The eval runs against the live `formValues`, so as the

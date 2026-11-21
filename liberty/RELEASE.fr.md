@@ -126,6 +126,20 @@
   Pas sur un écran API : l'import de lignes, l'export de classeur configuré (l'export de la grille
   fonctionne), le résumé côté serveur, le miroir d'audit, les paquets de changements sur ses enregistrements,
   les règles d'écriture du dictionnaire (SEQUENCE, LOGIN, SYSDATE — le serveur décide), le Data Explorer.
+  Deux choses qu'un enregistrement par une API demande, toutes deux en place : **les paramètres de l'écran
+  accompagnent chaque enregistrement** (les valeurs avec lesquelles il a été lu, sous celles de la ligne —
+  l'en-tête d'un formulaire de détail : le code produit et le type auxquels appartient une ligne de codes ;
+  dans la grille, la fiche et l'enregistrement côté serveur), et **un paramètre peut être obligatoire**
+  (« Obligatoire » dans l'éditeur du point d'accès) : un appel sans lui est refusé avant tout envoi, au lieu
+  que le serveur prenne un blanc et agisse dessus.
+- **Un générateur peut construire un écran entier.** « Créer à partir de… » écrivait un point d'accès. Le
+  générateur d'un connecteur peut maintenant répondre par un écran : les points d'accès par lesquels il lit et
+  enregistre, et l'écran lui-même. La boîte de dialogue demande alors l'application, l'identifiant et le titre
+  de l'écran et s'il faut l'ajouter au menu, puis crée le tout en une passe validée (la route de l'Assistant
+  d'écran, `POST /admin/assistant/scaffold`, qui accepte maintenant `endpoints`) : rien n'est écrit si quoi que
+  ce soit est invalide ou si le nom d'un point d'accès est pris. Chaque point d'accès garde ce dont il a été
+  construit : « Actualiser depuis le serveur » fonctionne dessus. Dans la liste, un point d'accès servi par une
+  fonction affiche `FN` à la place d'une méthode.
 - **Un point d'accès servi par une fonction.** Un seul appel HTTP ne peut pas tout faire : modifier une ligne
   qu'un serveur n'expose que par un formulaire, c'est la trouver, vérifier qu'il n'y en a qu'une, puis agir —
   plusieurs appels dans une session. Un point d'accès peut maintenant désigner une fonction du plugin d'une
