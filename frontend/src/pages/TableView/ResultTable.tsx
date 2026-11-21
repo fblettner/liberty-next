@@ -381,9 +381,11 @@ export function ResultTable({
   } = useBatchEdit({
     result, screen, connector, updateQuery, insertQuery, deleteQuery, addSeed, saveContext, requestPrompt, confirmStep, sharedActions, onSaved,
   })
+  const showRowMessage = useCallback((message: string) => setActionStatus({ message, tone: 'ok' }), [])
   // The row context menu (right-click / the row's handle) — its state, runner and popup.
   const { rowMenu, openRowMenu, runRowAction, rowMenuHandle, rowMenuPopup } = useRowMenu({
     screen, connector, editMode, requestPrompt, confirmStep, sharedActions, drillInlineDefault, navigate, onCurrentRow, onSaved, onDrill,
+    onMessage: showRowMessage,
   })
 
 

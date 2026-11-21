@@ -9,7 +9,7 @@
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { Checkbox, DatePicker, DateTimePicker, Field, Input, SearchSelect, matchOption } from '../../common'
+import { Checkbox, DatePicker, DateTimePicker, Field, Input, SearchSelect, Textarea, matchOption } from '../../common'
 import type { Column } from '../../types/connectors'
 import type { ScreenField } from '../../types/screens'
 import { type LookupSpec, lookupKey, lookupOptions, lookupCellColumns, useLookupTables } from '../../services/lookups'
@@ -225,9 +225,17 @@ export function FieldRow({
       />
     )
     const swatch = fmt === 'color' ? cssColor(String(dv ?? '')) : null
+    // a long text (format textarea) keeps its lines: a one-line input would drop them
+    const longText = fmt === 'textarea' && type === 'text'
     // a date-time (format datetime / timestamp, or a timestamp column) edits its day AND its time
     const withTime = type === 'date' && (fmt === 'datetime' || fmt === 'timestamp' || (!fmt && /timestamp|datetime/.test(typ)))
-    widget = withTime ? (
+    widget = longText ? (
+      <Textarea
+        required={required} value={textValue} rows={Math.min(12, Math.max(3, textValue.split('\n').length + 1))}
+        style={{ minHeight: 0, fontFamily: fonts.mono }}
+        onChange={(e) => onChange(field.name, e.target.value === '' ? null : e.target.value)}
+      />
+    ) : withTime ? (
       <DateTimePicker required={required} value={textValue} onChange={(v) => onChange(field.name, v === '' ? null : v)} />
     ) : type === 'date' ? (
       <DatePicker required={required} value={dv} onChange={(v) => onChange(field.name, v === '' ? null : v)} />

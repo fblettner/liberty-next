@@ -37,7 +37,7 @@ const RowMenuErr = styled.div`
 `
 
 export function useRowMenu({
-  screen, connector, editMode, requestPrompt, confirmStep, sharedActions, drillInlineDefault, navigate, onCurrentRow, onSaved, onDrill,
+  screen, connector, editMode, requestPrompt, confirmStep, sharedActions, drillInlineDefault, navigate, onCurrentRow, onSaved, onDrill, onMessage,
 }: {
   screen?: ScreenDetail | null
   connector: string
@@ -52,6 +52,8 @@ export function useRowMenu({
   onCurrentRow?: (row: DataRow) => void
   onSaved?: () => void
   onDrill?: (target: DrillTarget) => void
+  /** What a `notify` step of a row action said — shown where a toolbar action's message is. */
+  onMessage?: (message: string) => void
 }): {
   rowMenu: Action[]
   openRowMenu: (row: DataRow, e: React.MouseEvent<HTMLElement>) => void
@@ -120,12 +122,10 @@ export function useRowMenu({
     if (!result.ok) { setMenuError(result.error || (a.label || a.id)); return }
     if (result.cancelled) { closeMenu(); return }   // soft cancel from a prompt — no error
     closeMenu(); onSaved?.()
-    // Notify-action messages collect on ``result.warnings``; surface them in the menu's
-    // error/status slot (no global toast yet — same convention as before).
-    if (result.warnings.length > 0) {
-      console.info('row-menu warnings:', result.warnings)
-    }
-  }, [connector, onSaved, closeMenu, navigate, requestPrompt, confirmStep, sharedActions, onDrill, drillInlineDefault])
+    // Notify-action messages collect on ``result.warnings``: shown in the grid's status banner,
+    // as a toolbar action's are.
+    if (result.warnings.length > 0) onMessage?.(result.warnings.join(' · '))
+  }, [connector, onSaved, closeMenu, navigate, requestPrompt, confirmStep, sharedActions, onDrill, drillInlineDefault, onMessage])
   // The row's action handle (the grid's leading cell): a single navigate action fires at once —
   // a drill — the handle showing the action's label; several actions open the row menu.
   const rowMenuHandle = useMemo(() => {

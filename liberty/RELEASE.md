@@ -198,6 +198,11 @@
   fields, response field and map, "Changes data" — so a screen, an action, a job or the assistant use it like
   any endpoint. Only a function discovered under `plugins/` (`j_*`) can be named; an exception is the call's
   failure; the integrity report names an endpoint whose function is not installed.
+- **A long text keeps its lines.** A column whose format is Long Text (`textarea`) was typed in a one-line
+  box, in the record form and in the grid's edit mode: its line breaks were not shown, and lost as soon as
+  the value was edited. It is now a multi-line box in both (the form's grows with the text).
+- **A row action says what it did.** The message of a `notify` step in a row's menu action was only written
+  to the browser console; it is now shown in the grid's status banner, as a toolbar action's is.
 
 ## 7.0.83 — 2026-11-19
 

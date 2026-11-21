@@ -233,6 +233,13 @@
   l'utilisent comme n'importe quel point d'accès. Seule une fonction découverte sous `plugins/` (`j_*`) peut
   être désignée ; une exception est l'échec de l'appel ; le rapport d'intégrité nomme un point d'accès dont la
   fonction n'est pas installée.
+- **Un texte long garde ses lignes.** Une colonne au format Texte long (`textarea`) se saisissait dans une
+  zone d'une ligne, dans la fiche comme dans le mode édition de la grille : ses retours à la ligne n'étaient
+  pas affichés, et perdus dès que la valeur était modifiée. C'est maintenant une zone de plusieurs lignes dans
+  les deux (celle de la fiche grandit avec le texte).
+- **Une action de ligne dit ce qu'elle a fait.** Le message d'une étape `notify` dans une action du menu
+  d'une ligne n'était écrit que dans la console du navigateur ; il s'affiche maintenant dans le bandeau d'état
+  de la grille, comme celui d'une action de la barre d'outils.
 
 ## 7.0.83 — 2026-11-19
 

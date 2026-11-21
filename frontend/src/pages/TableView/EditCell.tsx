@@ -7,13 +7,16 @@ import { Checkbox, DatePicker, SearchSelect } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { EditCtrl } from './resultColumns'
 
-const EditInput = styled.input`
+const editBox = `
   width: 100%; box-sizing: border-box; background: ${colors.bg.input};
   border: 1px solid ${colors.border}; border-radius: ${radius.sm};
   color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.mono};
   padding: 2px 6px; outline: none;
   &:focus { border-color: ${colors.blue.border}; box-shadow: 0 0 0 2px ${colors.blue.bg}; }
 `
+const EditInput = styled.input`${editBox}`
+// a long text (format textarea): the same box, on several lines
+const EditArea = styled.textarea`${editBox} resize: vertical; display: block;`
 
 export type LookupOpt = { value: string; label: string; mono: string; cells?: string[] }
 
@@ -194,6 +197,13 @@ export function EditCell({
   const type = ctrl === 'date' ? 'date' : ctrl === 'number' ? 'number' : 'text'
   const dv = ctrl === 'date' && defaultText ? defaultText.slice(0, 10) : defaultText
   if (ctrl === 'date') return <CellDate initial={dv} onChange={(v) => onChange(v === '' ? null : v)} />
+  if (ctrl === 'text' && (column.format ?? '').toLowerCase() === 'textarea') {
+    // a long text keeps its lines (an <input> drops them): the same box, a few lines high
+    return (
+      <EditArea rows={Math.min(4, Math.max(1, dv.split('\n').length))} defaultValue={dv}
+        onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)} />
+    )
+  }
   return (
     <EditInput type={type} defaultValue={dv} onChange={(e) => {
       const raw = e.target.value
