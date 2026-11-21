@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { type AppMap, dataKey, mapLinks, matches, menuKey, relatedTo, screenKey, serviceKey, usageOf } from './studioMap'
+import { type AppMap, dataKey, mapLinks, matches, menuKey, reachOf, screenKey, serviceKey, usageOf } from './studioMap'
 
 const map: AppMap = {
   apps: ['main'], app: 'main',
@@ -27,11 +27,23 @@ describe('the map of an application', () => {
     expect(links).toContainEqual([dataKey('studio.describe'), serviceKey('describe')])
     expect(links.some(([a]) => a === menuKey('gone'))).toBe(false)                                                  // a target that does not exist
   })
-  it('says what a selection touches, both ways', () => {
-    expect(relatedTo(links, null)).toBeNull()
-    expect([...relatedTo(links, screenKey('codes'))!].sort()).toEqual(
-      [dataKey('main.code_put'), dataKey('main.codes_get'), dataKey('studio.describe'), menuKey('codes'), screenKey('codes'), screenKey('notes'), serviceKey('describe')].sort())
-    expect([...relatedTo(links, serviceKey('describe'))!].sort()).toEqual([dataKey('studio.describe'), screenKey('codes'), serviceKey('describe')].sort())
+  it('follows the links all the way from a selection: down to the data, up to the menu', () => {
+    expect(reachOf(links, null)).toBeNull()
+    const keys = (key: string) => [...reachOf(links, key)!.nodes].sort()
+    // a screen: its menu entry above; below, its data, its service, the screen inside its form AND that screen's data
+    expect(keys(screenKey('codes'))).toEqual(
+      [dataKey('main.code_put'), dataKey('main.codes_get'), dataKey('main.notes_get'), dataKey('studio.describe'), menuKey('codes'),
+        screenKey('codes'), screenKey('notes'), serviceKey('describe')].sort())
+    // a query: the screens that use it, and their menu entries
+    expect(keys(dataKey('main.codes_get'))).toEqual([dataKey('main.codes_get'), menuKey('codes'), screenKey('codes')].sort())
+    // the data of a screen opened inside another's form: that screen, the one that opens it, its menu entry
+    expect(keys(dataKey('main.notes_get'))).toEqual([dataKey('main.notes_get'), menuKey('codes'), screenKey('codes'), screenKey('notes')].sort())
+    // a menu entry: everything its screen leads to
+    expect(keys(menuKey('codes'))).toContain(serviceKey('describe'))
+    // a service: the endpoint it serves, the screens that call it, their menu — not those screens' other data
+    expect(keys(serviceKey('describe'))).toEqual([dataKey('studio.describe'), menuKey('codes'), screenKey('codes'), serviceKey('describe')].sort())
+    // the links to draw are those on the way, each once
+    expect(reachOf(links, dataKey('main.codes_get'))!.links).toEqual([[menuKey('codes'), screenKey('codes')], [screenKey('codes'), dataKey('main.codes_get')]])
   })
   it('names how a screen uses a piece of data, and filters by text', () => {
     expect(usageOf(map.screens[0], 'main.codes_get')).toBe('reads')

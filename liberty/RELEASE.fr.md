@@ -284,6 +284,32 @@
   l'application qu'aucun écran n'utilise, une référence à ce qui n'existe plus. Une recherche resserre chaque
   colonne ; le résultat du contrôle d'intégrité est à un clic. `GET /admin/studio/map`,
   `GET /admin/studio/overview`.
+  Une sélection suit les liens jusqu'au bout : une requête éclaire les écrans qui l'utilisent et leurs entrées
+  de menu, une entrée de menu tout ce à quoi son écran mène. Un **point d'accès** se modifie aussi sur place
+  (l'éditeur de la page du connecteur, dans une fenêtre), comme le **menu** et les **tableaux de bord** (leurs
+  pages, ouvertes par-dessus la carte).
+- **Les jobs et les points d'accès se modifient comme les services : le flux est l'espace de travail.**
+  L'**éditeur de job** est maintenant le flux du job — le début, une carte par étape avec sa nature, son nom et
+  ce qu'elle fait, la fin — avec ce qui est choisi modifié à côté : les champs d'une étape (la déplacer, la
+  dupliquer, la supprimer s'y trouvent), ou le job lui-même au début (son planning, ses préréglages, ses
+  reprises, ses alertes, ses paramètres). Un **+** sur un lien insère une étape à cet endroit (une étape ne
+  pouvait s'ajouter qu'à la fin). L'**éditeur de point d'accès** montre un point d'accès en quatre temps — ce
+  qu'il est → ses entrées → l'appel (la requête HTTP, ou la fonction ou le service qui le sert) → la réponse
+  (où sont ses lignes, ses colonnes) — et les champs du temps choisi à côté. Un **paramètre** est une ligne
+  (son nom, son libellé, sa valeur par défaut, « obligatoire ») qu'on ouvre pour modifier ses champs libellés,
+  au lieu de deux rangées de cases sans libellé.
+- **Une seule présentation pour les champs de tous les éditeurs.** Les champs d'un connecteur d'API, d'un point
+  d'accès, d'un job et d'une étape de job portent maintenant leur libellé au-dessus du champ, comme une étape
+  de service et le concepteur d'écran.
+- **Les longs flux passent à la ligne, et se zooment.** Le flux d'un service, d'un job et d'un point d'accès
+  continue sur la ligne suivante au lieu de partir à droite, et chaque canevas a un zoom (− / % / +, gardé par
+  nature de flux sur l'appareil).
+- **Une page de vue d'ensemble.** Le menu Liberty s'ouvre maintenant sur **Vue d'ensemble** : les applications
+  de l'installation, chacune avec ses chiffres et ce qui y est détaché (elle s'ouvre dans le Studio sur cette
+  application), et **comment une application se construit** — huit étapes dans l'ordre (connecter les données,
+  nommer les champs, construire les écrans, organiser le menu, ajouter la logique, montrer les chiffres, donner
+  l'accès, vérifier et livrer), chacune avec une phrase, ce que l'installation en contient déjà et le chemin
+  pour y aller. « Un nouvel écran, avec l'assistant » part de là.
 - **Les services, et leur flux.** La page Actions devient **Services** : une action partagée est un service.
   Son concepteur s'ouvre sur une **vue graphique** — les étapes dessinées comme un flux lu de gauche à droite :
   le début avec les entrées, une carte par étape (requête, point d'accès, fonction, service, message…), une

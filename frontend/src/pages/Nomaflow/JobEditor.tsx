@@ -40,7 +40,7 @@ const FieldWrap = styled.label<{ $full?: boolean }>`
   display: flex; flex-direction: column; gap: 4px;
   grid-column: ${({ $full }) => ($full ? '1 / -1' : 'auto')};
 `
-const FieldLabel = styled.span`font-size: ${fontSize.sm}; color: ${colors.text.secondary};`
+const FieldLabel = styled.span`font-size: ${fontSize.micro}; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: ${colors.text.muted};`
 const FieldHint = styled.span`font-size: ${fontSize.sm}; color: ${colors.text.muted};`
 const Toolbar = styled.div`display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap;`
 const Spacer = styled.div`flex: 1;`
@@ -406,6 +406,13 @@ export default function JobEditor() {
       {!job && !error && <Centered />}
 
       {job && (
+        <StepEditor
+          steps={job.steps}
+          onChange={(steps) => patch({ steps })}
+          connectors={connectors}
+          turnedOff={job.disabled_steps ?? []}
+          onTurnedOff={(names) => patch({ disabled_steps: names.length ? names : undefined })}
+          settings={(
         <Stack gap={14}>
           {/* ── job-level settings ─────────────────────────────────────────── */}
           <Section>
@@ -634,18 +641,9 @@ export default function JobEditor() {
             />
           </Section>
 
-          {/* ── step pipeline ──────────────────────────────────────────────── */}
-          <Section>
-            <SectionTitle><Layers size={15} /> {t('nomaflow.editor.stepsSection', { count: job.steps.length })}</SectionTitle>
-            <StepEditor
-              steps={job.steps}
-              onChange={(steps) => patch({ steps })}
-              connectors={connectors}
-              turnedOff={job.disabled_steps ?? []}
-              onTurnedOff={(names) => patch({ disabled_steps: names.length ? names : undefined })}
-            />
-          </Section>
         </Stack>
+          )}
+        />
       )}
     </PageLayout>
   )

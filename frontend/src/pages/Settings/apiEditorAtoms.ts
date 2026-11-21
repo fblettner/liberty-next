@@ -9,11 +9,12 @@ export const SectionHead = styled.div`
   margin-bottom: 12px;
 `
 export const Hint = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.micro}; padding: 4px 2px;`
-// One field row: label on the left (fixed width), control on the right.
+// One field row: its label above the control — the same look as the shared form's fields (common/Input FieldLabel),
+// so an endpoint, a connector, a step and a service are filled in the same way.
 export const FieldRow = styled.div`
-  display: grid; grid-template-columns: 160px 1fr; align-items: center; gap: 12px;
-  padding: 6px 0;
-  & > label { color: ${colors.text.primary}; font-size: ${fontSize.sm}; }
+  display: flex; flex-direction: column; gap: 5px; padding: 6px 0; min-width: 0;
+  & > label { font-size: ${fontSize.micro}; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: ${colors.text.muted}; }
+  & > span:empty { display: none; }
 `
 // A collapsible card (an endpoint, an environment): the header toggles the body.
 export const EndpointCard = styled.div`

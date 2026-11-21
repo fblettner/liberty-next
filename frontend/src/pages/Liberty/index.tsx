@@ -13,6 +13,7 @@ type Entry = { C: LazyExoticComponent<ComponentType>; reload?: boolean; framed?:
 const editor = (C: Entry['C']): Entry => ({ C, reload: true })
 
 const PAGES: Record<LibertyPage, Entry> = {
+  overview: { C: lazy(() => import('../Settings/LibertyOverview')) },
   studio: { C: lazy(() => import('../Settings/StudioHome')) },
   screens: editor(lazy(() => import('../Settings/ScreensBuilder'))),
   connectors: editor(lazy(() => import('../Settings/ConnectorsBuilder'))),

@@ -35,12 +35,33 @@ export function mapLinks(map: AppMap): [NodeKey, NodeKey][] {
   return out
 }
 
-/** What *key* is linked to, directly — itself included. Nothing selected → null (everything shows). */
-export function relatedTo(links: [NodeKey, NodeKey][], key: NodeKey | null): Set<NodeKey> | null {
+/** What a selection reaches: the items and the links to light up. */
+export interface Reach { nodes: Set<NodeKey>; links: [NodeKey, NodeKey][] }
+
+/** Everything *key* leads to and everything that leads to it, following the links all the way: downstream
+ *  (a menu entry → its screen → the data and services it uses → the screens inside its form…) and upstream
+ *  (a query → the screens that use it → their menu entries). Never up then down again — that would light up
+ *  a screen's siblings. Nothing selected → null (everything shows). */
+export function reachOf(links: [NodeKey, NodeKey][], key: NodeKey | null): Reach | null {
   if (!key) return null
-  const out = new Set<NodeKey>([key])
-  for (const [a, b] of links) { if (a === key) out.add(b); if (b === key) out.add(a) }
-  return out
+  const nodes = new Set<NodeKey>([key])
+  const used = new Set<number>()
+  const follow = (from: 0 | 1) => {
+    const to = from === 0 ? 1 : 0
+    const seen = new Set<NodeKey>([key])
+    const queue = [key]
+    while (queue.length) {
+      const at = queue.shift()!
+      links.forEach((link, i) => {
+        if (link[from] !== at) return
+        used.add(i)
+        nodes.add(link[to])
+        if (!seen.has(link[to])) { seen.add(link[to]); queue.push(link[to]) }
+      })
+    }
+  }
+  follow(0); follow(1)
+  return { nodes, links: [...used].sort((a, b) => a - b).map((i) => links[i]) }
 }
 
 /** How a screen uses a piece of data: it reads it, saves through it, or an action of the screen calls it. */

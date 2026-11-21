@@ -5,7 +5,8 @@
 // Increment 4 ships the hand-written sql_copy + sql_query forms (they need live
 // connector/query dropdowns). python / ldap_sync / http get a name field + a
 // raw-values fallback until increment 5 brings their SchemaForm.
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useRef, useEffect, useMemo, useState, type ReactNode } from 'react'
+import JobFlow from './JobFlow'
 import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
@@ -18,7 +19,11 @@ import type { ConnectorMeta } from '../../types/connectors'
 import type { StepConfig, StepType } from './types'
 
 // ── styled ───────────────────────────────────────────────────────────────────────
-const List = styled.div`display: flex; flex-direction: column; gap: 8px;`
+// the job as a flow: the canvas is the workspace, what is picked (a step, or the job at its start) is edited beside it
+const FlowSplit = styled.div`display: flex; gap: 14px; height: calc(100vh - 190px); min-height: 520px;`
+const FlowSide = styled.div`
+  flex: 0 0 min(560px, 44%); min-height: 0; overflow-y: auto; padding: 14px 16px; border: 1px solid ${colors.border}; border-radius: ${radius.lg};
+`
 const Card = styled.div`border: 1px solid ${colors.border}; border-radius: ${radius.md}; overflow: hidden;`
 const Head = styled.div`
   display: flex; align-items: center; gap: 8px; padding: 8px 10px;
@@ -42,13 +47,12 @@ const Field = styled.label<{ $span?: number }>`
   display: flex; flex-direction: column; gap: 4px;
   grid-column: ${({ $span }) => ($span ? `span ${$span}` : 'auto')};
 `
-const FieldLabel = styled.span`font-size: ${fontSize.sm}; color: ${colors.text.secondary};`
+// the same label as every editor's fields (common/Input FieldLabel)
+const FieldLabel = styled.span`font-size: ${fontSize.micro}; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: ${colors.text.muted};`
 const SubHead = styled.div`
   font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.secondary};
   text-transform: uppercase; letter-spacing: 0.04em;
 `
-const AddBar = styled.div`display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px;`
-const Note = styled.div`font-size: ${fontSize.sm}; color: ${colors.text.muted};`
 // Grid (not flex) so the key + value columns stay equal width regardless of the value
 // widget's natural size — a Select for a short connector name was shrinking to its
 // content width and pushing all the space onto the key cell. ``minmax(0, 1fr)`` lets
@@ -1013,7 +1017,9 @@ function CallJobForm({ step, patch }: FormProps) {
 }
 
 // ── one step card ──────────────────────────────────────────────────────────────────
-function StepCard({ step, index, count, sqlConnectors, onPatch, turnedOff, onTurnedOff, onMove, onDuplicate, onDelete }: {
+function StepCard({ step, index, count, sqlConnectors, onPatch, turnedOff, onTurnedOff, onMove, onDuplicate, onDelete, alwaysOpen = false }: {
+  /** Shown in the flow's side panel: no folding, its fields are there. */
+  alwaysOpen?: boolean
   step: StepConfig
   index: number
   count: number
@@ -1026,12 +1032,13 @@ function StepCard({ step, index, count, sqlConnectors, onPatch, turnedOff, onTur
   onDelete: () => void
 }) {
   const { t } = useTranslation()
-  const [open, setOpen] = useState(false)
+  const [folded, setOpen] = useState(false)
+  const open = alwaysOpen || folded
   const Chev = open ? ChevronDown : ChevronRight
   return (
-    <Card>
-      <Head onClick={() => setOpen((o) => !o)}>
-        <Chev size={14} />
+    <Card style={alwaysOpen ? { border: 'none', overflow: 'visible' } : undefined}>
+      <Head onClick={() => { if (!alwaysOpen) setOpen((o) => !o) }} style={alwaysOpen ? { cursor: 'default', padding: '0 0 10px' } : undefined}>
+        {!alwaysOpen && <Chev size={14} />}
         <Tag $tone={STEP_TONE[step.type] ?? 'neutral'}>{step.type}</Tag>
         <HeadName>{step.name || t('nomaflow.steps.unnamed')}</HeadName>
         <HeadSummary>{stepSummary(step)}</HeadSummary>
@@ -1046,7 +1053,7 @@ function StepCard({ step, index, count, sqlConnectors, onPatch, turnedOff, onTur
           onClick={(e) => { e.stopPropagation(); onDelete() }}><Trash2 size={13} /></IconBtn>
       </Head>
       {open && (
-        <Body>
+        <Body style={alwaysOpen ? { padding: 0, border: 'none' } : undefined}>
           <Field>
             <FieldLabel>{t('nomaflow.steps.name')}</FieldLabel>
             <Input value={step.name} onChange={(e) => onPatch({ name: e.target.value })} />
@@ -1198,7 +1205,9 @@ function NotifyForm({ step, patch }: FormProps) {
 }
 
 // ── the editor ─────────────────────────────────────────────────────────────────────
-export default function StepEditor({ steps, onChange, connectors, turnedOff = [], onTurnedOff }: {
+export default function StepEditor({ steps, onChange, connectors, turnedOff = [], onTurnedOff, settings }: {
+  /** What the side panel shows while no step is picked (the flow's start): the job's own settings. */
+  settings?: ReactNode
   steps: StepConfig[]
   onChange: (steps: StepConfig[]) => void
   connectors: ConnectorMeta[] | null
@@ -1227,37 +1236,44 @@ export default function StepEditor({ steps, onChange, connectors, turnedOff = []
     onChange([...steps.slice(0, i + 1), clone, ...steps.slice(i + 1)])
   }
   const deleteStep = (i: number) => onChange(steps.filter((_, idx) => idx !== i))
-  const addStep = (type: StepType) => onChange([...steps, blankStep(type)])
+  // the flow above the list: a card picks its step (opened and brought into view), a "+" inserts one at its place
+  const [focus, setFocus] = useState<{ index: number; tick: number } | null>(null)
+  const picked = focus && focus.index < steps.length ? focus.index : null
+  const insertStep = (index: number, type: StepType) => {
+    onChange([...steps.slice(0, index), blankStep(type), ...steps.slice(index)])
+    setFocus({ index, tick: Date.now() })
+  }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <List>
-        {steps.map((step, i) => (
+    <FlowSplit>
+      <JobFlow
+        steps={steps.map((s) => ({ name: s.name || t('nomaflow.steps.unnamed'), kind: s.type, tone: STEP_TONE[s.type] ?? 'blue', summary: stepSummary(s),
+          off: turnedOff.includes(s.name), continues: false }))}
+        kinds={STEP_TYPES} selected={picked}
+        onStart={() => setFocus(null)}
+        onSelect={(index) => setFocus({ index, tick: Date.now() })}
+        onInsert={(index, kind) => insertStep(index, kind as StepType)}
+      />
+      <FlowSide>
+        {picked != null ? (
           <StepCard
-            key={i}
-            step={step}
-            index={i}
+            key={picked}
+            alwaysOpen
+            step={steps[picked]}
+            index={picked}
             count={steps.length}
             sqlConnectors={sqlConnectors}
-            onPatch={(p) => patchStep(i, p)}
-            turnedOff={turnedOff.includes(step.name)}
+            onPatch={(p) => patchStep(picked, p)}
+            turnedOff={turnedOff.includes(steps[picked].name)}
             onTurnedOff={onTurnedOff && ((off) => onTurnedOff(off
-              ? [...turnedOff.filter((n) => n !== step.name), step.name]
-              : turnedOff.filter((n) => n !== step.name)))}
-            onMove={(dir) => moveStep(i, dir)}
-            onDuplicate={() => duplicateStep(i)}
-            onDelete={() => deleteStep(i)}
+              ? [...turnedOff.filter((n) => n !== steps[picked].name), steps[picked].name]
+              : turnedOff.filter((n) => n !== steps[picked].name)))}
+            onMove={(dir) => { moveStep(picked, dir); const j = picked + dir; if (j >= 0 && j < steps.length) setFocus({ index: j, tick: Date.now() }) }}
+            onDuplicate={() => { duplicateStep(picked); setFocus({ index: picked + 1, tick: Date.now() }) }}
+            onDelete={() => { deleteStep(picked); setFocus(null) }}
           />
-        ))}
-      </List>
-      <AddBar>
-        <Note>{t('nomaflow.steps.addLabel')}</Note>
-        {STEP_TYPES.map((type) => (
-          <Button key={type} type="button" $variant="ghost" $size="sm" onClick={() => addStep(type)}>
-            <Plus size={13} /> {type}
-          </Button>
-        ))}
-      </AddBar>
-    </div>
+        ) : settings}
+      </FlowSide>
+    </FlowSplit>
   )
 }

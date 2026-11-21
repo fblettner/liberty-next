@@ -241,6 +241,27 @@
   entry and no form opens, the application's queries and endpoints no screen uses, a reference to something
   that no longer exists. A search narrows every column; the integrity check's result is one click away.
   `GET /admin/studio/map`, `GET /admin/studio/overview`.
+  A selection follows the links all the way: a query lights the screens that use it and their menu entries, a
+  menu entry everything its screen leads to. An **endpoint** is edited in place too (the connector page's
+  editor, in a window), as are the **menu** and the **dashboards** (their pages, opened over the map).
+- **Jobs and endpoints are edited like services: the flow is the workspace.** The **job editor** is now the
+  job's flow — start, a card per step with its kind, its name and what it does, the end — with what is picked
+  edited beside it: a step's own fields (move, duplicate, delete there), or the job itself at the start (its
+  schedule, presets, retries, alerts, parameters). A **+** on a link inserts a step at that place (a step could
+  only be added last). The **endpoint editor** shows an endpoint as four stages — what it is → its inputs →
+  the call (the HTTP request, or the function or service that serves it) → the answer (where its rows are, its
+  columns) — and the picked stage's fields beside it. A **parameter** is a line (its name, its label, its
+  default, "required") opened to edit its labelled fields, instead of two rows of unlabelled boxes.
+- **One look for every editor's fields.** The fields of an API connector, an endpoint, a job and a job's step
+  now carry their label above the control, as a service's step and the screen designer do.
+- **Long flows wrap, and zoom.** A service's, a job's and an endpoint's flow continue on the next row instead
+  of running off to the right, and each canvas has a zoom (− / % / +, kept per kind of flow on the device).
+- **An overview page.** The Liberty menu now opens on **Overview**: the applications of the installation, each
+  with its figures and what is loose in it (it opens in the Studio on that application), and **how an
+  application is built** — eight steps in order (connect the data, name the fields, build the screens,
+  organise the menu, add the logic, show the figures, give access, check and deliver), each with one sentence,
+  what the installation already holds of it and the way in. "A new screen, with the assistant" starts from
+  there.
 - **Services, and their flow.** The Actions page is now **Services**: a shared action is a service. Its
   designer opens on a **graphical view** — the steps drawn as a flow read left to right: the start with the
   inputs, a card per step (query, endpoint, function, service, message…), a condition forking into its True

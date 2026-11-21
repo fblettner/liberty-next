@@ -2,29 +2,35 @@
 // shows the menu, the screens, the data each screen uses (queries, endpoints) and the services they call;
 // select anything to see what it is linked to; edit it in place — the screen designer, the query editor
 // and the service designer open over the map and come back to it. What nothing uses is shown as such.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import {
   AlertTriangle, ArrowUpRight, Database, FileInput, Folder, Globe, LayoutDashboard, LayoutGrid, Lock, PenLine, Play, Search,
   ShieldAlert, ShieldCheck, Workflow,
 } from 'lucide-react'
-import { Banner, Button, Centered, Input, SearchSelect } from '../../common'
+import { Banner, Button, Centered, Input, ModalBody, ModalHeader, Overlay, SearchSelect, VisualBuilderModal } from '../../common'
 import { api, ApiError } from '../../api/client'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius, media } from '../../theme'
 import {
-  type AppMap, type MapData, type MapScreen, type NodeKey, dataKey, mapLinks, matches, menuKey, relatedTo, screenKey, serviceKey, usageOf,
+  type AppMap, type MapData, type MapScreen, type NodeKey, dataKey, mapLinks, matches, menuKey, reachOf, screenKey, serviceKey, usageOf,
 } from '../../services/studioMap'
 import ScreensBuilder from './ScreensBuilder'
 import { EditQueryModal } from './EditQueryModal'
+import { EditEndpointModal } from './EditEndpointModal'
 import ActionDesignerModal from './ActionDesignerModal'
 import { StudioRunModal, type StudioService } from './StudioModals'
 
 type Tone = 'blue' | 'green' | 'orange' | 'purple'
 interface Overview { counts: Record<string, number>; integrity: { errors: number; warnings: number } }
-type Editing = { kind: 'screen'; id: string } | { kind: 'query'; connector: string; name: string } | { kind: 'service'; id: string } | { kind: 'run'; service: StudioService }
+type Editing = { kind: 'screen'; id: string } | { kind: 'query'; connector: string; name: string } | { kind: 'endpoint'; connector: string; name: string }
+  | { kind: 'service'; id: string } | { kind: 'run'; service: StudioService } | { kind: 'page'; page: 'menus' | 'dashboards' }
+
+// the editors that are whole pages (the menu, the dashboards): hosted in a window over the map, so the studio is not left
+const MenusBuilder = lazy(() => import('./MenusBuilder'))
+const DashboardsBuilder = lazy(() => import('./DashboardsBuilder'))
 
 const Page = styled.div`display: flex; flex-direction: column; gap: 12px; flex: 1 1 auto; min-height: 0; height: 100%;`
 const Bar = styled.div`display: flex; align-items: center; gap: 10px; flex-wrap: wrap;`
@@ -90,7 +96,8 @@ export default function StudioHome() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { focusApp } = useWorkspace()
-  const [app, setApp] = useState<string | null>(focusApp ?? null)
+  const [search] = useSearchParams()
+  const [app, setApp] = useState<string | null>(search.get('app') ?? focusApp ?? null)
   const [map, setMap] = useState<AppMap | null>(null)
   const [overview, setOverview] = useState<Overview | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -110,7 +117,8 @@ export default function StudioHome() {
   const done = useCallback(() => { setEditing(null); load(app) }, [app, load])
 
   const links = useMemo(() => (map ? mapLinks(map) : []), [map])
-  const related = useMemo(() => relatedTo(links, sel), [links, sel])
+  const reach = useMemo(() => reachOf(links, sel), [links, sel])
+  const related = reach?.nodes ?? null
   const state = (key: NodeKey) => ({ $on: sel === key, $rel: !!related && related.has(key) && sel !== key, $dim: !!related && !related.has(key) })
 
   // ── the links of the selection, drawn over the columns ────────────────────────────────
@@ -122,8 +130,7 @@ export default function StudioHome() {
     const frame = box.current?.getBoundingClientRect()
     if (!frame || !sel) { setWires([]); return }
     const out: string[] = []
-    for (const [a, b] of links) {
-      if (a !== sel && b !== sel) continue
+    for (const [a, b] of reach?.links ?? []) {
       const ra = nodes.current.get(a)?.getBoundingClientRect(), rb = nodes.current.get(b)?.getBoundingClientRect()
       if (!ra || !rb) continue
       const ya = ra.top + ra.height / 2 - frame.top, yb = rb.top + rb.height / 2 - frame.top
@@ -137,7 +144,7 @@ export default function StudioHome() {
       }
     }
     setWires(out)
-  }, [links, sel])
+  }, [reach, sel])
   useLayoutEffect(() => { measure() }, [measure, map, query, unused])
   useEffect(() => {
     const again = () => requestAnimationFrame(measure)
@@ -216,7 +223,7 @@ export default function StudioHome() {
         <Bar>
           {d.kind === 'query'
             ? <Button $variant="primary" $size="sm" disabled={d.missing} onClick={() => setEditing({ kind: 'query', connector: d.connector, name: d.name })}><PenLine size={13} /> {t('studio.editQuery')}</Button>
-            : <Button $variant="ghost" $size="sm" onClick={() => navigate(`/liberty/connectors?connector=${encodeURIComponent(d.connector)}`)}><ArrowUpRight size={13} /> {t('studio.openConnector')}</Button>}
+            : <Button $variant="primary" $size="sm" disabled={d.missing} onClick={() => setEditing({ kind: 'endpoint', connector: d.connector, name: d.name })}><PenLine size={13} /> {t('studio.editEndpoint')}</Button>}
         </Bar>
         <div className="group"><span>{t('studio.usedBy')}</span>
           {by.length === 0 && <span className="note">{t('studio.usedByNone')}</span>}
@@ -253,7 +260,7 @@ export default function StudioHome() {
         <span className="kind">{t('studio.menuEntry')}</span>
         <h3>{m.label}</h3>
         <span className="mono">{m.id}{m.type ? ` · ${m.type}` : ''}</span>
-        <Bar><Button $variant="ghost" $size="sm" onClick={() => navigate('/liberty/menus')}><ArrowUpRight size={13} /> {t('studio.editMenu')}</Button></Bar>
+        <Bar><Button $variant="primary" $size="sm" onClick={() => setEditing({ kind: 'page', page: 'menus' })}><PenLine size={13} /> {t('studio.editMenu')}</Button></Bar>
         {m.type === 'screen' && m.target && <div className="group"><span>{t('studio.opens')}</span>{jump(screenKey(m.target), m.target)}</div>}
       </>
     )
@@ -271,7 +278,7 @@ export default function StudioHome() {
         </div>
         {map.dashboards.length > 0 && (
           <div className="group"><span>{t('studio.dashboards')}</span>
-            {map.dashboards.map((d) => <Jump key={d.id} type="button" onClick={() => navigate('/liberty/dashboards')}><LayoutDashboard size={13} /> {d.label}{!d.in_menu && <em>{t('studio.notInMenu')}</em>}</Jump>)}
+            {map.dashboards.map((d) => <Jump key={d.id} type="button" onClick={() => setEditing({ kind: 'page', page: 'dashboards' })}><LayoutDashboard size={13} /> {d.label}{!d.in_menu && <em>{t('studio.notInMenu')}</em>}</Jump>)}
           </div>
         )}
       </>
@@ -355,6 +362,18 @@ export default function StudioHome() {
       {/* the editors, opened over the map: closing one comes back here */}
       {editing?.kind === 'screen' && <ScreensBuilder key={`${map.app}.${editing.id}`} embedded={{ app: map.app, screen: editing.id }} onDone={done} />}
       {editing?.kind === 'query' && <EditQueryModal connector={editing.connector} queryName={editing.name} onClose={done} onSaved={done} />}
+      {editing?.kind === 'endpoint' && <EditEndpointModal connector={editing.connector} endpointName={editing.name} onClose={done} onSaved={done} />}
+      {editing?.kind === 'page' && (
+        <Overlay style={{ zIndex: 500 }}>
+          <VisualBuilderModal $fullscreen={false} onClick={(e) => e.stopPropagation()}>
+            <ModalHeader>
+              <span style={{ flex: 1 }}>{t(editing.page === 'menus' ? 'studio.menu' : 'studio.dashboards')}</span>
+              <Button $variant="ghost" $size="sm" onClick={done}>{t('common.close')}</Button>
+            </ModalHeader>
+            <ModalBody><Suspense fallback={<Centered />}>{editing.page === 'menus' ? <MenusBuilder /> : <DashboardsBuilder />}</Suspense></ModalBody>
+          </VisualBuilderModal>
+        </Overlay>
+      )}
       {editing?.kind === 'service' && <ActionDesignerModal actionId={editing.id} onClose={done} onSaved={() => load(app)} />}
       {editing?.kind === 'run' && <StudioRunModal service={editing.service} onClose={() => setEditing(null)} />}
     </Page>

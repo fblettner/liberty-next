@@ -7,10 +7,10 @@ const t = (k: string) => k
 const leaves = (ns: MenuNode[]): MenuNode[] => ns.flatMap((n) => (n.items ? leaves(n.items) : [n]))
 
 describe('libertyMenu', () => {
-  it('groups the framework pages under folders, each leaf a route or an action', () => {
+  it('opens on the overview, then groups the framework pages under folders, each leaf a route or an action', () => {
     const m = libertyMenu(t)
     expect(m.app).toBe(LIBERTY_APP)
-    expect(m.items.map((n) => n.id)).toEqual(['build', 'administer', 'operate', 'deploy', 'document'])
+    expect(m.items.map((n) => n.id)).toEqual(['overview', 'build', 'administer', 'operate', 'deploy', 'document'])
     for (const l of leaves(m.items)) expect(l.action ?? leafPath(l, m.app)).toBeTruthy()
   })
   it('lists every Liberty page exactly once, in the menu order', () => {

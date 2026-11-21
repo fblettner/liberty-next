@@ -19,13 +19,12 @@
 // semantically (Connection / Authentication / Endpoints) so the operator sees only what's
 // useful. The Test tab here mirrors nomaubl's — pick the endpoint, parameters appear
 // automatically with each declared name/label/default, click Run.
-import { Fragment, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
-import {
-  Activity, ChevronDown, ChevronRight, Plus, RefreshCw, Trash2, Wand2,
-} from 'lucide-react'
+import { FlowCanvas, FlowRows } from './flowKit'
+import { Activity, ChevronDown, ChevronRight, Plus, RefreshCw, Trash2, Wand2, Tag, LogIn, LogOut, Send } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
   Banner, Button, Checkbox, FrameworkEnumsContext, Input, Row, SearchSelect, Stack, useModals,
@@ -43,7 +42,7 @@ import type { ApiTarget, SqlPools } from '../../services/apiTargets'
 // keys dropped. Every field is optional at the editor surface — newly-added connectors start
 // with just ``type`` + ``base_url``.
 
-type Endpoint = {
+export type Endpoint = {
   name: string
   label?: string | null
   description?: string | null
@@ -132,7 +131,7 @@ const TabBtn = styled.button<{ $active?: boolean }>`
   &:hover { color: ${colors.blue.main}; }
 `
 // A wider control area used for textareas — drops the label-aligned center for top-align.
-const FieldRowTop = styled(FieldRow)`align-items: start; & > label { padding-top: 8px; }`
+const FieldRowTop = FieldRow
 const Textarea = styled.textarea`
   width: 100%; min-height: 80px; padding: 8px 10px; border: 1px solid ${colors.border};
   background: ${colors.bg.input}; color: ${colors.text.primary}; border-radius: ${radius.sm};
@@ -144,18 +143,6 @@ const MethodPill = styled.span<{ $tone: string }>`
   background: ${colors.bg.card}; color: ${colors.blue.main};
   font-size: ${fontSize.micro}; font-weight: 600; min-width: 44px; text-align: center;
   margin-right: 8px;
-`
-// Parameters / Response mappings table. Three columns: name / label / default + delete.
-const TableHead = styled.div`
-  display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px; padding: 6px 4px;
-  color: ${colors.text.muted}; font-size: ${fontSize.micro}; letter-spacing: 0.5px; text-transform: uppercase;
-`
-const TableRow = styled.div`
-  display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px; padding: 4px 0;
-`
-// a parameter's second line: what to put in it, and an example
-const ParamHelpRow = styled.div`
-  display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 10px; padding: 0 0 10px 0;
 `
 const ParamHelp = styled.div`
   grid-column: 1 / -1; color: ${colors.text.muted}; font-size: ${fontSize.micro}; padding: 0 2px 6px; white-space: pre-wrap; word-break: break-word;
@@ -809,7 +796,46 @@ function parse(text: string): Record<string, string> | undefined {
   return Object.keys(out).length ? out : undefined
 }
 
-function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }: {
+type Stage = 'general' | 'inputs' | 'call' | 'answer'
+// a parameter: a line that says what it is, opened to edit its labelled fields
+const ParamCard = styled.div<{ $open: boolean }>`
+  border: 1px solid ${(p) => (p.$open ? colors.blue.border : colors.border)}; border-radius: ${radius.md}; margin-bottom: 6px; background: var(--bg-modal);
+`
+const ParamHead = styled.button`
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; background: transparent; border: none; cursor: pointer; text-align: left;
+  color: ${colors.text.muted}; font-family: ${fonts.sans}; font-size: ${fontSize.sm};
+  & .name { font-family: ${fonts.mono}; font-weight: 600; color: ${colors.text.primary}; }
+  & .label { color: ${colors.text.secondary}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .grow { flex: 1; }
+  & .meta { font-family: ${fonts.mono}; font-size: ${fontSize.micro}; }
+  & .req { font-size: ${fontSize.micro}; font-weight: 600; color: ${colors.orange.main}; background: ${colors.orange.bg}; border: 1px solid ${colors.orange.border}; border-radius: 999px; padding: 1px 8px; }
+  & .del { display: inline-flex; padding: 2px; }
+  & .del:hover { color: ${colors.red.main}; }
+`
+const ParamBody = styled.div`display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; padding: 4px 12px 12px; border-top: 1px solid ${colors.border};`
+const Part = styled.div<{ $on: boolean }>`display: ${(p) => (p.$on ? 'flex' : 'none')}; flex-direction: column; gap: 4px;`
+// the endpoint as a workspace, like a service: its flow on the left, the picked stage's fields beside it
+const EpSplit = styled.div`display: flex; gap: 14px; height: min(700px, 74vh); min-height: 460px;`
+const EpSide = styled.div`
+  flex: 0 0 min(640px, 58%); min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding: 14px 16px;
+  border: 1px solid ${colors.border}; border-radius: ${radius.lg};
+`
+const StageWire = styled.div`
+  flex: 0 0 26px; align-self: center; height: 2px; background: ${colors.border}; position: relative;
+  &::after { content: ''; position: absolute; right: 0; top: -3px; border-left: 6px solid ${colors.border}; border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
+`
+const StageCard = styled.button<{ $tone: 'blue' | 'purple' | 'orange' | 'green'; $on: boolean }>`
+  flex: 0 0 auto; width: 210px; text-align: left; cursor: pointer; padding: 9px 11px; display: flex; flex-direction: column; gap: 4px;
+  font-family: ${fonts.sans}; background: ${(p) => (p.$on ? colors[p.$tone].bg : 'var(--bg-modal)')}; border-radius: ${radius.lg};
+  border: 1px solid ${(p) => (p.$on ? colors[p.$tone].main : colors.border)}; transition: border-color 0.15s;
+  &:hover { border-color: ${(p) => colors[p.$tone].border}; }
+  & .kind { display: flex; align-items: center; gap: 6px; font-size: ${fontSize.micro}; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: ${(p) => colors[p.$tone].main}; }
+  & .chip { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: ${radius.md}; background: ${(p) => colors[p.$tone].bg}; border: 1px solid ${(p) => colors[p.$tone].border}; }
+  & .what { font-size: ${fontSize.sm}; font-family: ${fonts.mono}; color: ${colors.text.secondary}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .item { font-size: ${fontSize.micro}; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+`
+
+export function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }: {
   value: Endpoint
   onChange: (v: Endpoint) => void
   /** A generated endpoint: what it was created from, and the refresh from the server. */
@@ -850,13 +876,45 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
     }
   }
   const params = value.params ?? []
+  const [stage, setStage] = useState<Stage>('general')
+  const [openParam, setOpenParam] = useState<number | null>(null)
   const setParams = (next: NonNullable<Endpoint['params']>) =>
     set({ params: next.length ? next : undefined })
   const respMap = value.response_map ?? {}
   const respMapEntries = Object.entries(respMap)
 
+  // the endpoint as a small flow: what it is → what it is given → the call → what comes back. A stage's
+  // fields show when it is picked; each stage says in a line what it holds.
+  const served = value.action ? t('settings.api.stage.byAction', { name: value.action }) : value.callable ? t('settings.api.stage.byFunction', { name: value.callable.split(':').pop() })
+    : `${value.method ?? 'GET'} ${value.path ?? ''}`
+  const columns = Object.keys(value.row_map ?? {}).length
+  const answers = value.rows_field
+    ? t('settings.api.stage.rows', { where: value.rows_field }) + (columns ? ` · ${t('settings.api.stage.columns', { n: columns })}` : '')
+    : value.response_field ? value.response_field : t('settings.api.stage.whole')
+  const stages: { id: Stage; tone: 'blue' | 'purple' | 'orange' | 'green'; icon: ReactNode; what: string }[] = [
+    { id: 'general', tone: 'blue', icon: <Tag size={15} />, what: value.label || value.name || '' },
+    { id: 'inputs', tone: 'purple', icon: <LogIn size={15} />, what: t('settings.api.stage.params', { n: params.length }) },
+    { id: 'call', tone: 'orange', icon: <Send size={15} />, what: served },
+    { id: 'answer', tone: 'green', icon: <LogOut size={15} />, what: answers },
+  ]
+
   return (
-    <Stack gap={4}>
+    <EpSplit>
+      <FlowCanvas zoomKey="endpoint">
+        <FlowRows>
+          {stages.map((st, i) => (
+            <Fragment key={st.id}>
+              {i > 0 && <StageWire />}
+              <StageCard type="button" $tone={st.tone} $on={stage === st.id} onClick={() => setStage(st.id)}>
+                <span className="kind"><span className="chip">{st.icon}</span>{t(`settings.api.stage.${st.id}`)}</span>
+                <span className="what">{st.what}</span>
+              </StageCard>
+            </Fragment>
+          ))}
+        </FlowRows>
+      </FlowCanvas>
+      <EpSide>
+      <Part $on={stage === 'general'}>
       {sourceLabel && (
         <FieldRow>
           <label>{t('settings.api.refresh.source')}</label>
@@ -880,6 +938,8 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
           />
         </Row>
       </FieldRow>
+      </Part>
+      <Part $on={stage === 'call'}>
       <FieldRow>
         <label>{t('settings.api.endpoint.method')}</label>
         <Row gap={10}>
@@ -936,6 +996,8 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
           placeholder="X-Custom:value;Authorization:Bearer {{token}}"
         />
       </FieldRow>
+      </Part>
+      <Part $on={stage === 'general'}>
       <FieldRow>
         <label>{t('settings.api.endpoint.writable')}</label>
         <Checkbox
@@ -944,6 +1006,8 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
           label={t('settings.api.endpoint.writableHint')}
         />
       </FieldRow>
+      </Part>
+      <Part $on={stage === 'call'}>
       <FieldRow>
         <label>{t('settings.api.endpoint.contentType')}</label>
         <SearchSelect
@@ -995,6 +1059,8 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
           />
         </FieldRow>
       )}
+      </Part>
+      <Part $on={stage === 'answer'}>
       <FieldRow>
         <label title={t('settings.api.endpoint.rowsFieldHint')}>{t('settings.api.endpoint.rowsField')}</label>
         <Input
@@ -1078,6 +1144,8 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
           placeholder="data.items"
         />
       </FieldRow>
+      </Part>
+      <Part $on={stage === 'general'}>
       <FieldRow>
         <label>{t('settings.api.endpoint.description')}</label>
         <Input
@@ -1096,6 +1164,8 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
         />
       </FieldRow>
 
+      </Part>
+      <Part $on={stage === 'answer'}>
       <SectionHead>
         {t('settings.api.endpoint.responseMappings')}
         {' — '}
@@ -1149,6 +1219,8 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
         <Plus size={13} /> {t('settings.api.endpoint.addMapping')}
       </Button>
 
+      </Part>
+      <Part $on={stage === 'inputs'}>
       <SectionHead>
         {t('settings.api.endpoint.parameters')}
         {' — '}
@@ -1156,110 +1228,65 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
           {t('settings.api.endpoint.parametersHint')}
         </span>
       </SectionHead>
-      <TableHead>
-        <span>{t('settings.api.endpoint.paramName')}</span>
-        <span>{t('settings.api.endpoint.paramLabel')}</span>
-        <span>{t('settings.api.endpoint.paramDefault')}</span>
-        <span />
-      </TableHead>
       {params.length === 0 && (
         <Hint>{t('settings.api.endpoint.parametersEmpty')}</Hint>
       )}
-      {params.map((p, i) => (
-        <div key={i}>
-        <TableRow>
-          <Input
-            value={p.name}
-            onChange={(e) => {
-              const next = params.slice()
-              next[i] = { ...p, name: e.target.value }
-              setParams(next)
-            }}
-            placeholder="reportName"
-          />
-          <Input
-            value={p.label ?? ''}
-            onChange={(e) => {
-              const next = params.slice()
-              next[i] = { ...p, label: e.target.value || undefined }
-              setParams(next)
-            }}
-            placeholder="Report Name"
-          />
-          <Input
-            value={p.default ?? ''}
-            onChange={(e) => {
-              const next = params.slice()
-              next[i] = { ...p, default: e.target.value || undefined }
-              setParams(next)
-            }}
-            placeholder="R0010P"
-          />
-          <Button
-            $variant="ghost" $size="sm"
-            onClick={() => setParams(params.filter((_, j) => j !== i))}
-            title={t('common.remove')}
-          >
-            <Trash2 size={13} />
-          </Button>
-        </TableRow>
-        <ParamHelpRow>
-          <Input
-            value={p.help ?? ''}
-            onChange={(e) => {
-              const next = params.slice()
-              next[i] = { ...p, help: e.target.value || undefined }
-              setParams(next)
-            }}
-            placeholder={t('settings.api.endpoint.paramHelp')}
-          />
-          <Input
-            value={p.example ?? ''}
-            onChange={(e) => {
-              const next = params.slice()
-              next[i] = { ...p, example: e.target.value || undefined }
-              setParams(next)
-            }}
-            placeholder={t('settings.api.endpoint.paramExample')}
-          />
-          <Input
-            value={(p.choices ?? []).join(', ')}
-            onChange={(e) => {
-              const list = e.target.value.split(',').map((x) => x.trim())
-              const next = params.slice()
-              // keep a trailing blank while the operator is typing the next value; saved without it
-              next[i] = { ...p, choices: list.some((x) => x) ? list.filter((x, k) => x || k === list.length - 1) : undefined }
-              setParams(next)
-            }}
-            onBlur={() => {
-              const clean = (p.choices ?? []).filter((x) => x)
-              if (clean.length !== (p.choices ?? []).length) {
-                const next = params.slice()
-                next[i] = { ...p, choices: clean.length ? clean : undefined }
-                setParams(next)
-              }
-            }}
-            placeholder={t('settings.api.endpoint.paramChoices')}
-          />
-          <Checkbox
-            checked={p.required === true}
-            onChange={(v: boolean) => {
-              const next = params.slice()
-              next[i] = { ...p, required: v ? true : undefined }
-              setParams(next)
-            }}
-            label={t('settings.api.endpoint.paramRequired')}
-          />
-        </ParamHelpRow>
-        </div>
-      ))}
+      {params.map((p, i) => {
+        const open = openParam === i
+        const change = (q: Partial<typeof p>) => { const next = params.slice(); next[i] = { ...p, ...q }; setParams(next) }
+        return (
+          <ParamCard key={i} $open={open}>
+            <ParamHead type="button" onClick={() => setOpenParam(open ? null : i)}>
+              {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              <span className="name">{p.name || '—'}</span>
+              {p.label && <span className="label">{p.label}</span>}
+              <span className="grow" />
+              {p.default != null && p.default !== '' && <span className="meta">= {p.default}</span>}
+              {p.required && <span className="req">{t('settings.api.endpoint.paramRequired')}</span>}
+              <span className="del" role="button" tabIndex={-1} title={t('common.remove')}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); setParams(params.filter((_, k) => k !== i)); setOpenParam(null) } }}
+                onClick={(e) => { e.stopPropagation(); setParams(params.filter((_, k) => k !== i)); setOpenParam(null) }}><Trash2 size={13} /></span>
+            </ParamHead>
+            {open && (
+              <ParamBody>
+                <FieldRow><label>{t('settings.api.endpoint.paramName')}</label>
+                  <Input value={p.name} placeholder="reportName" onChange={(e) => change({ name: e.target.value })} /></FieldRow>
+                <FieldRow><label>{t('settings.api.endpoint.paramLabel')}</label>
+                  <Input value={p.label ?? ''} placeholder="Report Name" onChange={(e) => change({ label: e.target.value || undefined })} /></FieldRow>
+                <FieldRow><label>{t('settings.api.endpoint.paramDefault')}</label>
+                  <Input value={p.default ?? ''} onChange={(e) => change({ default: e.target.value || undefined })} /></FieldRow>
+                <FieldRow><label>{t('settings.api.endpoint.paramExample')}</label>
+                  <Input value={p.example ?? ''} onChange={(e) => change({ example: e.target.value || undefined })} /></FieldRow>
+                <FieldRow style={{ gridColumn: '1 / -1' }}><label>{t('settings.api.endpoint.paramHelp')}</label>
+                  <Input value={p.help ?? ''} onChange={(e) => change({ help: e.target.value || undefined })} /></FieldRow>
+                <FieldRow style={{ gridColumn: '1 / -1' }}><label>{t('settings.api.endpoint.paramChoices')}</label>
+                  <Input
+                    value={(p.choices ?? []).join(', ')}
+                    onChange={(e) => {
+                      const list = e.target.value.split(',').map((x) => x.trim())
+                      // keep a trailing blank while the operator is typing the next value; saved without it
+                      change({ choices: list.some((x) => x) ? list.filter((x, k) => x || k === list.length - 1) : undefined })
+                    }}
+                    onBlur={() => {
+                      const clean = (p.choices ?? []).filter((x) => x)
+                      if (clean.length !== (p.choices ?? []).length) change({ choices: clean.length ? clean : undefined })
+                    }}
+                  /></FieldRow>
+                <Checkbox checked={p.required === true} onChange={(v: boolean) => change({ required: v ? true : undefined })} label={t('settings.api.endpoint.paramRequired')} />
+              </ParamBody>
+            )}
+          </ParamCard>
+        )
+      })}
       <Button
         $variant="ghost" $size="sm" style={{ alignSelf: 'flex-start' }}
         onClick={() => setParams([...params, { name: '' }])}
       >
         <Plus size={13} /> {t('settings.api.endpoint.addParam')}
       </Button>
-    </Stack>
+      </Part>
+      </EpSide>
+    </EpSplit>
   )
 }
 

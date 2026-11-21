@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 import { type ActionType, blankActionOfType } from './ActionListEditor'
+import { FlowCanvas, FlowRows } from './flowKit'
 import { type ActionPath, pathEquals, removeAtPath, resolveAtPath, updateAtPath } from './actionPath'
 
 type Row = Record<string, unknown>
@@ -39,11 +40,6 @@ const LOOK: Record<string, { tone: Tone; icon: ReactNode }> = {
 /** The kinds a "+" offers, in the order a service is usually built — what only a screen does (navigate, confirm…) is left out. */
 const OFFERED: ActionType[] = ['run_query', 'call_api', 'call_plugin', 'call_action', 'if', 'loop', 'notify', 'send_notification', 'return']
 
-const Canvas = styled.div`
-  flex: 1 1 auto; min-height: 0; overflow: auto; padding: 28px 24px;
-  background-image: radial-gradient(${colors.border} 1px, transparent 1px); background-size: 18px 18px;
-  border: 1px solid ${colors.border}; border-radius: ${radius.lg};
-`
 const Line = styled.div`display: flex; align-items: center; width: max-content;`
 const Card = styled.button<{ $tone: Tone; $on: boolean }>`
   position: relative; flex: 0 0 auto; width: 200px; text-align: left; cursor: pointer; padding: 10px 12px;
@@ -230,16 +226,20 @@ export default function ActionFlow({ actions, inputs, onChange, path, onPathChan
   }
 
   return (
-    <Canvas>
-      <Line>
+    <FlowCanvas zoomKey="service">
+      {/* the service's own steps wrap onto the next row; what is nested (a branch, a loop) stays in one piece */}
+      <FlowRows>
         <End type="button" $on={!path || path.length === 0} onClick={() => onPathChange(null)}>
           <Play size={15} /> {t('settings.studio.start')}{inputs.length > 0 && <small>{inputs.join(', ')}</small>}
         </End>
-        {sequence(actions, [], null)}
-        <End type="button" as="div" style={{ cursor: 'default', background: colors.green.bg, borderColor: colors.green.border }}>
-          <Flag size={15} /> {t('settings.studio.answer')}{returned.length > 0 && <small>{returned.join(', ')}</small>}
-        </End>
-      </Line>
-    </Canvas>
+        {actions.map((a, i) => <Line key={`${text(a.id)}-${i}`}>{link([], null, i)}{step(a, [{ field: null, i }])}</Line>)}
+        <Line>
+          {link([], null, actions.length)}
+          <End type="button" as="div" style={{ cursor: 'default', background: colors.green.bg, borderColor: colors.green.border }}>
+            <Flag size={15} /> {t('settings.studio.answer')}{returned.length > 0 && <small>{returned.join(', ')}</small>}
+          </End>
+        </Line>
+      </FlowRows>
+    </FlowCanvas>
   )
 }

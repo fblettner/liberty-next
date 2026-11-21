@@ -118,5 +118,9 @@ def test_the_map_of_an_application(env) -> None:
         assert data["main.forgotten"]["used"] is False
         assert m["services"] == [{"id": "describe_code", "label": "Describe a code", "steps": 1, "screens": ["codes"],
                                   "endpoints": [{"connector": "studio", "endpoint": "describe_code", "label": None, "writable": False}], "missing": False}]
+        # the overview's line for the application: what it holds, what is loose
+        home = client.get("/admin/studio/overview", headers=h).json()
+        assert home["apps"] == [{"app": "main", "screens": 3, "forms": 1, "menu": 2, "data": 4, "services": 1, "dashboards": 0,
+                                 "unreached": 1, "unused": 1, "missing": 0}]
         # an unknown application: the first one
         assert client.get("/admin/studio/map?app=nope", headers=h).json()["app"] == "main"

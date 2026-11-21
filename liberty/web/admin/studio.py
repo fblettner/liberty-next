@@ -48,6 +48,31 @@ async def studio_services(request: Request, _: Superuser) -> dict[str, Any]:
     }
 
 
+def _version() -> str | None:
+    try:
+        from importlib.metadata import version
+
+        return version("liberty-next")
+    except Exception:  # noqa: BLE001 — a source checkout without metadata
+        return None
+
+
+async def _app_summaries(request: Request, principal: Any) -> list[dict[str, Any]]:
+    """Each application at a glance — from its map: how much it holds and what is loose in it."""
+    first = await studio_map(request, principal, app=None)
+    out = []
+    for name in first["apps"]:
+        m = first if first["app"] == name else await studio_map(request, principal, app=name)
+        out.append({
+            "app": name, "screens": len(m["screens"]), "forms": sum(1 for s in m["screens"] if s["form"]),
+            "menu": sum(1 for i in m["menu"] if i["type"]), "data": sum(1 for d in m["data"] if d["used"]),
+            "services": len(m["services"]), "dashboards": len(m["dashboards"]),
+            "unreached": sum(1 for s in m["screens"] if not s["reached"]), "unused": sum(1 for d in m["data"] if not d["used"]),
+            "missing": sum(1 for d in m["data"] if d["missing"]) + sum(1 for v in m["services"] if v["missing"]),
+        })
+    return out
+
+
 def _nested(mapping: Any) -> int:
     """How many items a ``{scope: {id: item}}`` mapping holds."""
     return sum(len(v or {}) for v in (mapping or {}).values()) if isinstance(mapping, dict) else 0
@@ -97,6 +122,8 @@ async def studio_overview(request: Request, _: Superuser) -> dict[str, Any]:
             "jobs": len(jobs), "notifications": len(getattr(getattr(state, "notification_rules", None), "notifications", None) or {}),
         },
         "integrity": {"errors": sum(1 for i in issues if i.severity == "error"), "warnings": sum(1 for i in issues if i.severity == "warning")},
+        "apps": await _app_summaries(request, _),
+        "version": _version(),
     }
 
 
