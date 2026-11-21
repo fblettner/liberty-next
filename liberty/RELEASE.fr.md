@@ -149,6 +149,15 @@
 - **Sur une tablette en portrait** (768 à 1100 px), le menu est la barre d'icônes quel que soit le mode
   enregistré, ouverte par-dessus la page par son bouton (un doigt ne survole pas) et refermée en touchant
   ailleurs ; les boutons de l'en-tête prennent leur forme courte pour laisser leur place aux onglets.
+- **Le menu a la largeur que vous lui donnez** : faites glisser son bord droit (180 à 460 px, retenu sur ce
+  navigateur ; un double-clic rend la largeur par défaut). Et **le libellé d'une entrée de menu prend deux
+  lignes** au lieu d'être coupé après quelques mots (son texte complet reste l'infobulle). La page d'un écran qui lit un point d'accès d'API porte le libellé de l'écran, et
+  non la description du point d'accès (une phrase).
+- Un serveur d'API injoignable est **dit avec son adresse** : « cannot connect to https://host:8999 — check the
+  connector's base URL », là où le texte du pilote (« nodename nor servname provided ») ne nommait ni l'un ni
+  l'autre.
+- Un PDF demandé sur une machine où **la bibliothèque Pango manque** (WeasyPrint installé, `brew install pango`
+  non fait) répond 503 avec ce qu'il faut installer, au lieu d'un 500 et d'une trace dans le journal.
 - **Un écran lu par une requête peut enregistrer par les points d'accès d'un autre connecteur** — **Enregistre
   par** (`save_connector`, Écrans → Requêtes). L'écran garde sa requête, ses colonnes, son formulaire ; ses
   requêtes de modification / ajout / suppression nomment des points d'accès d'un connecteur API : l'enregistrement

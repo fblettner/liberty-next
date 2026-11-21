@@ -31,15 +31,33 @@ function readMode(): Mode {
   } catch { return 'open' }
 }
 
+// The open menu's width is the user's: dragged at its right edge, kept (a double click gives the default back).
+const WIDTH_KEY = 'liberty.sidebar.width'
+const WIDTH_DEFAULT = 210, WIDTH_MIN = 180, WIDTH_MAX = 460
+const clampWidth = (w: number) => Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, Math.round(w)))
+function readWidth(): number {
+  try {
+    const w = Number(localStorage.getItem(WIDTH_KEY))
+    return w ? clampWidth(w) : WIDTH_DEFAULT
+  } catch { return WIDTH_DEFAULT }
+}
+// The edge that is dragged: a few pixels wide, shown on hover and while it moves.
+const Resizer = styled.div<{ $active?: boolean }>`
+  position: absolute; top: 12px; bottom: 12px; right: 0; width: 6px; cursor: col-resize; z-index: 2;
+  border-radius: 3px; background: ${({ $active }) => ($active ? colors.blue.main : 'transparent')};
+  &:hover { background: ${colors.blue.border}; }
+`
+
 // Open on hover: the rail holds the icon width in the layout; the navigation floats above it.
 const Rail = styled.div`position: relative; flex-shrink: 0; width: 64px; z-index: 60;`
 
 // Phone or split window: the navigation is a drawer over the page, opened from the header.
 const DrawerBackdrop = styled.div`position: fixed; inset: 0; z-index: 290; background: var(--overlay);`
 
-const Nav = styled.nav<{ $collapsed: boolean; $floating?: boolean; $drawer?: boolean; $open?: boolean }>`
-  width: ${({ $collapsed }) => ($collapsed ? '56px' : '210px')};
+const Nav = styled.nav<{ $collapsed: boolean; $floating?: boolean; $drawer?: boolean; $open?: boolean; $width: number; $resizing?: boolean }>`
+  width: ${({ $collapsed, $width }) => ($collapsed ? '56px' : `${$width}px`)};
   flex-shrink: 0;
+  position: relative;
   ${({ $floating, $collapsed }) => ($floating ? `position: absolute; top: 0; bottom: 0; left: 0;${$collapsed ? '' : ` background: ${colors.bg.modal}; box-shadow: 0 12px 40px var(--shadow-strong, rgba(0,0,0,0.35));`}` : '')}
   background: var(--ghost-bg, ${colors.bg.card});
   border: 1px solid ${colors.border};
@@ -49,7 +67,8 @@ const Nav = styled.nav<{ $collapsed: boolean; $floating?: boolean; $drawer?: boo
   flex-direction: column;
   padding: 14px 0 10px;
   overflow: hidden;
-  transition: width 0.2s ease;
+  /* no easing while the edge is dragged: the width follows the pointer */
+  transition: ${({ $resizing }) => ($resizing ? 'none' : 'width 0.2s ease')};
   ${glass.surface}
   ${glass.specularSm}
   /* The drawer stays mounted while closed (the app switcher inside resolves the current app). */
@@ -179,11 +198,30 @@ export default function Sidebar({ drawerOpen = false, onDrawerClose }: {
     if (floating) { window.clearTimeout(timer.current); setHover(false) }
     if (drawer) onDrawerClose?.()
   }
+  // the open menu's width, dragged at its right edge
+  const [width, setWidth] = useState(readWidth)
+  const [resizing, setResizing] = useState(false)
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault()
+    const from = e.clientX, was = width
+    let last = was
+    setResizing(true)
+    const move = (ev: PointerEvent) => { last = clampWidth(was + ev.clientX - from); setWidth(last) }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      setResizing(false)
+      try { localStorage.setItem(WIDTH_KEY, String(last)) } catch { /* ignore */ }
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+  const resetWidth = () => { setWidth(WIDTH_DEFAULT); try { localStorage.removeItem(WIDTH_KEY) } catch { /* ignore */ } }
   const [assistantOpen, setAssistantOpen] = useState(false)
   const openAssistant = () => { setAssistantOpen(true); if (drawer) onDrawerClose?.() }
 
   const nav = (
-    <Nav ref={navRef} $collapsed={collapsed} $floating={floating} $drawer={drawer} $open={drawerOpen} onClickCapture={onPick}
+    <Nav ref={navRef} $collapsed={collapsed} $floating={floating} $drawer={drawer} $open={drawerOpen} $width={width} $resizing={resizing} onClickCapture={onPick}
       onMouseEnter={floating ? () => hoverTo(true) : undefined} onMouseLeave={floating ? () => hoverTo(false) : undefined}>
       <Brand $collapsed={collapsed}>
         <BrandMark><img src={resolveApiPath("/favicon.svg")} alt={t('app.title')} /></BrandMark>
@@ -226,6 +264,11 @@ export default function Sidebar({ drawerOpen = false, onDrawerClose }: {
           </CollapseBtn>
         )}
       </Bottom>}
+
+      {/* the open menu is as wide as the user drags it (not the icon rail, not the phone's drawer) */}
+      {!collapsed && !drawer && (
+        <Resizer $active={resizing} onPointerDown={startResize} onDoubleClick={resetWidth} title={t('nav.resize')} />
+      )}
 
       {/* Superuser-only wizard — a modal so it opens over anything and closes cleanly (X / Esc /
           click-outside) without leaving a workspace tab behind. Lazy so it stays out of the shell chunk. */}

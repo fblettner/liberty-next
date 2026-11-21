@@ -6,6 +6,7 @@ const en = {
   },
   nav: {
     menu: 'Menu',
+    resize: 'Drag to resize the menu; double-click for the default width',
     developer: 'Developer',
     openOnHover: 'Open on hover',
     openOnHoverHint: 'Fold the menu to its icons and open it while the mouse is over it',

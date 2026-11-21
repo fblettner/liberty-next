@@ -42,6 +42,11 @@ _REPORTS_EXTRA_HINT = (
     "PDF rendering needs WeasyPrint — install the 'reports' extra "
     "(pip install 'liberty-next[reports]', plus the Pango / HarfBuzz / Fontconfig system libraries)"
 )
+_PANGO_HINT = (
+    "PDF rendering needs the Pango library on this machine, and it is not installed "
+    "(macOS: brew install pango — Debian / Ubuntu: apt install libpango-1.0-0 libpangoft2-1.0-0; "
+    "then restart the server)"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -746,6 +751,10 @@ def build_pdf(
         from weasyprint.text.fonts import FontConfiguration
     except ImportError as exc:
         raise ReportsUnavailableError(f"{_REPORTS_EXTRA_HINT}: {exc}") from exc
+    except OSError as exc:
+        # WeasyPrint is installed, the system library it draws text with is not (Pango, with GLib):
+        # said as the 503 the missing extra gives, not as a traceback
+        raise ReportsUnavailableError(f"{_PANGO_HINT}: {exc}") from exc
 
     if options is None:
         options = BuildOptions()

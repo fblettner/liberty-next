@@ -207,6 +207,8 @@ async def test_network_error() -> None:
         assert result.success is False
         assert result.status_code == 0
         assert "ConnectError" in (result.error or "")
+        # … said with the server it could not reach and where its address is set
+        assert (result.error or "").startswith("cannot connect to ") and "check the connector's base URL" in result.error
     finally:
         await conn.aclose()
 

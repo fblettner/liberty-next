@@ -8,6 +8,7 @@ const fr: Resources = {
   },
   nav: {
     menu: 'Menu',
+    resize: 'Faites glisser pour élargir le menu ; double-clic pour la largeur par défaut',
     developer: 'Développeur',
     openOnHover: 'Ouvrir au survol',
     openOnHoverHint: 'Replier le menu sur ses icônes et l\'ouvrir quand la souris passe dessus',

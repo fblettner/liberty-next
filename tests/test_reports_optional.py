@@ -88,3 +88,21 @@ def test_ldap_sync_without_ldap3_fails_with_the_extra_hint(monkeypatch) -> None:
     with pytest.raises(StepFailed) as ei:
         _search_ldap(step)
     assert "liberty-next[ldap]" in str(ei.value)
+
+
+def test_a_missing_system_library_is_said_not_a_traceback(monkeypatch) -> None:
+    """WeasyPrint installed, Pango not (a laptop without ``brew install pango``): importing it raises
+    ``OSError: cannot load library 'libgobject-2.0-0'`` — reported as the extra's absence is, with
+    what to install, so the route answers 503 with a sentence instead of a 500."""
+    for name in [m for m in sys.modules if m == "weasyprint" or m.startswith("weasyprint.")]:
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "weasyprint" or name.startswith("weasyprint."):
+            raise OSError("cannot load library 'libgobject-2.0-0'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    with pytest.raises(ReportsUnavailableError, match="Pango library.*brew install pango.*libgobject"):
+        build_pdf("# Title")

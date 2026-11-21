@@ -473,7 +473,11 @@ export default function TableView({ connector, query, screenApp, screenId, embed
   // Title = the screen's description (v1 ly_tables.tbl_label) — the menu label is already shown
   // on the tab; fall back to the menu label, then the technical name.
   const menuLabel = findMenuLabel(menus, { kind: 'sql', connector, target: query })
-  const friendlyName = meta?.description || meta?.label || menuLabel || `${connector}.${query}`
+  // An endpoint's description is a sentence about what it does ("Read. The managed instances…"), not
+  // a title: there the screen's own label names the page, then the endpoint's label.
+  const friendlyName = meta?.endpoint
+    ? (screen?.label || meta.label || menuLabel || meta.description || `${connector}.${query}`)
+    : (meta?.description || meta?.label || menuLabel || `${connector}.${query}`)
 
   // The AI assistant's page context: while this tab is the active route, publish what the user
   // sees — the screen, the active filters, the loaded rows' shape and the row they last clicked —

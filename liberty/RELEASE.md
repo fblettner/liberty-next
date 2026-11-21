@@ -131,6 +131,14 @@
 - **On a tablet in portrait** (768 to 1100 px) the menu is the icon rail whatever the saved mode, opened over the
   page by its button (a finger does not hover) and folded back by a tap elsewhere; the header's buttons take
   their short form so the tabs keep their room.
+- **The menu is as wide as you make it**: drag its right edge (180 to 460 px, remembered on this browser; a
+  double click gives the default back). And **a menu entry's label takes two lines** instead of being cut
+  after a few words (its full text stays the tooltip). The page of a screen that reads an API endpoint is titled by the screen's label, not by the
+  endpoint's description (a sentence).
+- An API server that cannot be reached is **said with its address**: "cannot connect to https://host:8999 —
+  check the connector's base URL", where the driver's own text ("nodename nor servname provided") named neither.
+- A PDF asked on a machine where **the Pango library is missing** (WeasyPrint installed, `brew install pango`
+  not done) answers 503 with what to install, instead of a 500 and a traceback in the log.
 - **A screen read by a query can save through another connector's endpoints** — the screen's **Saves through**
   (`save_connector`, Screens → Queries). The screen keeps its query, its columns, its form; its update / insert /
   delete name endpoints of an API connector, so the save goes through the application that owns the data (a

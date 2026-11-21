@@ -123,11 +123,11 @@ const rowBase = `
   font-family: ${fonts.sans};
   line-height: 1.3;
   text-align: left;
-  white-space: nowrap;
+  /* a long label takes a second line (LeafLabel) instead of being cut after a few words */
   overflow: hidden;
-  text-overflow: ellipsis;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
   flex-shrink: 0;
+  & > svg { flex-shrink: 0; }
 `
 
 const FolderRow = styled.button`
@@ -193,9 +193,10 @@ const ChildrenWrap = styled.div`
   min-height: 0;
 `
 
+// An entry's label: up to two lines, then cut (its full text is the row's tooltip).
 const LeafLabel = styled.span`
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden; overflow-wrap: anywhere; min-width: 0;
 `
 
 
@@ -231,7 +232,7 @@ function Node({ node, openIds, app, onAction }: { node: MenuNode; openIds: Set<s
         <FolderRow onClick={() => setOpen((o) => !o)} title={node.label}>
           <Chev size={13} />
           <NodeIcon node={node} />
-          {node.label}
+          <LeafLabel>{node.label}</LeafLabel>
         </FolderRow>
         {open && (
           <ChildrenWrap>

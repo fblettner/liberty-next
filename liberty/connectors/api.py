@@ -171,6 +171,18 @@ def _string_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _transport_error(exc: Exception, url: str) -> str:
+    """A call that never reached the server, in words an operator can act on: which server, and —
+    when it could not even be connected to — that the address is the connector's to check (the
+    driver's own text, "[Errno 8] nodename nor servname provided", names neither)."""
+    said = f"{type(exc).__name__}: {exc}"
+    if isinstance(exc, httpx.ConnectError | httpx.ConnectTimeout):
+        target = httpx.URL(url)
+        where = f"{target.scheme}://{target.host}" + (f":{target.port}" if target.port else "")
+        return f"cannot connect to {where} — check the connector's base URL ({said})"
+    return said
+
+
 _ABSENT = "\x00absent\x00"       # stands for a variable the caller did not give, while a function's body is filled
 
 
@@ -558,7 +570,7 @@ class APIConnector:
                 success=False,
                 status_code=0,
                 url=url,
-                error=f"{type(exc).__name__}: {exc}",
+                error=_transport_error(exc, url),
                 duration_ms=duration_ms,
             )
         duration_ms = (time.perf_counter() - started) * 1000.0
