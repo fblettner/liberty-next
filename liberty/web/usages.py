@@ -65,6 +65,10 @@ UsageType = Literal[
     "chart_query",              # ChartConfig.query
     "dashboard_widget_query",   # Widget.query (chart / kpi / table / select widgets)
     "nomaflow_step_query",      # nomaflow SQL step's query field
+    "nomaflow_param_choices",   # a job parameter's ``choices_from = "query:<connector>/<query>:…"``
+    "explorer_entity_query",    # ExplorerEntity.query (an Explorer model's entity)
+    "notification_action_query",# a notification rule's action: a connector query
+    "dictionary_scan_query",    # read by its NAME by the dictionary's "Scan a table" (web/dictgen.py)
     "menu_target_query",        # MenuItem.target (a query leaf) pointing at this query
     # connector references
     "screen_connector",         # Screen.connector
@@ -78,12 +82,18 @@ UsageType = Literal[
     "dashboard_connector",      # Dashboard.connector
     "export_sheet_connector",   # SheetSpec.connector
     "nomaflow_step_connector",  # SQL step's connector
+    "explorer_entity_connector",   # ExplorerEntity.connector, else the model's application
+    "notification_action_connector",  # a notification rule's action connector
     # screen references
     "menu_target_screen",       # MenuItem.target where MenuItem.type matches a screen target
     "nested_table_screen",      # NestedTableTab.screen
     "action_navigate_screen",   # (currently navigation is via query, not screen — kept for future)
     # api_endpoint references
     "action_api_call",          # CallApiAction.endpoint
+    "screen_read_endpoint",     # Screen.read_query naming a rows endpoint of an API connector
+    "screen_save_endpoint",     # Screen.update / insert / delete query naming an endpoint (its own or save_connector's)
+    "lookup_endpoint",          # LookupDef.query naming a rows endpoint (its connector is an API one)
+    "notification_action_endpoint",  # a notification rule's action: an endpoint
     # pool references
     "connector_pool",           # Connector.pool
     # menu_item references
@@ -161,6 +171,117 @@ def _iter_shared_action_steps(state: Any) -> Any:
     for aid, a in (getattr(actions, "actions", None) or {}).items():
         for step in _iter_actions(getattr(a, "steps", None) or []):
             yield (aid, step)
+
+
+@dataclass(slots=True)
+class _Ref:
+    """A connector — and its query or endpoint when one is named — referenced from outside the screens:
+    a job, an Explorer model, a notification rule."""
+
+    connector: str
+    query: str | None
+    endpoint: str | None
+    kind: str            # "nomaflow_step" | "nomaflow_param" | "explorer_entity" | "notification_action"
+    label: str
+    deep_link: dict[str, Any]
+
+
+def _iter_job_refs(state: Any) -> Any:
+    """What the jobs name (jobs.toml + the framework's own): a step's query on its connector, an LDAP step's
+    target query, a file load's ``refuse_query`` (on ``refuse_connector``, else the target's), the source / target
+    connectors of a copy, a connector handed to a python step (an ``op_kwargs`` key ending in ``connector``), and a
+    run parameter whose choices come from a query. Without this a query only a job runs read "0 references —
+    safe to delete", and Integrity called it unused."""
+    comps = getattr(state, "jobs", None)
+    registry = getattr(comps, "registry", None) if comps is not None else None
+    if registry is None:
+        return
+    try:
+        jobs = list(registry.jobs())
+    except Exception:  # noqa: BLE001 — a registry that cannot list: nothing to report from it
+        return
+    for job in jobs:
+        jid = str(getattr(job, "id", "") or "")
+        link = {"editor": "jobs", "job": jid}
+        for step in getattr(job, "steps", None) or []:
+            where = f"job {jid} · step {getattr(step, 'name', '?')}"
+            conn = getattr(step, "connector", None)
+            if conn:
+                yield _Ref(conn, getattr(step, "query", None), None, "nomaflow_step", where, link)
+            target = getattr(step, "target", None)
+            for side in (getattr(step, "source", None), target):
+                if side is not None and getattr(side, "connector", None):
+                    yield _Ref(side.connector, None, None, "nomaflow_step", where, link)
+            if getattr(step, "target_connector", None):
+                yield _Ref(step.target_connector, getattr(step, "target_query", None), None, "nomaflow_step", where, link)
+            refuse = getattr(step, "refuse_query", None)
+            refuse_conn = getattr(step, "refuse_connector", None) or (getattr(target, "connector", None) if target is not None else None)
+            if refuse and refuse_conn:
+                yield _Ref(refuse_conn, refuse, None, "nomaflow_step", f"{where} · refuse_query", link)
+            for key, val in (getattr(step, "op_kwargs", None) or {}).items():
+                if isinstance(val, str) and val and str(key).lower().endswith("connector"):
+                    yield _Ref(val, None, None, "nomaflow_step", f"{where} · {key}", link)
+        for p in getattr(job, "user_params", None) or []:
+            kind, _, arg = str(getattr(p, "choices_from", None) or "").partition(":")
+            if kind == "query":      # "query:<connector>/<query>:<value>[:<label>]" — liberty/jobs/choices.py
+                conn, _, rest = arg.partition("/")
+                query = rest.partition(":")[0]
+                if conn and query:
+                    yield _Ref(conn, query, None, "nomaflow_param", f"job {jid} · parameter {getattr(p, 'name', '?')}", link)
+
+
+def _iter_explorer_refs(state: Any) -> Any:
+    """What the Explorer models name (explorer.toml): each entity's query on its connector (blank = the app)."""
+    explorer = getattr(state, "explorer", None)
+    for app, models in (getattr(explorer, "explorer", None) or {}).items():
+        for mid, model in (models or {}).items():
+            for eid, entity in (getattr(model, "entities", None) or {}).items():
+                yield _Ref(getattr(entity, "connector", None) or app, getattr(entity, "query", None), None, "explorer_entity",
+                           f"{app} · explorer model {mid} · entity {eid}", {"editor": "explorer", "app": app, "model": mid})
+
+
+def _iter_notification_refs(state: Any) -> Any:
+    """What the notification rules name (notifications.toml): the ``action`` channel's query or endpoint."""
+    rules = getattr(state, "notification_rules", None)
+    for rid, rule in (getattr(rules, "notifications", None) or {}).items():
+        action = getattr(rule, "action", None)
+        if action is not None and getattr(action, "connector", None):
+            yield _Ref(action.connector, getattr(action, "query", None), getattr(action, "endpoint", None), "notification_action",
+                       f"notification rule {rid}", {"editor": "notifications", "rule": rid})
+
+
+def _iter_outside_refs(state: Any) -> Any:
+    yield from _iter_job_refs(state)
+    yield from _iter_explorer_refs(state)
+    yield from _iter_notification_refs(state)
+
+
+_REF_QUERY_TYPE = {"nomaflow_step": "nomaflow_step_query", "nomaflow_param": "nomaflow_param_choices",
+                   "explorer_entity": "explorer_entity_query", "notification_action": "notification_action_query"}
+_REF_CONNECTOR_TYPE = {"nomaflow_step": "nomaflow_step_connector", "nomaflow_param": "nomaflow_step_connector",
+                       "explorer_entity": "explorer_entity_connector", "notification_action": "notification_action_connector"}
+
+
+def _dictionary_scan_usage(connector: str, query: str) -> Usage | None:
+    """The dictionary's "Scan a table" (``POST /admin/dictionary/scan``) reads three queries by their NAME:
+    the per-table ones on whichever connector is scanned, the data-item one on the JDE dictionary's connector. A
+    connector that ships a query under one of those names ships it for the scan — nothing in the config points at it."""
+    try:
+        from liberty.web.dictgen import ScanBody as _Req
+    except Exception:  # noqa: BLE001
+        return None
+    fields = _Req.model_fields
+    per_table = {fields[k].default for k in ("jde_dd_table_query", "jde_dd_filter_query") if k in fields}
+    items = (fields["jde_dd_connector"].default, fields["jde_dd_query"].default) if "jde_dd_query" in fields else None
+    if query in per_table or (connector, query) == items:
+        return Usage(type="dictionary_scan_query", label="the dictionary's \"Scan a table\" (read by its name)",
+                     deep_link={"editor": "dictionary"})
+    return None
+
+
+def connectors_named_outside(state: Any) -> set[str]:
+    """Every connector a job, an Explorer model or a notification rule names (for Integrity's unused-connector check)."""
+    return {r.connector for r in _iter_outside_refs(state)}
 
 
 def _screen_deep_link(app: str, screen_id: str) -> dict[str, Any]:
@@ -537,6 +658,14 @@ def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
                             label=f"{scope_name} · dashboard {did} · {getattr(w, 'type', 'widget')}",
                             deep_link=_dashboard_deep_link(did),
                         ))
+    # Jobs, Explorer models, notification rules.
+    for ref in _iter_outside_refs(state):
+        if ref.connector == connector and ref.query == query:
+            out.append(Usage(type=_REF_QUERY_TYPE[ref.kind], label=ref.label, deep_link=ref.deep_link))
+    # The dictionary scan's own queries, read by name.
+    scan = _dictionary_scan_usage(connector, query)
+    if scan is not None:
+        out.append(scan)
     return out
 
 
@@ -638,6 +767,10 @@ def _find_connector_usages(state: Any, name: str) -> list[Usage]:
                             label=f"{scope_name} · dashboard {did} · {getattr(w, 'type', 'widget')}",
                             deep_link=_dashboard_deep_link(did),
                         ))
+    # Jobs, Explorer models, notification rules.
+    for ref in _iter_outside_refs(state):
+        if ref.connector == name:
+            out.append(Usage(type=_REF_CONNECTOR_TYPE[ref.kind], label=ref.label, deep_link=ref.deep_link))
     return out
 
 
@@ -667,6 +800,29 @@ def _find_api_endpoint_usages(state: Any, connector: str, endpoint: str) -> list
                 type="action_api_call", label=f"action {aid} · call_api",
                 deep_link={"editor": "actions", "action": aid},
             ))
+    # A screen that READS the endpoint (its rows) or SAVES through it (its own connector's, or save_connector's).
+    if screens is not None:
+        for app, screen_map in (screens.screens if hasattr(screens, "screens") else {}).items():
+            for sid, screen in screen_map.items():
+                own = getattr(screen, "connector", None) or app
+                if own == connector and getattr(screen, "read_query", None) == endpoint:
+                    out.append(Usage(type="screen_read_endpoint", label=f"{app}.{sid} · read", deep_link=_screen_deep_link(app, sid)))
+                saves = getattr(screen, "save_connector", None) or own
+                for slot in ("update_query", "insert_query", "delete_query"):
+                    if saves == connector and getattr(screen, slot, None) == endpoint:
+                        out.append(Usage(type="screen_save_endpoint", label=f"{app}.{sid} · {slot.split('_')[0]}",
+                                         deep_link=_screen_deep_link(app, sid)))
+    # A lookup whose rows come from the endpoint.
+    dictionary = _get_dictionary(state)
+    if dictionary is not None:
+        for s, section in _iter_dict_sections(dictionary):
+            for lk_id, lk in (section.get("lookups") or {}).items():
+                if (getattr(lk, "connector", None) or (None if s == "shared" else s)) == connector and getattr(lk, "query", None) == endpoint:
+                    out.append(Usage(type="lookup_endpoint", label=f"{s} · lookup {lk_id}", deep_link=_dict_deep_link("lookups", s, lk_id)))
+    # A notification rule's action.
+    for ref in _iter_notification_refs(state):
+        if ref.connector == connector and ref.endpoint == endpoint:
+            out.append(Usage(type="notification_action_endpoint", label=ref.label, deep_link=ref.deep_link))
     return out
 
 

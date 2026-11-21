@@ -27,6 +27,7 @@ from liberty.web.usages import (
     _iter_shared_action_steps,
     _menu_deep_link,
     _screen_deep_link,
+    connectors_named_outside,
 )
 
 _CRUD = ("get", "put", "post", "delete")
@@ -367,7 +368,19 @@ def _check_dictionary(state: Any, idx: _Index, out: list[Issue]) -> None:
                 if conn not in idx.conn_names:
                     out.append(Issue("error", "Missing connector",
                                      f"{scope} · {kind} '{name}' → connector '{conn}' does not exist", _dict_deep_link(coll, scope, name)))
-                elif q not in idx.sql_by_conn.get(conn, set()):
+                elif q in idx.sql_by_conn.get(conn, set()):
+                    continue
+                elif conn in idx.api_by_conn:
+                    # A lookup may read an API connector: the endpoint's rows are served as a query's
+                    # (web/connectors._api_rows_result — the screen's read, a lookup, a small list).
+                    if kind == "lookup" and q in _rows_endpoint_names(state, conn):
+                        continue
+                    what = "is not an endpoint that returns rows" if q in idx.api_by_conn[conn] else "does not exist"
+                    out.append(Issue("error", "Missing endpoint" if kind == "lookup" else "Missing query",
+                                     f"{scope} · {kind} '{name}' → endpoint '{conn}.{q}' {what}"
+                                     if kind == "lookup" else f"{scope} · {kind} '{name}' → query '{conn}.{q}' does not exist (an API connector has no query)",
+                                     _dict_deep_link(coll, scope, name)))
+                else:
                     out.append(Issue("error", "Missing query",
                                      f"{scope} · {kind} '{name}' → query '{conn}.{q}' does not exist", _dict_deep_link(coll, scope, name)))
 
@@ -528,6 +541,9 @@ def _check_unused_connectors(state: Any, idx: _Index, out: list[Issue]) -> None:
                 for w in getattr(d, "widgets", None) or []:
                     if getattr(w, "connector", None):
                         referenced.add(w.connector)
+    # jobs (a step's connector, a copy's source / target, a connector handed to a python step), the
+    # Explorer models' entities, the notification rules' actions
+    referenced |= connectors_named_outside(state)
     for name in sorted(idx.conn_names - referenced):
         out.append(Issue("warning", "Unused connector",
                          f"connector '{name}' is referenced by nothing and has no menu", _connector_deep_link(name)))

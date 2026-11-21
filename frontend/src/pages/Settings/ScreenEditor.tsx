@@ -20,7 +20,7 @@ import { useTranslation } from 'react-i18next'
 import { Plus, Trash2, ChevronRight, ChevronDown } from 'lucide-react'
 import {
   Banner, Button, Field, FrameworkEnumsContext, Input, ListRowSummaryContext, Row, SchemaForm, SchemaNavigator, SearchSelect, Select, Stack, useModals,
-  type FrameworkEnums, type JsonSchema, type SearchSelectOption,
+  type FrameworkEnums, type JsonSchema, type NavRoot, type SearchSelectOption,
 } from '../../common'
 import ParamBindList, { type ParamBind } from './ParamBindList'
 import {
@@ -33,6 +33,8 @@ import { EditQueryModal } from './EditQueryModal'
 import { EditQueryButton, CloneQueryButton, AddQueryButton } from './EditQueryButton'
 import ColumnGroupsEditor from './ColumnGroupsEditor'
 import ScreenVisualBuilder from './ScreenVisualBuilder'
+import ScreenStages from './ScreenStages'
+import ScreenColumnsPane from './ScreenColumnsPane'
 import ActionTreeView from './ActionTreeView'
 import ActionEditorModal from './ActionEditorModal'
 import ExportEditor from './ExportEditor'
@@ -86,27 +88,14 @@ const ROW_CLICK_ROUTE_OPTIONS: SearchSelectOption[] = [
 ]
 
 type RowClickMode = 'none' | 'dialog' | 'route'
-// Phase 3 — Screen.columns drives both grid + dialog display (single source of truth). Edited
-// via SchemaNavigator on a dedicated tab.
-const COLUMNS_KEYS = ['columns'] as const
 // Named shared grid views (grid formats) — edited via SchemaNavigator on the Views tab. Each
 // view's ``columns`` / ``group_by`` / ``sort.column`` bind to SCREEN_COLUMNS the same way the
 // Columns tab's pickers do.
 const VIEWS_KEYS = ['views'] as const
 
 type TabKey = 'general' | 'queries' | 'columns' | 'views' | 'summary' | 'dialog' | 'actions' | 'rowmenu' | 'export'
-const TAB_ORDER: TabKey[] = ['general', 'queries', 'columns', 'views', 'summary', 'dialog', 'actions', 'rowmenu', 'export']
 
 // ── styled bits ─────────────────────────────────────────────────────────────
-const TabsBar = styled.div`display: flex; gap: 4px; border-bottom: 1px solid ${colors.border}; margin-bottom: 14px;`
-const TabBtn = styled.button<{ $active?: boolean }>`
-  height: 34px; padding: 0 14px; border: none; border-bottom: 2px solid transparent; background: transparent;
-  color: ${({ $active }) => ($active ? colors.text.primary : colors.text.muted)};
-  border-bottom-color: ${({ $active }) => ($active ? colors.blue.main : 'transparent')};
-  font-weight: ${({ $active }) => ($active ? 600 : 400)};
-  font-size: ${fontSize.sm}; font-family: ${fonts.sans}; cursor: pointer;
-  &:hover { color: ${colors.text.primary}; }
-`
 const Sub = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; line-height: 1.5; margin-bottom: 10px;`
 const GroupsHr = styled.div`border-top: 1px solid ${colors.border}; margin: 18px 0 14px;`
 // Collapsible hook section on the Actions tab — header (chevron · heading · count) + body.
@@ -489,9 +478,9 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // Phase 3 — the Columns tab edits ``Screen.columns`` via SchemaNavigator. Same ColumnHint
   // shape used elsewhere; carries the full ``$defs`` map so nested ``filter_from`` /
   // ``visible_when`` / ``lookup_param_binds`` drill in via the breadcrumb navigator.
-  const columnsSchema = useMemo<JsonSchema>(
-    () => ({ ...pickSchemaProperties(schema, COLUMNS_KEYS as unknown as string[]), $defs: defs }),
-    [schema, defs],
+  const columnItemSchema = useMemo<JsonSchema>(
+    () => ({ ...((defs.ColumnHint as JsonSchema | undefined) ?? { type: 'object', properties: {} }), $defs: defs }),
+    [defs],
   )
   // Views tab — edits ``Screen.views`` (named shared grid formats) via SchemaNavigator. Carries
   // the full ``$defs`` so the nested ``sort`` (ScreenViewSort) list drills in via the breadcrumb.
@@ -926,109 +915,92 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // its code, its dd id, AND its meaning (the bare code alone is opaque if you don't know it). Only
   // decorates ColumnHint rows (has both ``name`` + ``rules`` in its schema) — nested lists inside a
   // column (rules_when / filter_from / binds) keep their own summary.
-  const columnRowLabel = (col: Record<string, unknown>, sch: JsonSchema): string | null => {
-    const props = sch?.properties
-    if (!props || !('name' in props) || !('rules' in props)) return null
+  const columnDescribe = (col: Record<string, unknown>): { dd: string; label: string } => {
     const name = typeof col.name === 'string' ? col.name : ''
-    if (!name) return null
     const ddRaw = typeof col.dd === 'string' ? col.dd : undefined
     const key = ddRaw === '' ? null : (ddRaw || name)   // dd="" opts out of the dictionary
-    let label: string | undefined
-    if (key) {
+    let label: string | undefined = typeof col.label === 'string' && col.label ? col.label : undefined   // the screen's own label wins
+    if (!label && key) {
       const dscope = dict?.connectors?.[app]
       const entry = (dscope?.entries?.[key] ?? dscope?.entries?.[key.toUpperCase()]
         ?? dict?.entries?.[key] ?? dict?.entries?.[key.toUpperCase()]) as Record<string, unknown> | undefined
       if (typeof entry?.label === 'string' && entry.label) label = entry.label
     }
-    if (!label) {   // fall back to the read query's column label
+    if (!label && name) {   // fall back to the read query's column label
       const sc = screenColumns?.find((c) => c.name.toLowerCase() === name.toLowerCase())
       if (sc?.label) label = sc.label
     }
-    const parts = [name]
-    if (ddRaw && ddRaw.toLowerCase() !== name.toLowerCase()) parts.push(ddRaw)
-    if (label) parts.push(label)
-    return parts.join(' · ')
+    return { dd: ddRaw && ddRaw.toLowerCase() !== name.toLowerCase() ? ddRaw : '', label: label ?? '' }
   }
   const renderColumns = (): ReactNode => {
-    const currentColumns = Array.isArray(value.columns) ? (value.columns as unknown[]) : []
+    const currentColumns = Array.isArray(value.columns) ? (value.columns as Record<string, unknown>[]) : []
+    // Per-column context for the column form: resolve the column's DATA DICTIONARY rule
+    // (from the fetched dictionary) so we can (1) show the inherited default beside the
+    // RULES field when it's left blank, and (2) only show the Lookup fields when the column's
+    // effective rule is a LOOKUP (override or DD default). Only meaningful at the
+    // ColumnHint level — other drilled levels (filter_from, …) get no context.
+    const deriveContext: NavRoot['deriveContext'] = (col, sch) => {
+      // Only at the ColumnHint level (its schema carries a ``rules`` property) — not the
+      // columns-array root or nested filter_from / bind levels.
+      if (!sch?.properties || !('rules' in sch.properties)) return {}
+      const ddName = typeof col.dd === 'string' ? col.dd : undefined
+      const name = typeof col.name === 'string' ? col.name : ''
+      const key = ddName === '' ? null : (ddName || name)  // dd="" opts out of the dictionary
+      let ddRule: string | undefined
+      let ddRuleVal: string | undefined
+      if (key) {
+        // Dictionary scope is the screen's APP (where entries/lookups/enums live), NOT
+        // its data-pool connector — matches the backend's ``dict_scope = app`` (a
+        // cross-pool screen like f00950 runs on jdedwards but its DD entries are under
+        // connectors.nomajde). Fall back to the shared top-level entries.
+        const dscope = dict?.connectors?.[app]
+        const entry = (dscope?.entries?.[key] ?? dscope?.entries?.[key.toUpperCase()]
+          ?? dict?.entries?.[key] ?? dict?.entries?.[key.toUpperCase()]) as Record<string, unknown> | undefined
+        ddRule = typeof entry?.rules === 'string' && entry.rules ? entry.rules.toUpperCase() : undefined
+        ddRuleVal = typeof entry?.rules_values === 'string' && entry.rules_values ? entry.rules_values : undefined
+      }
+      const override = typeof col.rules === 'string' && col.rules ? col.rules.toUpperCase() : undefined
+      const effective = override ?? ddRule
+      // Can this column ever be a LOOKUP / SEQUENCE? base override / DD default / any
+      // rules_when entry. ``lookup_param_binds`` narrows BOTH a lookup query AND a sequence
+      // query (e.g. "next id for a role" binds the sequence's :ROLE from a row column), so
+      // it shows for either; ``hide_label`` / ``return_binds`` stay lookup-only.
+      const rw = Array.isArray(col.rules_when) ? (col.rules_when as Record<string, unknown>[]) : []
+      const ruleIs = (want: string[]) => want.includes(effective ?? '')
+        || rw.some((e) => typeof e?.rules === 'string' && want.includes(e.rules.toUpperCase()))
+      const canLookup = ruleIs(['LOOKUP'])
+      const canBind = canLookup || ruleIs(['SEQUENCE', 'NN'])
+      return {
+        // The Rules tab always shows (it holds the rule); hide the rule-specific fields when
+        // they don't apply — the declutter the old "Lookup tab only" gave us.
+        hiddenFields: [
+          ...(canLookup ? [] : ['hide_label', 'return_binds']),
+          ...(canBind ? [] : ['lookup_param_binds']),
+        ],
+        fieldNotes: !override && ddRule
+          ? { rules: (
+              <div style={{ fontSize: fontSize.micro, color: colors.text.muted, marginTop: 4 }}>
+                {t('settings.screens.editor.ddDefaultRule',
+                  { rule: ddRuleVal ? `${ddRule} (${ddRuleVal})` : ddRule })}
+              </div>
+            ) }
+          : undefined,
+      }
+    }
     return (
-      <>
-        {/* Just the column list + drill. The "import from read query" button lives on the Queries
-            tab (it seeds from the read query), and column GROUPS live there too. */}
-        {/* Wrap in the augmented enums so a column's ``rules_values`` resolves its dropdown —
-            ENUM_IDS / LOOKUP_IDS / SEQUENCE_IDS (from the dictionary) + SCREEN_COLUMNS — plus
-            COLUMN_GROUPS for the per-column ``group`` picker. */}
-        <FrameworkEnumsContext.Provider value={augmentedEnums}>
-         <ListRowSummaryContext.Provider value={columnRowLabel}>
-          <SchemaNavigator
-            root={{
-              label: t('settings.screens.editor.columnsCrumb', { id }),
-              schema: columnsSchema,
-              value: { columns: currentColumns },
-              onChange: (v) => {
-                const next = Array.isArray(v.columns) && (v.columns as unknown[]).length
-                  ? (v.columns as unknown[])
-                  : null
-                setProp('columns', next)
-              },
-              // Per-column context for the column form: resolve the column's DATA DICTIONARY rule
-              // (from the fetched dictionary) so we can (1) show the inherited default beside the
-              // RULES field when it's left blank, and (2) only show the Lookup tab when the column's
-              // effective rule is a LOOKUP (override or DD default). Only meaningful at the
-              // ColumnHint level — other drilled levels (filter_from, …) get no context.
-              deriveContext: (col, sch) => {
-                // Only at the ColumnHint level (its schema carries a ``rules`` property) — not the
-                // columns-array root or nested filter_from / bind levels.
-                if (!sch?.properties || !('rules' in sch.properties)) return {}
-                const ddName = typeof col.dd === 'string' ? col.dd : undefined
-                const name = typeof col.name === 'string' ? col.name : ''
-                const key = ddName === '' ? null : (ddName || name)  // dd="" opts out of the dictionary
-                let ddRule: string | undefined
-                let ddRuleVal: string | undefined
-                if (key) {
-                  // Dictionary scope is the screen's APP (where entries/lookups/enums live), NOT
-                  // its data-pool connector — matches the backend's ``dict_scope = app`` (a
-                  // cross-pool screen like f00950 runs on jdedwards but its DD entries are under
-                  // connectors.nomajde). Fall back to the shared top-level entries.
-                  const dscope = dict?.connectors?.[app]
-                  const entry = (dscope?.entries?.[key] ?? dscope?.entries?.[key.toUpperCase()]
-                    ?? dict?.entries?.[key] ?? dict?.entries?.[key.toUpperCase()]) as Record<string, unknown> | undefined
-                  ddRule = typeof entry?.rules === 'string' && entry.rules ? entry.rules.toUpperCase() : undefined
-                  ddRuleVal = typeof entry?.rules_values === 'string' && entry.rules_values ? entry.rules_values : undefined
-                }
-                const override = typeof col.rules === 'string' && col.rules ? col.rules.toUpperCase() : undefined
-                const effective = override ?? ddRule
-                // Can this column ever be a LOOKUP / SEQUENCE? base override / DD default / any
-                // rules_when entry. ``lookup_param_binds`` narrows BOTH a lookup query AND a sequence
-                // query (e.g. "next id for a role" binds the sequence's :ROLE from a row column), so
-                // it shows for either; ``hide_label`` / ``return_binds`` stay lookup-only.
-                const rw = Array.isArray(col.rules_when) ? (col.rules_when as Record<string, unknown>[]) : []
-                const ruleIs = (want: string[]) => want.includes(effective ?? '')
-                  || rw.some((e) => typeof e?.rules === 'string' && want.includes(e.rules.toUpperCase()))
-                const canLookup = ruleIs(['LOOKUP'])
-                const canBind = canLookup || ruleIs(['SEQUENCE', 'NN'])
-                return {
-                  // The Rules tab always shows (it holds the rule); hide the rule-specific fields when
-                  // they don't apply — the declutter the old "Lookup tab only" gave us.
-                  hiddenFields: [
-                    ...(canLookup ? [] : ['hide_label', 'return_binds']),
-                    ...(canBind ? [] : ['lookup_param_binds']),
-                  ],
-                  fieldNotes: !override && ddRule
-                    ? { rules: (
-                        <div style={{ fontSize: fontSize.micro, color: colors.text.muted, marginTop: 4 }}>
-                          {t('settings.screens.editor.ddDefaultRule',
-                            { rule: ddRuleVal ? `${ddRule} (${ddRuleVal})` : ddRule })}
-                        </div>
-                      ) }
-                    : undefined,
-                }
-              },
-            }}
-          />
-         </ListRowSummaryContext.Provider>
-        </FrameworkEnumsContext.Provider>
-      </>
+      // The list on the left, the picked column's settings beside it. Wrapped in the augmented enums so a
+      // column's ``rules_values`` resolves its dropdown — ENUM_IDS / LOOKUP_IDS / SEQUENCE_IDS (from the
+      // dictionary) + SCREEN_COLUMNS — plus COLUMN_GROUPS for the per-column ``group`` picker. The "import
+      // from read query" button and the column GROUPS live on the Data stage.
+      <FrameworkEnumsContext.Provider value={augmentedEnums}>
+        <ScreenColumnsPane
+          columns={currentColumns}
+          onChange={(next) => setProp('columns', next.length ? next : null)}
+          itemSchema={columnItemSchema}
+          describe={columnDescribe}
+          deriveContext={deriveContext}
+        />
+      </FrameworkEnumsContext.Provider>
     )
   }
 
@@ -1463,16 +1435,11 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   // modal body without making the body itself scroll. The Dialog tab is special — the visual
   // builder owns its own per-panel scrolling (palette / canvas / inspector all scroll on their
   // own); wrapping it would create a redundant outer scrollbar. Detect via the active tab key.
-  const isDialogTab = tab === 'dialog'
+  const isDialogTab = tab === 'dialog' || tab === 'columns'
   return (
     <Stack gap={10} style={{ flex: 1, minHeight: 0 }}>
-      <TabsBar>
-        {TAB_ORDER.map((k) => (
-          <TabBtn key={k} type="button" $active={tab === k} onClick={() => setTab(k)}>
-            {t(`settings.screens.editor.tabs.${k}`)}
-          </TabBtn>
-        ))}
-      </TabsBar>
+      {/* the screen as its stages: what it is → data → grid → record form → actions → output */}
+      <ScreenStages screen={value as Record<string, unknown>} id={id} tab={tab} onTab={setTab} />
       <div style={{
         flex: 1,
         minHeight: 0,

@@ -320,8 +320,9 @@ pages/TableView/       the data screen: index (params, streaming run), ResultTab
                        color: link, mailto, swatch — safe values only, services/cells.formatLink), FilterPanel (a date column = a
                        period, logic in services/serverFilters.ts, tested),
                        actionRunner.ts (chain / if / loop / return runtime), Summary / Tree / Chart views
-pages/Settings/        one *Builder per config section + the Visual Designer (ScreenVisualBuilder,
-                       ScreenEditor, ActionListEditor…), ApiConnectorEditor, wizards, ConfigVersions,
+pages/Settings/        one *Builder per config section + the Visual Designer (ScreenEditor = a screen as six stages drawn as
+                       a flow: ScreenStages + services/screenStages.ts, tested; its columns as a list with the picked column's
+                       settings beside: ScreenColumnsPane; the record form's builder: ScreenVisualBuilder; ActionListEditor…), ApiConnectorEditor, wizards, ConfigVersions,
                        AccessBuilder (+ Access/: RoleEditor panel, MenuTree inherit|allow|deny, OtherAccess,
                        permissions.ts = strings ⇄ tree model + the backend's glob matcher, ScopeRulesEditor +
                        scopeRules.ts = data-scope rules / attributes helpers, both tested),

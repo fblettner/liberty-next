@@ -294,3 +294,85 @@ def test_query_used_only_by_a_shared_action_is_not_flagged_unused() -> None:
     unused = [i.message for i in check_integrity(state) if i.category == "Unused query"]
     assert not any("helper_q" in m for m in unused)
     assert any("f0004_get" not in m for m in unused) or not unused  # f0004_get is the screen read query → used
+
+
+# ── what the other files name: jobs, Explorer models, notification rules, the dictionary scan ──────────
+
+def _jobs(*jobs: dict):
+    """A stand-in for the nomaflow components parked on ``app.state.jobs`` (only ``registry.jobs()`` is read)."""
+    from liberty.jobs.schema import JobsFile
+
+    parsed = JobsFile.model_validate({"jobs": list(jobs)}).jobs
+    return SimpleNamespace(registry=SimpleNamespace(jobs=lambda: parsed))
+
+
+def test_a_query_only_a_job_runs_is_not_unused() -> None:
+    """A step's query, a file load's ``refuse_query`` (on the target's connector) and a run parameter's choices
+    are references: the query is not "unused", and Find usages names the job."""
+    from liberty.web.usages import find_usages
+
+    state = _state(conns={"demo": ["truncate_items", "refuse_closed", "period_choices", "left_over"], "tools": []})
+    state.jobs = _jobs(
+        {"id": "load", "steps": [
+            {"name": "empty", "type": "sql_query", "connector": "demo", "query": "truncate_items"},
+            {"name": "sales", "type": "file_load", "path": "/tmp/sales.csv", "refuse_query": "refuse_closed",
+             "target": {"connector": "demo", "table": "sales"}},
+            {"name": "roles", "type": "python", "callable": "app.db:create", "op_kwargs": {"admin_connector": "tools"}},
+        ], "user_params": [{"name": "period", "choices_from": "query:demo/period_choices:PERIOD:LABEL"}]},
+    )
+    issues = check_integrity(state)
+    unused = [i.message for i in issues if i.category == "Unused query"]
+    assert unused == ["query 'demo.left_over' is referenced by nothing in the loaded config"]
+    assert not [i for i in issues if i.category == "Unused connector"]        # demo and tools: both named by the job
+    assert [(u.type, u.label) for u in find_usages(state, kind="query", name="refuse_closed", scope="demo")] == [
+        ("nomaflow_step_query", "job load · step sales · refuse_query")]
+    assert [(u.type, u.deep_link) for u in find_usages(state, kind="query", name="period_choices", scope="demo")] == [
+        ("nomaflow_param_choices", {"editor": "jobs", "job": "load"})]
+    assert [u.label for u in find_usages(state, kind="connector", name="tools")] == ["job load · step roles · admin_connector"]
+
+
+def test_a_query_an_explorer_model_or_a_notification_rule_reads_is_not_unused() -> None:
+    from liberty.explorer.config import parse_explorer
+    from liberty.notify.rules import parse_notification_rules
+    from liberty.web.usages import find_usages
+
+    state = _state(conns={"app": ["apps_get", "mark_sent", "left_over"], "data": ["facts_get"]})
+    state.explorer = parse_explorer({"explorer": {"app": {"sales": {"hub": "fact", "entities": {
+        "fact": {"connector": "data", "query": "facts_get"}, "application": {"query": "apps_get"}},
+        "relations": [{"from": "fact", "to": "application", "on": [["APP_ID", "APP_ID"]]}]}}}})
+    state.notification_rules = parse_notification_rules({"notifications": {"sent": {
+        "trigger": {"kind": "action"}, "subject": "Sent", "channels": ["action"], "action": {"connector": "app", "query": "mark_sent"}}}})
+    issues = check_integrity(state)
+    assert [i.message for i in issues if i.category == "Unused query"] == ["query 'app.left_over' is referenced by nothing in the loaded config"]
+    assert not [i for i in issues if i.category == "Unused connector"]
+    assert [(u.type, u.label) for u in find_usages(state, kind="query", name="apps_get", scope="app")] == [
+        ("explorer_entity_query", "app · explorer model sales · entity application")]
+    assert [u.type for u in find_usages(state, kind="query", name="mark_sent", scope="app")] == ["notification_action_query"]
+
+
+def test_the_dictionary_scan_queries_are_used_by_their_name() -> None:
+    """"Scan a table" reads its per-table queries by name on the connector scanned: shipping one is using it."""
+    state = _state(conns={"jde": ["dictionary_data_items_for_table_get", "dictionary_data_items_filters_for_table_get", "left_over"]},
+                   menus={"jde": {"items": [{"id": "m", "label": "M", "type": "query", "target": "left_over"}]}})
+    assert not [i for i in check_integrity(state) if i.category == "Unused query"]
+
+
+def test_a_lookup_may_read_an_api_endpoint_that_returns_rows() -> None:
+    """A lookup's rows may come from an API connector's endpoint (served as a query's): not a missing query.
+    An endpoint that returns no rows, or none at all, is the error."""
+    from liberty.connectors.dictionary import parse_dictionary
+    from liberty.web.usages import find_usages
+
+    state = _state(conns={"app": []})
+    state.connectors._conns["sm"] = SimpleNamespace(config=SimpleNamespace(endpoints=[
+        SimpleNamespace(name="instances", rows_field="items", writable=False), SimpleNamespace(name="restart", rows_field=None, writable=True)]))
+    state.connectors.dictionary = parse_dictionary({"connectors": {"app": {"lookups": {
+        "ok": {"connector": "sm", "query": "instances", "value": "ID", "label": "NAME"},
+        "no_rows": {"connector": "sm", "query": "restart", "value": "ID", "label": "NAME"},
+        "gone": {"connector": "sm", "query": "nothing", "value": "ID", "label": "NAME"}}}}})
+    errors = [(i.category, i.message) for i in check_integrity(state) if i.severity == "error"]
+    assert errors == [
+        ("Missing endpoint", "app · lookup 'gone' → endpoint 'sm.nothing' does not exist"),
+        ("Missing endpoint", "app · lookup 'no_rows' → endpoint 'sm.restart' is not an endpoint that returns rows"),
+    ]
+    assert [(u.type, u.label) for u in find_usages(state, kind="api_endpoint", name="instances", scope="sm")] == [("lookup_endpoint", "app · lookup ok")]

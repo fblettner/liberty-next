@@ -290,6 +290,26 @@
   Deploy folder: check, then deliver.
 - **Long flows wrap, and zoom.** A service's, a job's and an endpoint's flow continue on the next row instead
   of running off to the right, and each canvas has a zoom (− / % / +, kept per kind of flow on the device).
+- **Integrity and "Find usages" see what the jobs, the Explorer models and the notification rules name.** A
+  query that only a job runs (a step's query, a file load's `refuse_query`, the choices of a run parameter), an
+  Explorer entity reads or a notification rule's action calls was reported **unused** — and "Find usages" said
+  "0 references", an invitation to delete a query a job needs. They are references now, each listed with its
+  job and step, model and entity, or rule; a connector only a job names (a copy's source or target, a connector
+  handed to a python step) is no longer "unused" either. The queries the dictionary's "Scan a table" reads by
+  their name count as used by it. **A lookup that reads an API endpoint** (its rows, as a screen reads them) is
+  no longer a "missing query" error; an endpoint that does not exist, or returns no rows, is. "Find usages" on
+  an endpoint also lists the screens that read or save through it, the lookups and the notification rules.
+- **The screen designer reads like the screen.** Its nine tabs are now **six stages drawn as a flow** — What
+  it is → Data → Grid → Record form → Actions → Output — and each card says what the screen holds there: the
+  query it reads and how many it saves through (in orange when none is set), the columns and filters, the
+  record form's tabs and fields, the toolbar and row-menu actions, the export. A stage with several sections
+  shows them under it (Grid: Columns, Views, Summary; Actions: Actions, Row menu). Every section is the one it
+  was: no setting moved or left.
+  **The columns are a list with the picked column's settings beside it**, as a service shows its flow and the
+  picked step: each line gives the column's name, its label (the screen's own, else the dictionary's) and
+  what is worth seeing without opening it — key, filter, hidden, required, read only, sensitive, its rule.
+  Drag to reorder, filter the list, add, remove; the settings are the same form, its nested rules opened in
+  the panel.
 - **An overview page.** The Liberty menu now opens on **Overview**: the applications of the installation, each
   with its figures and what is loose in it (it opens in the Studio on that application), and **how an
   application is built** — eight steps in order (connect the data, name the fields, build the screens,

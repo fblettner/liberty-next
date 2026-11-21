@@ -343,6 +343,31 @@
 - **Les longs flux passent à la ligne, et se zooment.** Le flux d'un service, d'un job et d'un point d'accès
   continue sur la ligne suivante au lieu de partir à droite, et chaque canevas a un zoom (− / % / +, gardé par
   nature de flux sur l'appareil).
+- **L'intégrité et « Rechercher les usages » voient ce que nomment les traitements, les modèles de l'Explorer
+  et les règles de notification.** Une requête que seul un traitement exécute (la requête d'une étape, le
+  `refuse_query` d'un chargement de fichier, les choix d'un paramètre de lancement), qu'une entité de
+  l'Explorer lit ou que l'action d'une règle de notification appelle était signalée **inutilisée** — et
+  « Rechercher les usages » répondait « 0 référence », une invitation à supprimer une requête dont un
+  traitement a besoin. Ce sont maintenant des références, chacune listée avec son traitement et son étape, son
+  modèle et son entité, ou sa règle ; un connecteur que seul un traitement nomme (la source ou la cible d'une
+  copie, un connecteur passé à une étape python) n'est plus « inutilisé » non plus. Les requêtes que « Analyser
+  une table » du dictionnaire lit par leur nom comptent comme utilisées par lui. **Une liste de valeurs qui lit
+  un point d'accès d'API** (ses lignes, comme un écran les lit) n'est plus une erreur « requête manquante » ; un
+  point d'accès qui n'existe pas, ou qui ne renvoie pas de lignes, en est une. « Rechercher les usages » sur un
+  point d'accès liste aussi les écrans qui le lisent ou enregistrent par lui, les listes de valeurs et les
+  règles de notification.
+- **Le concepteur d'écran se lit comme l'écran.** Ses neuf onglets sont maintenant **six étapes dessinées en
+  flux** — Ce qu'il est → Données → Grille → Fiche → Actions → Sortie — et chaque carte dit ce que l'écran y
+  contient : la requête qu'il lit et par combien il enregistre (en orange quand aucune n'est réglée), les
+  colonnes et les filtres, les onglets et les champs de la fiche, les actions de la barre d'outils et du menu
+  de ligne, l'export. Une étape à plusieurs sections les montre en dessous (Grille : Colonnes, Vues,
+  Synthèse ; Actions : Actions, Menu de ligne). Chaque section est celle qu'elle était : aucun réglage n'a
+  bougé ni disparu.
+  **Les colonnes sont une liste avec, à côté, les réglages de la colonne choisie**, comme un service montre
+  son flux et l'étape choisie : chaque ligne donne le nom de la colonne, son libellé (celui de l'écran, sinon
+  celui du dictionnaire) et ce qui mérite d'être vu sans l'ouvrir — clé, filtre, masquée, obligatoire,
+  lecture seule, sensible, sa règle. Glisser pour réordonner, filtrer la liste, ajouter, retirer ; les
+  réglages sont le même formulaire, ses règles imbriquées s'ouvrent dans le panneau.
 - **Une page de vue d'ensemble.** Le menu Liberty s'ouvre maintenant sur **Vue d'ensemble** : les applications
   de l'installation, chacune avec ses chiffres et ce qui y est détaché (elle s'ouvre dans le Studio sur cette
   application), et **comment une application se construit** — huit étapes dans l'ordre (connecter les données,
