@@ -12,7 +12,7 @@ import { Save, Plus, Trash2, Search, Edit3, BookText, Undo2, Copy, GitBranch, Fi
 import * as XLSX from 'xlsx'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, Row, Stack, SpinnerRing, SchemaNavigator, FrameworkEnumsContext, useModals, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Field, SearchSelect, Tag, type FrameworkEnums, type JsonSchema, type SearchSelectOption } from '../../common'
+import { Button, Banner, Centered, Card, HeaderActions, Row, Stack, SpinnerRing, SchemaNavigator, FrameworkEnumsContext, useModals, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Field, SearchSelect, Tag, type FrameworkEnums, type JsonSchema, type SearchSelectOption } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
 import { renameKey } from '../../services/keyRename'
 import { validateId, suggestCloneId } from '../../services/idValidator'
@@ -27,6 +27,7 @@ import { DictionaryScan } from './DictionaryScan'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { flattenConnectorSections, groupQueriesByTable } from './connectorTables'
 import { BuilderShell as Shell } from '../../common/builderShell'
+import { recordLine, recordMatches } from '../../services/dictionaryMarks'
 
 type DictionaryData = DictionaryDoc['dictionary']
 
@@ -42,12 +43,13 @@ const SubTab = styled.button<{ $active?: boolean }>`
   color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
   &:hover { color: ${colors.text.primary}; background: ${({ $active }) => ($active ? colors.blue.bg : 'var(--hover-subtle)')}; }
 `
+const Count = styled.span`margin-left: 6px; font-size: ${fontSize.micro}; font-family: ${fonts.mono}; opacity: 0.7;`
 const Split = styled.div`display: flex; gap: 14px; flex: 1; min-height: 0; align-items: stretch;`
 // The left nav has its own scroll container so a long list (think 347 dictionary entries) doesn't
 // drag the whole page along when you wheel through it. The search row and the "+ Add" button stay
 // pinned outside the scroller, the items live in NavList. The flex chain (Shell → Split → NavCol →
 // NavList) caps the list height to the page; no max-height hack needed.
-const NavCol = styled.div`flex: 0 0 220px; display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 0;`
+const NavCol = styled(Card)`flex: 0 0 min(340px, 32%); padding: 10px; display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 0;`
 const NavList = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;`
 const NavSearch = styled.div`
   display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; margin-bottom: 2px;
@@ -56,15 +58,22 @@ const NavSearch = styled.div`
   & input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; &::placeholder { color: ${colors.text.muted}; } }
 `
 const NavItem = styled.button<{ $active?: boolean }>`
-  display: flex; flex-direction: column; align-items: stretch; gap: 1px; padding: 6px 10px;
-  border-radius: ${radius.md}; text-align: left;
-  border: 1px solid ${({ $active }) => ($active ? colors.blue.border : 'transparent')};
-  background: ${({ $active }) => ($active ? colors.blue.bg : 'transparent')};
-  color: ${({ $active }) => ($active ? colors.blue.main : colors.text.secondary)};
-  cursor: pointer;
-  & .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: ${fontSize.sm}; font-family: ${fonts.mono}; }
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px; flex-shrink: 0;
+  border-radius: ${radius.md}; text-align: left; cursor: pointer;
+  border: 1px solid ${({ $active }) => ($active ? colors.blue.main : colors.border)};
+  background: ${({ $active }) => ($active ? colors.blue.bg : colors.bg.input)};
+  & .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  & .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: ${fontSize.sm}; font-family: ${fonts.mono}; color: ${colors.text.primary}; }
   & .sub  { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: ${fontSize.micro}; color: ${colors.text.muted}; font-family: ${fonts.sans}; }
-  &:hover { background: var(--hover-subtle); color: ${colors.text.primary}; }
+  /* the marks: one box for all (same height, same line), a short one never squeezed — only the last, the long
+     one (a rule and its target), gives way and ends with an ellipsis */
+  & .marks { display: flex; gap: 4px; flex-shrink: 0; align-items: center; max-width: 52%; min-width: 0; }
+  & .marks > * {
+    display: block; flex: 0 0 auto; box-sizing: border-box; height: 20px; line-height: 18px; padding: 0 7px;
+    font-size: ${fontSize.micro}; white-space: nowrap;
+  }
+  & .marks > *:last-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  &:hover { border-color: ${({ $active }) => ($active ? colors.blue.main : colors.blue.border)}; }
 `
 const FormCol = styled(Card)`flex: 1; min-width: 0; min-height: 0; overflow-y: auto;`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 24px 4px;`
@@ -145,6 +154,17 @@ export default function DictionaryBuilder() {
   const [addScopeOpen, setAddScopeOpen] = useState(false)
   const [frameworkAddOpen, setFrameworkAddOpen] = useState(false)
   const [usagesTarget, setUsagesTarget] = useState<FindUsagesTarget | null>(null)
+  const [usedIn, setUsedIn] = useState<number | null>(null)
+  useEffect(() => {
+    setUsedIn(null)
+    if (!sel || kind === 'framework_enums') return
+    let cancelled = false
+    const usageKind = kind === 'entries' ? 'dictionary_entry' : kind === 'lookups' ? 'lookup' : kind === 'sequences' ? 'sequence' : 'enum'
+    api.post<{ count: number }>('/admin/find-usages', { kind: usageKind, name: sel, scope: scope || 'shared' })
+      .then((r) => { if (!cancelled) setUsedIn(r.count) })
+      .catch(() => { /* the count is a comfort: the button still opens the full answer */ })
+    return () => { cancelled = true }
+  }, [sel, kind, scope])
   // Query-action modal target — opened from the in-line Edit / Clone / Add buttons
   // next to a LookupDef.query / SequenceDef.query dropdown (SchemaForm renders the
   // trio when ``onEditQuery`` / ``onCloneQuery`` / ``onAddQuery`` are wired). The
@@ -363,7 +383,7 @@ export default function DictionaryBuilder() {
   // handles the mix of underscore-snake and PascalCase ids you see in NOMASX1 / NOMAJDE.
   const keys = Object.keys(section).sort((a, b) => a.localeCompare(b))
   const needle = q.trim().toLowerCase()
-  const shown = needle ? keys.filter((k) => k.toLowerCase().includes(needle)) : keys
+  const shown = needle ? keys.filter((k) => recordMatches(needle, k, recordLine(kind, section[k], k))) : keys
 
   const setRecord = (key: string, v: Record<string, unknown>) => {
     setDict(setSection(dict, scope, kind, { ...section, [key]: v }))
@@ -637,33 +657,29 @@ export default function DictionaryBuilder() {
         onAddScope={() => setAddScopeOpen(true)}
         addScopeDisabled={SHARED_ONLY.has(kind)}
         addScopeTitle={SHARED_ONLY.has(kind) ? t('settings.dictionary.framework_enums.scopeNote') : t('settings.dictionary.scope.addPrompt')}
-        leading={(dirty || status || error) ? (
-          <>
-            {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
-            {status && <span style={{ color: colors.green.main, fontSize: fontSize.sm }}>{status}</span>}
-            {error && <span style={{ color: colors.red.main, fontSize: fontSize.sm }}>{error}</span>}
-          </>
-        ) : undefined}
-        right={
-          <>
-            <Button $variant="ghost" $size="sm" onClick={() => setScanOpen(true)} disabled={busy}>
-              <BookText size={13} /> {t('settings.dictscan.scanTable')}
-            </Button>
-            <Button $variant="ghost" $size="sm" onClick={exportEntries} disabled={busy || !dict} title={t('settings.dictionary.exportTitle')}>
-              <FileSpreadsheet size={13} /> {t('settings.dictionary.export')}
-            </Button>
-            <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
-              <Undo2 size={13} /> {t('common.discard')}
-            </Button>
-            <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
-              {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
-            </Button>
-          </>
-        }
       />
+      <HeaderActions>
+        {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+        <Button $variant="ghost" $size="sm" onClick={() => setScanOpen(true)} disabled={busy}>
+          <BookText size={13} /> {t('settings.dictscan.scanTable')}
+        </Button>
+        <Button $variant="ghost" $size="sm" onClick={exportEntries} disabled={busy || !dict} title={t('settings.dictionary.exportTitle')}>
+          <FileSpreadsheet size={13} /> {t('settings.dictionary.export')}
+        </Button>
+        <Button $variant="ghost" $size="sm" onClick={discard} disabled={busy || !dirty}>
+          <Undo2 size={13} /> {t('common.discard')}
+        </Button>
+        <Button $variant="primary" $size="sm" onClick={save} disabled={busy || !dirty}>
+          {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}
+        </Button>
+      </HeaderActions>
+      {status && <Banner $tone="ok">{status}</Banner>}
+      {error && <Banner $tone="error">{error}</Banner>}
       <SubTabs>
         {KIND_ORDER.map((k) => (
-          <SubTab key={k} $active={kind === k} type="button" onClick={() => { setKind(k); if (SHARED_ONLY.has(k)) setScope(SCOPE_SHARED) }}>{t(`settings.dictionary.${k}.tab`)}</SubTab>
+          <SubTab key={k} $active={kind === k} type="button" data-kind={k} onClick={() => { setKind(k); if (SHARED_ONLY.has(k)) setScope(SCOPE_SHARED) }}>
+            {t(`settings.dictionary.${k}.tab`)}<Count>{Object.keys(getSection(dict, SHARED_ONLY.has(k) ? SCOPE_SHARED : scope, k)).length}</Count>
+          </SubTab>
         ))}
         <div style={{ flex: 1 }} />
         <Button $variant="ghost" $size="sm" onClick={addRecord} title={t(`settings.dictionary.${kind}.add`)}>
@@ -685,23 +701,23 @@ export default function DictionaryBuilder() {
               // the key (entries/enums → `label`; lookups → `description`). Falls back to nothing when
               // the record has no human-readable side-name yet (in that case only the key shows).
               const rec = section[k] as Record<string, unknown> | undefined
-              // sub-label per kind: entries/enums → `label`; lookups/sequences → `description`.
-              const sub = (kind === 'lookups' || kind === 'sequences') ? rec?.description : rec?.label
-              const subStr = typeof sub === 'string' && sub.trim() ? sub : null
+              const line = recordLine(kind, rec, k)
               // Customer-override badge — see Screen.override for rationale.
               // framework_enums don't have the field (different model); rest do.
               const isOverride = rec?.override === true
               return (
-                <NavItem key={k} $active={k === sel} onClick={() => { setSel(k); setStatus(null) }}>
-                  <span className="name">
-                    {k}
-                    {isOverride && (
-                      <Tag $tone="orange" style={{ marginLeft: 6, fontSize: fontSize.micro }}>
-                        {t('settings.override.badge')}
-                      </Tag>
-                    )}
+                <NavItem key={k} $active={k === sel} data-record={k} onClick={() => { setSel(k); setStatus(null) }}>
+                  <span className="text">
+                    <span className="name">{k}</span>
+                    {line.sub && <span className="sub">{line.sub}</span>}
                   </span>
-                  {subStr && <span className="sub">{subStr}</span>}
+                  <span className="marks">
+                    {isOverride && <Tag $tone="orange">{t('settings.override.badge')}</Tag>}
+                    {line.marks.map((mk) => (
+                      <Tag key={`${mk.tone}:${mk.text}`} $tone={mk.tone} title={mk.title ?? mk.text}
+                        style={mk.mono ? undefined : { fontFamily: fonts.sans }}>{mk.text}</Tag>
+                    ))}
+                  </span>
                 </NavItem>
               )
             })}
@@ -735,7 +751,7 @@ export default function DictionaryBuilder() {
                       scope: scope || 'shared',
                       label: `${kind === 'entries' ? 'dictionary entry' : kind.slice(0, -1)} ${sel}`,
                     })} disabled={busy}>
-                      <GitBranch size={13} /> {t('findUsages.button')}
+                      <GitBranch size={13} /> {t('findUsages.button')}{usedIn != null && <Count data-used={usedIn}>{usedIn}</Count>}
                     </Button>
                   )}
                   <Button $variant="ghost" $size="sm" onClick={() => renameRecord(sel)} disabled={busy}>

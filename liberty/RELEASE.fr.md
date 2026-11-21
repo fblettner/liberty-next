@@ -343,6 +343,14 @@
 - **Les longs flux passent à la ligne, et se zooment.** Le flux d'un service, d'un job et d'un point d'accès
   continue sur la ligne suivante au lieu de partir à droite, et chaque canevas a un zoom (− / % / +, gardé par
   nature de flux sur l'appareil).
+- **La page Dictionnaire : un enregistrement dit ce qu'il est dans la liste.** La ligne d'une entrée porte son
+  format et sa règle (`LOOKUP` — sa cible dans l'infobulle de la pastille), celle d'une énumération le nombre de ses valeurs, celle d'une liste
+  de valeurs ou d'une séquence l'autre connecteur où elle lit ; le filtre trouve un enregistrement par son nom, son
+  libellé ou l'un de ces éléments (saisir `lookup` montre toutes les entrées réglées par une liste de
+  valeurs). L'onglet de chaque type dit combien d'enregistrements le périmètre contient, le bouton
+  **Rechercher les usages** de l'enregistrement choisi dit en combien d'endroits il est utilisé, la liste est
+  un panneau qui commence sur la même ligne que le formulaire, et Analyser une table, Exporter, Annuler et
+  Enregistrer sont dans l'en-tête de la page. Le formulaire d'un enregistrement est inchangé.
 - **Tableaux de bord : les cartes se déplacent par glisser-déposer et se dimensionnent par leur coin.** Dans
   l'éditeur de tableau de bord, la poignée d'une carte se glisse sur une autre carte — une barre montre de
   quel côté elle se posera — et son coin inférieur droit la dimensionne, la carte suivant le pointeur en

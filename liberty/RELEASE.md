@@ -290,6 +290,12 @@
   Deploy folder: check, then deliver.
 - **Long flows wrap, and zoom.** A service's, a job's and an endpoint's flow continue on the next row instead
   of running off to the right, and each canvas has a zoom (− / % / +, kept per kind of flow on the device).
+- **The Dictionary page: a record says what it is in the list.** An entry's line carries its format and its
+  rule (`LOOKUP` — its target in the chip's tooltip), an enum how many values it holds, a lookup or a sequence the other connector it reads from; the
+  filter finds a record by its name, its label or one of those (type `lookup` to see every entry ruled by a
+  lookup, or the lookup's name for those it rules). Each kind's tab says how many records the scope holds, the picked record's **Find usages** button
+  says in how many places it is used, the list is a panel that starts on the same line as the form, and Scan a
+  table, Export, Discard and Save are in the page header. The form of a record is unchanged.
 - **Dashboards: cards are moved by drag and drop, and sized by their corner.** In the dashboard editor a card's
   grip is dragged onto another card — a bar shows on which side it will land — and its bottom-right corner
   sizes it, the card following the pointer in whole columns and rows with its size written beside the grip
