@@ -56,7 +56,7 @@ def _nested(mapping: Any) -> int:
 @router.get("/studio/overview", summary="What the installation is built of")
 async def studio_overview(request: Request, _: Superuser) -> dict[str, Any]:
     """The studio's home: how much of each building block the loaded configuration holds, what the
-    integrity check finds, and the last changes — one call, read from the application state."""
+    integrity check finds — one call, read from the application state."""
     from liberty.web.integrity import check_integrity
 
     state = request.app.state
@@ -85,10 +85,6 @@ async def studio_overview(request: Request, _: Superuser) -> dict[str, Any]:
         issues = check_integrity(state)
     except Exception:  # noqa: BLE001 — the home must open even when the check cannot run
         issues = []
-    versions = getattr(state, "config_versions", None)
-    recent = []
-    for v in (versions.list_versions() if versions is not None else [])[:8]:
-        recent.append({"file": v.rel_path, "who": v.who, "when": v.created_at, "source": v.source})
     return {
         "counts": {
             "connectors": sql + api, "sql_connectors": sql, "api_connectors": api, "queries": queries, "endpoints": endpoints,
@@ -101,7 +97,152 @@ async def studio_overview(request: Request, _: Superuser) -> dict[str, Any]:
             "jobs": len(jobs), "notifications": len(getattr(getattr(state, "notification_rules", None), "notifications", None) or {}),
         },
         "integrity": {"errors": sum(1 for i in issues if i.severity == "error"), "warnings": sum(1 for i in issues if i.severity == "warning")},
-        "recent": recent,
+    }
+
+
+def _steps(actions: Any) -> Any:
+    """Every action of a list, nested ones included (chain / loop steps, both branches of an if)."""
+    for a in actions or []:
+        yield a
+        for field in ("steps", "then_steps", "else_steps"):
+            yield from _steps(getattr(a, field, None))
+
+
+def _screen_actions(screen: Any) -> Any:
+    for hook in ("actions", "row_menu", "on_insert", "on_update", "on_delete", "on_duplicate"):
+        yield from _steps(getattr(screen, hook, None))
+    dialog = getattr(screen, "dialog", None)
+    for hook in ("on_load", "on_save", "on_cancel"):
+        yield from _steps(getattr(dialog, hook, None))
+    for tab in getattr(dialog, "tabs", None) or []:
+        yield from _steps(getattr(tab, "actions", None))
+
+
+@router.get("/studio/map", summary="The map of an application")
+async def studio_map(request: Request, _: Superuser, app: str | None = None) -> dict[str, Any]:
+    """One application as a whole: its menu, its screens, the queries and endpoints each screen
+    reads, saves through and calls, the services its screens call, its dashboards — and what
+    nothing uses (a screen out of the menu, a query no screen reads). The links are in the items
+    themselves (a screen names its data and its services); the page draws them."""
+    state = request.app.state
+    connectors = getattr(state, "connectors", None)
+    all_screens = getattr(getattr(state, "screens", None), "screens", None) or {}
+    menus = getattr(getattr(state, "menus", None), "menus", None) or {}
+    dashboards = getattr(getattr(state, "dashboards", None), "dashboards", None) or {}
+    actions = getattr(getattr(state, "actions", None), "actions", None) or {}
+    apps = sorted(set(all_screens) | set(menus))
+    if not app or app not in apps:
+        app = apps[0] if apps else None
+    if app is None:
+        return {"apps": [], "app": None, "menu": [], "screens": [], "data": [], "services": [], "dashboards": []}
+    names = set(connectors.names()) if connectors is not None else set()
+
+    def config(name: str) -> Any:
+        return getattr(connectors.get(name), "config", None) if name in names else None
+
+    def kind(connector: str) -> str:
+        return "endpoint" if getattr(config(connector), "type", None) == "api" else "query"
+
+    data: dict[str, dict[str, Any]] = {}
+
+    def use(connector: str | None, name: str | None) -> str | None:
+        if not connector or not name:
+            return None
+        key = f"{connector}.{name}"
+        data.setdefault(key, {"key": key, "connector": connector, "name": name, "kind": kind(connector), "used": True})
+        return key
+
+    # ── the menu, in display order with its depth ──────────────────────────────────────────
+    items = list(getattr(menus.get(app), "items", None) or [])
+    by_parent: dict[str | None, list[Any]] = {}
+    for it in items:
+        by_parent.setdefault(it.parent, []).append(it)
+    menu: list[dict[str, Any]] = []
+
+    def walk(parent: str | None, depth: int) -> None:
+        for it in by_parent.get(parent, []):
+            menu.append({"id": it.id, "label": it.label, "depth": depth, "type": it.type, "target": it.target,
+                         "connector": it.connector})
+            walk(it.id, depth + 1)
+    walk(None, 0)
+    listed = {it.id for it in items}
+    for it in items:                                   # an entry whose parent is gone: still shown
+        if it.parent is not None and it.parent not in listed:
+            menu.append({"id": it.id, "label": it.label, "depth": 0, "type": it.type, "target": it.target, "connector": it.connector})
+    in_menu = {m["target"] for m in menu if m["type"] == "screen" and m["target"]}
+    menu_dashboards = {m["target"] for m in menu if m["type"] == "dashboard" and m["target"]}
+
+    # ── the screens, each with what it uses ──────────────────────────────────────────────
+    screens: list[dict[str, Any]] = []
+    called: dict[str, list[str]] = {}
+    nested_in: set[str] = set()
+    for sid, sc in sorted((all_screens.get(app) or {}).items()):
+        reads_on = sc.connector or app
+        saves_on = getattr(sc, "save_connector", None) or reads_on
+        read = use(reads_on, sc.read_query)
+        writes = [k for k in (use(saves_on, getattr(sc, slot, None)) for slot in ("insert_query", "update_query", "delete_query")) if k]
+        calls: list[str] = []
+        services: list[str] = []
+        for a in _screen_actions(sc):
+            if a.type == "run_query":
+                calls.append(use(a.connector or reads_on, a.query) or "")
+            elif a.type == "call_api":
+                calls.append(use(a.connector, a.endpoint) or "")
+            elif a.type == "call_action" and a.ref:
+                services.append(a.ref)
+                called.setdefault(a.ref, []).append(sid)
+        nested = [t.screen if getattr(t, "type", None) == "nested_table" else t.form_screen
+                  for t in getattr(getattr(sc, "dialog", None), "tabs", None) or [] if getattr(t, "type", None) in ("nested_table", "nested_form")]
+        nested_in.update(n for n in nested if n)
+        screens.append({"id": sid, "label": sc.label or sid, "connector": reads_on, "read": read, "writes": list(dict.fromkeys(writes)),
+                        "calls": list(dict.fromkeys(c for c in calls if c)), "services": list(dict.fromkeys(services)),
+                        "nested": [n for n in dict.fromkeys(nested) if n], "form": getattr(sc, "dialog", None) is not None,
+                        "read_only": bool(getattr(sc, "read_only", False)), "in_menu": sid in in_menu})
+    for sc in screens:                                 # a screen opened inside another's form is reached, menu entry or not
+        sc["reached"] = sc["in_menu"] or sc["id"] in nested_in
+
+    # ── the application's own data nothing here reads (its connector's queries / endpoints) ──
+    own = config(app)
+    for q in getattr(own, "queries", None) or []:
+        data.setdefault(f"{app}.{q.name}", {"key": f"{app}.{q.name}", "connector": app, "name": q.name, "kind": "query", "used": False})
+    for t in getattr(own, "tables", None) or []:
+        for slot in ("get", "put", "post", "delete"):
+            if getattr(t, slot, None):
+                name = f"{t.name}_{slot}"
+                data.setdefault(f"{app}.{name}", {"key": f"{app}.{name}", "connector": app, "name": name, "kind": "query", "used": False})
+    for e in getattr(own, "endpoints", None) or []:
+        data.setdefault(f"{app}.{e.name}", {"key": f"{app}.{e.name}", "connector": app, "name": e.name, "kind": "endpoint", "used": False})
+    described: dict[str, dict[str, tuple[Any, bool, Any]]] = {}
+
+    def describe(connector: str) -> dict[str, tuple[Any, bool, Any]]:
+        """``{name: (label, writable, serving action)}`` of a connector's queries (a table's slots are
+        ``<table>_get`` / ``_put`` / ``_post`` / ``_delete``, labelled as the table) and endpoints."""
+        if connector not in described:
+            cfg, out = config(connector), {}
+            for x in [*(getattr(cfg, "queries", None) or []), *(getattr(cfg, "endpoints", None) or [])]:
+                out[x.name] = (x.label, bool(x.writable), getattr(x, "action", None))
+            for t in getattr(cfg, "tables", None) or []:
+                for slot in ("get", "put", "post", "delete"):
+                    part = getattr(t, slot, None)
+                    if part is not None:
+                        out[f"{t.name}_{slot}"] = (getattr(part, "label", None) or t.label, bool(getattr(part, "writable", False)), None)
+            described[connector] = out
+        return described[connector]
+
+    for entry in data.values():                        # the label and what serves an endpoint, where the connector says
+        label, writable, action = describe(entry["connector"]).get(entry["name"], (None, False, None))
+        entry["label"], entry["writable"], entry["service"] = label, writable, action
+        entry["missing"] = entry["name"] not in describe(entry["connector"])
+
+    served = _served(connectors)
+    services = [{"id": ref, "label": getattr(actions.get(ref), "label", None), "steps": len(getattr(actions.get(ref), "steps", None) or []),
+                 "screens": sorted(set(sids)), "endpoints": served.get(ref, []), "missing": ref not in actions}
+                for ref, sids in sorted(called.items())]
+    return {
+        "apps": apps, "app": app, "menu": menu, "screens": screens,
+        "data": sorted(data.values(), key=lambda d: (not d["used"], d["key"])), "services": services,
+        "dashboards": [{"id": did, "label": getattr(d, "label", None) or did, "in_menu": did in menu_dashboards}
+                       for did, d in sorted((dashboards.get(app) or {}).items())],
     }
 
 

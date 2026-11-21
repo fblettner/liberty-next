@@ -271,13 +271,18 @@
   `<étape>.first_row.<COLONNE>` et `<étape>.rows`, au lieu d'un chemin dans la réponse brute du serveur. Un
   point d'accès sans `rows_field`, ou avec un `response_field`, donne ce qu'il donnait. `POST /api/http/...`
   renvoie les mêmes lignes dans `rows`.
-- **Le Studio — un point de départ pour qui construit.** Une nouvelle première page du menu Liberty,
-  **Studio** : ce dont l'installation est faite, dans l'ordre où une application se construit — **Données**
-  (connecteurs avec leurs requêtes et points d'accès, dictionnaire), **Écrans** (écrans, ceux qui ont une
-  fiche, menus), **Logique** (services, jobs, notifications), **Analyse** (tableaux de bord, graphiques,
-  modèles de l'explorateur) — chacun une tuile avec son nombre, qui ouvre son éditeur ; à côté, ce que trouve
-  le contrôle d'intégrité, les dernières modifications de la configuration, et les outils (intégrité,
-  historique, package, lots de modifications, supervision, référence développeur, notes de version).
+- **Le Studio — une application construite sans quitter la page.** Une nouvelle première page du menu
+  Liberty, **Studio**. Choisissez une application : sa **carte** montre, côte à côte, son menu, ses écrans,
+  les données que chaque écran utilise (requêtes et points d'accès) et les services que ses écrans appellent.
+  Sélectionnez un élément et ce à quoi il est lié s'éclaire, les liens tracés d'une colonne à l'autre — une
+  entrée de menu et l'écran qu'elle ouvre, un écran et ce qu'il lit, ce par quoi il enregistre et ce qu'il
+  appelle, les écrans de sa fiche, un point d'accès et le service qui le sert — pendant que le reste s'estompe.
+  Le panneau de droite dit ce qu'est l'élément et ce qui l'utilise, et **le modifie sur place** : le
+  concepteur d'écran, l'éditeur de requête et le concepteur de service s'ouvrent par-dessus la carte et y
+  reviennent (un double-clic sur un écran ou un service fait de même). Ce que rien n'utilise est montré comme
+  tel : un écran qu'aucune entrée de menu ni aucune fiche n'ouvre, les requêtes et points d'accès de
+  l'application qu'aucun écran n'utilise, une référence à ce qui n'existe plus. Une recherche resserre chaque
+  colonne ; le résultat du contrôle d'intégrité est à un clic. `GET /admin/studio/map`,
   `GET /admin/studio/overview`.
 - **Les services, et leur flux.** La page Actions devient **Services** : une action partagée est un service.
   Son concepteur s'ouvre sur une **vue graphique** — les étapes dessinées comme un flux lu de gauche à droite :

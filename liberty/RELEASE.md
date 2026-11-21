@@ -230,13 +230,17 @@
   columns (`row_map`) — what it binds is those rows: the next step reads `<step>.first_row.<COLUMN>` and
   `<step>.rows`, instead of a path into the server's raw answer. An endpoint without `rows_field`, or with a
   `response_field`, binds what it did before. `POST /api/http/...` returns the same rows as `rows`.
-- **The Studio — a home for whoever builds.** A new first page of the Liberty menu, **Studio**: what the
-  installation is made of, in the order an application is built — **Data** (connectors with their queries and
-  endpoints, the dictionary), **Screens** (screens, those with a record form, menus), **Logic** (services,
-  jobs, notifications), **Insight** (dashboards, charts, Explorer models) — each a tile with its count that
-  opens its editor; beside them what the integrity check finds now, the last changes of the configuration, and
-  the tools (integrity, history, package, change packages, monitoring, developer reference, release notes).
-  `GET /admin/studio/overview`.
+- **The Studio — an application built without leaving the page.** A new first page of the Liberty menu,
+  **Studio**. Pick an application: its **map** shows, side by side, its menu, its screens, the data each
+  screen uses (queries and endpoints) and the services its screens call. Select anything and what it is linked
+  to lights up, the links drawn across the columns — a menu entry and the screen it opens, a screen and what
+  it reads, saves through and calls, the screens inside its form, an endpoint and the service that serves it —
+  while the rest fades. The panel on the right says what the item is and what uses it, and **edits it in
+  place**: the screen designer, the query editor and the service designer open over the map and come back to
+  it (double-click a screen or a service does the same). What nothing uses is shown as such: a screen no menu
+  entry and no form opens, the application's queries and endpoints no screen uses, a reference to something
+  that no longer exists. A search narrows every column; the integrity check's result is one click away.
+  `GET /admin/studio/map`, `GET /admin/studio/overview`.
 - **Services, and their flow.** The Actions page is now **Services**: a shared action is a service. Its
   designer opens on a **graphical view** — the steps drawn as a flow read left to right: the start with the
   inputs, a card per step (query, endpoint, function, service, message…), a condition forking into its True

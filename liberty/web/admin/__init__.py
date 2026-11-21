@@ -284,6 +284,7 @@ from liberty.web.admin.studio import (
     StudioExposeBody,
     StudioRunBody,
     studio_expose,
+    studio_map,
     studio_overview,
     studio_run,
     studio_services,

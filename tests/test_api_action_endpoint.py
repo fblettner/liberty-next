@@ -273,7 +273,7 @@ def test_the_studio_lists_runs_and_exposes_a_service(env, monkeypatch) -> None:
         home = client.get("/admin/studio/overview", headers=h).json()
         assert home["counts"]["services"] == 6 and home["counts"]["exposed"] == 6 and home["counts"]["queries"] == 2
         assert home["counts"]["sql_connectors"] == 1 and home["counts"]["api_connectors"] == 1 and home["counts"]["endpoints"] == 7
-        assert home["integrity"]["errors"] >= 1 and isinstance(home["recent"], list)       # the endpoint whose action is not defined
+        assert home["integrity"]["errors"] >= 1                                           # the endpoint whose action is not defined
         # Run: the answer it would give as an endpoint, the steps it ran; a failing step is reported
         ran = client.post("/admin/studio/run", headers=h, json={"action": "describe_code", "inputs": {"KY": "001", "suffix": ""}}).json()
         assert ran["ok"] is True and ran["returned"] == {"code": "001", "label": "one", "suffix": "!"} and ran["steps"] == ["read: main.codes_get"]

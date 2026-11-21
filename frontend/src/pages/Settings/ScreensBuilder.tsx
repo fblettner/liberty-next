@@ -68,7 +68,9 @@ const Item = styled.div`
   & .actions { flex-shrink: 0; display: flex; gap: 4px; }
   &:hover { border-color: ${colors.blue.border}; background: ${colors.blue.bg}; }
 `
-export default function ScreensBuilder() {
+/** *embedded*: the studio opens ONE screen's designer in place — the list stays hidden, the designer opens on
+ *  that screen as a deep link would, and *onDone* is called once it is closed (saved or not). */
+export default function ScreensBuilder({ embedded, onDone }: { embedded?: { app: string; screen: string }; onDone?: () => void } = {}) {
   const { t } = useTranslation()
   const modals = useModals()
   const { focusApp: currentApp, refresh: refreshWorkspace } = useWorkspace()
@@ -190,6 +192,13 @@ export default function ScreensBuilder() {
     setDesignerSnapshot(null)
     setDesignerOpen(false)
   }
+  // embedded (the studio): once the designer it opened is closed, the studio takes over again
+  const wasOpen = useRef(false)
+  useEffect(() => {
+    if (designerOpen) wasOpen.current = true
+    else if (embedded && wasOpen.current) { wasOpen.current = false; onDone?.() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onDone is the caller's, read when the designer closes
+  }, [designerOpen])
   useEffect(() => {
     if (!designerOpen) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') cancelDesigner() }
@@ -237,8 +246,8 @@ export default function ScreensBuilder() {
         // no longer drops you on the Screens list to click again. Only honoured once per mount
         // and only when the requested screen actually exists; we then strip the params from the
         // URL so a manual tab-switch doesn't lock the user into that selection on subsequent visits.
-        const linkApp = !consumed.current ? searchParams.get('app') : null
-        const linkScreen = !consumed.current ? searchParams.get('screen') : null
+        const linkApp = !consumed.current ? (embedded?.app ?? searchParams.get('app')) : null
+        const linkScreen = !consumed.current ? (embedded?.screen ?? searchParams.get('screen')) : null
         if (linkApp && d.screens[linkApp]) {
           consumed.current = true
           setSelApp(linkApp)
@@ -246,9 +255,11 @@ export default function ScreensBuilder() {
             setSelId(linkScreen)
             setAutoOpenDesigner(true)
           }
-          const np = new URLSearchParams(searchParams)
-          np.delete('app'); np.delete('screen')
-          setSearchParams(np, { replace: true })
+          if (!embedded) {
+            const np = new URLSearchParams(searchParams)
+            np.delete('app'); np.delete('screen')
+            setSearchParams(np, { replace: true })
+          }
         } else {
           // Preserve the picked app/screen when reloading; on first open default to the workspace's
           // selected app (when it has screens here), else the first available.
@@ -480,7 +491,7 @@ export default function ScreensBuilder() {
 
   return (
     <FrameworkEnumsContext.Provider value={enums}>
-    <Shell>
+    <Shell style={embedded ? { display: 'none' } : undefined}>
       {/* One consolidated top toolbar — config path + status on the left, scope chips and every
           action (Add app · Add screen · Delete app · Save · Reload) inline on the right. Replaces
           the old "scope bar at top + bottom Save Row" split — the operator never has to scroll
