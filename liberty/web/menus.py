@@ -27,6 +27,8 @@ Hot-reloaded together with ``connectors.toml`` via ``POST /admin/reload``.
 
 from __future__ import annotations
 
+import re
+
 from urllib.parse import quote
 
 from typing import Annotated, Any
@@ -58,6 +60,9 @@ _PAGE_PERMISSIONS: tuple[tuple[str, str], ...] = (
 _INCLUDED_IN: dict[str, tuple[str, ...]] = {"nomaflow:view": ("nomaflow:edit",), "tests:view": ("tests:run", "tests:edit")}
 
 
+_EXPLORER_ON = re.compile(r"^/explorer/([^/]+)/([^/]+)(?:/[ad]/[^/]+)?$")
+
+
 def page_permission(target: str | None) -> str | None:
     """The permission a ``page`` leaf's route needs, or None when the route is open."""
     t = target or ""
@@ -66,6 +71,11 @@ def page_permission(target: str | None) -> str | None:
     shipped = route_permission(t)
     if shipped:
         return shipped
+    # the Explorer opened on ONE model — or on an analysis / a dashboard published in a menu
+    # (/explorer/<app>/<model>[/a|d/<id>], liberty/web/admin/menu_publish.py): who may use that model
+    on_model = _EXPLORER_ON.match(t)
+    if on_model:
+        return f"explorer:{on_model.group(1)}:{on_model.group(2)}"
     return next((perm for prefix, perm in _PAGE_PERMISSIONS if t == prefix or t.startswith(prefix + "/")), None)
 
 

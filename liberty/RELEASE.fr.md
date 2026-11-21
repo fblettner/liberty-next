@@ -363,6 +363,34 @@
   `page:<app>:<page>`, vérifiée avant de chercher le fichier et demandée aussi à l'entrée de menu ; l'éditeur de
   rôles la connaît. Le contrat est `frontend/src/pages/AppPage/sdk.ts` (version 1 : des champs s'ajoutent, aucun
   n'est renommé).
+- **Une entité de l'Explorer peut être un point d'accès d'API.** Une entité était une requête ou une table d'un
+  connecteur SQL ; elle peut maintenant désigner un point d'accès à lignes d'un connecteur d'API
+  (`connector = "<connecteur d'API>"`, `query = "<point d'accès>"` — ceux qu'un écran sait lire). Ses champs sont
+  découverts depuis les colonnes du point d'accès, libellés par le dictionnaire comme ceux d'un écran ; le moteur
+  lit les lignes — sous le périmètre de données de l'appelant — et les filtre, regroupe, mesure, trie et pagine
+  lui-même : la page, les analyses enregistrées, les tableaux de bord, les exports et les outils de l'assistant
+  fonctionnent dessus sans changement. Un filtre « égal » sur un champ qui est un paramètre du point d'accès lui
+  est aussi envoyé (un serveur qui ne liste rien sans lui, ou qui réduit ce qui est lu). Ce qu'une telle entité
+  ne peut pas faire : être jointe à une autre entité, et porter un champ calculé — les deux sont refusés avec
+  la raison. Chaque demande appelle le point d'accès : le coût est celui de la lecture, plafonnée à 50 000 lignes.
+- **Une analyse ou un tableau de bord de l'Explorer va dans un menu.** Sur une analyse ou un tableau de bord
+  enregistré et partagé, **Ajouter à un menu** (pour un super-utilisateur : les menus sont de la configuration)
+  demande le menu de quelle application, quel dossier et quel libellé, et ajoute l'entrée. Un clic dessus ouvre
+  l'Explorer sur cette analyse — son résultat aussitôt, la définition à un clic — ou sur ce tableau de bord.
+  L'entrée est montrée à qui peut utiliser le modèle (`explorer:<app>:<modèle>`), ce que demande désormais aussi
+  un lien vers un modèle entier (`/explorer/<app>/<modèle>`) ; un objet privé est refusé tant qu'il n'est pas
+  partagé ; une entrée dont l'analyse a été supprimée le dit. Route : `POST /admin/menus/publish` ; cibles
+  `/explorer/<app>/<modèle>/a/<id>` et `…/d/<id>`.
+- **Un point d'accès généré se modifie là où il a été créé.** « Créer depuis… » rendait un point d'accès facile à
+  ajouter ; lui ajouter ensuite une colonne ou un paramètre demandait de modifier à la main son corps, sa
+  correspondance de colonnes et ses paramètres. **Modifier…** sur un point d'accès généré rouvre le dialogue sur
+  ce dont il a été construit, ses choix tels qu'ils étaient — cochez une colonne, un champ, un filtre — et ce que
+  le générateur construit est fusionné avec ce que vous avez : votre nom, votre libellé et les textes de vos
+  paramètres sont gardés, les différences sont listées avant toute application, et les points d'accès lire /
+  ajouter / modifier / supprimer d'une application suivent ensemble. Pour tout point d'accès, les colonnes de ses
+  lignes sont maintenant une liste (une colonne, la clé d'une ligne dont elle est lue) au lieu d'une ligne de
+  texte, et **Colonnes depuis une réponse** appelle le point d'accès une fois et propose à cliquer les clés de sa
+  première ligne.
 - **Un lien peut ouvrir une page sur quelque chose.** `/job/<id>?<paramètre>=<valeur>` ouvre la page d'un
   traitement avec ces valeurs remplies ; `/liberty/connectors?connector=<nom>` ouvre la page Connecteurs sur ce
   connecteur, et avec `&create=<générateur>&q=<texte>` son dialogue « Créer depuis… » sur ce générateur, le texte

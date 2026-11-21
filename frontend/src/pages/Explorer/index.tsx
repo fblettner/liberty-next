@@ -9,7 +9,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
 import { setPageContext } from '../../services/aiContext'
-import { BookOpen, Compass, Play, Table2, List, ArrowLeft, Code2, X, Grid3x3, BarChart3, LineChart, PieChart, Gauge, Save, Copy, Trash2, LayoutDashboard, FlaskConical, Pencil, FileDown, LayoutGrid, SlidersHorizontal } from 'lucide-react'
+import { BookOpen, Compass, Play, Table2, List, ArrowLeft, Code2, X, Grid3x3, BarChart3, LineChart, PieChart, Gauge, Save, Copy, Trash2, LayoutDashboard, FlaskConical, Pencil, FileDown, LayoutGrid, SlidersHorizontal, ListPlus } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { Banner, Button, Centered, Checkbox, Input, PageLayout, SearchSelect, SpinnerRing, useModals, type SearchSelectOption, HeaderActions, HeaderSlot, HeaderSlotProvider, Card } from '../../common'
@@ -29,6 +29,7 @@ import { ChartView } from './ChartView'
 import { CalcModal } from './CalcModal'
 import { RecordDialog } from './RecordDialog'
 import { SaveModal } from './SaveModal'
+import { PublishModal } from './PublishModal'
 import { DashboardsView } from './DashboardsView'
 
 // $wide: the definition hidden — no fields pane, the result takes the page
@@ -65,12 +66,12 @@ type Mode = 'analyses' | 'dashboards'
 
 /** *initial*: the model a menu link opens (``/explorer/<app>/<model>``); without it the page
  *  starts on the current app's first model. */
-export default function ExplorerPage({ initial }: { initial?: { app: string; model: string } } = {}) {
+export default function ExplorerPage({ initial }: { initial?: { app: string; model: string; analysis?: string; dashboard?: string } } = {}) {
   const { t, i18n } = useTranslation()
   const lang = i18n.language || 'en'
   const { user } = useAuth()
   const modals = useModals()
-  const { focusApp: currentApp, explorerModels, menus } = useWorkspace()
+  const { focusApp: currentApp, explorerModels, menus, refresh: refreshWorkspace } = useWorkspace()
   const [models, setModels] = useState<ExplorerModelSummary[] | null>(null)
   const [app, setApp] = useState<string>('')
   const [modelId, setModelId] = useState<string>('')
@@ -100,6 +101,11 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
   const [dashDef, setDashDef] = useState<DashboardDefinition>({ period: null, tiles: [] })
   const [dashEditing, setDashEditing] = useState(false)
   const [saveModal, setSaveModal] = useState<{ kind: 'analyses' | 'dashboards'; asNew: boolean } | null>(null)
+  const [publishing, setPublishing] = useState<'analysis' | 'dashboard' | null>(null)
+  const [published, setPublished] = useState<string | null>(null)
+  // the saved lists of the model in view are there (a link to one of them waits for that)
+  const [savedFor, setSavedFor] = useState('')
+  const openedLink = useRef(false)
   const runId = useRef(0)
   const pendingDrill = useRef<DrillCell[] | null>(null)
 
@@ -131,8 +137,8 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
     try {
       const [an, da] = await Promise.all([listSaved<AnalysisDefinition>(a, m, 'analyses'), listSaved<DashboardDefinition>(a, m, 'dashboards')])
       if (n !== savedReq.current) return
-      setAnalyses(an); setDashboards(da)
-    } catch { if (n === savedReq.current) { setAnalyses([]); setDashboards([]) } }
+      setAnalyses(an); setDashboards(da); setSavedFor(`${a}/${m}`)
+    } catch { if (n === savedReq.current) { setAnalyses([]); setDashboards([]); setSavedFor(`${a}/${m}`) } }
   }, [])
   useEffect(() => {
     if (!app || !modelId) return
@@ -284,6 +290,22 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
     setCurrentDashboard(d); setDashEditing(false)
     setDashDef(d ? { period: d.definition.period ?? null, tiles: d.definition.tiles ?? [] } : { period: null, tiles: [] })
   }
+  // a menu entry published on a saved analysis or dashboard (/explorer/<app>/<model>/a|d/<id>): opened once,
+  // when the lists of ITS model are there; one that is gone (deleted, or private again) says so
+  useEffect(() => {
+    if (!initial || openedLink.current || (!initial.analysis && !initial.dashboard)) return
+    if (!model || app !== initial.app || modelId !== initial.model || savedFor !== `${app}/${modelId}`) return
+    openedLink.current = true
+    if (initial.analysis) {
+      const a = analyses.find((x) => x.id === initial.analysis)
+      if (a) loadAnalysis(a); else setError(t('explorer.publish.gone', { id: initial.analysis }))
+    } else {
+      const d = dashboards.find((x) => x.id === initial.dashboard)
+      setMode('dashboards')
+      if (d) loadDashboard(d); else setError(t('explorer.publish.gone', { id: initial.dashboard }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on the lists of the linked model
+  }, [savedFor, model])
   const saveDashboard = async (fields: { name: string; description: string; audience: string; shared: boolean }, asNew: boolean) => {
     const item = await saveSaved<DashboardDefinition>(app, modelId, 'dashboards', { id: asNew ? null : currentDashboard?.id, as_new: asNew, name: fields.name, description: fields.description || null, audience: fields.audience || null, shared: fields.shared, definition: dashDef })
     setCurrentDashboard(item); setDashEditing(false)
@@ -330,6 +352,7 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
             <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'analyses', asNew: false })} disabled={def.rows.length === 0 && def.measures.length === 0}><Save size={13} /> {t('common.save')}</Button>
             {currentAnalysis && <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'analyses', asNew: true })}><Copy size={13} /> {t('explorer.saveAs')}</Button>}
             {canDeleteAnalysis && <Button $size="sm" $variant="ghost" onClick={() => void removeAnalysis()} style={{ color: colors.red.main }}><Trash2 size={13} /> {t('common.delete')}</Button>}
+            {user?.is_superuser && currentAnalysis && <Button $size="sm" $variant="ghost" data-publish="analysis" onClick={() => setPublishing('analysis')} title={t('explorer.publish.hint')}><ListPlus size={13} /> {t('explorer.publish.button')}</Button>}
             <Button $size="sm" $variant="ghost" onClick={() => void exportFile('xlsx')} disabled={def.rows.length === 0 && def.measures.length === 0} title={t('explorer.exportExcel')}><FileDown size={13} /> Excel</Button>
             <Button $size="sm" $variant="ghost" onClick={() => void exportFile('pdf')} disabled={def.rows.length === 0 && def.measures.length === 0} title={t('explorer.exportPdf')}><FileDown size={13} /> PDF</Button>
           </HeaderActions>
@@ -345,6 +368,7 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
             <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'dashboards', asNew: false })} disabled={dashDef.tiles.length === 0}><Save size={13} /> {t('common.save')}</Button>
             {currentDashboard && <Button $size="sm" $variant="ghost" onClick={() => setSaveModal({ kind: 'dashboards', asNew: true })}><Copy size={13} /> {t('explorer.saveAs')}</Button>}
             {canDeleteDashboard && <Button $size="sm" $variant="ghost" onClick={() => void removeDashboard()} style={{ color: colors.red.main }}><Trash2 size={13} /> {t('common.delete')}</Button>}
+            {user?.is_superuser && currentDashboard && <Button $size="sm" $variant="ghost" data-publish="dashboard" onClick={() => setPublishing('dashboard')} title={t('explorer.publish.hint')}><ListPlus size={13} /> {t('explorer.publish.button')}</Button>}
             {currentDashboard && <Button $size="sm" $variant="ghost" onClick={() => void exportFile('xlsx')} title={t('explorer.exportExcel')}><FileDown size={13} /> Excel</Button>}
             {currentDashboard && <Button $size="sm" $variant="ghost" onClick={() => void exportFile('pdf')} title={t('explorer.exportPdf')}><FileDown size={13} /> PDF</Button>}
           </HeaderActions>
@@ -369,6 +393,7 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
         </Banner>
       )}
       {dictNotice && <Banner $tone="ok" style={{ marginBottom: 8 }}>{dictNotice}</Banner>}
+      {published && <Banner $tone="ok" style={{ marginBottom: 8 }} data-published>{published}</Banner>}
       {mode === 'dashboards' ? (
         <>
           {error && <Banner $tone="error">{error}</Banner>}
@@ -465,6 +490,14 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
       {record && recordEntity && (
         <RecordDialog app={app} entity={recordEntity} row={record.row} onClose={() => setRecord(null)} onSaved={() => void run(def, { drill, page })} />
       )}
+      {publishing && (publishing === 'analysis' ? currentAnalysis : currentDashboard) && (() => {
+        const obj = (publishing === 'analysis' ? currentAnalysis : currentDashboard)!
+        return (
+          <PublishModal app={app} model={modelId} kind={publishing} id={obj.id} name={obj.name} shared={!!obj.shared} menus={menus}
+            onClose={() => setPublishing(null)}
+            onDone={(label, menu) => { setPublishing(null); setPublished(t('explorer.publish.done', { label, menu })); refreshWorkspace() }} />
+        )
+      })()}
       {saveModal && (
         <SaveModal kind={saveModal.kind} asNew={saveModal.asNew} current={saveModal.kind === 'analyses' ? currentAnalysis : currentDashboard}
           onSave={(f) => (saveModal.kind === 'analyses' ? saveAnalysis(f, saveModal.asNew) : saveDashboard(f, saveModal.asNew))} onClose={() => setSaveModal(null)} />

@@ -58,7 +58,7 @@ const Item = styled.button<{ $on: boolean }>`
   & .desc { color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 `
 
-export function EndpointGeneratorModal({ connector, generators, existingNames = [], onCreate, onClose, initial }: {
+export function EndpointGeneratorModal({ connector, generators, existingNames = [], onCreate, onClose, initial, modify, onModify }: {
   connector: string
   generators: EndpointGeneratorDef[]
   /** The names of the connector's endpoints: a screen's endpoint that already exists is kept or replaced. */
@@ -70,10 +70,14 @@ export function EndpointGeneratorModal({ connector, generators, existingNames = 
   onClose: () => void
   /** Opened by a link (services/deepLinks.ts): the generator to start on and the text to search at once. */
   initial?: { generator?: string; query?: string }
+  /** "Modify…" of a generated endpoint: no search — the dialog opens on what it was built from, its saved
+   *  choices filled in; what the generator builds with the new ones goes to `onModify` (merged by the editor). */
+  modify?: { generator: string; candidate: string; options: Record<string, unknown>; name: string }
+  onModify?: (built: Record<string, unknown>[]) => void
 }) {
   const { t } = useTranslation()
   const { apps, currentApp, lastApp } = useWorkspace()
-  const [genId, setGenId] = useState((initial?.generator && generators.some((g) => g.id === initial.generator) ? initial.generator : generators[0]?.id) ?? '')
+  const [genId, setGenId] = useState(modify?.generator ?? (initial?.generator && generators.some((g) => g.id === initial.generator) ? initial.generator : generators[0]?.id) ?? '')
   const [query, setQuery] = useState(initial?.query ?? '')
   const [candidates, setCandidates] = useState<Candidate[] | null>(null)
   const [picked, setPicked] = useState<Candidate | null>(null)
@@ -108,23 +112,35 @@ export function EndpointGeneratorModal({ connector, generators, existingNames = 
   }
   // opened by a link with a text: its candidates are there when the dialog shows
   useEffect(() => {
-    if (initial?.query) void search()
+    if (modify) void pick({ id: modify.candidate, label: modify.candidate }, modify.options)
+    else if (initial?.query) void search()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on what the dialog was opened with
   }, [])
-  const pick = async (c: Candidate) => {
+  const pick = async (c: Candidate, saved?: Record<string, unknown>) => {
     setPicked(c); setFields([]); setNote(null); setAnswers({})
     const r = await step<{ options: OptionField[]; note?: string | null }>('options', { candidate: c.id })
     if (!r) return
     setFields(r.options ?? [])
     setNote(r.note ?? null)
     const init: Record<string, string | string[]> = {}
-    for (const f of r.options ?? []) init[f.name] = f.default ?? (f.kind === 'multi' ? [] : '')
+    for (const f of r.options ?? []) {
+      // "Modify…": the choice made when the endpoint was built, as long as the server still offers that field
+      const was = saved?.[f.name]
+      const kept = f.kind === 'multi' ? (Array.isArray(was) ? was.map(String) : undefined) : (typeof was === 'string' ? was : was == null ? undefined : String(was))
+      init[f.name] = kept ?? f.default ?? (f.kind === 'multi' ? [] : '')
+    }
     setAnswers(init)
   }
   const create = async () => {
     if (!picked) return
     const r = await step<{ endpoint?: Record<string, unknown>; endpoints?: Record<string, unknown>[]; screen?: Record<string, unknown>; app?: string | null; note?: string | null }>(
       'build', { candidate: picked.id, options: answers })
+    if (modify) {
+      // the endpoints only: a screen built with them stays as the operator has it
+      const built = r?.endpoints?.length ? r.endpoints : r?.endpoint ? [r.endpoint] : []
+      if (built.length) onModify?.(built)
+      return
+    }
     if (r?.screen && r.endpoints) {
       setBundle({ endpoints: r.endpoints, screen: r.screen, note: r.note })
       // the application the screen goes to: the generator's, else the one the operator works in
@@ -160,7 +176,7 @@ export function EndpointGeneratorModal({ connector, generators, existingNames = 
   return createPortal(
     <Overlay onClick={finish} style={{ zIndex: 600 }}>
       <Box onClick={(e) => e.stopPropagation()}>
-        <ModalHeader>{t(bundle ? 'settings.api.generate.screenTitle' : 'settings.api.generate.title')}</ModalHeader>
+        <ModalHeader>{modify ? t('settings.api.modify.title', { name: modify.name }) : t(bundle ? 'settings.api.generate.screenTitle' : 'settings.api.generate.title')}</ModalHeader>
         {bundle && (
           <ModalBody>
             {bundle.note && <Help>{bundle.note}</Help>}
@@ -202,16 +218,19 @@ export function EndpointGeneratorModal({ connector, generators, existingNames = 
           </ModalBody>
         )}
         {!bundle && <ModalBody>
-          {generators.length > 1 && (
+          {modify && <Help>{t('settings.api.modify.intro', { source: `${generator?.label ?? modify.generator} — ${modify.candidate}` })}</Help>}
+          {modify && busy && fields.length === 0 && <div style={{ marginTop: 12 }}><SpinnerRing size={14} thickness={2} /></div>}
+          {modify && error && <div style={{ marginTop: 12 }}><Banner $tone="error">{error}</Banner></div>}
+          {!modify && generators.length > 1 && (
             <SearchSelect
               value={genId}
               options={generators.map((g) => ({ value: g.id, label: g.label }))}
               onChange={(v) => { setGenId(v ?? ''); setQuery(''); reset(); setError(null) }}
             />
           )}
-          {generator?.description && <Help>{generator.description}</Help>}
-          <Label>{t('settings.api.generate.search')}</Label>
-          <Line>
+          {!modify && generator?.description && <Help>{generator.description}</Help>}
+          {!modify && <Label>{t('settings.api.generate.search')}</Label>}
+          {!modify && <Line>
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -221,9 +240,9 @@ export function EndpointGeneratorModal({ connector, generators, existingNames = 
             <Button $size="sm" onClick={() => void search()} disabled={busy}>
               {busy && !candidates ? <SpinnerRing size={13} thickness={2} /> : <Search size={13} />} {t('settings.api.generate.find')}
             </Button>
-          </Line>
-          {error && <div style={{ marginTop: 12 }}><Banner $tone="error">{error}</Banner></div>}
-          {candidates && (
+          </Line>}
+          {!modify && error && <div style={{ marginTop: 12 }}><Banner $tone="error">{error}</Banner></div>}
+          {!modify && candidates && (
             <>
               <Label>{t('settings.api.generate.found', { count: candidates.length })}</Label>
               {candidates.length > 0 && (
@@ -280,7 +299,7 @@ export function EndpointGeneratorModal({ connector, generators, existingNames = 
           <ModalFooter>
             <Button $variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
             <Button $variant="primary" onClick={() => void create()} disabled={!picked || busy}>
-              {busy && picked ? <SpinnerRing size={13} thickness={2} /> : <Wand2 size={13} />} {t('settings.api.generate.create')}
+              {busy && picked ? <SpinnerRing size={13} thickness={2} /> : <Wand2 size={13} />} {t(modify ? 'settings.api.modify.build' : 'settings.api.generate.create')}
             </Button>
           </ModalFooter>
         )}

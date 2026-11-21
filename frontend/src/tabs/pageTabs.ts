@@ -17,8 +17,9 @@ export const PAGE_TAB_PATHS = [
   '/developer',
 ] as const
 
-/** The Explorer opened on one model: ``/explorer/<app>/<model>`` (a menu link per model). */
-export const EXPLORER_MODEL_PATH = /^\/explorer\/([^/]+)\/([^/]+)$/
+/** The Explorer opened on one model: ``/explorer/<app>/<model>`` (a menu link per model) — and, published in a
+ *  menu, on one saved analysis (``…/a/<id>``) or dashboard (``…/d/<id>``). */
+export const EXPLORER_MODEL_PATH = /^\/explorer\/([^/]+)\/([^/]+)(?:\/([ad])\/([^/]+))?$/
 
 /** A page an application ships: ``/app/<app>/<page>`` (liberty/web/app_pages.py — the same names as its `ROUTE`). */
 export const APP_PAGE_PATH = /^\/app\/([a-z0-9][a-z0-9_]*)\/([a-z0-9][a-z0-9_]*)$/
@@ -40,8 +41,11 @@ export function callableRef(app: string, fn: string): string {
   return mod.includes('.') ? `${mod}:${name}` : `${app}.${mod}:${name}`
 }
 
-/** The ``{app, model}`` of an Explorer model path, else null. */
-export function explorerModelOf(pathname: string): { app: string; model: string } | null {
+/** The ``{app, model}`` of an Explorer model path — with the saved ``analysis`` or ``dashboard`` it opens on —
+ *  else null. */
+export function explorerModelOf(pathname: string): { app: string; model: string; analysis?: string; dashboard?: string } | null {
   const m = EXPLORER_MODEL_PATH.exec(pathname)
-  return m ? { app: decodeURIComponent(m[1]), model: decodeURIComponent(m[2]) } : null
+  if (!m) return null
+  const on = m[3] ? { [m[3] === 'a' ? 'analysis' : 'dashboard']: decodeURIComponent(m[4]) } : {}
+  return { app: decodeURIComponent(m[1]), model: decodeURIComponent(m[2]), ...on }
 }

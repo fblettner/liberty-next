@@ -125,6 +125,8 @@ export default function App() {
         <Route path="notifications" element={<TabRoute kind="page" />} />
         <Route path="explorer" element={<TabRoute kind="page" />} />
         <Route path="explorer/:app/:model" element={<TabRoute kind="page" />} />
+        {/* a saved analysis (a) or dashboard (d) published in a menu */}
+        <Route path="explorer/:app/:model/:kind/:saved" element={<TabRoute kind="page" />} />
         {/* a page an application ships: plugins/<app>/pages/<page>.js (pages/AppPage) */}
         <Route path="app/:app/:page" element={<TabRoute kind="page" />} />
         {/* nomaflow run detail is hosted by TabHost as a `nomaflow_run` workspace tab — the

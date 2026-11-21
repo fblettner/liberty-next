@@ -30,10 +30,10 @@ import StageStrip from './StageStrip'
 import { apiFigures } from '../../services/connectorFigures'
 import { api, ApiError } from '../../api/client'
 import {
-  Banner, Button, Checkbox, FrameworkEnumsContext, Input, Row, SearchSelect, Stack, useModals,
+  Banner, Button, Checkbox, FrameworkEnumsContext, Input, Row, SearchSelect, SpinnerRing, Stack, useModals,
 } from '../../common'
 import { EndpointGeneratorModal, type EndpointGeneratorDef } from './EndpointGeneratorModal'
-import { mergeGenerated, type GeneratedEndpoint } from '../../services/endpointRefresh'
+import { mergeGenerated, type GeneratedEndpoint, mergeModified, rowKeys } from '../../services/endpointRefresh'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { EndpointBody, EndpointCard, EndpointHead, FieldRow, Hint, SectionHead } from './apiEditorAtoms'
 import ApiEnvironmentsTab from './ApiEnvironmentsTab'
@@ -640,6 +640,35 @@ function EndpointsTab({
       setChecking(false)
     }
   }
+  // "Modify…": the dialog reopened on what a generated endpoint was built from; what it builds with the new
+  // choices is merged into the endpoints of the same origin (services/endpointRefresh.mergeModified), the
+  // differences shown first. Nothing is saved: the builder's Save writes it.
+  const [modifying, setModifying] = useState<number | null>(null)
+  const applyModified = async (idx: number, built: Record<string, unknown>[]) => {
+    const name = endpoints[idx]?.name ?? ''
+    const merged = mergeModified(endpoints as unknown as GeneratedEndpoint[], idx, built as unknown as GeneratedEndpoint[])
+    setModifying(null)
+    if (merged.lines.length === 0) {
+      // nothing to apply: the list is left as it is (not even marked unsaved)
+      await modals.alert({ title: t('settings.api.modify.title', { name }), message: t('settings.api.modify.nothing') })
+      return
+    }
+    const ok = await modals.confirm({
+      title: t('settings.api.modify.title', { name }),
+      message: <>{t('settings.api.modify.changes')}
+        <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>{merged.lines.map((l) => <li key={l.name}><b>{l.name}</b> — {l.added ? t('settings.api.modify.added') : l.changes.join(' · ')}</li>)}</ul></>,
+      confirmLabel: t('settings.api.refresh.apply'),
+    })
+    if (ok) setEndpoints(merged.endpoints as unknown as Endpoint[])
+  }
+  // one call of an endpoint as the page has it (unsaved), for "the columns from an answer": its parameters
+  // take their example, else their default
+  const tryEndpoint = async (ep: Endpoint): Promise<unknown> => {
+    const params = Object.fromEntries((ep.params ?? []).map((p) => [p.name, p.example ?? p.default ?? '']).filter(([, v]) => v !== ''))
+    const r = await api.post<{ success?: boolean; error?: string | null; body?: unknown }>('/admin/config/api/test', { config: value, test_endpoint: ep.name, params })
+    if (r.success === false) throw new Error(r.error || 'the call failed')
+    return r.body
+  }
   const generated = endpoints.filter((e) => e.source)
   const checkGenerated = async () => {
     setChecking(true)
@@ -748,6 +777,8 @@ function EndpointsTab({
                   value={ep} onChange={(v) => updateEndpoint(i, v)}
                   sourceLabel={ep.source ? `${generators.find((g) => g.id === ep.source?.generator)?.label ?? ep.source.generator} — ${ep.source.candidate}` : undefined}
                   onRefresh={ep.source ? () => void refreshEndpoint(i) : undefined}
+                  onModify={ep.source ? () => setModifying(i) : undefined}
+                  onTry={() => tryEndpoint(ep)}
                   refreshing={checking}
                 />
               </EndpointBody>
@@ -768,11 +799,18 @@ function EndpointsTab({
               value={ep} onChange={(v) => updateEndpoint(wideIdx, v)}
               sourceLabel={ep.source ? `${generators.find((g) => g.id === ep.source?.generator)?.label ?? ep.source.generator} — ${ep.source.candidate}` : undefined}
               onRefresh={ep.source ? () => void refreshEndpoint(wideIdx) : undefined}
+              onModify={ep.source ? () => setModifying(wideIdx) : undefined}
+              onTry={() => tryEndpoint(ep)}
               refreshing={checking}
             />
           </EditorModalShell>
         )
       })()}
+      {modifying !== null && endpoints[modifying]?.source && (
+        <EndpointGeneratorModal key={`modify-${modifying}`} connector={connectorName} generators={generators} onCreate={() => undefined} onClose={() => setModifying(null)}
+          modify={{ generator: endpoints[modifying].source!.generator, candidate: endpoints[modifying].source!.candidate, options: endpoints[modifying].source!.options ?? {}, name: endpoints[modifying].name }}
+          onModify={(built) => void applyModified(modifying, built)} />
+      )}
       {generating && (
         <EndpointGeneratorModal key={askedN ?? 0} connector={connectorName} generators={generators} existingNames={endpoints.map((e) => e.name)} onCreate={addGenerated} onClose={() => setGenerating(false)}
           initial={openGenerator ?? undefined} />
@@ -782,31 +820,73 @@ function EndpointsTab({
 }
 
 // ── per-endpoint editor ────────────────────────────────────────────────────────────────────
-// The column → record key map of an endpoint a screen reads, typed as ``AN8=z_AN8_19, ALPH=z_ALPH_20``.
-// Kept as text while it is typed (a half-written pair must not vanish), parsed on every change.
-function RowMapInput({ value, onChange, hint }: { value?: Record<string, string>; onChange: (m: Record<string, string> | undefined) => void; hint: string }) {
-  const asText = (m?: Record<string, string>) => Object.entries(m ?? {}).map(([k, v]) => `${k}=${v}`).join(', ')
-  const [text, setText] = useState(asText(value))
-  const shown = asText(value)
-  useEffect(() => { setText((cur) => (asText(parse(cur)) === shown ? cur : shown)) }, [shown])
-  return (
-    <Input
-      value={text}
-      onChange={(e) => { setText(e.target.value); onChange(parse(e.target.value)) }}
-      placeholder="ID=id, NAME=name"
-      title={hint}
-    />
-  )
-}
-function parse(text: string): Record<string, string> | undefined {
-  const out: Record<string, string> = {}
-  for (const part of text.split(',')) {
-    const eq = part.indexOf('=')
-    const k = (eq < 0 ? '' : part.slice(0, eq)).trim()
-    const v = (eq < 0 ? '' : part.slice(eq + 1)).trim()
-    if (k && v) out[k] = v
+// The column → record key map of an endpoint a screen reads, as a list: one line per column (its name, the key
+// of a row it is read from), added and removed by hand — or picked from an answer: the endpoint is called once
+// (its parameters' examples) and the keys of its first row are offered, those already mapped left out.
+const MapGrid = styled.div`display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; align-items: center; width: 100%;`
+const KeyChip = styled.button`
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: transparent; color: ${colors.text.secondary};
+  font-family: ${fonts.mono}; font-size: ${fontSize.sm}; padding: 3px 8px; cursor: pointer;
+  &:hover { border-color: ${colors.blue.border}; color: ${colors.text.primary}; }
+`
+function RowMapEditor({ value, onChange, rowsField, onTry }: {
+  value?: Record<string, string>; onChange: (m: Record<string, string> | undefined) => void; rowsField: string; onTry?: () => Promise<unknown>
+}) {
+  const { t } = useTranslation()
+  // kept as lines while they are typed (a half-written line must not vanish); the map follows every change
+  const toLines = (m?: Record<string, string>) => Object.entries(m ?? {}).map(([name, key]) => ({ name, key }))
+  const [lines, setLines] = useState(toLines(value))
+  const shown = JSON.stringify(value ?? {})
+  const mapOf = (ls: { name: string; key: string }[]) => Object.fromEntries(ls.filter((l) => l.name.trim() && l.key.trim()).map((l) => [l.name.trim(), l.key.trim()]))
+  useEffect(() => { setLines((cur) => (JSON.stringify(mapOf(cur)) === shown ? cur : toLines(JSON.parse(shown) as Record<string, string>))) }, [shown])
+  const put = (next: { name: string; key: string }[]) => { setLines(next); const m = mapOf(next); onChange(Object.keys(m).length ? m : undefined) }
+  const [offered, setOffered] = useState<string[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState<string | null>(null)
+  const read = async () => {
+    if (!onTry) return
+    setBusy(true); setProblem(null); setOffered(null)
+    try {
+      const keys = rowKeys(await onTry(), rowsField)
+      if (keys.length === 0) setProblem(t('settings.api.endpoint.rowMapNoRow', { where: rowsField }))
+      else setOffered(keys)
+    } catch (e) { setProblem(e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
   }
-  return Object.keys(out).length ? out : undefined
+  const mapped = new Set(lines.map((l) => l.key.trim()))
+  const free = (offered ?? []).filter((k) => !mapped.has(k))
+  return (
+    <Stack gap={6} style={{ width: '100%' }} data-row-map>
+      {lines.length > 0 && (
+        <MapGrid>
+          {lines.map((l, i) => (
+            <Fragment key={i}>
+              <Input value={l.name} placeholder={t('settings.api.endpoint.rowMapColumn')} onChange={(e) => put(lines.map((x, k) => (k === i ? { ...x, name: e.target.value } : x)))} />
+              <Input value={l.key} placeholder={t('settings.api.endpoint.rowMapKey')} style={{ fontFamily: fonts.mono }} onChange={(e) => put(lines.map((x, k) => (k === i ? { ...x, key: e.target.value } : x)))} />
+              <Button $variant="ghost" $size="sm" title={t('common.delete')} onClick={() => put(lines.filter((_x, k) => k !== i))}><Trash2 size={13} /></Button>
+            </Fragment>
+          ))}
+        </MapGrid>
+      )}
+      <Row gap={8} style={{ flexWrap: 'wrap' }}>
+        <Button $variant="ghost" $size="sm" onClick={() => setLines([...lines, { name: '', key: '' }])}><Plus size={13} /> {t('settings.api.endpoint.rowMapAdd')}</Button>
+        {onTry && (
+          <Button $variant="ghost" $size="sm" onClick={() => void read()} disabled={busy} title={t('settings.api.endpoint.rowMapReadHint')} data-row-map-read>
+            {busy ? <SpinnerRing size={13} thickness={2} /> : <Wand2 size={13} />} {t('settings.api.endpoint.rowMapRead')}
+          </Button>
+        )}
+      </Row>
+      {problem && <Hint style={{ color: colors.orange.main }}>{problem}</Hint>}
+      {offered && (
+        <Hint>
+          {free.length ? t('settings.api.endpoint.rowMapPick') : t('settings.api.endpoint.rowMapAllMapped')}
+          <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+            {free.map((k) => <KeyChip key={k} type="button" data-row-key={k} onClick={() => put([...lines.filter((l) => l.name.trim() || l.key.trim()), { name: k, key: k }])}>{k}</KeyChip>)}
+          </span>
+        </Hint>
+      )}
+      {lines.length === 0 && !offered && <Hint>{t('settings.api.endpoint.rowMapHint')}</Hint>}
+    </Stack>
+  )
 }
 
 type Stage = 'general' | 'inputs' | 'call' | 'answer'
@@ -848,12 +928,16 @@ const StageCard = styled.button<{ $tone: 'blue' | 'purple' | 'orange' | 'green';
   & .item { font-size: ${fontSize.micro}; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 `
 
-export function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }: {
+export function EndpointEditor({ value, onChange, sourceLabel, onRefresh, onModify, onTry, refreshing }: {
   value: Endpoint
   onChange: (v: Endpoint) => void
   /** A generated endpoint: what it was created from, and the refresh from the server. */
   sourceLabel?: string
   onRefresh?: () => void
+  /** "Modify…": reopen what the endpoint was built from, with other choices. */
+  onModify?: () => void
+  /** One call of the endpoint as it is edited (its parameters' examples): its answer — for "the columns from an answer". */
+  onTry?: () => Promise<unknown>
   refreshing?: boolean
 }) {
   const { t } = useTranslation()
@@ -933,6 +1017,11 @@ export function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refres
           <label>{t('settings.api.refresh.source')}</label>
           <Row gap={10}>
             <span style={{ color: colors.text.secondary, fontSize: fontSize.sm }}>{sourceLabel}</span>
+            {onModify && (
+              <Button $variant="ghost" $size="sm" onClick={onModify} disabled={refreshing} title={t('settings.api.modify.hint')} data-endpoint-modify={value.name}>
+                <Wand2 size={13} /> {t('settings.api.modify.button')}
+              </Button>
+            )}
             <Button $variant="ghost" $size="sm" onClick={onRefresh} disabled={refreshing} title={t('settings.api.refresh.hint')}>
               <RefreshCw size={13} /> {t('settings.api.refresh.button')}
             </Button>
@@ -1087,7 +1176,7 @@ export function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refres
         <>
           <FieldRow>
             <label title={t('settings.api.endpoint.rowMapHint')}>{t('settings.api.endpoint.rowMap')}</label>
-            <RowMapInput value={value.row_map ?? undefined} onChange={(m) => set({ row_map: m })} hint={t('settings.api.endpoint.rowMapHint')} />
+            <RowMapEditor value={value.row_map ?? undefined} onChange={(m) => set({ row_map: m })} rowsField={value.rows_field} onTry={onTry} />
           </FieldRow>
           <FieldRow>
             <label title={t('settings.api.endpoint.labelsFieldHint')}>{t('settings.api.endpoint.labelsField')}</label>

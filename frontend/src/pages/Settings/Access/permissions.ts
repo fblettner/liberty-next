@@ -6,7 +6,7 @@
 // allowed / denied node — so existing roles and the backend's `_keeper` are untouched.
 
 import { hasPermission, isDenied } from '../../../services/permissions'
-import { appPageOf } from '../../../tabs/pageTabs'
+import { appPageOf, explorerModelOf } from '../../../tabs/pageTabs'
 // the backend's matcher lives in services/ (shared with the screens that gate an action)
 export { hasPermission, isDenied, segmentMatch } from '../../../services/permissions'
 
@@ -48,6 +48,8 @@ export const isLeaf = (n: MenuNode): boolean => !!n.type && !!n.target
 export const pagePermission = (target: string): string | null => {
   const shipped = appPageOf(target)                                  // a page an application ships: its own permission
   if (shipped) return `page:${shipped.app}:${shipped.page}`
+  const onModel = explorerModelOf(target)                             // the Explorer on one model, or on a published analysis / dashboard
+  if (onModel) return `explorer:${onModel.app}:${onModel.model}`
   return target === '/nomaflow' || target.startsWith('/nomaflow/') ? 'nomaflow:view'
     : target === '/liberty/tests' || target === '/liberty/test-results' ? 'tests:view' : null
 }

@@ -839,6 +839,10 @@ async def run_aggregate(
     connectors: ConnectorRegistry, screens: ScreensFile | None, view: ModelView, req: AggregateRequest, *,
     scope: DataScope | None = None, debug: bool = False,
 ) -> dict[str, Any]:
+    from liberty.explorer import api_source
+
+    if api_source.is_api_request(connectors, view, req):      # an entity read through an API: grouped in Python
+        return await api_source.run_aggregate(connectors, screens, view, req, scope=scope, debug=debug)
     b = _Builder(connectors, screens, view, entity=req.entity, calculated=req.calculated, scope=scope)
     return await b.aggregate(req, debug=debug)
 
@@ -847,6 +851,10 @@ async def run_detail(
     connectors: ConnectorRegistry, screens: ScreensFile | None, view: ModelView, req: DetailRequest, *,
     scope: DataScope | None = None, debug: bool = False,
 ) -> dict[str, Any]:
+    from liberty.explorer import api_source
+
+    if api_source.is_api_request(connectors, view, req):
+        return await api_source.run_detail(connectors, screens, view, req, scope=scope, debug=debug)
     b = _Builder(connectors, screens, view, entity=req.entity, calculated=req.calculated, scope=scope)
     return await b.detail(req, debug=debug)
 
@@ -855,6 +863,10 @@ async def run_calc_test(
     connectors: ConnectorRegistry, screens: ScreensFile | None, view: ModelView, req: CalcTestRequest, *,
     scope: DataScope | None = None, debug: bool = False,
 ) -> dict[str, Any]:
+    from liberty.explorer import api_source
+
+    if api_source.is_api_request(connectors, view, req):
+        raise ExplorerError("a calculated field is not available on an entity read through an API")
     b = _Builder(connectors, screens, view, entity=req.entity, calculated=req.calculated, scope=scope)
     return await b.calc_test(req.name, debug=debug)
 

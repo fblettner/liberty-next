@@ -264,6 +264,19 @@ async def describe_entity(
         screen = (screens.screens.get(app) or {}).get(entity.screen)
         if screen is None:
             view.error = f"screen {app}.{entity.screen!r} not found"
+    from liberty.explorer import api_source
+
+    if api_source.api_entity(connectors, app, entity):
+        # an endpoint with rows (liberty/explorer/api_source.py): its columns from one read, labelled as a screen's are
+        try:
+            columns, sample, _more = await api_source.read_entity(connectors, screens, app, entity, language=language, max_rows=1)
+        except Exception as exc:  # noqa: BLE001 — reported on the entity
+            view.error = f"{connector}.{entity.query}: {exc}"
+            return view
+        api = connectors.api(connector)
+        resolve_dictionary(columns, getattr(connectors, "dictionary", None), app, int(getattr(api.config, "dd_prefix", 0) or 0), language, fallback=connector)
+        view.fields, view.warnings = fields_from_columns(entity, columns, sample[0] if sample else None)
+        return view
     try:
         conn = connectors.sql(connector)
         query = entity.query

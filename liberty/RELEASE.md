@@ -307,6 +307,30 @@
   function of the application — so the page imports nothing and looks like the rest. The permission is
   `page:<app>:<page>`, checked before the file is looked up and asked of the menu entry too; the role editor
   knows it. The contract is `frontend/src/pages/AppPage/sdk.ts` (version 1: fields are added, never renamed).
+- **An Explorer entity can be an API endpoint.** An entity was a query or a table of an SQL connector; it can
+  now name an endpoint with rows of an API connector (`connector = "<api connector>"`, `query = "<endpoint>"` —
+  the endpoints a screen reads). Its fields are discovered from the endpoint's columns, labelled by the
+  dictionary like a screen's; the engine reads the rows — under the caller's data scope — and filters, groups,
+  measures, sorts and pages them itself, so the page, the saved analyses, the dashboards, the exports and the
+  assistant's tools work on it unchanged. An `equals` filter on a field that is a parameter of the endpoint is
+  sent to the endpoint too (a server that lists nothing without it, or narrows what is read). What such an
+  entity cannot do: be joined with another entity, and carry a calculated field — both are refused with the
+  reason. Each request calls the endpoint: the cost is the read's, capped at 50,000 rows.
+- **An analysis or a dashboard of the Explorer goes in a menu.** On a saved, shared analysis or dashboard, **Add
+  to a menu** (a superuser's: the menus are configuration) asks which application's menu, which folder and what
+  label, and adds the entry. One click on it opens the Explorer on that analysis — its result at once, the
+  definition one click away — or on that dashboard. The entry is shown to who may use the model
+  (`explorer:<app>:<model>`), which a link to a whole model (`/explorer/<app>/<model>`) now asks too; a private
+  object is refused until it is shared; an entry whose analysis was deleted says so. Route:
+  `POST /admin/menus/publish`; targets `/explorer/<app>/<model>/a/<id>` and `…/d/<id>`.
+- **A generated endpoint is modified where it was created.** "Create from…" made an endpoint easy to add; adding
+  a column or a parameter afterwards meant editing its body, its row map and its parameters by hand. **Modify…**
+  on a generated endpoint reopens the dialog on what it was built from, its choices as they were — tick a column,
+  a field, a filter — and what the generator builds is merged into what you have: your name, label and parameter
+  texts are kept, the differences are listed before anything is applied, and an application's read / add / change
+  / delete endpoints follow together. For any endpoint, the columns of its rows are now a list (a column, the key
+  of a row it is read from) instead of a line of text, and **Columns from an answer** calls the endpoint once and
+  offers the keys of its first row to click.
 - **A link can open a page on something.** `/job/<id>?<parameter>=<value>` opens a job's page with those values
   filled in; `/liberty/connectors?connector=<name>` opens the Connectors page on that connector, and with
   `&create=<generator>&q=<text>` its "Create from…" dialog on that generator with the text already searched.

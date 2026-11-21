@@ -30,3 +30,13 @@ describe("a page an application ships", () => {
   })
 })
 
+describe('the Explorer opened on a saved analysis or dashboard', () => {
+  it('reads what a published menu entry points at', () => {
+    expect(explorerModelOf('/explorer/nomasx1/security/a/roles_per_user')).toEqual({ app: 'nomasx1', model: 'security', analysis: 'roles_per_user' })
+    expect(explorerModelOf('/explorer/shop/sales/d/overview')).toEqual({ app: 'shop', model: 'sales', dashboard: 'overview' })
+    expect(isPageTabPath('/explorer/shop/sales/a/revenue-by-company')).toBe(true)
+    expect(explorerModelOf('/explorer/shop/sales/x/y')).toBeNull()
+    expect(explorerModelOf('/explorer/shop/sales/a')).toBeNull()
+  })
+})
+

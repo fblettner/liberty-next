@@ -1105,6 +1105,7 @@ const fr: Resources = {
     broken: 'La page {{app}}/{{page}} n\'a pas pu être dessinée',
   },
   explorer: {
+    publish: { button: 'Ajouter à un menu', hint: 'La publier comme entrée de menu : un clic l\'ouvre, son résultat aussitôt', title: 'Ajouter « {{name}} » à un menu', menu: 'Menu de', folder: 'Dossier', top: 'En haut du menu', label: 'Libellé dans le menu', add: 'Ajouter au menu', private: 'Elle est privée : partagez-la d\'abord (Enregistrer, visible par tous) — une entrée de menu est pour tous ceux qui peuvent utiliser le modèle.', done: '« {{label}} » est dans le menu de {{menu}}.', gone: 'L\'entrée de menu désigne « {{id}} », qui n\'existe plus ou n\'est plus partagée.' },
     show: { label: 'Libellé', both: 'Code + libellé', code: 'Code' },
     showHint: 'Ce que montre cette colonne : son libellé, son code, ou les deux',
     definition: 'Définition',
@@ -1945,6 +1946,12 @@ const fr: Resources = {
         tokenHeaders: 'En-têtes de la demande de jeton',
         tokenHeadersHint: 'En-têtes supplémentaires pour la demande de jeton (ex. un en-tête client-id). Mêmes paires Clé:Valeur séparées par des points-virgules.',
       },
+      modify: {
+        button: 'Modifier…', hint: 'Rouvrir ce dont il a été créé et changer les choix — cocher une colonne, un champ, un filtre. Votre nom, votre libellé et les textes de vos paramètres sont gardés',
+        title: 'Modifier {{name}}', intro: 'Créé depuis {{source}}. Changez les choix : ce qui en est construit est fusionné avec ce que vous avez, les différences montrées d\'abord.',
+        build: 'Voir ce qui change', nothing: 'Avec ces choix le point d\'accès est celui que vous avez déjà : rien ne change.',
+        changes: 'Avec ces choix (rien n\'est enregistré tant que vous n\'enregistrez pas le connecteur) :', added: 'nouveau point d\'accès',
+      },
       refresh: {
         source: 'Créé à partir de',
         button: 'Actualiser depuis le serveur',
@@ -2043,7 +2050,7 @@ const fr: Resources = {
         callableHint: 'Une fonction du plugin d’une application répond à la place d’un appel HTTP — pour ce qu’un seul appel ne peut pas faire (trouver une ligne, la vérifier, puis la modifier). Ses arguments sont les paramètres, ou l’objet JSON que donne le corps une fois ses {{variables}} remplies ; sa réponse est traitée comme une réponse (lignes, champs d’erreur, correspondance de réponse). La méthode et le chemin ne servent pas.',
         writable: 'Modifie des données',
         writableHint: 'Il soumet, crée ou lance quelque chose : l’assistant ne l’appelle qu’avec ai:write et une carte que l’utilisateur accepte',
-        wide: 'Ouvrir sur toute la fenêtre', wideNote: 'Gardé dans le connecteur en cours de modification : Enregistrer, sur la page Connecteurs, l\'écrit.', writableTag: 'modifie des données',
+        rowMapColumn: 'Colonne', rowMapKey: 'Clé dans une ligne', rowMapAdd: 'Colonne', rowMapRead: 'Colonnes depuis une réponse', rowMapReadHint: 'Appelle le point d\'accès une fois avec les exemples de ses paramètres et propose les clés de sa première ligne', rowMapNoRow: 'La réponse ne contient aucune ligne à « {{where}} ».', rowMapPick: 'Cliquez une clé pour l\'ajouter comme colonne (renommez-la ensuite) :', rowMapAllMapped: 'Toutes les clés de la réponse sont déjà des colonnes.', wide: 'Ouvrir sur toute la fenêtre', wideNote: 'Gardé dans le connecteur en cours de modification : Enregistrer, sur la page Connecteurs, l\'écrit.', writableTag: 'modifie des données',
         body: 'Corps',
         formatJson: 'Formater le JSON',
         bodyHint: 'Utilisez des substituts {{param}} pour les variables',

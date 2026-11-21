@@ -1103,6 +1103,7 @@ const en = {
     broken: 'The page {{app}}/{{page}} could not be drawn',
   },
   explorer: {
+    publish: { button: 'Add to a menu', hint: 'Publish it as a menu entry: one click opens it, its result at once', title: 'Add “{{name}}” to a menu', menu: 'Menu of', folder: 'Folder', top: 'At the top of the menu', label: 'Label in the menu', add: 'Add to the menu', private: 'It is private: share it first (Save, visible to everyone) — a menu entry is for everybody who may use the model.', done: '“{{label}}” is in the menu of {{menu}}.', gone: 'The menu entry points at “{{id}}”, which no longer exists or is no longer shared.' },
     show: { label: 'Label', both: 'Code + label', code: 'Code' },
     showHint: 'What this column shows: its label, its code, or both',
     definition: 'Definition',
@@ -1947,6 +1948,12 @@ const en = {
         tokenHeaders: 'Token request headers',
         tokenHeadersHint: 'Extra headers for the token request (e.g. a client-id header). Same Semicolon-separated Key:Value pairs.',
       },
+      modify: {
+        button: 'Modify…', hint: 'Reopen what it was created from and change the choices — tick a column, a field, a filter. Your name, label and parameter texts are kept',
+        title: 'Modify {{name}}', intro: 'Created from {{source}}. Change the choices: what is built from them is merged into what you have, the differences shown first.',
+        build: 'See what changes', nothing: 'With these choices the endpoint is what you already have: nothing changes.',
+        changes: 'With these choices (nothing is saved until you save the connector):', added: 'new endpoint',
+      },
       refresh: {
         source: 'Created from',
         button: 'Refresh from the server',
@@ -2045,7 +2052,7 @@ const en = {
         callableHint: 'A function of an application’s plugin answers instead of an HTTP call — for what one call cannot do (find a row, check it, then change it). Its arguments are the parameters, or the JSON object the body gives once its {{placeholders}} are filled; its answer is treated like a response (rows, error fields, response map). Method and path are not used.',
         writable: 'Changes data',
         writableHint: 'It submits, creates or runs something: the assistant calls it only with ai:write and a card the user accepts',
-        wide: 'Open over the whole window', wideNote: 'Kept in the connector being edited: Save on the Connectors page writes it.', writableTag: 'changes data',
+        rowMapColumn: 'Column', rowMapKey: 'Key in a row', rowMapAdd: 'Column', rowMapRead: 'Columns from an answer', rowMapReadHint: 'Calls the endpoint once with its parameters\' examples and offers the keys of its first row', rowMapNoRow: 'The answer holds no row at “{{where}}”.', rowMapPick: 'Click a key to add it as a column (rename it after):', rowMapAllMapped: 'Every key of the answer is already a column.', wide: 'Open over the whole window', wideNote: 'Kept in the connector being edited: Save on the Connectors page writes it.', writableTag: 'changes data',
         body: 'Body',
         formatJson: 'Format JSON',
         bodyHint: 'Use {{param}} placeholders for variables',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mergeGenerated } from './endpointRefresh'
+import { mergeGenerated, mergeModified, rowKeys } from './endpointRefresh'
 
 const current = {
   name: 'my_report',                      // renamed by the operator
@@ -53,3 +53,56 @@ describe('mergeGenerated', () => {
     expect(mergeGenerated(a, { ...a, body: '{"rows": {{ROWS}}}' }).changes).toEqual([])
   })
 })
+
+describe('Modify…: the generator asked again with other choices', () => {
+  const src = (options: Record<string, unknown>) => ({ generator: 'application', candidate: 'P01012', options })
+  const list = [
+    { name: 'other', method: 'GET', path: '/x' },
+    { name: 'my_list', label: 'My list', method: 'POST', path: '/formservice', body: '{"a":1}', params: [{ name: 'AN8', label: 'Number (mine)' }], source: src({ columns: ['AN8'] }) },
+    { name: 'form_P01012_add', method: 'POST', path: '/formservice', body: '{"b":1}', source: src({ columns: ['AN8'] }) },
+    { name: 'form_P4210_add', method: 'POST', path: '/formservice', source: { generator: 'application', candidate: 'P4210', options: {} } },
+  ]
+  it('merges a single build into the endpoint being modified, whatever it was renamed to', () => {
+    const fresh = { name: 'form_P01012_list', method: 'POST', path: '/formservice', body: '{"a":2}', params: [{ name: 'AN8' }, { name: 'ALPH' }], source: src({ columns: ['AN8', 'ALPH'] }) }
+    const r = mergeModified(list, 1, [fresh])
+    expect(r.endpoints[1].name).toBe('my_list')                                   // the operator's name
+    expect(r.endpoints[1].label).toBe('My list')
+    expect(r.endpoints[1].params).toEqual([{ name: 'AN8', label: 'Number (mine)' }, { name: 'ALPH' }])
+    expect((r.endpoints[1].source as { options: unknown }).options).toEqual({ columns: ['AN8', 'ALPH'] })   // the next Modify… starts from here
+    expect(r.lines).toEqual([{ name: 'my_list', changes: ['+ ALPH', 'body'] }])
+    expect(r.endpoints[0]).toBe(list[0])
+    expect(list[1].body).toBe('{"a":1}')                                          // the list given is not touched
+  })
+  it("applies a set to the endpoints of the same origin, adds what is new, leaves another application's alone", () => {
+    const built = [
+      { name: 'my_list', method: 'POST', path: '/formservice', body: '{"a":1}', params: [{ name: 'AN8' }], source: src({ row: true }) },
+      { name: 'form_P01012_add', method: 'POST', path: '/formservice', body: '{"b":2}', source: src({ row: true }) },
+      { name: 'form_P01012_delete', method: 'POST', path: '/formservice', writable: true, source: src({ row: true }) },
+      { name: 'form_P4210_add', method: 'POST', path: '/other', source: src({ row: true }) },
+    ]
+    const r = mergeModified(list, 1, built)
+    expect(r.lines).toEqual([
+      { name: 'form_P01012_add', changes: ['body'] },
+      { name: 'form_P01012_delete', changes: [], added: true },
+      { name: 'form_P4210_add_2', changes: [], added: true },                      // the name is another application's: not merged into it
+    ])
+    expect(r.endpoints[3]).toBe(list[3])
+    expect(r.endpoints.map((e) => e.name)).toEqual(['other', 'my_list', 'form_P01012_add', 'form_P4210_add', 'form_P01012_delete', 'form_P4210_add_2'])
+    expect((r.endpoints[1].source as { options: unknown }).options).toEqual({ row: true })                 // unchanged content, new choices kept
+  })
+  it('does nothing on an endpoint that was not generated', () => {
+    expect(mergeModified(list, 0, [{ name: 'x' }])).toEqual({ endpoints: list, lines: [] })
+  })
+})
+
+describe('the keys a column can be read from', () => {
+  it("reads the first row's keys where the rows are", () => {
+    const answer = { fs_P01012_W01012B: { data: { gridData: { rowset: [{ z_AN8_19: 1, z_ALPH_20: 'x' }, { z_AN8_19: 2 }] } } } }
+    expect(rowKeys(answer, 'fs_P01012_W01012B.data.gridData.rowset')).toEqual(['z_AN8_19', 'z_ALPH_20'])
+    expect(rowKeys([{ id: 1, name: 'a' }], '')).toEqual(['id', 'name'])
+    expect(rowKeys({ rows: [] }, 'rows')).toEqual([])
+    expect(rowKeys({ rows: 'nope' }, 'rows')).toEqual([])
+    expect(rowKeys({ a: 1 }, 'missing.path')).toEqual([])
+  })
+})
+

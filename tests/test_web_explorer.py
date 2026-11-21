@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from liberty.auth.db import AuthDatabase
 from liberty.auth.service import AuthService
-from liberty.config import AISettings, AppSettings, AuthSettings, ConnectorSettings, ExplorerSettings, JobsSettings, ScreenSettings, Settings
+from liberty.config import AISettings, AppSettings, AuthSettings, ConnectorSettings, ExplorerSettings, JobsSettings, MenuSettings, ScreenSettings, Settings
 from liberty.connectors.config import PoolConfig
 from liberty.connectors.db import PoolRegistry
 from liberty.main import create_app
@@ -180,6 +180,8 @@ def env(tmp_path):
         app=AppSettings(static_dir=""),
         connectors=ConnectorSettings(config_path=Path(tmp_path / "connectors.toml")),
         screens=ScreenSettings(config_path=tmp_path / "screens.toml"),
+        # the menus too: a route that writes them (publish to a menu) must never reach the working folder's file
+        menus=MenuSettings(config_path=tmp_path / "menus.toml"),
         explorer=ExplorerSettings(config_path=tmp_path / "explorer.toml"),
         auth=AuthSettings(backend="db", jwt_secret=JWT_SECRET, pool="default"),
         ai=AISettings(enabled=False),
@@ -494,3 +496,31 @@ def test_dictionary_refresh_job_user_param(env) -> None:
             time.sleep(0.05)
         assert d["run"]["state"] == "SUCCEEDED", d
         assert "model=shop/shop_shipped" in d["logs"] and "model=shop/sales" not in d["logs"]
+
+
+def test_publish_a_saved_analysis_in_a_menu(env) -> None:
+    """POST /admin/menus/publish: a shared analysis becomes a menu entry that opens the Explorer on it,
+    shown to who may use the model; a private one is refused until it is shared."""
+    app, _ = env
+    with TestClient(app) as client:
+        admin, analyst, nobody = _h(client, "admin"), _h(client, "analyst"), _h(client, "nobody")
+        item = client.put("/api/explorer/shop/sales/saved/analyses", json={"name": "Revenue by company", "definition": {"rows": [{"field": "company.NAME"}]}},
+                          headers=admin).json()["item"]
+        body = {"app": "shop", "model": "sales", "kind": "analysis", "id": item["id"], "menu_app": "shop", "label": "Revenue by company"}
+        assert client.post("/admin/menus/publish", json=body, headers=analyst).status_code == 403           # the menus are a superuser's
+        r = client.post("/admin/menus/publish", json=body, headers=admin)
+        assert r.status_code == 422 and "share it first" in r.json()["detail"]                              # private: nobody else would see it
+        client.put("/api/explorer/shop/sales/saved/analyses", json={"id": item["id"], "name": "Revenue by company", "definition": {}, "shared": True}, headers=admin)
+        assert client.post("/admin/menus/publish", json={**body, "parent": "nowhere"}, headers=admin).status_code == 422
+        r = client.post("/admin/menus/publish", json=body, headers=admin)
+        assert r.status_code == 200, r.text
+        entry = r.json()["item"]
+        assert entry == {"id": "explorer_revenue_by_company", "label": "Revenue by company", "type": "page",
+                         "target": "/explorer/shop/sales/a/revenue-by-company", "icon": "compass"}
+        assert client.post("/admin/menus/publish", json=body, headers=admin).status_code == 409             # once per menu
+        assert client.post("/admin/menus/publish", json={**body, "id": "nope"}, headers=admin).status_code == 404
+        assert client.post("/admin/menus/publish", json={**body, "model": "nope"}, headers=admin).status_code == 404
+        # the catalogue: the entry for who may use the model, not for the others
+        targets = lambda h: [i.get("target") for i in (client.get("/api/menus", headers=h).json().get("menus", {}).get("shop", {}).get("items") or [])]  # noqa: E731
+        assert "/explorer/shop/sales/a/revenue-by-company" in targets(analyst)
+        assert "/explorer/shop/sales/a/revenue-by-company" not in targets(nobody)

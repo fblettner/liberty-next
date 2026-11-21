@@ -305,6 +305,11 @@ from liberty.web.admin.rename import (
     move_query_between_connectors,
     rename_top_level_key,
 )
+from liberty.web.admin.menu_publish import (
+    PublishBody,
+    explorer_target,
+    publish_to_menu,
+)
 from liberty.web.admin.clone_app import (
     CloneAppBody,
     DeleteAppBody,

@@ -90,3 +90,54 @@ export function mergeGenerated<T extends GeneratedEndpoint>(current: T, fresh: G
   }
   return { next: next as T, changes }
 }
+
+// ── "Modify…": the same generator asked again with other choices ──────────────────────────────
+
+export interface ModifyLine { name: string; changes: string[]; added?: boolean }
+
+const sourceOf = (e: GeneratedEndpoint): { generator?: string; candidate?: string } | undefined =>
+  (e.source && typeof e.source === 'object' ? (e.source as { generator?: string; candidate?: string }) : undefined)
+
+/** The endpoints after a generated one (at `idx`) was built again with OTHER choices: what the build
+ *  returned is merged into the endpoints of the same origin (the same generator and candidate — an
+ *  application's read / add / change / delete go together), each as a refresh does (`mergeGenerated`:
+ *  the operator's name, label and parameter texts are kept); an endpoint the build returns that the list
+ *  does not hold is added; one it no longer returns is left as it is. Every endpoint touched takes the
+ *  build's `source`, so the next "Modify…" starts from the new choices. */
+export function mergeModified<T extends GeneratedEndpoint>(endpoints: T[], idx: number, built: GeneratedEndpoint[]): { endpoints: T[]; lines: ModifyLine[] } {
+  const target = endpoints[idx]
+  const origin = target ? sourceOf(target) : undefined
+  if (!target || !origin) return { endpoints, lines: [] }
+  const next = endpoints.slice()
+  const lines: ModifyLine[] = []
+  const family = (e: GeneratedEndpoint) => { const s = sourceOf(e); return !!s && s.generator === origin.generator && s.candidate === origin.candidate }
+  for (const fresh of built) {
+    // the one being modified is found whatever it was renamed to when the build returns a single endpoint
+    let at = built.length === 1 ? idx : next.findIndex((e) => family(e) && e.name === fresh.name)
+    if (at < 0 && fresh.name === target.name) at = idx
+    if (at < 0) {
+      let name = fresh.name
+      for (let n = 2; next.some((e) => e.name === name); n++) name = `${fresh.name}_${n}`
+      next.push({ ...fresh, name } as T)
+      lines.push({ name, changes: [], added: true })
+      continue
+    }
+    const merged = mergeGenerated(next[at], fresh)
+    next[at] = { ...merged.next, ...(fresh.source ? { source: fresh.source } : {}) } as T
+    if (merged.changes.length) lines.push({ name: next[at].name, changes: merged.changes })
+  }
+  return { endpoints: next, lines }
+}
+
+/** The keys of the first row an answer holds at `rowsField` (a dotted path; '' = the answer itself is
+ *  the list) — what a column can be read from. Empty when there is no row there. */
+export function rowKeys(answer: unknown, rowsField: string): string[] {
+  let at: unknown = answer
+  for (const part of rowsField.split('.').map((p) => p.trim()).filter(Boolean)) {
+    if (Array.isArray(at)) at = at[0]
+    if (!at || typeof at !== 'object') return []
+    at = (at as Record<string, unknown>)[part]
+  }
+  const row = Array.isArray(at) ? at[0] : at
+  return row && typeof row === 'object' && !Array.isArray(row) ? Object.keys(row as object) : []
+}
