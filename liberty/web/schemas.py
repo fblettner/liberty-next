@@ -111,6 +111,7 @@ class ApiResultOut(_Closed):
     extracted: Any = Field(default=None, description="The endpoint's ``extract`` path applied to the JSON.")
     mapped: dict[str, Any] = Field(default_factory=dict, description="The endpoint's ``map`` of fields.")
     error: str | None = None
+    warnings: str | None = None
     duration_ms: float
 
 

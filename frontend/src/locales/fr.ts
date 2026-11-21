@@ -1764,6 +1764,8 @@ const fr: Resources = {
         contentType: 'Content-Type',
         errorFields: 'Champs d’erreur',
         errorFieldsHint: 'Où le serveur place ses erreurs quand il répond 200 malgré tout (chemins à points, séparés par des virgules) : un contenu à cet endroit fait de l’appel un échec, avec ce contenu comme erreur',
+        warningFields: 'Champs d’avertissement',
+        warningFieldsHint: 'Où le serveur place ses avertissements : rapportés avec la réponse, l’appel reste valide. Un chemin peut se terminer par un filtre sur les éléments d’une liste : result.errors[errorLevel=2]',
         writable: 'Modifie des données',
         writableHint: 'Il soumet, crée ou lance quelque chose : l’assistant ne l’appelle qu’avec ai:write et une carte que l’utilisateur accepte',
         writableTag: 'modifie des données',

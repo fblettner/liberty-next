@@ -1766,6 +1766,8 @@ const en = {
         contentType: 'Content-Type',
         errorFields: 'Error fields',
         errorFieldsHint: 'Where the server puts its errors when it answers 200 all the same (dot-paths, separated by commas): something there makes the call a failure, with that content as its error',
+        warningFields: 'Warning fields',
+        warningFieldsHint: 'Where the server puts its warnings: reported with the answer, the call stands. A path may end with a filter on a list’s items: result.errors[errorLevel=2]',
         writable: 'Changes data',
         writableHint: 'It submits, creates or runs something: the assistant calls it only with ai:write and a card the user accepts',
         writableTag: 'changes data',

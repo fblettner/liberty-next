@@ -173,6 +173,7 @@ export default function HttpRunner({ connector, endpoint }: { connector: string;
               </span>
             </Meta>
             {result.error && <Banner $tone="error">{result.error}</Banner>}
+            {result.warnings && <Banner $tone="warning">{result.warnings}</Banner>}
             {result.extracted !== null && result.extracted !== undefined && (
               <div>
                 <FieldLabel>{t('http.responseField')}</FieldLabel>

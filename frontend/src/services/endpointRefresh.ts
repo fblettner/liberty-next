@@ -21,6 +21,7 @@ export interface GeneratedEndpoint {
   body?: string | null
   writable?: boolean
   error_fields?: string[] | null
+  warning_fields?: string[] | null
   params?: GeneratedParam[]
   [key: string]: unknown
 }
@@ -64,11 +65,12 @@ export function mergeGenerated<T extends GeneratedEndpoint>(current: T, fresh: G
   if (bodyKey(current.body) !== bodyKey(fresh.body)) changes.push('body')
   if (!!current.writable !== !!fresh.writable) changes.push(fresh.writable ? 'changes data: yes' : 'changes data: no')
   if (!same(current.error_fields ?? [], fresh.error_fields ?? [])) changes.push('error fields')
+  if (!same(current.warning_fields ?? [], fresh.warning_fields ?? [])) changes.push('warning fields')
   const choicesChanged = wanted.filter((p) => had.has(p.name) && !same(had.get(p.name)?.choices, p.choices ?? had.get(p.name)?.choices)).map((p) => p.name)
   if (choicesChanged.length) changes.push(`allowed values: ${choicesChanged.join(', ')}`)
 
   const next: Record<string, unknown> = { ...current, method: fresh.method, path: fresh.path }
-  for (const [key, value] of Object.entries({ body: fresh.body, writable: fresh.writable || undefined, error_fields: fresh.error_fields?.length ? fresh.error_fields : undefined, params: params.length ? params : undefined })) {
+  for (const [key, value] of Object.entries({ body: fresh.body, writable: fresh.writable || undefined, error_fields: fresh.error_fields?.length ? fresh.error_fields : undefined, warning_fields: fresh.warning_fields?.length ? fresh.warning_fields : undefined, params: params.length ? params : undefined })) {
     if (value === undefined || value === null || value === '') delete next[key]
     else next[key] = value
   }

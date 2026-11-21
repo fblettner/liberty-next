@@ -89,6 +89,7 @@ async def test_api_connector(body: ApiTestBody, request: Request, _: Superuser) 
                 "url": result.url,
                 "duration_ms": result.duration_ms,
                 "error": result.error,
+                "warnings": result.warnings,
                 "extracted": result.extracted,
                 "mapped": result.mapped,
                 "body": result.body[:4000] if isinstance(result.body, str) else result.body,

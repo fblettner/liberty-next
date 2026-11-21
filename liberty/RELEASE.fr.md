@@ -86,7 +86,11 @@
   avec une liste `errors`). L'appel était alors un succès pour Liberty : le volet de test l'indiquait, une
   action passait à l'étape suivante. Un point d'accès nomme maintenant ses **champs d'erreur** (chemins à
   points, dans l'éditeur du point d'accès) : quand l'un d'eux contient quelque chose, l'appel est un échec et
-  son erreur est ce contenu (« Alpha Name Cannot Be Blank »). La réponse complète reste retournée.
+  son erreur est ce contenu (« Alpha Name Cannot Be Blank »). La réponse complète reste retournée. Les
+  **champs d'avertissement** fonctionnent de la même façon sans faire échouer l'appel : leur contenu est
+  rapporté avec la réponse (`warnings`), dans l'exécuteur HTTP, le volet de test et à l'assistant. Un chemin
+  peut se terminer par un filtre sur les éléments d'une liste, `result.errors[errorLevel=1]`, pour un serveur
+  qui place ses erreurs et ses avertissements dans une même liste.
 
 ## 7.0.83 — 2026-11-19
 

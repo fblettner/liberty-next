@@ -238,5 +238,6 @@ export interface ApiResult {
   extracted: unknown
   mapped: Record<string, unknown>
   error: string | null
+  warnings?: string | null   // the server's warnings (the endpoint's warning fields): the call stands
   duration_ms: number
 }

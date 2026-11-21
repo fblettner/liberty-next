@@ -64,6 +64,7 @@ class ApiResult:
     extracted: Any = None
     mapped: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    warnings: str | None = None        # what the server answered at the endpoint's warning_fields: said, the call stands
     duration_ms: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
@@ -78,6 +79,7 @@ class ApiResult:
             "extracted": self.extracted,
             "mapped": self.mapped,
             "error": self.error,
+            "warnings": self.warnings,
             "duration_ms": round(self.duration_ms, 3),
         }
 
@@ -352,6 +354,7 @@ class APIConnector:
                     "path": e.path,
                     "content_type": e.content_type,
                     "error_fields": list(e.error_fields),
+                    "warning_fields": list(e.warning_fields),
                     "response_field": e.response_field,
                     "response_map": e.response_map,
                     "params": [
@@ -537,6 +540,7 @@ class APIConnector:
         ok = 200 <= resp.status_code < 300
         # a server that answers 200 with its errors inside (a form that refused the save): a failure
         refused = _errors_in(parsed, endpoint.error_fields) if (ok and parsed is not None) else None
+        warned = _errors_in(parsed, endpoint.warning_fields) if parsed is not None else None
         extracted = extract_path(parsed, endpoint.response_field) if (ok and parsed is not None) else None
         mapped = (
             {name: extract_path(parsed, path) for name, path in endpoint.response_map.items()}
@@ -554,6 +558,7 @@ class APIConnector:
             extracted=extracted,
             mapped=mapped,
             error=refused if ok else f"HTTP {resp.status_code}",
+            warnings=warned,
             duration_ms=duration_ms,
         )
 
@@ -628,12 +633,28 @@ def _error_text(item: Any) -> str:
     return str(item)
 
 
+_FILTERED = re.compile(r"^(?P<path>.*)\[(?P<key>[^=\[\]]+)=(?P<value>[^\[\]]*)\]$")
+
+
+def _select(parsed: Any, path: str) -> Any:
+    """:func:`extract_path`, with an optional filter on a list's items at the end:
+    ``result.errors[errorLevel=1]`` keeps the items whose ``errorLevel`` is 1 (compared as text) —
+    a server that puts its errors and its warnings in one list, told apart by a field."""
+    m = _FILTERED.match(path.strip())
+    if not m:
+        return extract_path(parsed, path.strip())
+    items = extract_path(parsed, m["path"])
+    if not isinstance(items, list):
+        return None
+    return [i for i in items if isinstance(i, dict) and str(i.get(m["key"].strip())) == m["value"].strip()]
+
+
 def _errors_in(parsed: Any, paths: list[str]) -> str | None:
-    """The errors a response carries at *paths* (an endpoint's ``error_fields``), as one text —
-    ``None`` when every path is empty, absent, false or zero."""
+    """What a response carries at *paths* (an endpoint's ``error_fields`` or ``warning_fields``),
+    as one text — ``None`` when every path is empty, absent, false or zero."""
     found: list[str] = []
     for path in paths:
-        value = extract_path(parsed, path)
+        value = _select(parsed, path)
         if value in (None, "", [], {}, False, 0):
             continue
         for item in value if isinstance(value, list) else [value]:

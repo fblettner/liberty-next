@@ -72,7 +72,10 @@
   The call was then a success for Liberty: the test pane said so, an action went on to its next step. An
   endpoint now names its **error fields** (dot-paths, in the endpoint editor): when one of them holds
   something, the call is a failure and its error is that content ("Alpha Name Cannot Be Blank"). The whole
-  answer is still returned.
+  answer is still returned. **Warning fields** work the same way without failing the call: their content is
+  reported with the answer (`warnings`), in the HTTP runner, the test pane and to the assistant. A path may end
+  with a filter on a list's items, `result.errors[errorLevel=1]`, for a server that puts its errors and its
+  warnings in one list.
 
 ## 7.0.83 — 2026-11-19
 

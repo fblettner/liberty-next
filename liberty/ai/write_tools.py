@@ -305,6 +305,7 @@ async def perform_api_run(
     except HTTPException as exc:
         raise ScreenWriteError(str(exc.detail)) from exc
     return {**what, "called": True, "success": bool(out.get("success")), "status_code": out.get("status_code"), "error": out.get("error"),
+            **({"warnings": out["warnings"]} if out.get("warnings") else {}),
             "result": out.get("extracted") if out.get("extracted") is not None else (out.get("mapped") or out.get("json") or out.get("body"))}
 
 

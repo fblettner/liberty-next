@@ -59,6 +59,8 @@ type Endpoint = {
   response_field?: string | null
   /** Where the server puts its errors when it answers 200 all the same: something there = the call failed. */
   error_fields?: string[] | null
+  /** Where the server puts its warnings: reported with the answer, the call stands. */
+  warning_fields?: string[] | null
   response_map?: Record<string, string>
   params?: Array<{ name: string; label?: string | null; default?: string | null; help?: string | null; example?: string | null; choices?: string[] | null }>
 }
@@ -885,6 +887,22 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
           }}
           placeholder="errors, result.messages"
           title={t('settings.api.endpoint.errorFieldsHint')}
+        />
+      </FieldRow>
+      <FieldRow>
+        <label title={t('settings.api.endpoint.warningFieldsHint')}>{t('settings.api.endpoint.warningFields')}</label>
+        <Input
+          value={(value.warning_fields ?? []).join(', ')}
+          onChange={(e) => {
+            const list = e.target.value.split(',').map((x) => x.trim())
+            set({ warning_fields: list.some((x) => x) ? list.filter((x, k) => x || k === list.length - 1) : undefined })
+          }}
+          onBlur={() => {
+            const clean = (value.warning_fields ?? []).filter((x) => x)
+            if (clean.length !== (value.warning_fields ?? []).length) set({ warning_fields: clean.length ? clean : undefined })
+          }}
+          placeholder="warnings, result.errors[errorLevel=2]"
+          title={t('settings.api.endpoint.warningFieldsHint')}
         />
       </FieldRow>
       <FieldRow>

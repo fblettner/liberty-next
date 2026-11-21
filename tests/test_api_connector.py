@@ -521,3 +521,35 @@ async def test_errors_inside_a_200_answer_make_the_call_a_failure() -> None:
         assert conn.describe()["endpoints"][0]["error_fields"] == ["fs_F.errors", "sysErrors"]
     finally:
         await conn.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_warning_is_reported_and_does_not_fail_the_call() -> None:
+    """A server that puts errors and warnings in one list, told apart by a field (JD Edwards'
+    business functions: errorLevel 1 = an error, 2 = a warning)."""
+    answers = [
+        {"result": {"output": [], "errors": [{"alphaDescription": "Warning: Duplicate Address Book record exists", "errorLevel": 2}]}},
+        {"result": {"errors": [{"alphaDescription": "Error: Address Number - Invalid", "errorLevel": 1},
+                               {"alphaDescription": "Warning: Duplicate Address Book record exists", "errorLevel": 2}]}},
+        {"result": {"output": [{"id": 1, "value": "A"}], "errors": []}},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=answers.pop(0))
+
+    cfg = ApiConnectorConfig(type="api", base_url="https://api.test", endpoints=[
+        EndpointDef(name="run", method="POST", path="/bsfn", body="{}",
+                    error_fields=["result.errors[errorLevel=1]", "sysErrors"], warning_fields=["result.errors[errorLevel=2]"]),
+    ])
+    conn = _connector(cfg, handler)
+    try:
+        warned = await conn.call("run")
+        assert warned.success is True and warned.error is None and warned.warnings == "Warning: Duplicate Address Book record exists"
+        assert warned.to_dict()["warnings"] == warned.warnings
+        failed = await conn.call("run")
+        assert failed.success is False and failed.error == "Error: Address Number - Invalid"
+        assert failed.warnings == "Warning: Duplicate Address Book record exists"       # both are said
+        clean = await conn.call("run")
+        assert clean.success is True and clean.warnings is None
+    finally:
+        await conn.aclose()
