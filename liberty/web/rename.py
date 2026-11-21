@@ -411,7 +411,7 @@ def _replace_connector_field_recursive(node: Any, *, old: str, new: str) -> int:
     accidentally rename — only the listed keys do)."""
     n = 0
     if isinstance(node, dict):
-        for key in ("connector", "row_click_connector"):
+        for key in ("connector", "row_click_connector", "save_connector"):
             if node.get(key) == old:
                 node[key] = new
                 n += 1
@@ -970,6 +970,7 @@ def _replace_dd_field_recursive(node: Any, *, old: str, new: str) -> int:
 # tracking the effective connector (a node's own ``connector`` field, else inherited from its
 # parent screen/scope/app) and only rename a ref whose context matches the target connector.
 _QUERY_REF_FIELDS = ("read_query", "update_query", "insert_query", "delete_query", "query", "to")
+_SAVE_REF_FIELDS = ("update_query", "insert_query", "delete_query")
 
 
 def _replace_query_refs(node: Any, *, mapping: dict[str, str], target_conn: str, default_conn: str | None) -> int:
@@ -979,12 +980,17 @@ def _replace_query_refs(node: Any, *, mapping: dict[str, str], target_conn: str,
     if isinstance(node, dict):
         own = node.get("connector")
         ctx = own if isinstance(own, str) and own else default_conn
+        # a screen may save through another connector than the one it reads (``save_connector``)
+        saves = node.get("save_connector")
+        save_ctx = saves if isinstance(saves, str) and saves else ctx
+        for f in _QUERY_REF_FIELDS:
+            if (save_ctx if f in _SAVE_REF_FIELDS else ctx) != target_conn:
+                continue
+            v = node.get(f)
+            if isinstance(v, str) and v in mapping:
+                node[f] = mapping[v]
+                n += 1
         if ctx == target_conn:
-            for f in _QUERY_REF_FIELDS:
-                v = node.get(f)
-                if isinstance(v, str) and v in mapping:
-                    node[f] = mapping[v]
-                    n += 1
             # A menu leaf's ``target`` is a query name only when it's a SQL ("query") leaf.
             if node.get("type") == "query":
                 tv = node.get("target")

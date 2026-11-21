@@ -270,9 +270,10 @@ def _rewrite_screen(
     # Effective connector: explicit ``Screen.connector`` wins, else the app default
     # (= the same-named connector — the runtime convention; see Screen.connector docs).
     eff_conn = out.get("connector") or fallback_connector
+    save_conn = out.get("save_connector") or eff_conn
     for attr in ("read_query", "update_query", "insert_query", "delete_query"):
         if attr in out and out[attr]:
-            out[attr] = _query_rename(rename_map, eff_conn, out[attr])
+            out[attr] = _query_rename(rename_map, eff_conn if attr == "read_query" else save_conn, out[attr])
     dialog = out.get("dialog")
     if isinstance(dialog, dict):
         for tab in dialog.get("tabs") or []:

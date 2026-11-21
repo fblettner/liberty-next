@@ -99,8 +99,11 @@ def test_an_endpoint_served_by_a_function(env) -> None:
         assert out["mapped"] == {"FOUND": 1} and out["url"] == "plugin:flowplg.rows:j_change_row"
         # a warning is reported, the call stands; an error in the answer or raised by the function fails it
         assert call("row_change", KY="W", DL01="x")["warnings"] == "check the code"
-        refused = call("row_change", KY="002")
+        refused = call("row_change", KY="002", DL01="")
         assert refused["success"] is False and refused["error"] == "Description required"
+        # "not given" is not "blank": a variable the caller did not send reaches the function as None
+        # (a function that types values in a form leaves alone the field nobody sent)
+        assert call("row_change", KY="002")["json"]["cells"] == {"DL01": None}
         gone = call("row_change", KY="ZZZ", DL01="x")
         assert gone["success"] is False and gone["error"] == "no row *ZZZ"
         # without a body: the parameters by name; a function that is not a plugin entry point is refused

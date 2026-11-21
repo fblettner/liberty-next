@@ -23,9 +23,12 @@ import type { Column } from '../../types/connectors'
 import type { PromptField, ScreenField } from '../../types/screens'
 import { evalConditions, type Row } from './dialogHelpers'
 import { CellWrap, FieldRow } from './FieldRow'
+import { media } from '../../theme'
 
 const PromptGrid = styled.div<{ $cols: number }>`
   display: grid; grid-template-columns: repeat(${({ $cols }) => $cols}, 1fr); gap: 12px;
+  /* Phone-width window: one field per line (a field's own span folds too: FieldRow's CellWrap). */
+  ${media.tablet} { grid-template-columns: minmax(0, 1fr); }
 `
 
 /** Build a synthetic Column from a resolved PromptField so FieldRow picks the right widget.

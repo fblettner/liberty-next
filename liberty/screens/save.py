@@ -198,6 +198,11 @@ def connector_of(screen: Screen, app: str) -> str:
     return screen.connector or app
 
 
+def save_connector_of(screen: Screen, app: str) -> str:
+    """Where the screen's update / insert / delete names live (``save_connector``, else its own)."""
+    return screen.write_connector(app)
+
+
 def resolved_fields(ctx: WriteContext, app: str, screen: Screen) -> dict[str, dict[str, Any]]:
     """Each column of the screen as the form receives it (label, format, rule, the flags and the
     ``*_when`` rules), keyed by lower-cased name. The dictionary is the application's."""
@@ -258,7 +263,7 @@ def blockers(screen: Screen, operation: str) -> list[str]:
 
 def operations(ctx: WriteContext, app: str, screen: Screen) -> dict[str, Any]:
     """What may be done on the screen by this caller: per operation, True or the reasons why not."""
-    connector = connector_of(screen, app)
+    connector = save_connector_of(screen, app)
     out: dict[str, Any] = {}
     for op in ("insert", "update", "delete"):
         why = blockers(screen, op)
@@ -275,8 +280,10 @@ def _require(ctx: WriteContext, connector: str, query: str) -> None:
         raise ScreenWriteError(f"permission denied: the signed-in user may not run {connector}.{query} (missing {perm}). Tell the user.")
 
 
-def _binds_of(ctx: WriteContext, connector: str, query: str | None) -> set[str]:
-    """The ``:NAME`` parameters *query* reads, upper-cased, without the ``_ORIGINAL`` ones."""
+def _binds_of(ctx: WriteContext, connector: str, query: str | None, *, screen: Screen | None = None, app: str | None = None) -> set[str]:
+    """The ``:NAME`` parameters *query* reads, upper-cased, without the ``_ORIGINAL`` ones. For a
+    *screen* that saves through another connector than the one it reads (``save_connector``), the
+    endpoint's variables under the names of the screen's columns that feed them."""
     if not query:
         return set()
     api = api_connector(ctx.connectors, connector)
@@ -285,7 +292,12 @@ def _binds_of(ctx: WriteContext, connector: str, query: str | None) -> set[str]:
         endpoint = endpoint_of(api, query)
         if endpoint is None:
             raise ScreenWriteError(f"{connector}: no endpoint {query!r}")
-        return {p.name.upper() for p in endpoint.params if not p.name.upper().endswith(_ORIGINAL)}
+        names = {p.name.upper() for p in endpoint.params if not p.name.upper().endswith(_ORIGINAL)}
+        if screen is not None and connector_of(screen, app or "") != connector:
+            from liberty.web.connectors import _save_columns
+            fed = _save_columns(ctx.connectors, screen, app, connector, endpoint, None) or {}
+            names = {fed.get(n.lower(), n).upper() for n in names}
+        return names
     try:
         qdef = ctx.connectors.sql(connector).get_query(query)
     except ConnectorError as exc:
@@ -294,7 +306,8 @@ def _binds_of(ctx: WriteContext, connector: str, query: str | None) -> set[str]:
     return {n for n in names if not n.endswith(_ORIGINAL)}
 
 
-async def _run(ctx: WriteContext, connector: str, query: str, params: Row, *, action_context: dict[str, Any] | None = None) -> dict[str, Any]:
+async def _run(ctx: WriteContext, connector: str, query: str, params: Row, *, action_context: dict[str, Any] | None = None,
+               screen_hint: tuple[str, str] | None = None) -> dict[str, Any]:
     from fastapi import HTTPException
 
     from liberty.web.connectors import _run_sql
@@ -302,6 +315,8 @@ async def _run(ctx: WriteContext, connector: str, query: str, params: Row, *, ac
     try:
         return await _run_sql(
             ctx.connectors, connector, query, params, language=ctx.language, user=ctx.principal.username,
+            # an API save says which screen it is (several screens may save through one endpoint)
+            screen_hint=screen_hint if api_connector(ctx.connectors, connector) is not None else None,
             scope=ctx.principal.data_scope, verbose_errors=ctx.principal.is_superuser, screens=ctx.screens,
             changesets=ctx.changesets, pool=ctx.pool, notify_ctx=ctx.notify_ctx, action_context=action_context,
             origin=ctx.origin,
@@ -620,9 +635,10 @@ async def save_row(
     if why:
         raise ScreenWriteError(f"{app}/{screen_id} cannot be written from here: " + "; ".join(why))
     connector = connector_of(screen, app)
+    save_conn = save_connector_of(screen, app)      # where the save names live: the screen's connector unless it says otherwise
     main_query = screen.insert_query if mode == "add" else screen.update_query
     assert main_query is not None
-    _require(ctx, connector, main_query)
+    _require(ctx, save_conn, main_query)
     fields = resolved_fields(ctx, app, screen)
     group_by_col = {h.name.lower(): h.group for h in screen.columns if h.group}
 
@@ -655,7 +671,7 @@ async def save_row(
 
     # what the screen writes: the binds of its queries
     groups = list(screen.column_groups or [])
-    writable = _binds_of(ctx, connector, main_query)
+    writable = _binds_of(ctx, save_conn, main_query, screen=screen, app=app)
     for g in groups:
         for q in (g.insert_query, g.update_query):
             writable |= _binds_of(ctx, g.connector or connector, q)
@@ -785,7 +801,7 @@ async def save_row(
         # a screen on an API endpoint: every save carries the parameters it was read with, under
         # the row's own values (a detail form's header) — as the browser's saveScreenRow does
         main_params = {**(params or {}), **main_params}
-    resp = await _run(ctx, connector, main_query, with_upper(main_params))
+    resp = await _run(ctx, save_conn, main_query, with_upper(main_params), screen_hint=(app, screen.id))
     resolved: Row = dict(resp.get("resolved_binds") or {})
     rowcount = int(resp.get("rowcount") or 0)
 
@@ -832,8 +848,9 @@ async def delete_row(
     if why:
         raise ScreenWriteError(f"{app}/{screen_id} cannot be written from here: " + "; ".join(why))
     connector = connector_of(screen, app)
+    save_conn = save_connector_of(screen, app)
     assert screen.delete_query is not None
-    _require(ctx, connector, screen.delete_query)
+    _require(ctx, save_conn, screen.delete_query)
     fields = resolved_fields(ctx, app, screen)
     row = await read_row(ctx, app, screen, key, params)
     if screen.is_row_editable(row) is not True:
@@ -863,7 +880,7 @@ async def delete_row(
         fk = resolve_bind_list(g.param_binds, row)
         await _run(ctx, g.connector or connector, g.delete_query, with_upper({**row, **fk}))
     context = dict(params or {}) if api_connector(ctx.connectors, connector) is not None else {}
-    resp = await _run(ctx, connector, screen.delete_query, with_upper({**context, **row}))
+    resp = await _run(ctx, save_conn, screen.delete_query, with_upper({**context, **row}), screen_hint=(app, screen.id))
     rowcount = int(resp.get("rowcount") or 0)
     out = {**preview, "written": True, "rowcount": rowcount}
     out.pop("record", None)

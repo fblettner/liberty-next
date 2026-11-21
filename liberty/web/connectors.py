@@ -165,10 +165,10 @@ def _find_screen_for_query(
     for app, app_screens in screens.screens.items():
         for s in app_screens.values():
             eff = s.connector or app
-            if eff == connector:
-                for attr, slot in slots:
-                    if getattr(s, attr) == query:
-                        return s, slot, app
+            saves = s.save_connector or eff        # a screen read by a query may save through another connector's endpoints
+            for attr, slot in slots:
+                if getattr(s, attr) == query and connector == (eff if slot == "read" else saves):
+                    return s, slot, app
             # Column-group write queries (the 1:1 related-table CRUD) also resolve to this screen —
             # so the group write inherits the screen's column hints and dictionary scope, and a group
             # column's ``dd`` mapping (e.g. ULMUSE → MUSE) fires its LOGIN/SYSDATE/etc. rule just like
@@ -490,12 +490,17 @@ async def _run_api(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=(
             f"{connector}.{query} holds no rows (rows_field) and is not marked as changing data (writable): "
             "a screen can neither read it nor save through it"))
-    screen, slot, screen_app = _find_screen_for_query(screens, connector, query) if screens else (None, None, None)
+    # the screen that sent the save, when it says so (several screens may save through one endpoint:
+    # one read by a query, one read from the API — each has its own rules and its own columns)
+    screen, slot, screen_app = _hinted_save(screens, screen_hint, connector, query)
+    if screen is None:
+        screen, slot, screen_app = _find_screen_for_query(screens, connector, query) if screens else (None, None, None)
     if screen is not None and slot != "group":
         _refuse_read_only_row(screen, slot, params)
     kind = {"insert": "INSERT", "update": "UPDATE", "delete": "DELETE"}.get(slot or "", "CALL")
+    columns = _save_columns(connectors, screen, screen_app, connector, endpoint, params) if slot in ("insert", "update", "delete") else None
     try:
-        out = await api_write(api_conn, query, params, statement_type=kind)
+        out = await api_write(api_conn, query, params, statement_type=kind, columns=columns)
     except ApiRowsError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     except ConnectorError as exc:
@@ -511,6 +516,43 @@ async def _run_api(
                 row.setdefault(str(k)[:-9], v)
         fire_screen_event(rules, dispatcher, app=screen_app or "", screen=screen.id, event=slot, row=row, user=user)
     return out
+
+
+def _hinted_save(screens: ScreensFile | None, hint: tuple[str, str] | None, connector: str,
+                 query: str) -> tuple[Screen | None, str | None, str | None]:
+    """The screen a save names (``_app`` / ``_screen``) when *query* on *connector* IS one of its
+    saves — ``(screen, slot, app)``, else three ``None`` (a hint that does not hold is ignored:
+    the screen is then looked for as usual)."""
+    if not (screens and hint):
+        return None, None, None
+    app, sid = hint
+    screen = (screens.screens.get(app) or {}).get(sid)
+    if screen is None or screen.write_connector(app) != connector:
+        return None, None, None
+    for attr, slot in (("update_query", "update"), ("insert_query", "insert"), ("delete_query", "delete")):
+        if getattr(screen, attr) == query:
+            return screen, slot, app
+    return None, None, None
+
+
+def _save_columns(connectors: ConnectorRegistry, screen: Screen | None, app: str | None, connector: str, endpoint: Any,
+                  params: dict[str, Any] | None) -> dict[str, str] | None:
+    """For a screen that is READ on another connector than the one it saves through
+    (``save_connector``): which of its columns feeds each variable of the endpoint — by dictionary
+    item (:func:`liberty.connectors.api_rows.columns_for`). ``None`` when the screen reads the
+    same connector: its columns are named like the variables."""
+    from liberty.connectors.api_rows import columns_for
+
+    if screen is None:
+        return None
+    read_conn = screen.connector or app or ""
+    if not read_conn or read_conn == connector:
+        return None
+    try:
+        prefix = int(getattr(connectors.sql(read_conn).config, "dd_prefix", 0) or 0)
+    except Exception:  # noqa: BLE001 — not an SQL connector (another API): the hints' items only
+        prefix = 0
+    return columns_for(endpoint, list(screen.columns or []), prefix, params)
 
 
 def _api_reader(connectors: ConnectorRegistry, connector: str, query: str) -> Any:
@@ -1154,8 +1196,11 @@ async def sql_query_post(
             screens=screens, chunk_size=chunk_size,
             pool=_request_pool(request),
         )
+    from liberty.connectors.api_rows import api_connector
+    sid, sapp = qp.get("_screen"), qp.get("_app")
+    save_hint = (sapp, sid) if (sid and sapp and api_connector(connectors, connector) is not None) else None
     return await _run_sql(
-        connectors, connector, query, params,
+        connectors, connector, query, params, screen_hint=save_hint,
         language=request_language(request), max_rows=limit, user=principal.username,
             scope=principal.data_scope,
             verbose_errors=principal.is_superuser,

@@ -132,6 +132,44 @@
   dans la grille, la fiche et l'enregistrement côté serveur), et **un paramètre peut être obligatoire**
   (« Obligatoire » dans l'éditeur du point d'accès) : un appel sans lui est refusé avant tout envoi, au lieu
   que le serveur prenne un blanc et agisse dessus.
+- **L'application sur téléphone et tablette.** Sous 768 px : le menu est un tiroir ouvert par un bouton en haut à
+  gauche, les boutons de l'en-tête ont leur ligne au-dessus des onglets (qui défilent), chaque boîte de dialogue
+  est en plein écran, les marges des pages se réduisent — et **une grille s'affiche en liste** : chaque ligne une
+  carte, chaque colonne une ligne « libellé · valeur », avec la recherche, la pagination, le menu de ligne et la
+  modification en masse (le tri et les filtres d'en-tête restent un geste d'écran large). Un formulaire montre
+  ses champs sur une colonne, ses onglets défilent. Au-dessus de 768 px rien ne change. Première étape (cadre,
+  dialogues, pages, grilles, formulaires) ; les éditeurs de paramétrage, la construction dans l'Explorateur et
+  les calendriers restent des mises en page de bureau.
+- **Un écran lu par une requête peut enregistrer par les points d'accès d'un autre connecteur** — **Enregistre
+  par** (`save_connector`, Écrans → Requêtes). L'écran garde sa requête, ses colonnes, son formulaire ; ses
+  requêtes de modification / ajout / suppression nomment des points d'accès d'un connecteur API : l'enregistrement
+  passe par l'application propriétaire des données (un formulaire JD Edwards : ses règles, ses valeurs par
+  défaut, ses messages) et la lecture reste rapide. Une variable du point d'accès prend la valeur de la colonne
+  de son nom, sinon de la colonne qui porte cet élément du dictionnaire — son `dd`, ou son nom sans le
+  `dd_prefix` du connecteur (`ALPH` ← `ABALPH`) : aucune liste de correspondances à écrire. Tout ce qu'a
+  l'enregistrement d'un écran reste vrai : la permission du point d'accès, `editable_when`, les règles de
+  notification, la grille et le formulaire inchangés, le `screen_write` de l'assistant. L'intégrité, la
+  recherche d'usages, le renommage et les packages suivent le connecteur d'enregistrement. Les actions
+  d'enregistrement (`on_update`…) n'étaient pas le bon endroit : elles s'exécutent après un enregistrement que
+  l'écran doit déjà savoir faire.
+- Enregistrement par un point d'accès — **« non fourni » n'est pas « vide ».** Une colonne que l'écran n'envoie
+  pas laisse la variable du point d'accès de côté (une fonction qui sert le point d'accès y reçoit `None` et ne
+  touche pas au champ) ; une colonne envoyée vide est donnée vide — l'utilisateur l'a effacée. Avant, les deux
+  arrivaient vides, et un champ que l'écran ne lisait pas aurait été effacé. Et pour une **modification** servie
+  par une fonction, une colonne qui porte encore ce que la ligne avait au chargement est laissée de côté aussi :
+  seul ce que l'utilisateur a changé est saisi (un formulaire recontrôle un champ ressaisi — JDE signalait un nom
+  en double à chaque enregistrement). Un enregistrement **nomme aussi son
+  écran** (`?_screen=&_app=`) : deux écrans qui enregistrent par le même point d'accès gardent chacun leurs
+  règles et leurs colonnes.
+- « Créer à partir de… » — **un générateur peut construire plusieurs points d'accès d'un coup** sans écran
+  (`{endpoints: […]}`) : l'éditeur les ajoute tous à la liste.
+- « Créer à partir de… » → un écran — **les points d'accès qui existent déjà** ne sont plus un refus : ils sont
+  conservés tels quels (le nouvel écran les utilise) ou, sur demande, réécrits à leur place (`existing_endpoints`
+  sur la route de création : `refuse` par défaut, `keep`, `replace`).
+- Connecteurs API — **les points d'accès sous un titre.** Un point d'accès a un **Groupe** (`group`) :
+  l'éditeur du connecteur range ensemble les points d'accès d'un même groupe sous ce titre, repliable, avec
+  leur nombre ; la recherche y regarde aussi. Pour un connecteur qui porte les points d'accès de plusieurs
+  applications ou sujets. Affichage seulement ; un point d'accès sans groupe reste en tête, comme avant.
 - Connecteurs API — **un paramètre de requête vide peut ne pas être envoyé.** Un point d'accès dont les
   filtres optionnels passent dans la chaîne de requête les envoyait vides (`?instanceName=`) quand ils
   n'étaient pas renseignés, ce que certains serveurs refusent ou lisent comme un filtre sur rien. L'option

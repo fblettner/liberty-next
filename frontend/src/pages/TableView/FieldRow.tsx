@@ -13,13 +13,15 @@ import { Checkbox, DatePicker, DateTimePicker, Field, Input, SearchSelect, match
 import type { Column } from '../../types/connectors'
 import type { ScreenField } from '../../types/screens'
 import { type LookupSpec, lookupKey, lookupOptions, lookupCellColumns, useLookupTables } from '../../services/lookups'
-import { colors, fontSize, fonts, radius } from '../../theme'
+import { colors, fontSize, fonts, radius, media } from '../../theme'
 import { cssColor, formatLink, isDateTimeColumn, localDateTime } from '../../services/cells'
 import { OpenFormatted } from './FormatValue'
 import { type Row, resolveBindList, applyRulesWhen, activeRulesWhen } from './dialogHelpers'
 
 export const CellWrap = styled.div<{ $span: number }>`
   grid-column: span ${({ $span }) => $span}; min-width: 0;
+  /* Phone-width window: the form is one column — a span would open a second one. */
+  ${media.tablet} { grid-column: auto; }
 `
 const ReadOnlyBox = styled.div`
   display: block; width: 100%; box-sizing: border-box; padding: 6px 10px; min-height: 32px;

@@ -117,6 +117,39 @@
   filter on nothing. The endpoint editor's "Leave out a query parameter whose value is blank"
   (`skip_blank_query`) sends only the ones that have a value. Off by default: existing endpoints are
   unchanged.
+- **The application on a phone and a tablet.** Below 768 px: the menu is a drawer opened by a button at the top
+  left, the header's buttons sit in a row of their own above the tabs (which scroll sideways), every dialog is
+  full-screen, a page's margins shrink — and **a grid is shown as a list**: each row a card, each column a
+  "label · value" line, the search, the pager, the row menu and Bulk edit still there (sorting and the header
+  filters are a wide-screen gesture). A record form shows its fields in one column, its tabs scroll. Above
+  768 px nothing changes. First step (shell, dialogs, pages, grids, record forms); the builders, the Explorer's
+  authoring and the date pickers are still desktop layouts.
+- **A screen read by a query can save through another connector's endpoints** — the screen's **Saves through**
+  (`save_connector`, Screens → Queries). The screen keeps its query, its columns, its form; its update / insert /
+  delete name endpoints of an API connector, so the save goes through the application that owns the data (a
+  JD Edwards form: JDE's own rules, defaults and messages apply) while the read stays fast. An endpoint's
+  variable takes the value of the column of its name, else of the column carrying that dictionary item — its
+  `dd`, or its name minus the connector's `dd_prefix` (`ALPH` ← `ABALPH`): no bind list to write. Everything a
+  screen's save has still holds: the endpoint's permission, `editable_when`, the notification rules, the grid
+  and the form unchanged, the assistant's `screen_write`. Integrity, find usages, rename and packages follow
+  the save connector. The save hooks (`on_update`…) were not the place for this: they run after a save the
+  screen must already be able to do.
+- A save through an endpoint — **"not given" is not "blank".** A column the screen does not send leaves the
+  endpoint's variable out (a function serving the endpoint receives `None` there and leaves the field alone);
+  a column sent blank is given blank — the user cleared it. Before, both arrived blank, and a field the screen
+  did not read would have been blanked. And on a **change** served by a function, a column that still holds what
+  the row was loaded with is left out too: only what the user changed is typed (a form re-checks a field typed
+  again — JDE warned of a duplicate name on every save). A save also **names its screen** (`?_screen=&_app=`), so two screens
+  saving through one endpoint each keep their own rules and columns.
+- "Create from…" — **a generator may build several endpoints at once** without a screen (`{endpoints: […]}`): the
+  editor adds them all to the list.
+- "Create from…" → a screen — **endpoints that already exist** are no longer a refusal: they are kept as they
+  are (the new screen uses them), or, on request, written again in place (`existing_endpoints` on the scaffold
+  route: `refuse` by default, `keep`, `replace`).
+- API connectors — **endpoints under a heading.** An endpoint has a **Group** (`group`): the connector editor
+  lists the endpoints of one group together under that heading, which folds, with their number; the search
+  also looks in it. For a connector holding the endpoints of several applications or subjects. Display only;
+  an endpoint without a group is listed first, as before.
 - **A generator can build a whole screen.** "Create from…" wrote one endpoint. A connector's generator may now
   answer with a screen: the endpoints it reads and saves through, and the screen itself. The dialog then asks
   for the application, the screen's id and title and whether to add it to the menu, and creates everything in

@@ -519,6 +519,9 @@ async def test_errors_inside_a_200_answer_make_the_call_a_failure() -> None:
         lost = await conn.call("save")
         assert lost.success is False and lost.error == "session lost"
         assert conn.describe()["endpoints"][0]["error_fields"] == ["fs_F.errors", "sysErrors"]
+        # a heading in the editor: carried as it is, nothing else reads it
+        assert EndpointDef(name="x", group="P01012 — Address Book").group == "P01012 — Address Book"
+        assert conn.describe()["endpoints"][0]["group"] is None
     finally:
         await conn.aclose()
 

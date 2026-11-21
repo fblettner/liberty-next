@@ -2,7 +2,7 @@
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
-import { colors, radius, fontSize, shadow } from '../theme'
+import { colors, radius, fontSize, shadow, media } from '../theme'
 import { Button } from './Button'
 
 export const Overlay = styled.div`
@@ -13,6 +13,15 @@ export const Overlay = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
+`
+
+// Phone-width window: a window that asks for a height takes the whole screen (100vh is the fallback
+// where dvh is unknown). For the presets below, whose own height and radius come after the base
+// Modal's rules; the width and the max-* are the base Modal's (!important).
+const FULL_SCREEN = `
+  height: 100vh;
+  height: 100dvh;
+  border-radius: 0;
 `
 
 export const Modal = styled.div`
@@ -34,6 +43,19 @@ export const Modal = styled.div`
   flex-direction: column;
   overflow: hidden;
   box-shadow: ${shadow.modal};
+  /* Phone-width window: every window takes the full width; a short one (a question, a small form)
+     keeps the height of its content, one with a height of its own takes the whole screen.
+     !important: the callers size their window with an inline style. */
+  ${media.tablet} {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    max-height: 100dvh !important;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    &[style*=' height:'], &[style^='height:'] { height: 100vh !important; height: 100dvh !important; }
+  }
 `
 
 export const ModalHeader = styled.div`
@@ -43,6 +65,7 @@ export const ModalHeader = styled.div`
   font-weight: 700;
   color: ${colors.text.primary};
   flex-shrink: 0;
+  ${media.tablet} { padding: 10px 12px; }
 `
 
 // Body fills the vertical space between Header and Footer. Without 'flex: 1 1 auto' +
@@ -62,6 +85,7 @@ export const ModalBody = styled.div`
   font-size: ${fontSize.md};
   line-height: 1.6;
   color: ${colors.text.secondary};
+  ${media.tablet} { padding: 12px; }
 `
 
 /** A Modal preset for long, multi-tab forms (ScreenDialog and any future "fill out a record"
@@ -82,6 +106,7 @@ export const ScreenDialogModal = styled(Modal)<{ $fullscreen?: boolean }>`
      only required fields filled-in keeps the same footprint as a full Edit). */
   min-width: 0;
   min-height: 0;
+  ${media.tablet} { ${FULL_SCREEN} }
 `
 
 /** A Modal preset for the screen visual designer — a nearly full-screen frame so the 3-column
@@ -99,6 +124,7 @@ export const VisualBuilderModal = styled(Modal)<{ $fullscreen?: boolean }>`
   border-radius: ${({ $fullscreen }) => ($fullscreen ? '0' : radius.lg)};
   min-width: 0;
   min-height: 0;
+  ${media.tablet} { ${FULL_SCREEN} }
 `
 
 /** A Modal preset for a *nested* ScreenDialog opened from inside another dialog — e.g. a row
@@ -116,6 +142,8 @@ export const NestedScreenDialogModal = styled(Modal)<{ $fullscreen?: boolean }>`
   /* Re-enable a small min-height so a single-field dialog still has a sensible footprint. */
   min-width: 0;
   min-height: 240px;
+  /* on a phone the parent's frame cannot stay visible behind it anyway */
+  ${media.tablet} { ${FULL_SCREEN} }
 `
 
 /** Overlay variant for a nested dialog — bumps z-index above the parent's Overlay so click-
@@ -132,6 +160,7 @@ export const ModalFooter = styled.div`
   padding: 12px 20px;
   border-top: 1px solid ${colors.border};
   flex-shrink: 0;
+  ${media.tablet} { padding: 10px 12px; flex-wrap: wrap; }
 `
 
 export function ConfirmModal({

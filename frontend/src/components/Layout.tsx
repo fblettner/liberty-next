@@ -6,8 +6,8 @@ import { Outlet, useMatch, useNavigate, useLocation } from 'react-router-dom'
 import { isPageTabPath } from '../tabs/pageTabs'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Sun, Moon, LogOut, User, Sparkles, X, Bell, Compass, Blocks } from 'lucide-react'
-import { colors, fontSize, fonts, radius, glass } from '../theme'
+import { Sun, Moon, LogOut, User, Sparkles, X, Bell, Compass, Blocks, Menu } from 'lucide-react'
+import { colors, fontSize, fonts, radius, glass, media } from '../theme'
 import { useTabs } from '../tabs/TabsContext'
 import { api } from '../api/client'
 import { LANGUAGE_KEY, type Language } from '../i18n'
@@ -15,7 +15,7 @@ import { useAuth } from '../auth/AuthContext'
 import { installAuthBuiltins } from '../pages/TableView/actionRunner'
 import { useWorkspace } from '../workspace/WorkspaceContext'
 import { isLibertyApp, LIBERTY_APP } from '../services/libertyMenu'
-import { Banner, Centered, ErrorBoundary } from '../common'
+import { Banner, Centered, ErrorBoundary, useViewport } from '../common'
 import Sidebar from './Sidebar'
 import ProfileModal from './ProfileModal'
 import { NotificationBell } from './NotificationBell'
@@ -29,6 +29,8 @@ const THEME_KEY = 'liberty.theme'
 const Shell = styled.div`
   display: flex;
   height: 100vh;
+  /* the visible height on a phone, whose address bar comes and goes (100vh above is the fallback) */
+  height: 100dvh;
   overflow: hidden;
   color: ${colors.text.primary};
   font-family: ${fonts.sans};
@@ -52,11 +54,38 @@ const ContentArea = styled.div`
   flex-direction: column;
 `
 
-const UtilityBar = styled.div`
-  position: fixed;
-  top: 12px;
-  right: 16px;
-  z-index: 90;
+// Phone-width window: the row above the tab strip — the navigation's button, then the utility pill.
+const TopRow = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 8px 0;
+  flex-shrink: 0;
+`
+
+// Opens the navigation drawer on a phone-width window.
+const MenuBtn = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: ${radius.md};
+  border: 1px solid ${colors.border};
+  background: var(--ghost-bg, ${colors.bg.card});
+  color: ${colors.text.primary};
+  cursor: pointer;
+  & svg { display: block; }
+`
+
+// The utility pill floats over the top-right of the page; on a phone-width window (`$inline`) it
+// sits in the top row instead, so it covers nothing — and scrolls sideways if it ever runs short.
+const UtilityBar = styled.div<{ $inline?: boolean }>`
+  ${({ $inline }) => ($inline
+    ? 'min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none;'
+    : 'position: fixed; top: 12px; right: 16px; z-index: 90;')}
   display: flex;
   align-items: center;
   gap: 2px;
@@ -89,6 +118,7 @@ const UtilBtn = styled.button<{ $active?: boolean; $danger?: boolean }>`
     background: ${({ $danger }) => ($danger ? colors.red.bg : 'var(--hover-subtle)')};
     color: ${({ $danger }) => ($danger ? colors.red.main : colors.text.primary)};
   }
+  ${media.tablet} { flex-shrink: 0; padding: 0 6px; }
 `
 
 const Sep = styled.div`
@@ -96,6 +126,8 @@ const Sep = styled.div`
   height: 16px;
   background: ${colors.border};
   margin: 0 2px;
+  /* every button of the pill has to fit beside the navigation's button */
+  ${media.tablet} { display: none; }
 `
 
 // AI Assistant — a labeled pill at the end of the bar (nomaubl style). Violet is the assistant's
@@ -118,6 +150,7 @@ const AiBtn = styled.button<{ $active?: boolean }>`
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
   &:hover { background: ${colors.ai.bgActive}; border-color: ${colors.ai.borderHover}; }
+  ${media.tablet} { flex-shrink: 0; padding: 0 8px; }
 `
 
 function readDark(): boolean {
@@ -148,10 +181,14 @@ export default function Layout() {
   // removed /chat full-page route + the sidebar entry). Toggled by the Sparkles button
   // in the utility bar below.
   const [aiOpen, setAiOpen] = useState(false)
+  // Phone-width window: the navigation is a drawer opened from the top row, where the pill sits too.
+  const { compact } = useViewport()
+  const [drawerOpen, setDrawerOpen] = useState(false)
 
   // The utility pill is position:fixed over the top-right, so it floats above the tab strip. Publish
   // its live width as --utilbar-width so the strip can reserve that space on its right edge (else its
-  // right scroll-arrow + close-all button hide under the pill). Re-measures on resize / content change.
+  // right scroll-arrow + close-all button hide under the pill). Re-measures on resize / content change
+  // (and when the pill moves to the top row and back: another element).
   const utilRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = utilRef.current
@@ -161,7 +198,7 @@ export default function Layout() {
     const ro = new ResizeObserver(set)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [compact])
 
   useEffect(() => {
     document.documentElement.classList.toggle('theme-light', !dark)
@@ -237,10 +274,93 @@ export default function Layout() {
   const pageTabMatch = isPageTabPath(pathname)
   const onTabRoute = !!(sqlMatch || screenMatch || httpMatch || dashboardMatch || jobMatch || nomaflowRunMatch || monitoringMatch || pageTabMatch)
 
+  const utility = (
+    <UtilityBar ref={utilRef} $inline={compact}>
+      {/* Close all tabs — lives in the pill (not floating beside it) so it's aligned and shares
+          the toolbar's look & feel. Only shown when there's more than one tab to close. */}
+      {tabs.length >= 2 && (
+        <>
+          <UtilBtn $danger onClick={() => { closeAll(); navigate('/') }} title={t('tabs.closeAll')} aria-label={t('tabs.closeAll')}>
+            <X size={15} />
+          </UtilBtn>
+          <Sep />
+        </>
+      )}
+      {compact ? (
+        // one button for the two languages: it shows the current one and switches to the other
+        <UtilBtn onClick={() => switchLang(lang === 'en' ? 'fr' : 'en')} title={lang === 'en' ? 'Français' : 'English'}>
+          {lang.toUpperCase()}
+        </UtilBtn>
+      ) : (
+        <>
+          <UtilBtn $active={lang === 'en'} onClick={() => switchLang('en')} title="English">
+            EN
+          </UtilBtn>
+          <UtilBtn $active={lang === 'fr'} onClick={() => switchLang('fr')} title="Français">
+            FR
+          </UtilBtn>
+        </>
+      )}
+      <Sep />
+      <UtilBtn onClick={toggleTheme} title={dark ? t('common.lightMode') : t('common.darkMode')}>
+        {dark ? <Moon size={14} /> : <Sun size={14} />}
+      </UtilBtn>
+      {user && (
+        <>
+          <Sep />
+          {libertyMenu && (inLiberty ? backApp : true) && (
+            <>
+              <UtilBtn type="button" $active={inLiberty} onClick={switchLiberty}
+                title={inLiberty ? t('liberty.backTo', { app: backApp }) : t('liberty.open')}>
+                <Blocks size={14} />
+              </UtilBtn>
+              <Sep />
+            </>
+          )}
+          {explorerModels && explorerModels.length > 0 && (
+            <>
+              <UtilBtn type="button" title={t('explorer.title')} onClick={() => navigate('/explorer')} $active={pathname === '/explorer'}><Compass size={14} /></UtilBtn>
+              <Sep />
+            </>
+          )}
+          <NotificationBell>
+            {(open) => <UtilBtn type="button" title={t('notifications.title')} style={open ? { color: colors.text.primary } : undefined}><Bell size={14} /></UtilBtn>}
+          </NotificationBell>
+          <Sep />
+          {/* Identity is icon-only now (username + superuser flag moved to the hover title) —
+              keeps the pill compact; the icon still opens the profile modal. */}
+          <UtilBtn
+            onClick={() => setProfileOpen(true)}
+            title={`${user.username}${user.is_superuser ? ' · superuser' : ''} — ${t('profile.title')}`}
+          >
+            <User size={14} />
+          </UtilBtn>
+          <UtilBtn onClick={logout} title={t('common.signOut')}>
+            <LogOut size={14} />
+          </UtilBtn>
+        </>
+      )}
+      <Sep />
+      {/* AI assistant — labeled pill at the end of the bar; toggles the right-side drawer. */}
+      <AiBtn $active={aiOpen} onClick={() => setAiOpen((v) => !v)} title={t('nav.assistant')}>
+        <Sparkles size={14} /> {!compact && t('nav.assistant')}
+      </AiBtn>
+    </UtilityBar>
+  )
+
   return (
     <Shell>
-      <Sidebar />
+      <Sidebar drawerOpen={drawerOpen} onDrawerClose={() => setDrawerOpen(false)} />
       <MainArea>
+        {compact && (
+          <TopRow>
+            {/* no "Menu" text of its own yet: the title reuses "Expand" */}
+            <MenuBtn type="button" onClick={() => setDrawerOpen(true)} title={t('nav.menu')} aria-label={t('nav.menu')}>
+              <Menu size={18} />
+            </MenuBtn>
+            {utility}
+          </TopRow>
+        )}
         <TabStrip />
         {/* Back-affordance for drill-down navigation (row_click_route) — only renders when
             the operator got here via a row click that threaded ``location.state.from``.
@@ -261,68 +381,7 @@ export default function Layout() {
         </ContentArea>
       </MainArea>
 
-      <UtilityBar ref={utilRef}>
-        {/* Close all tabs — lives in the pill (not floating beside it) so it's aligned and shares
-            the toolbar's look & feel. Only shown when there's more than one tab to close. */}
-        {tabs.length >= 2 && (
-          <>
-            <UtilBtn $danger onClick={() => { closeAll(); navigate('/') }} title={t('tabs.closeAll')} aria-label={t('tabs.closeAll')}>
-              <X size={15} />
-            </UtilBtn>
-            <Sep />
-          </>
-        )}
-        <UtilBtn $active={lang === 'en'} onClick={() => switchLang('en')} title="English">
-          EN
-        </UtilBtn>
-        <UtilBtn $active={lang === 'fr'} onClick={() => switchLang('fr')} title="Français">
-          FR
-        </UtilBtn>
-        <Sep />
-        <UtilBtn onClick={toggleTheme} title={dark ? t('common.lightMode') : t('common.darkMode')}>
-          {dark ? <Moon size={14} /> : <Sun size={14} />}
-        </UtilBtn>
-        {user && (
-          <>
-            <Sep />
-            {libertyMenu && (inLiberty ? backApp : true) && (
-              <>
-                <UtilBtn type="button" $active={inLiberty} onClick={switchLiberty}
-                  title={inLiberty ? t('liberty.backTo', { app: backApp }) : t('liberty.open')}>
-                  <Blocks size={14} />
-                </UtilBtn>
-                <Sep />
-              </>
-            )}
-            {explorerModels && explorerModels.length > 0 && (
-              <>
-                <UtilBtn type="button" title={t('explorer.title')} onClick={() => navigate('/explorer')} $active={pathname === '/explorer'}><Compass size={14} /></UtilBtn>
-                <Sep />
-              </>
-            )}
-            <NotificationBell>
-              {(open) => <UtilBtn type="button" title={t('notifications.title')} style={open ? { color: colors.text.primary } : undefined}><Bell size={14} /></UtilBtn>}
-            </NotificationBell>
-            <Sep />
-            {/* Identity is icon-only now (username + superuser flag moved to the hover title) —
-                keeps the pill compact; the icon still opens the profile modal. */}
-            <UtilBtn
-              onClick={() => setProfileOpen(true)}
-              title={`${user.username}${user.is_superuser ? ' · superuser' : ''} — ${t('profile.title')}`}
-            >
-              <User size={14} />
-            </UtilBtn>
-            <UtilBtn onClick={logout} title={t('common.signOut')}>
-              <LogOut size={14} />
-            </UtilBtn>
-          </>
-        )}
-        <Sep />
-        {/* AI assistant — labeled pill at the end of the bar; toggles the right-side drawer. */}
-        <AiBtn $active={aiOpen} onClick={() => setAiOpen((v) => !v)} title={t('nav.assistant')}>
-          <Sparkles size={14} /> {t('nav.assistant')}
-        </AiBtn>
-      </UtilityBar>
+      {!compact && utility}
 
       {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
       <AiDrawer open={aiOpen} onClose={() => setAiOpen(false)} />

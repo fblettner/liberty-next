@@ -125,7 +125,11 @@ export const glass = {
   `,
 }
 
+// The same widths as BREAKPOINTS in common/useViewport.ts.
 export const media = {
+  /** Small laptop or tablet. */
+  narrow: '@media (max-width: 1100px)',
+  /** Phone or split window: drawer navigation, full-screen windows, grids as lists. */
   tablet: '@media (max-width: 768px)',
   mobile: '@media (max-width: 480px)',
 }

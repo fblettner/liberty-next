@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException, Request, status
 from liberty.web.admin._base import Superuser, _dump_screen, _snapshot_all_config, router
@@ -71,6 +71,9 @@ class ScaffoldBody(BaseModel):
     dictionary_scope: str | None = None         # None / "shared" → top-level entries; else connectors.<scope>.entries
     dictionary: list[dict[str, Any]] = []       # each entry: {id, label?, format?, justify?, size?, rules?, ...}
     endpoints: list[dict[str, Any]] = []        # on an API connector: the endpoints the screen reads and saves through
+    # an endpoint of that name is already on the connector: refuse (409), keep it as it is (the screen
+    # uses it), or replace it with the one sent
+    existing_endpoints: Literal["refuse", "keep", "replace"] = "refuse"
                                                 # (built by a connector's generator), added to it
     screen: dict[str, Any]                      # a parsed Screen dict (id, label, queries, columns[], dialog{tabs[]})
     menu: ScaffoldMenuItem | None = None
@@ -115,10 +118,14 @@ async def assistant_scaffold(body: ScaffoldBody, request: Request, principal: Su
         existing = target.setdefault("endpoints", [])
         taken = {str(e.get("name", "")) for e in existing if isinstance(e, dict)}
         clash = sorted(str(e.get("name")) for e in body.endpoints if str(e.get("name")) in taken)
-        if clash:
+        if clash and body.existing_endpoints == "refuse":
             raise HTTPException(status.HTTP_409_CONFLICT,
                                 detail=f"endpoint {', '.join(clash)} already exists on connector {body.connector!r} — rename or remove it first")
-        existing.extend(body.endpoints)
+        if body.existing_endpoints == "replace":
+            # in place: the endpoint keeps its position in the list
+            sent = {str(e.get("name")): e for e in body.endpoints}
+            existing[:] = [sent.get(str(e.get("name")), e) if isinstance(e, dict) else e for e in existing]
+        existing.extend(e for e in body.endpoints if str(e.get("name")) not in taken)
 
     # ── dictionary.toml: merge entries (shared or per-connector scope) ───────────────────────
     dfile = load_dictionary(_dictionary_path(settings))

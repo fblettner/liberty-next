@@ -191,6 +191,15 @@ async def generate_api_endpoint(body: EndpointGenerateBody, request: Request, _:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"{generator.callable} built a screen without an endpoint")
         return {"endpoints": [e.model_dump(mode="json", exclude_defaults=True) for e in many],
                 "screen": screen.model_dump(mode="json", exclude_defaults=True), "app": out.get("app"), "note": out.get("note")}
+    if out.get("endpoint") is None and out.get("endpoints"):
+        # several endpoints and no screen (an application's read / add / change / delete): the editor adds them all
+        try:
+            many = [EndpointDef.model_validate(
+                {**e, "source": {**e["source"], "generator": e["source"].get("generator") or body.generator}}
+                if isinstance(e, dict) and isinstance(e.get("source"), dict) else e) for e in out["endpoints"]]
+        except ValidationError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"{generator.callable} built an invalid endpoint: {exc}") from exc
+        return {"endpoints": [e.model_dump(mode="json", exclude_defaults=True) for e in many], "note": out.get("note")}
     try:
         endpoint = EndpointDef.model_validate(out.get("endpoint"))
     except ValidationError as exc:

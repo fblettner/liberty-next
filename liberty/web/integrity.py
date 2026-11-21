@@ -234,14 +234,21 @@ def _check_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
             sql = idx.sql_by_conn.get(conn, set())
             # a screen may read an API connector's endpoint that says where its rows are (api_rows)
             readable = _rows_endpoint_names(state, conn)
-            saving = _write_endpoint_names(state, conn)      # … and save through its endpoints that change data
+            # … and save through endpoints that change data — its own connector's, or another one's (save_connector)
+            save_conn = getattr(s, "save_connector", None) or conn
+            if save_conn not in idx.conn_names:
+                out.append(Issue("error", "Missing connector",
+                                 f"{app}.{sid} · save_connector '{save_conn}' does not exist", link))
+            saving = _write_endpoint_names(state, save_conn)
+            save_sql = idx.sql_by_conn.get(save_conn, set())
             for attr in ("read_query", "update_query", "insert_query", "delete_query"):
                 q = getattr(s, attr, None)
+                on, known = (conn, sql) if attr == "read_query" else (save_conn, save_sql)
                 if q and q in (readable if attr == "read_query" else saving):
                     continue
-                if q and conn in idx.conn_names and q not in sql:
+                if q and on in idx.conn_names and q not in known:
                     out.append(Issue("error", "Missing query",
-                                     f"{app}.{sid} · {attr} '{q}' does not exist on {conn}", link))
+                                     f"{app}.{sid} · {attr} '{q}' does not exist on {on}", link))
             rcs = getattr(s, "row_click_screen", None)
             if rcs and rcs not in app_screens:
                 out.append(Issue("error", "Broken screen reference",

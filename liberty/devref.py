@@ -520,7 +520,8 @@ def _connector_tables(state: Any) -> list[dict[str, Any]]:
         for attr in ("read_query", "update_query", "insert_query", "delete_query"):
             q = getattr(s, attr, None)
             if q:
-                query_screen.setdefault((conn, q), []).append((app, sid, s))
+                on = conn if attr == "read_query" else (getattr(s, "save_connector", None) or conn)
+                query_screen.setdefault((on, q), []).append((app, sid, s))
     out: list[dict[str, Any]] = []
     for cname in reg.names():
         cfg = getattr(reg.get(cname), "config", None)

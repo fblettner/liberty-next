@@ -184,6 +184,18 @@ def test_a_generator_builds_a_whole_screen_and_the_scaffold_creates_it(env) -> N
         again = client.post("/admin/assistant/scaffold", headers=h, json={"connector": "remote", "app": "remote", "endpoints": bundle["endpoints"],
                                                                          "screen": {**bundle["screen"], "id": "other"}})
         assert again.status_code == 409 and "T1_rows" in again.json()["detail"]
+        # … unless told what to do with them: kept as they are (another screen on the same endpoints), or written again in place
+        changed = [{**bundle["endpoints"][0], "label": "Rows, built again"}, bundle["endpoints"][1]]
+        kept = client.post("/admin/assistant/scaffold", headers=h, json={
+            "connector": "remote", "app": "remote", "endpoints": changed, "screen": {**bundle["screen"], "id": "other"}, "existing_endpoints": "keep"})
+        assert kept.status_code == 200, kept.text
+        names = lambda: [(e["name"], e.get("label")) for e in client.app.state.connectors.get("remote").describe()["endpoints"] if e["name"].startswith("T1_")]  # noqa: E731
+        before = names()
+        assert ("T1_rows", "Rows, built again") not in before and len(before) == 2
+        replaced = client.post("/admin/assistant/scaffold", headers=h, json={
+            "connector": "remote", "app": "remote", "endpoints": changed, "screen": {**bundle["screen"], "id": "third"}, "existing_endpoints": "replace"})
+        assert replaced.status_code == 200, replaced.text
+        assert names() == [("T1_rows", "Rows, built again"), before[1]]               # same place in the list, the new definition
         # the screen works: it reads, it saves with the parameters it was read with, a required one cannot be left out
         sent: list = []
 

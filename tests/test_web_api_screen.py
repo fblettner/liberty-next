@@ -57,6 +57,15 @@ params = [ {{ name = "AN8" }}, {{ name = "ALPH" }}, {{ name = "AN8_ORIGINAL" }} 
 error_fields = ["errors"]
 warning_fields = ["warnings"]
 response_map = {{ AN8 = "saved.an8" }}
+
+[connectors.jde]
+type = "sql"
+pool = "default"
+dd_prefix = 2
+
+[[connectors.jde.queries]]
+name = "f0101_get"
+sql = "SELECT 9999 AS ABAN8, 'TEST' AS ABALPH, 'C' AS ABAT1"
 """
 
 _SCREENS = """
@@ -79,6 +88,27 @@ filter = true
 [[screens.erp.addresses.columns]]
 name = "AN8"
 filter = true
+"""
+
+# read by a query, saved through the API's endpoint: the columns are the table's, the variables the form's
+_SCREENS += """
+[screens.jde.book]
+label = "Address book"
+read_query = "f0101_get"
+save_connector = "erp"
+update_query = "address_save"
+editable_when = [ { field = "ABAT1", value = "C" } ]
+
+[[screens.jde.book.columns]]
+name = "ABAN8"
+key = true
+
+[[screens.jde.book.columns]]
+name = "ABALPH"
+dd = "ALPH"
+
+[[screens.jde.book.columns]]
+name = "ABAT1"
 """
 
 ANSWER = {"grid": {"columns": {"z_AN8_19": "Address Number", "z_ALPH_20": "Alpha Name", "z_AT1_50": "Sch Typ"}, "more": False,
@@ -216,3 +246,56 @@ def test_a_row_is_saved_through_an_endpoint(env) -> None:
         assert not [i for i in issues if i["category"] == "Missing query"]
         # importing rows is said not to be available
         assert client.post("/api/sql/erp/_import", json={"rows": []}, headers=_h(client, "wim")).status_code == 400
+
+
+def test_a_screen_read_by_a_query_saves_through_another_connectors_endpoint(env) -> None:
+    """``save_connector``: the screen keeps its query and its columns (``ABAN8``, ``ABALPH``); its
+    save goes to an API endpoint whose variables (``AN8``, ``ALPH``) take the columns carrying
+    those dictionary items — the hint's ``dd``, or the name minus the connector's ``dd_prefix``."""
+    with TestClient(env) as client:
+        sent: list = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            sent.append(json.loads(request.content))
+            return httpx.Response(200, json={"errors": [], "warnings": [], "saved": {"an8": 9999}})
+
+        client.app.state.connectors.get("erp")._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        row = {"params": {"ABAN8": 9999, "ABALPH": "New name", "ABAT1": "C", "ABAN8_ORIGINAL": 9999, "ABAT1_ORIGINAL": "C"}}
+        # the screen names itself: another screen (erp/addresses) saves through the same endpoint
+        url = "/api/sql/erp/address_save?_screen=book&_app=jde"
+        r = client.post(url, json=row, headers=_h(client, "wim"))
+        assert r.status_code == 200, r.text
+        assert r.json()["statement_type"] == "UPDATE" and r.json()["rowcount"] == 1
+        # ALPH ← ABALPH (its dd), AN8 ← ABAN8 (the name minus the prefix); AN8_ORIGINAL has no column: left out
+        assert sent[-1] == {"an8": "9999", "name": "New name", "was": ""}
+        # THIS screen's editable_when, on its own column
+        locked = {"params": {"ABAN8": 9999, "ABALPH": "x", "ABAT1_ORIGINAL": "V"}}
+        assert client.post(url, json=locked, headers=_h(client, "wim")).status_code == 409
+        # the endpoint's permission is the save's: reading the screen is not enough
+        assert client.post(url, json=row, headers=_h(client, "ann")).status_code == 403
+        # the catalog carries it; integrity, usages and a rename follow the save connector
+        detail = client.get("/api/screens/jde/book", headers=_h(client, "admin")).json()
+        assert detail["save_connector"] == "erp" and detail["update_query"] == "address_save" and detail["connector"] == "jde"
+        issues = client.get("/admin/config/integrity", headers=_h(client, "admin")).json()["issues"]
+        assert not [i for i in issues if i["category"] in ("Missing query", "Missing connector")], issues
+
+
+def test_the_columns_that_feed_an_endpoints_variables() -> None:
+    from liberty.connectors.api_rows import columns_for, write_params
+    from liberty.connectors.config import ColumnHint, EndpointDef, ParamDef
+
+    endpoint = EndpointDef(name="save", params=[ParamDef(name="AN8"), ParamDef(name="ALPH"), ParamDef(name="TAX"), ParamDef(name="MAX", default="10")])
+    hints = [ColumnHint(name="ABAN8"), ColumnHint(name="NAME", dd="ALPH"), ColumnHint(name="TAX")]
+    fed = columns_for(endpoint, hints, 2)
+    assert fed == {"an8": "aban8", "alph": "name"}                       # TAX has its own column: not listed
+    # without hints, the names the row came with (a connector with a prefix)
+    assert columns_for(endpoint, None, 2, {"ABAN8": 1, "ABALPH": "x", "ABAN8_ORIGINAL": 1}) == {"an8": "aban8", "alph": "abalph"}
+    assert columns_for(endpoint, None, 0, {"ABAN8": 1}) == {}
+    # a column the row carries blank is GIVEN blank (the user cleared it); one it does not carry is left out;
+    # a blank where the variable has a default leaves the default to apply
+    assert write_params(endpoint, {"ABAN8": 9999, "NAME": "  ", "MAX": ""}, fed) == {"AN8": 9999, "ALPH": ""}
+    # an update served by a function: only what changed since the row was loaded — the key (required) always
+    keyed = EndpointDef(name="save", params=[ParamDef(name="AN8", required=True), ParamDef(name="ALPH"), ParamDef(name="TAX")])
+    row = {"ABAN8": 9999, "NAME": "TEST ", "TAX": "124", "ABAN8_ORIGINAL": 9999, "NAME_ORIGINAL": "TEST", "TAX_ORIGINAL": "123"}
+    assert write_params(keyed, row, columns_for(keyed, hints, 2), changed_only=True) == {"AN8": 9999, "TAX": "124"}
+    assert write_params(keyed, row, columns_for(keyed, hints, 2)) == {"AN8": 9999, "ALPH": "TEST", "TAX": "124"}

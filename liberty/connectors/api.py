@@ -171,6 +171,21 @@ def _string_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
+_ABSENT = "\x00absent\x00"       # stands for a variable the caller did not give, while a function's body is filled
+
+
+def _absent_as_none(value: Any) -> Any:
+    """A filled body, the marker taken out: a value that was exactly one absent variable becomes
+    ``None``; inside a longer text the variable is blank, as it always was."""
+    if isinstance(value, str):
+        return None if value == _ABSENT else value.replace(_ABSENT, "")
+    if isinstance(value, dict):
+        return {(k.replace(_ABSENT, "") if isinstance(k, str) else k): _absent_as_none(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_absent_as_none(v) for v in value]
+    return value
+
+
 def substitute_json(text: str | None, params: dict[str, Any]) -> str:
     """:func:`substitute` for a JSON body. A placeholder written inside a string literal
     (``"name": "{{NAME}}"``) receives its value as string content — a quote in the value cannot
@@ -352,6 +367,7 @@ class APIConnector:
                     "name": e.name,
                     "label": e.label,
                     "description": e.description,
+                    "group": e.group,
                     "method": e.method.upper(),
                     "writable": e.writable,
                     "path": e.path,
@@ -495,7 +511,9 @@ class APIConnector:
             return ApiResult(connector=self.name, endpoint=endpoint_name, success=False, status_code=0,
                              url=self.config.base_url, error=f"{type(exc).__name__}: {exc}")
         if endpoint.callable:
-            return await self._call_plugin(endpoint, merged)
+            # what the caller did not give and no default fills: the function sees ``None`` there, not ""
+            absent = {q.name for q in endpoint.params if q.name not in (params or {}) and merged.get(q.name) == ""}
+            return await self._call_plugin(endpoint, merged, absent)
 
         token = await self._get_token(merged)
         if token is not None:
@@ -575,10 +593,14 @@ class APIConnector:
             duration_ms=duration_ms,
         )
 
-    async def _call_plugin(self, endpoint: EndpointDef, merged: dict[str, Any]) -> ApiResult:
+    async def _call_plugin(self, endpoint: EndpointDef, merged: dict[str, Any], absent: set[str] | None = None) -> ApiResult:
         """An endpoint served by a plugin function (``callable``): its arguments are the
         endpoint's parameters — or the object its ``body`` gives once filled — and its answer is
-        treated as an HTTP answer's JSON (error / warning fields, response field and map)."""
+        treated as an HTTP answer's JSON (error / warning fields, response field and map).
+
+        A value of the body that is exactly ONE variable the caller did not give (*absent*: not
+        sent, no default) reaches the function as ``None`` — "not given" is not "blank": a
+        function that types values in a form leaves alone the field nobody sent."""
         from liberty.plugins.invoke import (
             PluginInvocationError, build_kwargs, call_target, normalise_result, plugins_root, resolve_callable,
         )
@@ -592,7 +614,8 @@ class APIConnector:
 
         try:
             if endpoint.body:
-                kwargs = json.loads(substitute_json(endpoint.body, merged))
+                marked = {**merged, **{name: _ABSENT for name in absent or ()}}
+                kwargs = _absent_as_none(json.loads(substitute_json(endpoint.body, marked)))
                 if not isinstance(kwargs, dict):
                     return failed(f"{endpoint.name}: the body of an endpoint served by a function must be a JSON object (its arguments)")
             else:

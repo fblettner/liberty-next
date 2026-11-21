@@ -58,11 +58,16 @@ export function PortalPanel({
   const roomRight = window.innerWidth - rect.left - 8
   const roomLeft = rect.right - 8
   const alignRight = roomRight < Math.min(maxWidth, Math.max(roomLeft, minWidth)) && roomLeft > roomRight
-  const cap = Math.max(minWidth, Math.min(maxWidth, alignRight ? roomLeft : roomRight))
+  const room = alignRight ? roomLeft : roomRight
+  const fit = Math.max(minWidth, Math.min(maxWidth, room))
+  // Not even the minimum width fits on the trigger's side (a phone-width window): the panel leaves
+  // the trigger's edge for the window's, and keeps within the window.
+  const pinned = fit > room
+  const cap = pinned ? Math.min(fit, window.innerWidth - 16) : fit
   const style: React.CSSProperties = {
     minWidth: Math.min(Math.max(rect.width, minWidth), cap),
     maxWidth: cap,
-    ...(alignRight ? { right: window.innerWidth - rect.right } : { left: rect.left }),
+    ...(alignRight ? { right: pinned ? 8 : window.innerWidth - rect.right } : { left: pinned ? 8 : rect.left }),
     ...(flip ? { bottom: window.innerHeight - rect.top + 4 } : { top: rect.bottom + 4 }),
   }
   return createPortal(

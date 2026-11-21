@@ -357,7 +357,7 @@ def build_write_tools(state: Callable[[], Any], *, include_api: bool = False) ->
             fields = resolved_fields(ctx, app, sc)
             writes: set[str] = set()
             for q in (sc.insert_query, sc.update_query):
-                writes |= _binds_of(ctx, connector, q)
+                writes |= _binds_of(ctx, sc.write_connector(app), q, screen=sc, app=app)
             for g in sc.column_groups or []:
                 for q in (g.insert_query, g.update_query):
                     writes |= _binds_of(ctx, g.connector or connector, q)

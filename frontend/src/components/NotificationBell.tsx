@@ -10,7 +10,7 @@ import { Bell } from 'lucide-react'
 import { api } from '../api/client'
 import { PortalPanel } from '../common'
 import { useSio } from '../sio/SioContext'
-import { colors, fonts, fontSize, radius } from '../theme'
+import { colors, fonts, fontSize, radius, media } from '../theme'
 import type { Notification } from '../types/notifications'
 import { relative } from '../pages/Nomaflow/util'
 
@@ -24,7 +24,11 @@ const Badge = styled.span`
   font-size: ${fontSize.micro}; font-weight: 700; font-family: ${fonts.sans};
   display: flex; align-items: center; justify-content: center; line-height: 1; pointer-events: none;
 `
-const Panel = styled.div`width: 360px; max-height: 480px; display: flex; flex-direction: column; min-height: 0;`
+const Panel = styled.div`
+  width: 360px; max-height: 480px; display: flex; flex-direction: column; min-height: 0;
+  /* a phone narrower than the panel: the window's width, less the margins PortalPanel keeps */
+  ${media.tablet} { width: min(360px, calc(100vw - 18px)); }
+`
 const PanelHeader = styled.div`
   display: flex; align-items: center; justify-content: space-between; padding: 10px 12px;
   border-bottom: 1px solid ${colors.border}; font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.primary};

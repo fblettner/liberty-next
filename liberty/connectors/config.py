@@ -978,6 +978,7 @@ class EndpointDef(BaseModel):
     params: list[ParamDef] = Field(default_factory=list, json_schema_extra={"x_group": "Params"}, description="Declared parameters for the ``{{placeholders}}``.")
     label: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Short name shown in listings.")
     description: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="Longer description of what this endpoint does.")
+    group: str | None = Field(default=None, json_schema_extra={"x_group": "Advanced"}, description="The heading this endpoint is listed under in the connector's editor (``P01012 — Address Book``, ``Monitoring``): the endpoints of one application, one subject, kept together. Display only.")
 
 
 class ApiTargetConfig(BaseModel):

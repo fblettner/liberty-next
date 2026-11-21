@@ -152,7 +152,7 @@ export function useBatchEdit({
     const newBinds = new Map<DataRow, Record<string, unknown>>()
     const writeRow = (mode: 'add' | 'edit', sent: Record<string, unknown>, savedRow: DataRow) =>
       saveScreenRow({
-        connector, mode, sent, savedRow, columns: result.columns, columnGroups,
+        connector, saveConnector: screen?.save_connector, screenRef: screen ? { app: screen.app, id: screen.id } : null, mode, sent, savedRow, columns: result.columns, columnGroups,
         mainUpdateQuery: updateQuery, mainInsertQuery: insertQuery, context: saveContext,
       })
     // The values to write for a row = its edits, plus any conditional forced default (default_when)
@@ -184,7 +184,7 @@ export function useBatchEdit({
     for (const row of deleted) {
       if (newRows.includes(row)) continue
       if (!deleteQuery) { localErrs.push(t('table.editNoDelete')); break }
-      jobs.push(deleteScreenRow({ connector, row, columnGroups, mainDeleteQuery: deleteQuery, context: saveContext }))
+      jobs.push(deleteScreenRow({ connector, saveConnector: screen?.save_connector, screenRef: screen ? { app: screen.app, id: screen.id } : null, row, columnGroups, mainDeleteQuery: deleteQuery, context: saveContext }))
     }
     const settled = await Promise.allSettled(jobs)
     const reqErrs = settled

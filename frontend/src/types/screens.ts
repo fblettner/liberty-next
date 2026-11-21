@@ -372,6 +372,9 @@ export interface ScreenListItem {
   update_query: string | null
   insert_query: string | null
   delete_query: string | null
+  /** The connector the three save names belong to when it is not the screen's (a screen read by a
+   *  query, saved through an API connector's endpoints). */
+  save_connector?: string | null
   auto_load: boolean
   /** Phase 3 — kept as a bool for back-compat with frontend code that checks "is this screen
    *  audited"; derived server-side from ``audit_table`` presence. */

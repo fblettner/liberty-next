@@ -5,7 +5,7 @@
 // its own surface (a host page whose tabs are pages).
 import { type ReactNode } from 'react'
 import styled from '@emotion/styled'
-import { colors, radius, fontSize, glass } from '../theme'
+import { colors, radius, fontSize, glass, media } from '../theme'
 
 const PageWrap = styled.div`
   display: flex;
@@ -17,6 +17,7 @@ const PageWrap = styled.div`
   min-height: 0;
   overflow: hidden;
   padding: 16px;
+  ${media.tablet} { padding: 8px; }
 `
 
 const ContextBar = styled.div`
@@ -29,6 +30,8 @@ const ContextBar = styled.div`
   background: var(--ghost-bg, ${colors.bg.card});
   ${glass.surface}
   flex-shrink: 0;
+  /* Phone-width window: the page's own buttons go under the title when the row is too short for both. */
+  ${media.tablet} { flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
 `
 
 const ContextIcon = styled.span`
@@ -41,6 +44,7 @@ const ContextIcon = styled.span`
 const ContextText = styled.div`
   flex: 1;
   min-width: 0;
+  ${media.tablet} { flex: 1 1 160px; }
 `
 
 const ContextTitle = styled.div`
@@ -57,6 +61,7 @@ const ContextDesc = styled.div`
   font-size: ${fontSize.sm};
   color: ${colors.text.muted};
   margin-top: 2px;
+  ${media.tablet} { display: none; }
 `
 
 const PageContent = styled.div<{ $embedded?: boolean }>`
@@ -75,6 +80,7 @@ const PageContent = styled.div<{ $embedded?: boolean }>`
   border-top: ${({ $embedded }) => ($embedded ? `1px solid ${colors.border}` : 'none')};
   border-radius: ${({ $embedded }) => ($embedded ? radius.lg : `0 0 ${radius.lg} ${radius.lg}`)};
   background: var(--ghost-bg, ${colors.bg.card});
+  ${media.tablet} { padding: 8px; }
 `
 
 export function PageLayout({

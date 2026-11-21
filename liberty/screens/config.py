@@ -1141,6 +1141,16 @@ class Screen(BaseModel):
     update_query: str | None = Field(default=None, description="Writable query for edits — usually ``<base>_put``.")
     insert_query: str | None = Field(default=None, description="Writable query for inserts — usually ``<base>_post``.")
     delete_query: str | None = Field(default=None, description="Writable query for deletes — usually ``<base>_delete``.")
+    save_connector: str | None = Field(
+        default=None,
+        description=(
+            "The connector the update / insert / delete names above belong to, when it is not the "
+            "screen's: a screen READ by a query saves through the endpoints of an API connector "
+            "(a JD Edwards form, so JDE's own rules apply) — the same idea as a column group's own "
+            "connector. An endpoint's variable takes the value of the column of its name, else of the "
+            "column carrying that dictionary item (``ALPH`` ← ``ABALPH``). Blank = the screen's connector."
+        ),
+    )
     columns: list[ColumnHint] = Field(
         default_factory=list,
         json_schema_extra={"x_group": "Columns"},
@@ -1500,6 +1510,11 @@ class Screen(BaseModel):
             if live_s not in {str(v).strip() for v in allowed}:
                 return False
         return True
+
+    def write_connector(self, app: str) -> str:
+        """The connector the screen's update / insert / delete names belong to: ``save_connector``,
+        else the screen's own (``connector``, else the application's)."""
+        return self.save_connector or self.connector or app
 
     def effective_key_columns(self) -> list[str]:
         """The row-identifying columns for this screen. Returns ``key_columns`` when set,

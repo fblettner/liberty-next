@@ -22,6 +22,12 @@ import { originalKeys, resolveBindList, valueFor, withUpper, type Row, overlayCI
 export interface SaveScreenRowArgs {
   /** The screen's effective connector (the main write queries live here). */
   connector: string
+  /** Where the main update / insert names live when it is not the screen's connector
+   *  (``Screen.save_connector``: a screen read by a query saves through an API's endpoints). */
+  saveConnector?: string | null
+  /** The screen that saves, sent with a save that goes through another connector: several screens
+   *  may save through one endpoint, each with its own rules and columns. */
+  screenRef?: { app: string; id: string } | null
   mode: 'add' | 'edit'
   /** The values to write, keyed by column/field name (already filtered for visibility + passwords
    *  by the caller). Split across the main table + each group by each column's ``group``. */
@@ -44,6 +50,9 @@ export interface SaveScreenRowArgs {
 }
 
 const enc = encodeURIComponent
+/** ``?_screen=…&_app=…`` on a save that goes through another connector than the screen's. */
+const screenQuery = (a: { saveConnector?: string | null; screenRef?: { app: string; id: string } | null }): string =>
+  a.saveConnector && a.screenRef ? `?_screen=${enc(a.screenRef.id)}&_app=${enc(a.screenRef.app)}` : ''
 
 /** Write the main row + each related group. Returns the main write's rowcount + the server-assigned
  *  binds (the sequence PK on add) so the caller can thread them into on_save / nested savers. */
@@ -79,7 +88,7 @@ export async function saveScreenRow(a: SaveScreenRowArgs): Promise<{ rowcount: n
   const own = isEdit ? { ...mainSaved, ...mainSent, ...originalKeys(mainSaved) } : mainSent
   const mainParams = a.context ? { ...a.context, ...own } : own
   const resp = await api.post<{ rowcount?: number; resolved_binds?: Row }>(
-    `/api/sql/${enc(a.connector)}/${enc(mainQuery)}`, { params: withUpper(mainParams) },
+    `/api/sql/${enc(a.saveConnector || a.connector)}/${enc(mainQuery)}${screenQuery(a)}`, { params: withUpper(mainParams) },
   )
   const resolved = resp.resolved_binds ?? {}
 
@@ -126,6 +135,9 @@ export async function saveScreenRow(a: SaveScreenRowArgs): Promise<{ rowcount: n
 export interface DeleteScreenRowArgs {
   /** The screen's effective connector (the main delete query lives here). */
   connector: string
+  /** Where the main delete name lives when it is not the screen's connector (``Screen.save_connector``). */
+  saveConnector?: string | null
+  screenRef?: { app: string; id: string } | null
   /** The full loaded row — identifies the main row to delete AND each related row (its key
    *  columns / FK come from here). */
   row: Row
@@ -160,7 +172,7 @@ export async function deleteScreenRow(a: DeleteScreenRowArgs): Promise<{ rowcoun
   // ── main row (parent) ──
   if (!a.mainDeleteQuery) return { rowcount: 0 }
   const resp = await api.post<{ rowcount?: number }>(
-    `/api/sql/${enc(a.connector)}/${enc(a.mainDeleteQuery)}`, { params: withUpper({ ...(a.context ?? {}), ...a.row }) },
+    `/api/sql/${enc(a.saveConnector || a.connector)}/${enc(a.mainDeleteQuery)}${screenQuery(a)}`, { params: withUpper({ ...(a.context ?? {}), ...a.row }) },
   )
   return { rowcount: resp.rowcount ?? 0 }
 }

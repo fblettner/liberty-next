@@ -234,10 +234,13 @@ def _resolve_screen(state: Any, seed: Seed) -> tuple[Dependency | None, list[tup
     if eff_conn:
         refs.append((Seed("connector", eff_conn), f"screen {seed.scope}.{seed.name}"))
     # CRUD queries on the screen's connector.
+    save_conn = getattr(screen, "save_connector", None) or eff_conn       # where its saves live, when not its own
+    if save_conn and save_conn != eff_conn:
+        refs.append((Seed("connector", save_conn), f"screen {seed.scope}.{seed.name}.save_connector"))
     for attr in ("read_query", "update_query", "insert_query", "delete_query"):
         v = getattr(screen, attr, None)
         if v:
-            refs.append((Seed("query", v, eff_conn), f"screen {seed.scope}.{seed.name}.{attr}"))
+            refs.append((Seed("query", v, eff_conn if attr == "read_query" else save_conn), f"screen {seed.scope}.{seed.name}.{attr}"))
     # Column hints — each ColumnHint.dd (or its name) resolves to a DD entry. A screen-level rule
     # override (``ColumnHint.rules`` + ``rules_values``) and each conditional ``rules_when`` entry
     # can ALSO reference a lookup / enum / sequence directly (bypassing a DD entry); a package that

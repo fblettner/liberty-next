@@ -24,7 +24,7 @@ import type { Column, QueryResult } from '../../types/connectors'
 import type { NestedFormTab, NestedTableTab, ScreenDetail, ScreenField } from '../../types/screens'
 import { bindsComplete, evalConditions, originalKeys, resolveBindList, type Row, valueFor, withUpper } from './dialogHelpers'
 import { CellWrap, FieldRow, isPassword } from './FieldRow'
-import { colors, fontSize } from '../../theme'
+import { colors, fontSize, media } from '../../theme'
 // Circular import: ResultTable → ScreenDialog → (this module's) NestedFormView/NestedTableView,
 // and NestedTableView → ResultTable. ESM resolves the bindings at module-eval; they're only *used*
 // at render time (inside JSX), so the cycle resolves fully before React renders — the same lazy-
@@ -34,6 +34,8 @@ import { NestedSaversContext, type DialogMode } from './ScreenDialog'
 
 const FieldGrid = styled.div<{ $cols: number }>`
   display: grid; grid-template-columns: repeat(${({ $cols }) => $cols}, 1fr); gap: 12px;
+  /* Phone-width window: one field per line (a field's own span folds too: FieldRow's CellWrap). */
+  ${media.tablet} { grid-template-columns: minmax(0, 1fr); }
 `
 const Hint = styled.div`
   color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 6px 0;

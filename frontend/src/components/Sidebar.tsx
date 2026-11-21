@@ -1,6 +1,7 @@
 // Left navigation rail — open, collapsed to its icons, or open on hover (the icon rail keeps its
 // width in the layout and the menu floats over the page while the mouse is on it — nomaubl's auto
-// collapse); the mode is persisted to localStorage.
+// collapse); the mode is persisted to localStorage. On a phone-width window it is a drawer over the
+// page instead, opened from the header's button (Layout holds its state).
 // Adapted from nomaubl's Sidebar.
 // It shows the picked workspace's menu tree (SidebarMenu): an application's, or the Liberty Next
 // workspace's (the framework's pages, superusers — picked like an application).
@@ -8,10 +9,11 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ChevronLeft, ChevronRight, PanelLeftDashed } from 'lucide-react'
-import { colors, fontSize, fonts, radius, glass } from '../theme'
+import { colors, fontSize, fonts, radius, glass, shadow } from '../theme'
 import { resolveApiPath } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
+import { useViewport } from '../common/useViewport'
 import SidebarMenu from './SidebarMenu'
 import WorkspaceSelect from './WorkspaceSelect'
 
@@ -32,7 +34,10 @@ function readMode(): Mode {
 // Open on hover: the rail holds the icon width in the layout; the navigation floats above it.
 const Rail = styled.div`position: relative; flex-shrink: 0; width: 64px; z-index: 60;`
 
-const Nav = styled.nav<{ $collapsed: boolean; $floating?: boolean }>`
+// Phone or split window: the navigation is a drawer over the page, opened from the header.
+const DrawerBackdrop = styled.div`position: fixed; inset: 0; z-index: 290; background: var(--overlay);`
+
+const Nav = styled.nav<{ $collapsed: boolean; $floating?: boolean; $drawer?: boolean; $open?: boolean }>`
   width: ${({ $collapsed }) => ($collapsed ? '56px' : '210px')};
   flex-shrink: 0;
   ${({ $floating, $collapsed }) => ($floating ? `position: absolute; top: 0; bottom: 0; left: 0;${$collapsed ? '' : ` background: ${colors.bg.modal}; box-shadow: 0 12px 40px var(--shadow-strong, rgba(0,0,0,0.35));`}` : '')}
@@ -47,6 +52,15 @@ const Nav = styled.nav<{ $collapsed: boolean; $floating?: boolean }>`
   transition: width 0.2s ease;
   ${glass.surface}
   ${glass.specularSm}
+  /* The drawer stays mounted while closed (the app switcher inside resolves the current app). */
+  ${({ $drawer, $open }) => ($drawer ? `
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: 300;
+    width: min(280px, calc(100vw - 56px));
+    display: ${$open ? 'flex' : 'none'};
+    background: ${colors.bg.modal};
+    box-shadow: ${shadow.xl};
+    transition: none;
+  ` : '')}
 `
 
 const Brand = styled.div<{ $collapsed: boolean }>`
@@ -118,7 +132,11 @@ const CollapseBtn = styled.button<{ $collapsed: boolean }>`
   &:hover { color: ${colors.text.secondary}; border-color: ${colors.border}; }
 `
 
-export default function Sidebar() {
+export default function Sidebar({ drawerOpen = false, onDrawerClose }: {
+  /** Phone-width window only: the drawer is shown. */
+  drawerOpen?: boolean
+  onDrawerClose?: () => void
+}) {
   const { t } = useTranslation()
   const { user } = useAuth()
   const { currentMenu } = useWorkspace()
@@ -140,18 +158,22 @@ export default function Sidebar() {
     }, on ? 120 : 250)
   }
   useEffect(() => () => window.clearTimeout(timer.current), [])
-  const floating = mode === 'hover'
-  const collapsed = floating ? !hover : mode === 'collapsed'
+  // a phone-width window: a drawer, always in full; the saved mode applies again above that width
+  const { compact: drawer } = useViewport()
+  const floating = !drawer && mode === 'hover'
+  const collapsed = drawer ? false : floating ? !hover : mode === 'collapsed'
   const toggle = () => setMode(mode === 'collapsed' ? 'open' : 'collapsed')
-  // a page picked from the floating navigation folds it back at once
+  // a page picked from the floating navigation folds it back at once; from the drawer, closes it
   const onPick = (e: React.MouseEvent) => {
-    if (floating && (e.target as HTMLElement).closest('a')) { window.clearTimeout(timer.current); setHover(false) }
+    if (!(e.target as HTMLElement).closest('a')) return
+    if (floating) { window.clearTimeout(timer.current); setHover(false) }
+    if (drawer) onDrawerClose?.()
   }
   const [assistantOpen, setAssistantOpen] = useState(false)
-  const openAssistant = () => setAssistantOpen(true)
+  const openAssistant = () => { setAssistantOpen(true); if (drawer) onDrawerClose?.() }
 
   const nav = (
-    <Nav ref={navRef} $collapsed={collapsed} $floating={floating} onClickCapture={onPick}
+    <Nav ref={navRef} $collapsed={collapsed} $floating={floating} $drawer={drawer} $open={drawerOpen} onClickCapture={onPick}
       onMouseEnter={floating ? () => hoverTo(true) : undefined} onMouseLeave={floating ? () => hoverTo(false) : undefined}>
       <Brand $collapsed={collapsed}>
         <BrandMark><img src={resolveApiPath("/favicon.svg")} alt={t('app.title')} /></BrandMark>
@@ -170,7 +192,8 @@ export default function Sidebar() {
         )}
       </Items>
 
-      <Bottom>
+      {/* the drawer has one shape: no mode to switch */}
+      {!drawer && <Bottom>
         {/* open ↔ collapsed; "open on hover" is the second switch (shown while the menu is open) */}
         {!floating && (
           <CollapseBtn $collapsed={collapsed} onClick={toggle} title={collapsed ? t('common.expand') : undefined}>
@@ -184,7 +207,7 @@ export default function Sidebar() {
             {t(floating ? 'nav.keepOpen' : 'nav.openOnHover')}
           </CollapseBtn>
         )}
-      </Bottom>
+      </Bottom>}
 
       {/* Superuser-only wizard — a modal so it opens over anything and closes cleanly (X / Esc /
           click-outside) without leaving a workspace tab behind. Lazy so it stays out of the shell chunk. */}
@@ -195,5 +218,6 @@ export default function Sidebar() {
       )}
     </Nav>
   )
+  if (drawer) return <>{drawerOpen && <DrawerBackdrop onClick={onDrawerClose} />}{nav}</>
   return floating ? <Rail>{nav}</Rail> : nav
 }

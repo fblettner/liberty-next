@@ -222,11 +222,23 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
   }, [selectedConnectorMeta, queryOptions])
   // What a screen can SAVE through: its queries, or — on an API connector — the endpoints marked as
   // changing data (the row's values go to the endpoint's variables by name).
+  // A screen read by a query may save through ANOTHER connector's endpoints (``save_connector``):
+  // the three save pickers then list that connector's endpoints that change data.
+  const saveConnector = typeof value.save_connector === 'string' ? value.save_connector : ''
+  const saveConnectorOptions = useMemo<SearchSelectOption[]>(
+    () => (wsConnectors ?? []).filter((c) => c.type === 'api' && c.name !== effectiveConnector && c.endpoints.some((e) => e.writable))
+      .map((c) => ({ value: c.name, label: c.name, mono: c.name })),
+    [wsConnectors, effectiveConnector],
+  )
+  const saveConnectorMeta = useMemo(
+    () => (saveConnector ? (wsConnectors ?? []).find((c) => c.name === saveConnector) : selectedConnectorMeta),
+    [wsConnectors, saveConnector, selectedConnectorMeta],
+  )
   const writeOptions = useMemo<SearchSelectOption[]>(() => {
-    if (selectedConnectorMeta?.type !== 'api') return queryOptions
-    return selectedConnectorMeta.endpoints.filter((e) => e.writable)
+    if (saveConnectorMeta?.type !== 'api') return saveConnector ? [] : queryOptions
+    return saveConnectorMeta.endpoints.filter((e) => e.writable)
       .map((e) => ({ value: e.name, label: e.description || e.label || e.name, mono: e.name }))
-  }, [selectedConnectorMeta, queryOptions])
+  }, [saveConnectorMeta, saveConnector, queryOptions])
   // CRUD tables on the effective connector — drives the "pick a table → fill all four queries"
   // shortcut so operators don't wire read / update / insert / delete one by one. Sorted by name.
   const tableOptions = useMemo<SearchSelectOption[]>(() => {
@@ -815,11 +827,16 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
           {/* Edit / Clone / Add trio — same shared component the dictionary + charts
               editors use. Clone + Add need ``existingNames`` to populate the new-name
               validator + suggest non-colliding clone defaults. */}
-          <EditQueryButton connector={effectiveConnector} queryName={queryName} />
-          <CloneQueryButton connector={effectiveConnector} queryName={queryName}
-            existingNames={queryOptions.map((o) => o.value)} />
-          <AddQueryButton connector={effectiveConnector}
-            existingNames={queryOptions.map((o) => o.value)} />
+          {/* the query buttons edit SQL: not for a save that goes through another connector's endpoints */}
+          {!(saveConnector && key !== 'read_query') && (
+            <>
+              <EditQueryButton connector={effectiveConnector} queryName={queryName} />
+              <CloneQueryButton connector={effectiveConnector} queryName={queryName}
+                existingNames={queryOptions.map((o) => o.value)} />
+              <AddQueryButton connector={effectiveConnector}
+                existingNames={queryOptions.map((o) => o.value)} />
+            </>
+          )}
         </Row>
       </Field>
     )
@@ -840,6 +857,18 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
         </Field>
       )}
       {renderQueryField('read_query', true)}
+      {(saveConnectorOptions.length > 0 || saveConnector) && (
+        <Field label={t('settings.screens.editor.queries.saveConnector')}>
+          <SearchSelect sort
+            value={saveConnector}
+            options={saveConnectorOptions}
+            // the three save names belong to the connector picked: changing it clears them
+            onChange={(v) => onChange({ ...value, save_connector: v || undefined, update_query: undefined, insert_query: undefined, delete_query: undefined })}
+            anyLabel={t('settings.screens.editor.queries.saveConnectorOwn')}
+          />
+          <Sub>{t('settings.screens.editor.queries.saveConnectorHint')}</Sub>
+        </Field>
+      )}
       {renderQueryField('update_query', false)}
       {renderQueryField('insert_query', false)}
       {renderQueryField('delete_query', false)}

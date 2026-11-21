@@ -18,7 +18,7 @@ const PAGE_ICONS: Record<string, typeof TableIcon> = {
   '/explorer': Compass,
   '/developer': Code2,
 }
-import { colors, fontSize, fonts, radius } from '../theme'
+import { colors, fontSize, fonts, radius, media } from '../theme'
 import { useTabs, tabPath, type Tab } from '../tabs/TabsContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
 import { useBranding } from '../branding/BrandingContext'
@@ -37,6 +37,8 @@ const Bar = styled.div`
      --utilbar-width). +28px = its 16px right offset + a 12px gap, so the right arrow / close-all and
      the last tab never slide under it. Falls back to a sane reserve before the first measure. */
   padding-right: calc(var(--utilbar-width, 320px) + 28px);
+  /* Phone-width window: the pill is in the row above, the strip has the whole width. */
+  ${media.tablet} { padding: 4px 8px 0; min-height: 46px; }
 `
 // The tabs scroll inside here (the arrows + close-all stay pinned outside). overflow-x matches the
 // old single-element bar so the active tab's seamless-bottom trick is unchanged.
@@ -65,6 +67,8 @@ const EdgeBtn = styled.button`
     color: ${colors.text.primary};
   }
   &:disabled { opacity: 0.35; cursor: default; }
+  /* a finger scrolls the strip itself: the arrows give their room to the tabs */
+  ${media.tablet} { display: none; }
 `
 const TitleBlock = styled.div`
   /* Centre the title vertically in the now-taller (50px) bar instead of stretching + sitting high.
@@ -73,6 +77,7 @@ const TitleBlock = styled.div`
   display: flex; align-items: baseline; gap: 10px; padding: 0 6px;
   & .name { font-size: ${fontSize['2xl']}; font-weight: 700; letter-spacing: -0.3px; line-height: 1; color: ${colors.blue.main}; }
   & .sub { font-size: ${fontSize.base}; color: ${colors.text.muted}; }
+  ${media.tablet} { & .sub { display: none; } }
 `
 const TabBtn = styled.button<{ $active?: boolean }>`
   /* Two-line layout: app name on top (small/muted), screen label below.

@@ -386,7 +386,9 @@ def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
                     ("delete_query", "screen_delete_query"),
                 ):
                     v = getattr(screen, attr, None)
-                    if v == query and screen_conn == connector:
+                    # the saves may live on another connector than the read (save_connector)
+                    on = screen_conn if attr == "read_query" else (getattr(screen, "save_connector", None) or screen_conn)
+                    if v == query and on == connector:
                         out.append(Usage(
                             type=kind,
                             label=f"{app}.{sid} · {attr}",
@@ -551,6 +553,12 @@ def _find_connector_usages(state: Any, name: str) -> list[Usage]:
                     out.append(Usage(
                         type="screen_connector",
                         label=f"{app}.{sid}",
+                        deep_link=_screen_deep_link(app, sid),
+                    ))
+                if getattr(screen, "save_connector", None) == name:
+                    out.append(Usage(
+                        type="screen_connector",
+                        label=f"{app}.{sid} · save_connector",
                         deep_link=_screen_deep_link(app, sid),
                     ))
                 dialog = getattr(screen, "dialog", None)

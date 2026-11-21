@@ -17,11 +17,11 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Copy, Lock as LockIcon, Maximize2, Minimize2, Save, Trash2, X, Zap } from 'lucide-react'
 import { ApiError } from '../../api/client'
-import { Banner, Button, ConfirmModal, ErrorDetails, Modal, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SpinnerRing } from '../../common'
+import { Banner, Button, ConfirmModal, ErrorDetails, Modal, ModalBody, ModalFooter, ModalHeader, NestedOverlay, NestedScreenDialogModal, Overlay, Row as FlexRow, ScreenDialogModal, SpinnerRing, useViewport } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import type { Column } from '../../types/connectors'
 import type { Action, ColumnGroup, FormTab, ScreenDetail, ScreenField, ScreenTab } from '../../types/screens'
-import { colors, fontSize, fonts } from '../../theme'
+import { colors, fontSize, fonts, media } from '../../theme'
 import { entityKeyOf, evalConditions, matchedDefaultWhen, type Row } from './dialogHelpers'
 import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
 import { CellWrap, FieldRow, isPassword } from './FieldRow'
@@ -62,6 +62,12 @@ export const NestedSaversContext = createContext<NestedSaversCtx | null>(null)
 
 const TabStrip = styled.div`
   display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid ${colors.border};
+  /* Phone-width window: the tabs scroll sideways in their bar (overflow-y pinned: with only
+     overflow-x set the browser adds a vertical scroll too). */
+  ${media.tablet} {
+    flex-shrink: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+    & > button { flex-shrink: 0; white-space: nowrap; }
+  }
 `
 const TabBtn = styled.button<{ $active?: boolean }>`
   height: 32px; padding: 0 14px; border: none; border-bottom: 2px solid transparent; background: transparent;
@@ -73,6 +79,8 @@ const TabBtn = styled.button<{ $active?: boolean }>`
 `
 const FieldGrid = styled.div<{ $cols: number }>`
   display: grid; grid-template-columns: repeat(${({ $cols }) => $cols}, 1fr); gap: 12px;
+  /* Phone-width window: one field per line (a field's own span folds too: FieldRow's CellWrap). */
+  ${media.tablet} { grid-template-columns: minmax(0, 1fr); }
 `
 
 export function ScreenDialog({
@@ -157,6 +165,8 @@ export function ScreenDialog({
   // 100vw / 100vh. Doesn't apply when ``nested`` (those are intentionally smaller so the parent
   // remains visible behind). Resets to windowed on each open.
   const [fullscreen, setFullscreen] = useState(false)
+  // Phone-width window: the form already takes the whole screen (Modal's media rule).
+  const { compact } = useViewport()
   useEffect(() => { if (!open) setFullscreen(false) }, [open])
 
   // Duplicate: in EDIT mode, "Duplicate" turns the current record into a NEW one — the form keeps
@@ -564,7 +574,7 @@ export function ScreenDialog({
       // with another deleter can also produce it. We surface as a hard error here (rather than the
       // chain's soft warning) because the operator's intent on Delete is unambiguous.
       const resp = await deleteScreenRow({
-        connector: targetConn, row: savedRow,
+        connector: targetConn, saveConnector: screen.save_connector, screenRef: { app: screen.app, id: screen.id }, row: savedRow,
         columnGroups: (screen.column_groups ?? []) as ColumnGroup[],
         mainDeleteQuery: screen.delete_query,
         context: saveContext,
@@ -667,6 +677,8 @@ export function ScreenDialog({
       // assigned SEQUENCE PK on add.
       const { rowcount: mainRowcount, resolvedBinds } = await saveScreenRow({
         connector,
+        saveConnector: screen.save_connector,
+        screenRef: { app: screen.app, id: screen.id },
         mode: effMode,
         sent,
         savedRow,
@@ -820,7 +832,7 @@ export function ScreenDialog({
                 deliberately smaller so the parent's frame stays visible). Same affordance the
                 Screen Designer modal uses; ``aria-pressed`` exposes the on/off state without
                 two icons in the DOM. */}
-            {!nested && (
+            {!nested && !compact && (
               <Button
                 $variant="ghost"
                 $size="sm"

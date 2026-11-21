@@ -19,7 +19,7 @@
 // semantically (Connection / Authentication / Endpoints) so the operator sees only what's
 // useful. The Test tab here mirrors nomaubl's — pick the endpoint, parameters appear
 // automatically with each declared name/label/default, click Run.
-import { useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import {
@@ -46,6 +46,7 @@ type Endpoint = {
   name: string
   label?: string | null
   description?: string | null
+  group?: string | null
   method?: string
   path?: string
   headers?: Record<string, string>
@@ -156,6 +157,12 @@ const ParamHelpRow = styled.div`
 `
 const ParamHelp = styled.div`
   grid-column: 1 / -1; color: ${colors.text.muted}; font-size: ${fontSize.micro}; padding: 0 2px 6px; white-space: pre-wrap; word-break: break-word;
+`
+const GroupHead = styled.button`
+  display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 6px; padding: 4px 2px;
+  background: none; border: none; border-bottom: 1px solid ${colors.border}; cursor: pointer; text-align: left;
+  font-family: ${fonts.sans}; font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.secondary};
+  & .count { font-weight: 400; color: ${colors.text.muted}; }
 `
 const WritesTag = styled.span`
   font-family: ${fonts.sans}; font-size: ${fontSize.micro}; color: ${colors.orange.main};
@@ -538,16 +545,28 @@ function EndpointsTab({
   const [openIdx, setOpenIdx] = useState<number | null>(null)
   const openRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => { openRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, [openIdx])
-  // Shown in alphabetical order, narrowed by the search box; each row keeps its place in the saved
-  // list (`i`), which is what the edits address.
+  // Shown under their group's heading (the ungrouped ones first), in alphabetical order, narrowed by
+  // the search box; each row keeps its place in the saved list (`i`), which is what the edits address.
   const [search, setSearch] = useState('')
+  const [folded, setFolded] = useState<Set<string>>(new Set())
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase()
+    const by = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
     return endpoints
-      .map((ep, i) => ({ ep, i }))
-      .filter(({ ep }) => !q || [ep.name, ep.label, ep.path, ep.method, ep.description].some((x) => (x ?? '').toLowerCase().includes(q)))
-      .sort((a, b) => a.ep.name.localeCompare(b.ep.name, undefined, { numeric: true, sensitivity: 'base' }))
+      .map((ep, i) => ({ ep, i, group: (ep.group ?? '').trim() }))
+      .filter(({ ep }) => !q || [ep.name, ep.label, ep.path, ep.method, ep.description, ep.group].some((x) => (x ?? '').toLowerCase().includes(q)))
+      .sort((a, b) => by(a.group, b.group) || by(a.ep.name, b.ep.name))
   }, [endpoints, search])
+  const groupSizes = useMemo(() => {
+    const sizes = new Map<string, number>()
+    for (const s of shown) sizes.set(s.group, (sizes.get(s.group) ?? 0) + 1)
+    return sizes
+  }, [shown])
+  const toggleGroup = (group: string) => setFolded((was) => {
+    const next = new Set(was)
+    if (next.has(group)) next.delete(group); else next.add(group)
+    return next
+  })
 
   const addEndpoint = async () => {
     const name = (await modals.prompt({
@@ -586,13 +605,15 @@ function EndpointsTab({
   const generators = value.generators ?? []
   const [generating, setGenerating] = useState(false)
   const [showGenerators, setShowGenerators] = useState(false)
-  const addGenerated = (raws: Record<string, unknown>[], saved: boolean) => {
+  const addGenerated = (raws: Record<string, unknown>[], saved: boolean, replaced = false) => {
     const next = [...endpoints]
     for (const raw of raws) {
       const ep = raw as unknown as Endpoint
       let name = ep.name || 'endpoint'
-      // a screen's endpoints were saved with it under their own names: one the list already shows is that one
-      if (saved && next.some((e) => e.name === name)) continue
+      // a screen's endpoints were saved with it under their own names: one the list already shows is
+      // that one — kept as it was, or written again when the operator chose to replace it
+      const at = saved ? next.findIndex((e) => e.name === name) : -1
+      if (at >= 0) { if (replaced) next[at] = ep; continue }
       for (let n = 2; next.some((e) => e.name === name); n++) name = `${ep.name}_${n}`
       next.push({ ...ep, name })
     }
@@ -710,10 +731,22 @@ function EndpointsTab({
         <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t('table.search')} />
       )}
       {endpoints.length > 0 && shown.length === 0 && <Hint>{t('settings.api.endpoint.noMatch')}</Hint>}
-      {shown.map(({ ep, i }) => {
+      {shown.map(({ ep, i, group }, at) => {
         const open = openIdx === i
+        // a heading before the first endpoint of each group; a search opens every group
+        const heading = group && (at === 0 || shown[at - 1].group !== group)
+        const hidden = group !== '' && folded.has(group) && !search.trim() && !open
         return (
-          <EndpointCard key={`${ep.name}-${i}`} ref={open ? openRef : undefined}>
+          <Fragment key={`${ep.name}-${i}`}>
+          {heading && (
+            <GroupHead type="button" onClick={() => toggleGroup(group)}>
+              {folded.has(group) && !search.trim() ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+              <span>{group}</span>
+              <span className="count">{groupSizes.get(group)}</span>
+            </GroupHead>
+          )}
+          {!hidden && (
+          <EndpointCard ref={open ? openRef : undefined}>
             <EndpointHead $open={open} onClick={() => setOpenIdx(open ? null : i)} type="button">
               {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
               {/* served by a plugin function: no HTTP method */}
@@ -735,10 +768,12 @@ function EndpointsTab({
               </EndpointBody>
             )}
           </EndpointCard>
+          )}
+          </Fragment>
         )
       })}
       {generating && (
-        <EndpointGeneratorModal connector={connectorName} generators={generators} onCreate={addGenerated} onClose={() => setGenerating(false)} />
+        <EndpointGeneratorModal connector={connectorName} generators={generators} existingNames={endpoints.map((e) => e.name)} onCreate={addGenerated} onClose={() => setGenerating(false)} />
       )}
     </Stack>
   )
@@ -1031,6 +1066,15 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
           value={value.description ?? ''}
           onChange={(e) => set({ description: e.target.value || undefined })}
           placeholder={t('settings.api.endpoint.descriptionPlaceholder')}
+        />
+      </FieldRow>
+      <FieldRow>
+        <label title={t('settings.api.endpoint.groupHint')}>{t('settings.api.endpoint.group')}</label>
+        <Input
+          value={value.group ?? ''}
+          onChange={(e) => set({ group: e.target.value || undefined })}
+          placeholder={t('settings.api.endpoint.groupPlaceholder')}
+          title={t('settings.api.endpoint.groupHint')}
         />
       </FieldRow>
 

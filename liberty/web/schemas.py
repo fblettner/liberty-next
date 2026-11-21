@@ -195,6 +195,7 @@ class _ScreenSummaryFields(BaseModel):
     update_query: str | None = None
     insert_query: str | None = None
     delete_query: str | None = None
+    save_connector: str | None = None      # where the three saves live, when it is not the screen's connector
     auto_load: bool
     audit: bool
     audit_table: str | None = None

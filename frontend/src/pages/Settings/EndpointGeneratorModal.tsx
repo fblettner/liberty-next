@@ -58,12 +58,15 @@ const Item = styled.button<{ $on: boolean }>`
   & .desc { color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 `
 
-export function EndpointGeneratorModal({ connector, generators, onCreate, onClose }: {
+export function EndpointGeneratorModal({ connector, generators, existingNames = [], onCreate, onClose }: {
   connector: string
   generators: EndpointGeneratorDef[]
+  /** The names of the connector's endpoints: a screen's endpoint that already exists is kept or replaced. */
+  existingNames?: string[]
   /** The endpoint(s) the generator built — the editor adds them: unsaved for a single endpoint,
-   *  already *saved* for a screen's endpoints (created with it). */
-  onCreate: (endpoints: Record<string, unknown>[], saved: boolean) => void
+   *  already *saved* for a screen's endpoints (created with it; *replaced* = the ones that existed
+   *  were written again). */
+  onCreate: (endpoints: Record<string, unknown>[], saved: boolean, replaced?: boolean) => void
   onClose: () => void
 }) {
   const { t } = useTranslation()
@@ -77,6 +80,7 @@ export function EndpointGeneratorModal({ connector, generators, onCreate, onClos
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [replace, setReplace] = useState(false)
   const generator = generators.find((g) => g.id === genId)
   // a generator that built a whole screen: what it built, and where the operator puts it
   const [bundle, setBundle] = useState<{ endpoints: Record<string, unknown>[]; screen: Record<string, unknown>; note?: string | null } | null>(null)
@@ -120,7 +124,8 @@ export function EndpointGeneratorModal({ connector, generators, onCreate, onClos
       const known = (apps ?? []).map((a) => a.name)
       const home = [r.app, currentApp, lastApp].find((a) => a && known.includes(a)) ?? known[0] ?? connector
       setTarget({ app: home, id: String(r.screen.id ?? ''), label: String(r.screen.label ?? ''), menu: true })
-    } else if (r?.endpoint) onCreate([r.endpoint], false)
+    } else if (r?.endpoints?.length) onCreate(r.endpoints, false)      // several endpoints, no screen: added to the list, unsaved
+    else if (r?.endpoint) onCreate([r.endpoint], false)
   }
   const createScreen = async () => {
     if (!bundle) return
@@ -129,6 +134,8 @@ export function EndpointGeneratorModal({ connector, generators, onCreate, onClos
     try {
       await api.post('/admin/assistant/scaffold', {
         connector, app, endpoints: bundle.endpoints, screen: { ...bundle.screen, id, label },
+        // one of them is already on the connector: kept as it is (the screen uses it), or written again
+        existing_endpoints: replace ? 'replace' : 'keep',
         menu: target.menu ? { app, id, label, target: id, connector } : null,
       })
       setDone(`${app} / ${id}`)
@@ -138,7 +145,8 @@ export function EndpointGeneratorModal({ connector, generators, onCreate, onClos
       setBusy(false)
     }
   }
-  const finish = () => { if (bundle && done) onCreate(bundle.endpoints, true); else onClose() }
+  const finish = () => { if (bundle && done) onCreate(bundle.endpoints, true, replace); else onClose() }
+  const clashing = bundle ? bundle.endpoints.filter((e) => existingNames.includes(String(e.name))).length : 0
 
   // Portalled to document.body, as the shared confirm is: rendered inside the builder it sits in a
   // stacking context of its own (the panel's backdrop-filter) and a fixed overlay does not show.
@@ -154,10 +162,20 @@ export function EndpointGeneratorModal({ connector, generators, onCreate, onClos
               {bundle.endpoints.map((e) => (
                 <Item key={String(e.name)} type="button" $on={false} disabled>
                   <span className="code">{String(e.name)}</span>
-                  <span className="desc">{String(e.description ?? e.label ?? '')}</span>
+                  <span className="desc">
+                    {existingNames.includes(String(e.name)) ? `${t(replace ? 'settings.api.generate.screenReplaced' : 'settings.api.generate.screenKept')} · ` : ''}
+                    {String(e.description ?? e.label ?? '')}
+                  </span>
                 </Item>
               ))}
             </List>
+            {clashing > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <Checkbox checked={replace} disabled={!!done} onChange={(v: boolean) => setReplace(v)}
+                  label={t('settings.api.generate.screenReplace', { n: clashing })} />
+                <Help>{t('settings.api.generate.screenReplaceHint')}</Help>
+              </div>
+            )}
             <Label>{t('settings.api.generate.screenApp')}</Label>
             <SearchSelect
               value={target.app}

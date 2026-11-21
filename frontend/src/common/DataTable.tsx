@@ -46,7 +46,7 @@ import {
   Table as TableIcon, ChevronDown, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Check,
   LayoutGrid, Trash2, MoreHorizontal, CornerDownRight,
 } from 'lucide-react'
-import { colors, radius, fontSize, fonts, shadow } from '../theme'
+import { colors, radius, fontSize, fonts, shadow, media } from '../theme'
 import { ColumnFilterControl, type FilterMeta } from './DataTableFilter'
 import { SearchSelect } from './SearchSelect'
 import {
@@ -57,6 +57,7 @@ import {
 import { Overlay, Modal, ModalHeader, ModalBody, ModalFooter } from './Modal'
 import { Button } from './Button'
 import { Input } from './Input'
+import { useViewport } from './useViewport'
 
 // "All" (Number.MAX_SAFE_INTEGER) renders every loaded row in one virtualised page — the
 // pagination chrome collapses into a single page. Useful for screens with high ``max_rows``
@@ -143,7 +144,10 @@ function dropLegacyGrid(id: string): void {
 const Wrap = styled.div`display: flex; flex-direction: column; min-height: 0; flex: 1;`
 const ToolbarRow = styled.div`display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;`
 const Spacer = styled.div`flex: 1; min-width: 4px;`
-const ActionGroup = styled.div`display: flex; gap: 4px; align-items: center; flex-shrink: 0;`
+const ActionGroup = styled.div`
+  display: flex; gap: 4px; align-items: center; flex-shrink: 0;
+  ${media.tablet} { flex-shrink: 1; flex-wrap: wrap; }
+`
 const SearchBox = styled.div`
   display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px;
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
@@ -154,6 +158,8 @@ const SearchBox = styled.div`
     &::placeholder { color: ${colors.text.muted}; }
   }
   &:focus-within { border-color: ${colors.blue.border}; }
+  /* Phone-width window: the search takes what the row leaves, down to a few characters. */
+  ${media.tablet} { min-width: 0; max-width: none; flex: 1 1 140px; }
 `
 const CtrlBtn = styled.button<{ $active?: boolean }>`
   display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px;
@@ -290,15 +296,59 @@ const MiniLink = styled.button`
 // own scrollbar so the filter panel, search row, etc. above the table stay fixed regardless
 // of how many rows-per-page the user picks. `<thead>` rows are `position: sticky; top: 0`
 // inside this box, so the column headers stay visible while the body scrolls.
-const TableScroll = styled.div`
+const TableScroll = styled.div<{ $keepRoom?: boolean }>`
   flex: 1; min-height: 0; overflow: auto;
   border: 1px solid ${colors.border}; border-radius: ${radius.lg}; scrollbar-width: thin;
+  /* Phone-width window: the filters, the toolbar and the pager above and below can take most of a
+     short screen — the list keeps a few cards' height and the page scrolls instead. */
+  ${({ $keepRoom }) => ($keepRoom ? `${media.tablet} { min-height: 260px; }` : '')}
 `
 // `table-layout: auto` (the default): the browser sizes columns to their content — the best fit in
 // practice. (Column *resizing* was tried with `table-layout: fixed`, but that forced widths the
 // content didn't suit and interfered with header drag-reorder, so it was dropped — columns aren't
 // user-resizable; hide the column or let the content breathe.)
-const Table = styled.table`border-collapse: collapse; width: 100%; font-size: ${fontSize.sm}; font-family: ${fonts.mono};`
+const Table = styled.table`
+  border-collapse: collapse; width: 100%; font-size: ${fontSize.sm}; font-family: ${fonts.mono};
+  /* Phone-width window: each row becomes a card, one "label  value" line per visible column (the
+     label is the column's header, from data-label; an empty value gives no line). The header row is
+     not shown: sorting and the header filters are wide-window gestures — search, views, grouping
+     and columns stay in the toolbar. !important where an inline style sizes the table or a cell. */
+  ${media.tablet} {
+    display: block; width: 100% !important; min-width: 0 !important;
+    & thead { display: none; }
+    & tbody { display: block; }
+    & tbody tr { display: block; padding: 8px 12px; }
+    & tbody tr:not(:last-child) { border-bottom: 1px solid ${colors.border}; }
+    /* the virtualizer's spacer rows keep the exact height it gives them */
+    & tbody tr[aria-hidden='true'] { padding: 0; border: none; }
+    & tbody td {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+      width: auto !important; min-width: 0 !important; max-width: none !important;
+      padding: 3px 0 !important; border-bottom: none !important;
+      text-align: right !important; white-space: normal; overflow: visible; overflow-wrap: anywhere;
+    }
+    & tbody td[data-label]::before {
+      content: attr(data-label); flex: 0 0 38%; text-align: left;
+      font-family: ${fonts.sans}; font-size: ${fontSize.micro}; font-weight: 700;
+      letter-spacing: 0.06em; text-transform: uppercase; color: ${colors.text.muted};
+    }
+    /* the value — or, in edit mode, its input — takes the rest of the line */
+    & tbody td[data-label] > * { min-width: 0; }
+    & tbody td[data-label] > input { flex: 1 1 0; text-align: start; }
+    /* no label: a group's heading, the selection box, the row's menu */
+    & tbody td:not([data-label]) { justify-content: flex-start; text-align: left !important; }
+    /* a cell spanning the table (no result, a row's detail panel) is a plain block */
+    & tbody td[colspan] { display: block; }
+    & tbody td:empty { display: none; }
+    /* a value-less line: the grid's cells wrap their text in a span, empty for a null or a blank */
+    & tbody td[data-label]:has(> span:only-child:empty) { display: none; }
+  }
+`
+// The height the virtualizer assumes for a row before measuring it: a table line, or — as a card
+// on a phone-width window — a line per visible column plus the card's padding and border.
+const ROW_H = 26
+const CARD_LINE_H = 26
+const CARD_PAD_H = 17
 // ``STICKY_BG`` composites the (light-theme-translucent) dropdown tint over the opaque base, so a
 // sticky header / filter cell is FULLY opaque — a translucent sticky cell lets the scrolling data
 // rows bleed through (most visible in light mode, where ``--bg-dropdown`` is only 95% opaque).
@@ -331,8 +381,19 @@ const Tr = styled.tr`
   &.dt-row-new td { background: ${colors.green.bg}; box-shadow: inset 3px 0 0 ${colors.green.main}; }
   &.dt-row-dirty td { background: ${colors.orange.bg}; box-shadow: inset 3px 0 0 ${colors.orange.main}; }
   &.dt-row-deleted td { background: ${colors.red.bg}; box-shadow: inset 3px 0 0 ${colors.red.main}; text-decoration: line-through; }
+  /* As a card (see Table): the hover and the edit-state tint are the card's, not each line's. */
+  ${media.tablet} {
+    &:hover { background: var(--hover-subtle); }
+    &:hover td, &.dt-row-new td, &.dt-row-dirty td, &.dt-row-deleted td { background: none; box-shadow: none; }
+    &.dt-row-new { background: ${colors.green.bg}; box-shadow: inset 3px 0 0 ${colors.green.main}; }
+    &.dt-row-dirty { background: ${colors.orange.bg}; box-shadow: inset 3px 0 0 ${colors.orange.main}; }
+    &.dt-row-deleted { background: ${colors.red.bg}; box-shadow: inset 3px 0 0 ${colors.red.main}; }
+  }
 `
-const GroupTr = styled.tr` td { background: ${colors.bg.card}; font-family: ${fonts.sans}; }`
+const GroupTr = styled.tr`
+  td { background: ${colors.bg.card}; font-family: ${fonts.sans}; }
+  ${media.tablet} { background: ${colors.bg.card}; }
+`
 const Td = styled.td<{ $wrap?: boolean }>`
   padding: 5px 12px; color: ${colors.text.secondary}; overflow: hidden;
   ${({ $wrap }) => ($wrap ? 'white-space: pre-wrap; overflow-wrap: anywhere;' : 'white-space: nowrap; text-overflow: ellipsis;')}
@@ -361,11 +422,16 @@ const RowMenuBtn = styled.button`
   border: 1px solid ${colors.border}; border-radius: ${radius.sm}; background: ${colors.bg.input}; cursor: pointer; color: ${colors.text.secondary};
   tr:hover & { color: ${colors.text.primary}; border-color: ${colors.blue.border}; }
   &:hover { background: ${colors.blue.bg}; color: ${colors.blue.main}; }
+  /* a finger's target */
+  ${media.tablet} { width: 30px; height: 30px; }
 `
 const GroupCount = styled.span`color: ${colors.text.muted}; font-weight: 400;`
 const Empty = styled.div`padding: 36px; text-align: center; color: ${colors.text.muted}; font-size: ${fontSize.base}; font-family: ${fonts.sans};`
 const PaginationRow = styled.div`display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px 0; flex-wrap: wrap;`
-const PagLeft = styled.div`display: flex; align-items: center; gap: 10px; color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};`
+const PagLeft = styled.div`
+  display: flex; align-items: center; gap: 10px; color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: ${fonts.sans};
+  ${media.tablet} { flex-wrap: wrap; }
+`
 const PageSizeBox = styled.div`display: flex; width: 104px;`
 const PagRight = styled.div`display: flex; align-items: center; gap: 3px;`
 const PagBtn = styled.button<{ $active?: boolean }>`
@@ -397,6 +463,9 @@ export function DataTable<T extends object>({
   columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize: initialPageSizeProp, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, rowMenuButton, onPasteRows, renderDetail, chromeless, getSubRows, onRowExpand, subRowCount,
 }: DataTableProps<T>) {
   const { t } = useTranslation()
+  // Phone-width window: the rows read as cards (the Table's media rule); what follows it here is the
+  // virtualizer's row height and a toolbar that keeps to its icons.
+  const { compact } = useViewport()
 
   // Start from the column hints' hidden flags. A saved view (shared or user) is layered on top by
   // the load effect below; this is just the base the grid shows before any view applies.
@@ -788,12 +857,17 @@ export function DataTable<T extends object>({
   // 11px monospace line-height + small fudge). Each row gets a `data-index` and uses
   // `measureElement` so group rows / edit-mode rows / dialog-changed rows that grow a few
   // pixels taller get measured for real — no need to hardcode multiple sizes per kind.
+  //
+  // As cards (phone-width window) a row is one line per visible column: the estimate follows, so the
+  // scroll extent is about right before the rows are measured (empty values give no line — the
+  // measure corrects it).
   const tableScrollRef = useRef<HTMLDivElement | null>(null)
   const visibleRows = table.getRowModel().rows
+  const cardHeight = CARD_PAD_H + CARD_LINE_H * Math.max(1, table.getVisibleLeafColumns().length + (rowMenuButton != null ? 1 : 0))
   const rowVirtualizer = useVirtualizer({
     count: visibleRows.length,
     getScrollElement: () => tableScrollRef.current,
-    estimateSize: () => 26,
+    estimateSize: () => (compact ? cardHeight : ROW_H),
     overscan: 10,
     // Track measurements by the stable row id (not the index) so a prepend/remove shifts the cache
     // WITH the rows — fixes the "added top row renders stale until you scroll" glitch.
@@ -803,6 +877,13 @@ export function DataTable<T extends object>({
     // (below) so a group row, edit-mode row, or wrapped cell that's taller than the estimate
     // gets re-measured automatically — no need to override the function here.
   })
+  // Table ⇄ cards: the heights measured in the other shape no longer hold — measure again.
+  const measuredCompact = useRef(compact)
+  useEffect(() => {
+    if (measuredCompact.current === compact) return
+    measuredCompact.current = compact
+    rowVirtualizer.measure()
+  }, [compact, rowVirtualizer])
   const virtualItems = rowVirtualizer.getVirtualItems()
   // Spacer math: top spacer pushes content down to the first visible row's `start`; bottom
   // spacer fills the gap between the last visible row's `end` and the total height. Both
@@ -900,6 +981,9 @@ export function DataTable<T extends object>({
           <Td
             key={cell.id}
             $wrap={!cell.getIsGrouped() && colWrap(cell.column)}
+            // the line's label when the row reads as a card (phone-width window): a data column's
+            // header — not on the selection / status columns, nor on a group's heading
+            data-label={isInternal(cell.column) || cell.getIsGrouped() ? undefined : colHeaderText(cell.column)}
             style={{
               ...(cell.column.columnDef.size != null ? { width: cell.column.getSize(), minWidth: cell.column.columnDef.minSize }
                 : !cell.getIsGrouped() && colWrap(cell.column) ? { maxWidth: WRAP_MAX_W } : null),
@@ -961,7 +1045,7 @@ export function DataTable<T extends object>({
           {(tableId || sharedList.length > 0) && (
             <MenuWrap ref={viewRef}>
               <CtrlBtn $active={!!activeView} onClick={() => setViewOpen((v) => !v)} title={t('table.views')}>
-                <LayoutGrid size={13} /> {activeView ? activeView.name : t('table.views')}
+                <LayoutGrid size={13} /> {compact ? null : activeView ? activeView.name : t('table.views')}
               </CtrlBtn>
               <MenuPortal open={viewOpen} anchorRef={viewRef} onClose={() => setViewOpen(false)} minWidth={240}>
                 <MenuHead>
@@ -1019,18 +1103,22 @@ export function DataTable<T extends object>({
               </MenuPortal>
             </MenuWrap>
           )}
-          <CtrlBtn $active={showFilters} onClick={() => setShowFilters((v) => !v)} title={t('table.filters')}>
-            <Filter size={13} /> {t('table.filters')}
-          </CtrlBtn>
+          {/* the filter row lives in the header, which the card list does not show; filters set
+              on a wide window still apply and can still be cleared */}
+          {!compact && (
+            <CtrlBtn $active={showFilters} onClick={() => setShowFilters((v) => !v)} title={t('table.filters')}>
+              <Filter size={13} /> {t('table.filters')}
+            </CtrlBtn>
+          )}
           {columnFilters.length > 0 && (
             <CtrlBtn onClick={() => setColumnFilters([])} title={t('table.clearFilters')}>
-              <FilterX size={13} /> {t('table.clearFilters')}
+              <FilterX size={13} /> {!compact && t('table.clearFilters')}
             </CtrlBtn>
           )}
           {groupableCols.length > 0 && (
             <MenuWrap ref={groupRef}>
               <CtrlBtn $active={grouping.length > 0} onClick={() => setGroupOpen((v) => !v)} title={t('table.group')}>
-                <Group size={13} /> {t('table.group')}{grouping.length ? ` (${grouping.length})` : ''}
+                <Group size={13} /> {!compact && t('table.group')}{grouping.length ? ` (${grouping.length})` : ''}
               </CtrlBtn>
               <MenuPortal open={groupOpen} anchorRef={groupRef} onClose={() => setGroupOpen(false)} minWidth={230}>
                   <MenuTitle>{t('table.groupBy')}</MenuTitle>
@@ -1059,7 +1147,7 @@ export function DataTable<T extends object>({
           )}
           <MenuWrap ref={colRef}>
             <CtrlBtn onClick={() => setColOpen((v) => !v)} title={t('table.columns')}>
-              <Columns3 size={13} /> {t('table.columns')}
+              <Columns3 size={13} /> {!compact && t('table.columns')}
             </CtrlBtn>
             <MenuPortal open={colOpen} anchorRef={colRef} onClose={() => setColOpen(false)} minWidth={230}>
                 <MenuHead>
@@ -1092,7 +1180,7 @@ export function DataTable<T extends object>({
           </MenuWrap>
           <MenuWrap ref={exportRef}>
             <CtrlBtn onClick={() => setExportOpen((v) => !v)} title={t('table.export')}>
-              <Download size={13} /> {t('table.export')} <ChevronDown size={11} />
+              <Download size={13} /> {!compact && t('table.export')} <ChevronDown size={11} />
             </CtrlBtn>
             <MenuPortal open={exportOpen} anchorRef={exportRef} onClose={() => setExportOpen(false)} minWidth={150}>
                 <DropdownItem onClick={(e) => { e.stopPropagation(); setExportAll((v) => !v) }}>
@@ -1106,7 +1194,7 @@ export function DataTable<T extends object>({
       </ToolbarRow>
       )}
 
-      <TableScroll ref={tableScrollRef}>
+      <TableScroll ref={tableScrollRef} $keepRoom={!chromeless}>
         {/* Stretch-when-narrow, scroll-when-wide. ``minWidth`` = sum of natural column widths
             keeps each column at least content-fit, but the styled ``width: 100%`` lets the
             table fill the scroll container when the total is *less* than the viewport — no

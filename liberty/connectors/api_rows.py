@@ -93,15 +93,67 @@ def endpoint_params(endpoint: EndpointDef, params: dict[str, Any] | None) -> dic
     return out
 
 
-def write_params(endpoint: EndpointDef, params: dict[str, Any] | None) -> dict[str, Any]:
+def columns_for(endpoint: EndpointDef, hints: list[ColumnHint] | None, prefix: int = 0,
+                row: dict[str, Any] | None = None) -> dict[str, str]:
+    """Which column of a screen feeds each variable of the endpoint that saves it, when the screen
+    is not read from that endpoint (``Screen.save_connector``: a query's columns, a form's
+    variables): the column carrying the variable's dictionary item — its hint's ``dd``, or, on a
+    ``dd_prefix`` connector, its name minus the prefix (``ABALPH`` → ``ALPH``; from the hints, else
+    from the names the *row* was sent with). ``{variable: column}``, both lower-cased; a variable
+    that has a column of its own name is not listed — that column is it."""
+    wanted = {p.name.lower() for p in endpoint.params}
+    own = {h.name.lower() for h in hints or []} | {str(k).lower() for k in row or {}}
+    out: dict[str, str] = {}
+    names = [(h.name, h.dd) for h in hints or []] + [(str(k), None) for k in row or {} if not str(k).upper().endswith("_ORIGINAL")]
+    for name, dd in names:
+        low = name.lower()
+        for item in ((dd or "").lower(), low[prefix:] if prefix and len(low) > prefix else ""):
+            if item and item in wanted and item not in own:
+                out.setdefault(item, low)
+    return out
+
+
+def write_params(endpoint: EndpointDef, params: dict[str, Any] | None, columns: dict[str, str] | None = None, *,
+                 changed_only: bool = False) -> dict[str, Any]:
     """A saved row's values for the endpoint that saves it. A screen sends the row by column name,
-    upper-cased, with what the row held when it was loaded under ``<COL>_ORIGINAL``: a parameter
-    takes the value of its own name (so a parameter ``AN8_ORIGINAL`` gets the loaded key), without
-    regard to case. A parameter the row does not carry keeps its default."""
-    return endpoint_params(endpoint, params)
+    upper-cased, with what the row held when it was loaded under ``<COL>_ORIGINAL``: a variable
+    takes the value of its own name (so a variable ``AN8_ORIGINAL`` gets the loaded key), without
+    regard to case — or of the column *columns* gives it (:func:`columns_for`).
+
+    A variable the row does NOT carry is left out — it keeps its default, and a function that
+    serves the endpoint is told it was not given (a field nobody sent is not typed blank in the
+    form). One the row carries BLANK is given blank: the user cleared it — unless it has a
+    default, which then applies as it always did.
+
+    *changed_only* (an UPDATE through an endpoint served by a function): a variable whose column
+    still holds what the row was loaded with (``<COL>_ORIGINAL``) is left out too — the function
+    types only what the user changed, as the user would (a form re-checks a field typed again:
+    JDE warned of a duplicate name on every save). A required variable — the key — is always given."""
+    given = {str(k).lower(): v for k, v in (params or {}).items()}
+
+    def clean(value: Any) -> Any:
+        return value.strip() if isinstance(value, str) else value     # a code read from a database that pads it (JD Edwards)
+
+    out: dict[str, Any] = {}
+    for p in endpoint.params:
+        low = p.name.lower()
+        key = low if low in given else (columns or {}).get(low)
+        if key is None or key not in given:
+            continue
+        value = clean(given[key])
+        was = f"{key}_original"
+        if changed_only and not p.required and was in given and str(clean(given[was]) if given[was] is not None else "") == str(value if value is not None else ""):
+            continue
+        if value in (None, ""):
+            if p.default is None:
+                out[p.name] = ""
+            continue
+        out[p.name] = value
+    return out
 
 
-async def api_write(conn: APIConnector, endpoint_name: str, params: dict[str, Any] | None, *, statement_type: str = "CALL") -> dict[str, Any]:
+async def api_write(conn: APIConnector, endpoint_name: str, params: dict[str, Any] | None, *, statement_type: str = "CALL",
+                    columns: dict[str, str] | None = None) -> dict[str, Any]:
     """Call the endpoint that saves a screen's row and answer as a statement does (``rowcount`` 1,
     the values the endpoint maps out of its answer — ``response_map`` — as ``resolved_binds``, so
     a number the server assigned reaches the form). Raises :class:`ApiRowsError` when the call
@@ -112,7 +164,9 @@ async def api_write(conn: APIConnector, endpoint_name: str, params: dict[str, An
     if not endpoint.writable:
         raise ApiRowsError(f"{conn.name}.{endpoint_name}: this endpoint is not marked as changing data (writable) — a screen cannot save through it")
     started = time.perf_counter()
-    result = await conn.call(endpoint_name, write_params(endpoint, params), untrusted=True)
+    # an update served by a function types only what changed; an HTTP endpoint's template needs every value
+    only_changed = statement_type == "UPDATE" and bool(endpoint.callable)
+    result = await conn.call(endpoint_name, write_params(endpoint, params, columns, changed_only=only_changed), untrusted=True)
     if not result.success:
         said = (result.body or "").strip() if result.json is None else ""
         raise ApiRowsError(f"{result.error or f'HTTP {result.status_code}'}" + (f" — {said[:300]}" if said else ""))
