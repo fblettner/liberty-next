@@ -132,6 +132,12 @@
   dans la grille, la fiche et l'enregistrement côté serveur), et **un paramètre peut être obligatoire**
   (« Obligatoire » dans l'éditeur du point d'accès) : un appel sans lui est refusé avant tout envoi, au lieu
   que le serveur prenne un blanc et agisse dessus.
+- Connecteurs API — **un paramètre de requête vide peut ne pas être envoyé.** Un point d'accès dont les
+  filtres optionnels passent dans la chaîne de requête les envoyait vides (`?instanceName=`) quand ils
+  n'étaient pas renseignés, ce que certains serveurs refusent ou lisent comme un filtre sur rien. L'option
+  « Ne pas envoyer un paramètre de requête dont la valeur est vide » de l'éditeur du point d'accès
+  (`skip_blank_query`) n'envoie que ceux qui ont une valeur. Désactivée par défaut : les points d'accès
+  existants ne changent pas.
 - **Un générateur peut construire un écran entier.** « Créer à partir de… » écrivait un point d'accès. Le
   générateur d'un connecteur peut maintenant répondre par un écran : les points d'accès par lesquels il lit et
   enregistre, et l'écran lui-même. La boîte de dialogue demande alors l'application, l'identifiant et le titre

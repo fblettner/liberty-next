@@ -112,6 +112,11 @@
   row of codes belongs to; in the grid, the record form and the server-side save), and **a parameter can be
   required** (the endpoint editor's "Required"): a call without it is refused before anything is sent, instead
   of the server taking a blank and acting on it.
+- API connectors — **a blank query parameter can be left out.** An endpoint whose optional filters travel in
+  the query string sent them empty (`?instanceName=`) when left blank, which some servers refuse or read as a
+  filter on nothing. The endpoint editor's "Leave out a query parameter whose value is blank"
+  (`skip_blank_query`) sends only the ones that have a value. Off by default: existing endpoints are
+  unchanged.
 - **A generator can build a whole screen.** "Create from…" wrote one endpoint. A connector's generator may now
   answer with a screen: the endpoints it reads and saves through, and the screen itself. The dialog then asks
   for the application, the screen's id and title and whether to add it to the menu, and creates everything in

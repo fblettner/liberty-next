@@ -1799,6 +1799,7 @@ const en = {
         formatJson: 'Format JSON',
         bodyHint: 'Use {{param}} placeholders for variables',
         queryParams: 'Query params',
+        skipBlankQuery: 'Leave out a query parameter whose value is blank',
         responseField: 'Response field',
         description: 'Description',
         descriptionPlaceholder: 'Short description',

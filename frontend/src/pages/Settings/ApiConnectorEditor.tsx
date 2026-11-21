@@ -64,6 +64,7 @@ type Endpoint = {
   labels_field?: string | null
   more_field?: string | null
   limit_param?: string | null
+  skip_blank_query?: boolean
   callable?: string | null
   error_fields?: string[] | null
   /** Where the server puts its warnings: reported with the answer, the call stands. */
@@ -931,6 +932,16 @@ function EndpointEditor({ value, onChange, sourceLabel, onRefresh, refreshing }:
           placeholder="pageSize={{pageSize}}&page={{page}}"
         />
       </FieldRow>
+      {Object.keys(value.query_params ?? {}).length > 0 && (
+        <FieldRow>
+          <span />
+          <Checkbox
+            checked={value.skip_blank_query === true}
+            onChange={(v: boolean) => set({ skip_blank_query: v ? true : undefined })}
+            label={t('settings.api.endpoint.skipBlankQuery')}
+          />
+        </FieldRow>
+      )}
       <FieldRow>
         <label title={t('settings.api.endpoint.rowsFieldHint')}>{t('settings.api.endpoint.rowsField')}</label>
         <Input

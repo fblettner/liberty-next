@@ -1797,6 +1797,7 @@ const fr: Resources = {
         formatJson: 'Formater le JSON',
         bodyHint: 'Utilisez des substituts {{param}} pour les variables',
         queryParams: 'Paramètres de requête',
+        skipBlankQuery: 'Ne pas envoyer un paramètre de requête dont la valeur est vide',
         responseField: 'Champ de réponse',
         description: 'Description',
         descriptionPlaceholder: 'Description courte',

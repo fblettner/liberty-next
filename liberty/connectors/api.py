@@ -356,6 +356,7 @@ class APIConnector:
                     "writable": e.writable,
                     "path": e.path,
                     "content_type": e.content_type,
+                    "skip_blank_query": True if e.skip_blank_query else None,
                     "rows_field": e.rows_field,
                     "callable": e.callable,
                     "limit_param": e.limit_param,
@@ -502,6 +503,8 @@ class APIConnector:
 
         url = self._resolve_url(substitute_path(endpoint.path, merged))
         query = {k: substitute(v, merged) for k, v in endpoint.query_params.items()}
+        if endpoint.skip_blank_query:
+            query = {k: v for k, v in query.items() if str(v).strip() != ""}     # an optional filter left blank is absent, not empty
 
         headers: dict[str, str] = {k: substitute(v, merged) for k, v in self.config.default_headers.items()}
         headers.update(self._auth_headers(token))

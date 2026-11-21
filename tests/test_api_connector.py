@@ -553,3 +553,21 @@ async def test_a_warning_is_reported_and_does_not_fail_the_call() -> None:
         assert clean.success is True and clean.warnings is None
     finally:
         await conn.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_blank_query_parameter_is_left_out_when_the_endpoint_says_so() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url.query, "ascii") if isinstance(request.url.query, bytes) else str(request.url.query))
+        return httpx.Response(200, json={})
+
+    cfg = ApiConnectorConfig(type="api", base_url="https://sm.test", endpoints=[
+        EndpointDef(name="state", path="/instancestate", query_params={"instanceName": "{{NAME}}", "jdeHome": "{{HOME}}"},
+                    params=[ParamDef(name="NAME"), ParamDef(name="HOME")], skip_blank_query=True),
+        EndpointDef(name="as_before", path="/x", query_params={"a": "{{NAME}}", "b": "{{HOME}}"}, params=[ParamDef(name="NAME"), ParamDef(name="HOME")])])
+    conn = APIConnector("sm", cfg, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    await conn.call("state", {"NAME": "AIS1"})
+    await conn.call("as_before", {"NAME": "AIS1"})
+    assert seen == ["instanceName=AIS1", "a=AIS1&b="]
