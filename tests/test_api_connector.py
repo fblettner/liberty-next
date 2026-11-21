@@ -608,3 +608,26 @@ async def test_a_declared_parameter_is_not_the_connectors_credential() -> None:
         assert json.loads(sent[-1][2]) == {"username": "svc_admin", "password": "s3cret"}   # undeclared: the built-ins, as before
     finally:
         await conn.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_delete_sends_the_body_its_endpoint_declares() -> None:
+    seen: list[tuple[str, str, bytes, str | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, str(request.url), request.content, request.headers.get("content-type")))
+        return httpx.Response(200, json={"ok": True})
+
+    cfg = ApiConnectorConfig.model_validate({"type": "api", "base_url": "https://sm.example.com/manage", "endpoints": [
+        {"name": "clear", "method": "DELETE", "path": "/clearcache", "writable": True,
+         "body": '{"instanceName": "{{instanceName}}", "cache": "{{cache}}"}', "params": [{"name": "instanceName"}, {"name": "cache"}]},
+        {"name": "drop", "method": "DELETE", "path": "/things/{{id}}", "writable": True, "params": [{"name": "id"}]},
+        {"name": "read", "method": "GET", "path": "/things", "body": '{"ignored": true}'},
+    ]})
+    conn = _connector(cfg, handler)
+    assert (await conn.call("clear", {"instanceName": "html_1", "cache": "ALL"})).success
+    assert seen[0][0] == "DELETE" and json.loads(seen[0][2]) == {"instanceName": "html_1", "cache": "ALL"} and seen[0][3] == "application/json"
+    # a DELETE without a declared body stays without one; a GET never carries one
+    await conn.call("drop", {"id": "7"})
+    await conn.call("read", {})
+    assert seen[1][2] == b"" and seen[2][2] == b""

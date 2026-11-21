@@ -396,6 +396,11 @@
   connecteur, et avec `&create=<générateur>&q=<texte>` son dialogue « Créer depuis… » sur ce générateur, le texte
   déjà cherché. Pour une page livrée par une application, une notification, un document. Le contrat des pages
   gagne `useCan` (l'appelant détient-il une permission — pour ne montrer un bouton qu'à qui peut s'en servir).
+- **Un point d'accès DELETE envoie le corps qu'il déclare.** Un connecteur d'API retirait le corps d'une requête
+  DELETE, comme pour un GET. Certains serveurs nomment ce qu'il faut supprimer dans un corps JSON — le Server
+  Manager de JD Edwards vide un cache ainsi — et répondaient « champ obligatoire manquant ». Un point d'accès
+  `DELETE` avec un `body` l'envoie maintenant (avec son type de contenu) ; sans corps déclaré rien ne change, et
+  un GET / HEAD n'en porte jamais.
 - **L'intégrité et « Rechercher les utilisations » lisent les procédures de l'assistant.** Une procédure
   (`ai.toml`) est un texte que l'assistant suit — « query `list_runs` on the `nomaflow` connector » — donc une
   requête ou un point d'accès qu'elle nomme sera appelé par l'assistant ; rien d'autre dans la configuration ne

@@ -336,6 +336,10 @@
   `&create=<generator>&q=<text>` its "Create from…" dialog on that generator with the text already searched.
   For a page an application ships, a notification, a document. The page contract gains `useCan` (does the caller
   hold a permission — to show a button only to who may use it).
+- **A DELETE endpoint sends the body it declares.** An API connector dropped the body of a DELETE request, as
+  for a GET. Some servers name what to delete in a JSON body — JD Edwards' Server Manager clears a cache that
+  way — and answered "required field missing". A `DELETE` endpoint with a `body` now sends it (with its content
+  type); one without stays without, and a GET / HEAD never carries one.
 - **Integrity and Find usages read the assistant's playbooks.** A playbook (`ai.toml`) is prose the assistant
   follows — "query `list_runs` on the `nomaflow` connector" — so a query or an endpoint it names is one the
   assistant will call; nothing else in the configuration points at it, and Integrity reported such a query as

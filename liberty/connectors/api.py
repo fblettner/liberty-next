@@ -754,7 +754,9 @@ class APIConnector:
     def _build_body(
         self, endpoint: EndpointDef, params: dict[str, Any], headers: dict[str, str], *, untrusted: bool = False
     ) -> dict[str, Any]:
-        if endpoint.method.upper() in ("GET", "HEAD", "DELETE") or not endpoint.body:
+        # GET / HEAD carry no body. A DELETE does when the endpoint declares one: some servers name what to
+        # delete in a JSON body (JDE's Server Manager clears a cache that way), and HTTP allows it.
+        if endpoint.method.upper() in ("GET", "HEAD") or not endpoint.body:
             return {}
         content_type = (endpoint.content_type or "application/json").lower()
         if content_type.startswith("multipart/form-data"):
