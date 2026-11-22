@@ -105,13 +105,15 @@ export function SearchSelectMulti({ value, onChange, options: given, placeholder
     document.addEventListener('mousedown', onDoc)
     window.addEventListener('resize', compute)
     window.addEventListener('scroll', compute, true)
-    queueMicrotask(() => searchRef.current?.focus())
     return () => {
       document.removeEventListener('mousedown', onDoc)
       window.removeEventListener('resize', compute)
       window.removeEventListener('scroll', compute, true)
     }
   }, [open])
+  // the search box takes the focus when the panel appears (it is rendered once its position is known)
+  const shown = open && pos !== null
+  useEffect(() => { if (shown) searchRef.current?.focus() }, [shown])
 
   const filtered = useMemo(() => {
     const n = q.trim().toLowerCase()

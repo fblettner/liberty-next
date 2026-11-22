@@ -28,3 +28,22 @@ describe('orderOptions', () => {
     expect(orderOptions(list, true).map((x) => `${x.group ?? ''}:${x.value}`)).toEqual([':m', 'nomajde:b', 'nomasx1:a', 'nomasx1:z'])
   })
 })
+
+describe('sortOptions — a line that shows a code', () => {
+  it('orders on the code, not on the description', () => {
+    const o = sortOptions([
+      { value: 'truncate_items', mono: 'truncate_items', label: 'Before a full reload of the item file.' },
+      { value: 'customers_from_sales', mono: 'customers_from_sales', label: 'After a load: add the customers' },
+      { value: 'dim_company_get', mono: 'dim_company_get', label: 'Companies with their business unit' },
+    ])
+    expect(o.map((x) => x.value)).toEqual(['customers_from_sales', 'dim_company_get', 'truncate_items'])
+  })
+  it('orders a line without code on its label, among the others', () => {
+    const o = sortOptions([
+      { value: 'b', mono: 'F0101', label: 'Address book' },
+      { value: 'a', label: 'F0006 — business units' },
+      { value: 'c', mono: ' ', label: 'F0005' },
+    ])
+    expect(o.map((x) => x.value)).toEqual(['c', 'a', 'b'])
+  })
+})

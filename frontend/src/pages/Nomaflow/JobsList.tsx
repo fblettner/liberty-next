@@ -11,7 +11,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Play, Ban, Pencil, Plus, RefreshCw, Workflow, Clock, CalendarClock, ChevronDown, ChevronRight, Copy, Download, Trash2, Search, Star } from 'lucide-react'
 import { api, apiDownload, ApiError } from '../../api/client'
-import { PageLayout, Button, Banner, Centered, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, FileInput, Input, Select, SearchSelect, type SearchSelectOption, useModals } from '../../common'
+import { PageLayout, Button, Banner, Centered, Tag, Mono, SpinnerRing, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Checkbox, FileInput, Input, SearchSelect, type SearchSelectOption, useModals } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { useAuth } from '../../auth/AuthContext'
 import { nomaflowAccess } from '../../services/permissions'
@@ -877,21 +877,16 @@ function RunWithParamsModal({
               <ParamRow>
                 <ParamKey>{t('nomaflow.runParams.presetPick')}</ParamKey>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}>
-                  <Select
-                    value={selectedPreset}
-                    onChange={(e) => applyPreset(e.target.value)}
-                    disabled={presets.length === 0}
-                    style={{ flex: 1, minWidth: 0 }}
-                  >
-                    <option value="">
-                      {presets.length === 0
-                        ? t('nomaflow.runParams.noPresets')
-                        : t('nomaflow.runParams.pickPreset')}
-                    </option>
-                    {presets.map((p) => (
-                      <option key={p.name} value={p.name}>{p.name}</option>
-                    ))}
-                  </Select>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <SearchSelect sort
+                      value={selectedPreset}
+                      onChange={(v) => applyPreset(v)}
+                      disabled={presets.length === 0}
+                      options={presets.map((p) => ({ value: p.name, label: p.name }))}
+                      anyLabel={t('nomaflow.runParams.pickPreset')}
+                      placeholder={presets.length === 0 ? t('nomaflow.runParams.noPresets') : t('nomaflow.runParams.pickPreset')}
+                    />
+                  </div>
                   {onSavePreset && <Button
                     $variant="ghost" $size="sm"
                     onClick={handleSavePreset}
@@ -918,20 +913,15 @@ function RunWithParamsModal({
             </ParamSectionTitle>
             <ParamRow>
               <ParamKey>log_level</ParamKey>
-              <Select
+              <SearchSelect
                 value={logLevel}
-                onChange={(e) => setLogLevel(e.target.value as 'WARNING' | 'INFO' | 'DEBUG')}
-              >
-                <option value="WARNING">
-                  {t('nomaflow.runParams.logLevelWarning')}
-                </option>
-                <option value="INFO">
-                  {t('nomaflow.runParams.logLevelInfo')}
-                </option>
-                <option value="DEBUG">
-                  {t('nomaflow.runParams.logLevelDebug')}
-                </option>
-              </Select>
+                onChange={(v) => setLogLevel((v || 'WARNING') as 'WARNING' | 'INFO' | 'DEBUG')}
+                options={[
+                  { value: 'WARNING', label: t('nomaflow.runParams.logLevelWarning') },
+                  { value: 'INFO', label: t('nomaflow.runParams.logLevelInfo') },
+                  { value: 'DEBUG', label: t('nomaflow.runParams.logLevelDebug') },
+                ]}
+              />
             </ParamRow>
           </ParamSection>
           {/* Job-level params (shared across all steps). Rendered when the job carries

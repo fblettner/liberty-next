@@ -59,6 +59,9 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
   const [hidden, setHidden] = useState<string[]>((initial?.hidden ?? []).map((c) => c.toUpperCase()))
   const [measures, setMeasures] = useState<Record<string, string>>(Object.fromEntries(Object.entries(initial?.measures ?? {}).map(([k, v]) => [k.toUpperCase(), v])))
   const [defaultDate, setDefaultDate] = useState((initial?.default_date ?? '').toUpperCase())
+  // the fixed values of the query's parameters, and "keep on upgrade": both were dropped by a save of this window
+  const [params, setParams] = useState<Record<string, string>>(Object.fromEntries(Object.entries(initial?.params ?? {}).map(([k, v]) => [k, v == null ? '' : String(v)])))
+  const [override, setOverride] = useState(!!initial?.override)
   const [columns, setColumns] = useState<DiscoveredColumn[] | null>(null)
   const [discovering, setDiscovering] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -77,6 +80,12 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
     if (source.type === 'api') return source.endpoints.filter((e) => e.rows_field).map((e) => ({ value: e.name, label: e.label || e.name, mono: e.name }))
     return source.type === 'sql' ? source.queries.filter((q) => q.statement_type === 'SELECT').map((q) => ({ value: q.name, label: q.label || q.name, mono: q.name })) : []
   }, [source])
+  // what the picked query asks for: its declared parameters and the binds of its statement — each gets a field,
+  // with those the entity already fixes (a parameter the query no longer has stays, to be cleared)
+  const paramNames = useMemo(() => {
+    const q = source?.type === 'sql' ? source.queries.find((x) => x.name === query) : undefined
+    return [...new Set([...(q?.params ?? []).map((p) => p.name), ...(q?.bind_params ?? []), ...Object.keys(params)])]
+  }, [source, query, params])
   const screenOpts = useMemo<SearchSelectOption[]>(() => {
     const list = screens?.[app] ?? []
     const matching = list.filter((s) => s.read_query === query && s.connector === effConnector)
@@ -136,6 +145,9 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
     if (hidden.length) body.hidden = hidden
     if (Object.keys(measures).length) body.measures = measures
     if (defaultDate) body.default_date = defaultDate
+    const fixed = Object.fromEntries(Object.entries(params).filter(([, v]) => v.trim() !== ''))
+    if (Object.keys(fixed).length) body.params = fixed
+    if (override) body.override = true
     onSave(id.trim(), body)
   }
 
@@ -174,6 +186,23 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
             <SearchSelect value={defaultDate} onChange={mark(setDefaultDate)} options={rows.map((c) => ({ value: c.name, label: c.name }))} anyLabel={t('settings.explorer.none')} />
           </Field>
         </Grid2>
+        {paramNames.length > 0 && (
+          <div data-entity-params>
+            <div style={{ fontSize: fontSize.micro, color: colors.text.muted, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>{t('settings.explorer.params')}</div>
+            <div style={{ color: colors.text.muted, fontSize: fontSize.sm, marginBottom: 6 }}>{t('settings.explorer.paramsHint')}</div>
+            <Grid3>
+              {paramNames.map((name) => (
+                <Field key={name} label={name}>
+                  <Input value={params[name] ?? ''} onChange={(e) => { setParams((p) => ({ ...p, [name]: e.target.value })); setDirty(true) }} />
+                </Field>
+              ))}
+            </Grid3>
+          </div>
+        )}
+        <div>
+          <Checkbox checked={override} onChange={mark(setOverride)} label={t('settings.explorer.keepOnUpgrade')} />
+          <div style={{ color: colors.text.muted, fontSize: fontSize.sm, marginTop: 2 }}>{t('settings.explorer.keepOnUpgradeHint')}</div>
+        </div>
         <div>
           <div style={{ fontSize: fontSize.micro, color: colors.text.muted, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
             {t('settings.explorer.columns')} {discovering && <SpinnerRing size={11} thickness={2} />}

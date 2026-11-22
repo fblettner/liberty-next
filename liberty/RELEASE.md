@@ -648,6 +648,40 @@
   endpoint's parameters (an input the steps read as `INPUT.<name>` counts even when the action does not declare
   it). The endpoints a service already serves are listed on it. Routes: `GET /admin/studio/services`,
   `POST /admin/studio/run`, `POST /admin/studio/expose` (superuser).
+- **Picking and filling in, made simpler.** A pass on what was hard to set by a person who does not write
+  code:
+  - **One picker for a function of an application**, the same everywhere a function is chosen (a job's
+    function step, a service's plugin step, an endpoint served by a function, a tool of the assistant, the
+    steps run after a change package): the list is **grouped by application and module**, each line the
+    function's name and what it does in plain words, ordered by name — the application of the function already
+    picked first. Under the field, what is stored (`module:function`) and the description in full; a name the
+    list does not hold is said.
+  - **A job's "load a file" step reads as five questions** — where the file comes from (given by the person who
+    starts the job, a file on the server, a watched folder: one choice, which shows only its own fields), how to
+    read it, the table it fills, what happens to the rows already there, what is checked. Labels are a few
+    words, what a field is for is written under it. The columns named differently in the file and the values
+    written on every row are rows with headed columns and examples; **the table's columns are offered as a
+    list** once the table is named (also for the columns replaced and the column to total), and **the query that
+    refuses the file is picked** among the connector's queries.
+  - **Every dropdown is the shared one.** The last native dropdowns (the job step forms, a job's retry, the
+    Run window's presets and log level, the report templates, a screen's row click, the steps after a change
+    package, a report's format) are replaced: search, theme, the same look.
+  - **A dropdown takes the keyboard when it opens**: the search box has the focus, typing filters at once (it
+    had to be clicked first).
+  - **A list of "code — description" lines is ordered on the code**, not on the description (the codes came out
+    shuffled); a description is found by typing it.
+  - The name = value rows of the job editors carry their placeholders in the user's language.
+- **Fixes in the builders.**
+  - **A service's Notification step can be set**: the rule is picked among the notification rules triggered
+    "by an action" (a rule that is disabled or unknown is said), and the values its message needs besides the
+    current record are given below. The step could be added but neither field was shown.
+  - **Explorer → an entity keeps the fixed values of its query's parameters and "keep on upgrade"**: both are
+    now fields of the entity window, which dropped them on save.
+  - **Explorer → a model with no entity is no longer left out of a save in silence**: one that names a preset
+    is kept (and the page draws it, offering to fill it — it failed to render); one that names none is refused,
+    by name.
+  - **Dashboards and charts carry "keep on upgrade"** as a tick box (it could only be set in the file), and a
+    dashboard filter left unfinished is refused instead of being dropped.
 
 ## 7.0.83 — 2026-11-19
 

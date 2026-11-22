@@ -757,6 +757,44 @@
   étapes sous `INPUT.<nom>` compte même si l'action ne la déclare pas). Les points d'accès qu'un service sert
   déjà sont listés sur lui. Routes : `GET /admin/studio/services`, `POST /admin/studio/run`,
   `POST /admin/studio/expose` (superutilisateur).
+- **Choisir et renseigner, en plus simple.** Une passe sur ce qui était difficile à régler pour une personne
+  qui n'écrit pas de code :
+  - **Un seul sélecteur pour une fonction d'application**, le même partout où une fonction se choisit (l'étape
+    fonction d'un traitement, l'étape plugin d'un service, un point d'accès servi par une fonction, un outil de
+    l'assistant, les étapes lancées après un paquet de modifications) : la liste est **groupée par application
+    et par module**, chaque ligne donne le nom de la fonction et ce qu'elle fait en mots simples, classée par
+    nom — l'application de la fonction déjà choisie en premier. Sous le champ, ce qui est enregistré
+    (`module:fonction`) et la description entière ; un nom absent de la liste est signalé.
+  - **L'étape « charger un fichier » d'un traitement se lit en cinq questions** — d'où vient le fichier (donné
+    par la personne qui lance le traitement, un fichier sur le serveur, un dossier surveillé : un seul choix,
+    qui n'affiche que ses propres champs), comment le lire, la table qu'il alimente, ce que deviennent les
+    lignes déjà présentes, ce qui est contrôlé. Les libellés tiennent en quelques mots, l'usage d'un champ est
+    écrit dessous. Les colonnes nommées autrement dans le fichier et les valeurs écrites sur chaque ligne sont
+    des lignes à colonnes titrées, avec des exemples ; **les colonnes de la table sont proposées en liste** dès
+    que la table est nommée (aussi pour les colonnes de remplacement et la colonne à totaliser), et **la
+    requête qui refuse le fichier se choisit** parmi les requêtes du connecteur.
+  - **Toutes les listes déroulantes sont la liste partagée.** Les dernières listes natives (les formulaires
+    d'étape d'un traitement, la reprise d'un traitement, les préréglages et le niveau de journal de la fenêtre
+    de lancement, les modèles de rapport, le clic sur une ligne d'un écran, les étapes après un paquet de
+    modifications, le format d'un rapport) sont remplacées : recherche, thème, même aspect.
+  - **Une liste prend le clavier à l'ouverture** : la zone de recherche a le focus, la saisie filtre aussitôt
+    (il fallait d'abord cliquer dedans).
+  - **Une liste de lignes « code — description » est classée sur le code**, non sur la description (les codes
+    sortaient mélangés) ; une description se retrouve en la saisissant.
+  - Les lignes nom = valeur des éditeurs de traitement portent leurs exemples dans la langue de l'utilisateur.
+- **Corrections dans les éditeurs.**
+  - **L'étape Notification d'un service se règle** : la règle se choisit parmi les règles de notification
+    déclenchées « par une action » (une règle désactivée ou inconnue est signalée), et les valeurs dont son
+    message a besoin en plus de l'enregistrement courant se donnent dessous. L'étape pouvait être ajoutée mais
+    aucun de ses deux champs n'était affiché.
+  - **Explorateur → une entité garde les valeurs fixes des paramètres de sa requête et « conserver à la mise à
+    niveau »** : ce sont maintenant des champs de la fenêtre de l'entité, qui les perdait à l'enregistrement.
+  - **Explorateur → un modèle sans entité n'est plus écarté de l'enregistrement en silence** : celui qui nomme un
+    préréglage est conservé (et la page le dessine en proposant de le remplir — elle ne s'affichait plus) ;
+    celui qui n'en nomme aucun est refusé, nommément.
+  - **Tableaux de bord et graphiques portent « conserver à la mise à niveau »** en case à cocher (cela ne se
+    réglait que dans le fichier), et un filtre de tableau de bord laissé incomplet est refusé au lieu d'être
+    perdu.
 
 ## 7.0.83 — 2026-11-19
 

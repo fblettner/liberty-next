@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { SlidersHorizontal, BarChart3 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Field, Input, SearchSelect, SpinnerRing, useModals, type SearchSelectOption } from '../../common'
+import { Banner, Checkbox, Field, Input, SearchSelect, SpinnerRing, useModals, type SearchSelectOption } from '../../common'
 import { EditorModalShell } from '../../common/EditorModalShell'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { ChartSpecEditor } from '../TableView/ChartSpecEditor'
@@ -31,6 +31,8 @@ export interface ChartRecord {
   connector?: string
   query?: string
   spec?: SavedChartSpec
+  /** The installation's own version of a shipped chart: an upgrade leaves it as saved. */
+  override?: boolean
 }
 
 const Tabs = styled.div`display: flex; gap: 16px; padding: 0 18px; border-bottom: 1px solid ${colors.border}; flex-shrink: 0;`
@@ -74,11 +76,13 @@ export function ChartEditorModal({
   const [description, setDescription] = useState(initial?.description ?? '')
   const [query, setQuery] = useState(initial?.query ?? '')
   const [spec, setSpec] = useState<ChartSpec>(initial?.spec ? fromSavedSpec(initial.spec) : defaultChartSpec())
+  // "keep on upgrade": a save used to drop it
+  const [keep, setKeep] = useState(initial?.override === true)
   const [error, setError] = useState<string | null>(null)
 
   // Unsaved-changes guard — same Save / Discard / Keep-editing dialog the screen visual dialog
   // uses. Snapshot the editable state on first render; compare to it on every close attempt.
-  const draftKey = JSON.stringify({ id, label, description, query, spec })
+  const draftKey = JSON.stringify({ id, label, description, query, spec, keep })
   const initialKey = useRef<string | null>(null)
   if (initialKey.current === null) initialKey.current = draftKey
   const dirty = draftKey !== initialKey.current
@@ -119,6 +123,7 @@ export function ChartEditorModal({
       spec: toSavedSpec(spec),
     }
     if (description.trim()) record.description = description.trim()
+    if (keep) record.override = true
     onSave(cid, record)
   }
 
@@ -173,6 +178,7 @@ export function ChartEditorModal({
               <Field label={t('settings.charts.description')}>
                 <Input value={description} onChange={(e) => setDescription(e.target.value)} />
               </Field>
+              <div data-chart-keep><Checkbox checked={keep} onChange={setKeep} label={t('settings.dash.keepOnUpgrade')} /></div>
               <Grid2>
                 <Field label={t('settings.charts.connector')}>
                   {/* The connector is the chart's scope — fixed here. Move a chart between

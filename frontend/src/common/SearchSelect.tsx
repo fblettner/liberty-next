@@ -234,7 +234,6 @@ export function SearchSelect({
     // events skip non-Window scrollers without it.
     window.addEventListener('resize', compute)
     window.addEventListener('scroll', compute, true)
-    queueMicrotask(() => searchRef.current?.focus())
     return () => {
       document.removeEventListener('mousedown', onDoc)
       document.removeEventListener('keydown', onKey)
@@ -242,6 +241,12 @@ export function SearchSelect({
       window.removeEventListener('scroll', compute, true)
     }
   }, [open])
+
+  // The search box takes the focus when the panel APPEARS, so the user types at once. The panel is
+  // only rendered once its position is known (one render after ``open``): focusing on ``open``
+  // itself found no input yet and the user had to click in the box first.
+  const shown = open && panelPos !== null
+  useEffect(() => { if (shown) searchRef.current?.focus() }, [shown])
 
   // Exact, then trim-tolerant (see matchOption) — the trigger label.
   const current = matchOption(options, value)

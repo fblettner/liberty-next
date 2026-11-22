@@ -92,7 +92,13 @@ export default function ExplorerBuilder() {
   const load = () => {
     setError(null)
     api.get<ExplorerDoc>('/admin/config/explorer/parsed')
-      .then((d) => { setDoc(d.explorer); setSaved(d.explorer) })
+      .then((d) => {
+        // The server leaves out what is empty: a model that only names a preset (not applied yet) comes
+        // without its entities and hub. Given whole here, so the page draws it and offers to fill it.
+        const whole = Object.fromEntries(Object.entries(d.explorer ?? {}).map(([app, byId]) => [app,
+          Object.fromEntries(Object.entries(byId).map(([id, m]) => [id, { ...m, hub: m.hub ?? '', entities: m.entities ?? {} }]))])) as Models
+        setDoc(whole); setSaved(whole)
+      })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
   }
   useEffect(load, [t])
@@ -141,10 +147,17 @@ export default function ExplorerBuilder() {
 
   const persist = async () => {
     if (!doc) return
-    setBusy(true); setError(null); setStatus(null)
+    setError(null); setStatus(null)
+    // A model with no entity used to be left out of the save while the page said "saved". One that names a
+    // preset is whole (it is filled from the preset at first use) and is kept; one that names none cannot be
+    // read by anybody: the save is refused and says which, so it is completed or deleted knowingly.
+    const empty = Object.entries(doc).flatMap(([app, byId]) => Object.entries(byId)
+      .filter(([, m]) => Object.keys(m.entities ?? {}).length === 0 && !m.preset).map(([id]) => `${app} · ${id}`))
+    if (empty.length) { setError(t('settings.explorer.emptyModels', { list: empty.join(', ') })); return }
+    setBusy(true)
     const pruned: Models = {}
     for (const [app, byId] of Object.entries(doc)) {
-      const kept = Object.entries(byId).filter(([, m]) => Object.keys(m.entities ?? {}).length > 0)
+      const kept = Object.entries(byId)
         .map(([id, m]) => [id, { ...m, relations: (m.relations ?? []).map((r) => ({ ...r, on: (r.on ?? []).filter((p) => p[0] && p[1]) })) }] as const)
       if (kept.length) pruned[app] = Object.fromEntries(kept)
     }

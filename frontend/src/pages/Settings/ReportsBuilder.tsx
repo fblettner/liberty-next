@@ -23,7 +23,7 @@ import {
   Plus, Trash2, Save, X, Edit3, Database, Play, EyeOff, Sparkles,
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Field, Input, Select, Tag, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, SpinnerRing, Checkbox, Centered, useIsLight, useModals, HeaderActions, Row } from '../../common'
+import { Banner, Button, Card, Field, Input, SearchSelect, Tag, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, SpinnerRing, Checkbox, Centered, useIsLight, useModals, HeaderActions, Row } from '../../common'
 import { Markdown } from '../../common/Markdown'
 import {
   attachTemplateContext,
@@ -703,32 +703,24 @@ function TemplateEditDialog({
               />
             </Field>
             <Field label={t('settings.templates.fields.connector') + ' *'} htmlFor="tpl-conn">
-              <Select
-                id="tpl-conn"
+              <SearchSelect sort
                 value={tpl.data.connector}
-                onChange={(e) => {
-                  updateData('connector', e.target.value)
+                onChange={(v) => {
+                  updateData('connector', v)
                   updateData('query', '') // reset cascading query
                 }}
-              >
-                <option value="">{t('common.pick')}</option>
-                {connectorNames.map((n) => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </Select>
+                options={connectorNames.map((n) => ({ value: n, label: n }))}
+                placeholder={t('common.pick')}
+              />
             </Field>
             <Field label={t('settings.templates.fields.query') + ' *'} htmlFor="tpl-query">
-              <Select
-                id="tpl-query"
+              <SearchSelect sort
                 value={tpl.data.query}
-                onChange={(e) => updateData('query', e.target.value)}
+                onChange={(v) => updateData('query', v)}
                 disabled={!tpl.data.connector}
-              >
-                <option value="">{t('common.pick')}</option>
-                {queryChoices.map((q) => (
-                  <option key={q} value={q}>{q}</option>
-                ))}
-              </Select>
+                options={queryChoices.map((q) => ({ value: q, label: q }))}
+                placeholder={t('common.pick')}
+              />
             </Field>
           </Grid>
 
@@ -763,19 +755,15 @@ function TemplateEditDialog({
                       update('params', next)
                     }}
                   />
-                  <Select
+                  <SearchSelect
                     value={p.type}
-                    onChange={(e) => {
+                    onChange={(v) => {
                       const next = [...tpl.params]
-                      next[i] = { ...next[i], type: e.target.value as ParamType }
+                      next[i] = { ...next[i], type: (v || 'string') as ParamType }
                       update('params', next)
                     }}
-                  >
-                    <option value="string">string</option>
-                    <option value="int">int</option>
-                    <option value="float">float</option>
-                    <option value="bool">bool</option>
-                  </Select>
+                    options={(['string', 'int', 'float', 'bool'] as const).map((ty) => ({ value: ty, label: ty }))}
+                  />
                   <Checkbox
                     checked={p.required}
                     onChange={(checked) => {

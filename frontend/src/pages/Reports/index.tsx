@@ -24,7 +24,6 @@ import {
   Centered,
   Field,
   Input,
-  Select,
   Checkbox,
   Tag,
   Overlay,
@@ -230,15 +229,11 @@ function RunReportDialog({ report, onClose }: { report: ReportDef; onClose: () =
 
           {report.formats.length > 1 && (
             <Field label={t('reports.format')} htmlFor="report-format">
-              <Select
-                id="report-format"
+              <SearchSelect
                 value={format}
-                onChange={(e) => setFormat(e.target.value as OutputFormat)}
-              >
-                {report.formats.map((f) => (
-                  <option key={f} value={f}>{f.toUpperCase()}</option>
-                ))}
-              </Select>
+                onChange={(v) => { if (v) setFormat(v as OutputFormat) }}
+                options={report.formats.map((f) => ({ value: f, label: f.toUpperCase() }))}
+              />
             </Field>
           )}
 

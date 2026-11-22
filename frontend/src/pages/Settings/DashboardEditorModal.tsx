@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Plus, Pencil, Trash2, GripVertical, BarChart3, Hash, Table as TableIcon, LayoutDashboard, List as ListIcon, BarChartHorizontal, FileText, Link2, Workflow } from 'lucide-react'
-import { Button, Input, Field, Banner, SearchSelect, LocalizedTexts, useModals, type SearchSelectOption } from '../../common'
+import { Button, Checkbox, Input, Field, Banner, SearchSelect, LocalizedTexts, useModals, type SearchSelectOption } from '../../common'
 import { prunedLocalized, type Localized } from '../../services/localized'
 import { api } from '../../api/client'
 import type { QueryResult } from '../../types/connectors'
@@ -176,6 +176,8 @@ export function DashboardEditorModal({
   const [description, setDescription] = useState(sstr(initial.description))
   // the title and the description said in the other languages (`l.fr = { label, description }`)
   const [texts, setTexts] = useState<Localized | undefined>(prunedLocalized(initial.l as Localized | undefined))
+  // "keep on upgrade" (the installation's own version of a shipped dashboard): a save used to drop it
+  const [keep, setKeep] = useState(initial.override === true)
   // Normalise on load: restore the `type` the parsed-config endpoint dropped (see widgetType), so
   // the canvas renders live previews and saved widgets keep their discriminator.
   const [widgets, setWidgets] = useState<Raw[]>(Array.isArray(initial.widgets) ? (initial.widgets as Raw[]).map((w) => ({ ...w, type: widgetType(w) })) : [])
@@ -293,6 +295,9 @@ export function DashboardEditorModal({
     const rec: Raw = { id, label: label.trim() || id, widgets }
     if (description.trim()) rec.description = description.trim()
     if (texts) rec.l = texts
+    if (keep) rec.override = true
+    // a filter row left without its id or its label used to vanish at save: said instead, so it is finished or removed
+    if (filters.some((f) => !(sstr(f.id) && sstr(f.label)))) return setError(t('settings.dash.errFilter'))
     // `connector` (the owning scope) is the dict path key — the builder places the record under
     // it, so we don't write it into the body.
     const cleanFilters = filters.filter((f) => sstr(f.id) && sstr(f.label)).map((f) => { const { l, ...rest } = f; const said = prunedLocalized(l as Localized | undefined); return said ? { ...rest, l: said } : rest })
@@ -316,7 +321,7 @@ export function DashboardEditorModal({
 
   // Unsaved-changes guard (Save / Discard / Keep editing) — snapshot the editable state on first
   // render, compare on close. Same dialog the screen visual builder uses.
-  const draftKey = JSON.stringify({ label, description, texts, widgets, filters, period })
+  const draftKey = JSON.stringify({ label, description, texts, keep, widgets, filters, period })
   const initialKey = useRef<string | null>(null)
   if (initialKey.current === null) initialKey.current = draftKey
   const dirty = draftKey !== initialKey.current
@@ -367,6 +372,7 @@ export function DashboardEditorModal({
             { key: 'label', label: t('settings.dash.dLabel'), base: label },
             { key: 'description', label: t('settings.dash.description'), base: description },
           ]} />
+          <div data-dash-keep><Checkbox checked={keep} onChange={setKeep} label={t('settings.dash.keepOnUpgrade')} /></div>
 
           <AddBar>
             <span style={{ fontSize: fontSize.sm, color: colors.text.muted, fontWeight: 600 }}>{t('settings.dash.addWidget')}:</span>

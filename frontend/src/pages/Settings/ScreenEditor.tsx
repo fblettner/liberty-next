@@ -19,7 +19,7 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Plus, Trash2, ChevronRight, ChevronDown } from 'lucide-react'
 import {
-  Banner, Button, Field, FrameworkEnumsContext, Input, ListRowSummaryContext, Row, SchemaForm, SchemaNavigator, SearchSelect, Select, Stack, useModals,
+  Banner, Button, Field, FrameworkEnumsContext, Input, ListRowSummaryContext, Row, SchemaForm, SchemaNavigator, SearchSelect, Stack, useModals,
   type FrameworkEnums, type JsonSchema, type NavRoot, type SearchSelectOption,
 } from '../../common'
 import ParamBindList, { type ParamBind } from './ParamBindList'
@@ -665,14 +665,15 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       <>
         <RowClickHeader>{t('settings.screens.editor.rowClickHeader')}</RowClickHeader>
         <Field label={t('settings.screens.editor.rowClickModeLabel')}>
-          <Select
+          <SearchSelect
             value={currentMode}
-            onChange={(e) => setMode(e.target.value as RowClickMode)}
-          >
-            <option value="none">{t('settings.screens.editor.rowClickModeNone')}</option>
-            <option value="dialog">{t('settings.screens.editor.rowClickModeDialog')}</option>
-            <option value="route">{t('settings.screens.editor.rowClickModeRoute')}</option>
-          </Select>
+            onChange={(v) => setMode((v || 'none') as RowClickMode)}
+            options={[
+              { value: 'none', label: t('settings.screens.editor.rowClickModeNone') },
+              { value: 'dialog', label: t('settings.screens.editor.rowClickModeDialog') },
+              { value: 'route', label: t('settings.screens.editor.rowClickModeRoute') },
+            ]}
+          />
         </Field>
 
         {currentMode === 'dialog' && (

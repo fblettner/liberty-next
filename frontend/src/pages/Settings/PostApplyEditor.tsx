@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { ChevronRight, ChevronDown, Plus, Trash2, Save, Settings2 } from 'lucide-react'
-import { Banner, Button, Input, Select, SearchSelect, type SearchSelectOption } from '../../common'
+import { Banner, Button, CallableSelect, Input, SearchSelect } from '../../common'
 import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -55,17 +55,6 @@ export function PostApplyEditor({ onSaved }: { onSaved?: () => void }) {
       .catch((e) => setError(e instanceof ApiError ? e.message : String(e))), [])
   useEffect(() => { if (open && !cfg) void load() }, [open, cfg, load])
 
-  // Plugin callables for the call_plugin target picker — same discovered j_* catalog the action /
-  // job designers read (allowCustom lets you type one the walk didn't surface). Fetched on open.
-  const [pluginOpts, setPluginOpts] = useState<SearchSelectOption[]>([])
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    api.get<{ callables: { callable: string; docstring: string | null }[] }>('/api/plugins/callables')
-      .then((r) => { if (!cancelled) setPluginOpts((r.callables ?? []).map((c) => ({ value: c.callable, label: c.docstring || c.callable, mono: c.callable }))) })
-      .catch(() => { /* leave empty; the picker stays freeform */ })
-    return () => { cancelled = true }
-  }, [open])
 
   const update = (i: number, patch: Partial<Step>) =>
     setSteps((s) => s.map((st, j) => (j === i ? { ...st, ...patch } : st)))
@@ -105,23 +94,19 @@ export function PostApplyEditor({ onSaved }: { onSaved?: () => void }) {
               </div>
               <div>
                 <Lbl>{t('settings.changes.paType')}</Lbl>
-                <Select value={st.type} onChange={(e) => update(i, { type: e.target.value as StepType })}>
-                  {(cfg?.types ?? ['call_plugin', 'call_api', 'run_query']).map((ty) => <option key={ty} value={ty}>{ty}</option>)}
-                </Select>
+                <SearchSelect value={st.type} onChange={(v) => { if (v) update(i, { type: v as StepType }) }}
+                  options={(cfg?.types ?? ['call_plugin', 'call_api', 'run_query']).map((ty) => ({ value: ty, label: ty }))} />
               </div>
               <div>
                 <Lbl>{t('settings.changes.paConnector')}</Lbl>
-                <Select value={st.connector ?? ''} onChange={(e) => update(i, { connector: e.target.value || null })}
-                  disabled={st.type === 'call_plugin'}>
-                  <option value="">{t('settings.changes.paSameAsApp')}</option>
-                  {connectorOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </Select>
+                <SearchSelect sort value={st.connector ?? ''} onChange={(v) => update(i, { connector: v || null })}
+                  disabled={st.type === 'call_plugin'} options={connectorOpts}
+                  anyLabel={t('settings.changes.paSameAsApp')} placeholder={t('settings.changes.paSameAsApp')} />
               </div>
               <div>
                 <Lbl>{TARGET_LABEL[st.type]}</Lbl>
                 {st.type === 'call_plugin' ? (
-                  <SearchSelect sort value={st.target} onChange={(v) => update(i, { target: v })}
-                    options={pluginOpts} allowCustom placeholder={TARGET_LABEL.call_plugin} />
+                  <CallableSelect value={st.target} onChange={(v) => update(i, { target: v })} placeholder={TARGET_LABEL.call_plugin} />
                 ) : (
                   <Input value={st.target} onChange={(e) => update(i, { target: e.target.value })} placeholder={TARGET_LABEL[st.type]} />
                 )}

@@ -13,14 +13,15 @@ import { useTranslation } from 'react-i18next'
 import { ArrowLeft, Save, Workflow, Layers, X, Plus, Check } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
-  PageLayout, Button, Banner, Centered, Card, Input, Select, Checkbox,
+  PageLayout, Button, Banner, Centered, Card, Input, Checkbox,
   SearchSelect, SpinnerRing, Stack, useModals,
 } from '../../common'
 import { UserParamsEditor } from './UserParamsEditor'
 import { cleanUserParams, forEachCandidates } from '../../services/jobParams'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
-import StepEditor, { KeyValueEditor, JOB_PARAM_CATALOG } from './StepEditor'
+import StepEditor from './StepEditor'
+import { KeyValueEditor, JOB_PARAM_CATALOG } from './stepFields'
 import ScheduleField from './ScheduleField'
 import type { JobConfig, JobPreset, JobsParsedResponse } from './types'
 import { TabIdContext, useDirtyGuard } from '../../tabs/dirtyGuard'
@@ -582,13 +583,11 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
                 </FieldWrap>
                 <FieldWrap>
                   <FieldLabel>{t('nomaflow.editor.retryBackoff')}</FieldLabel>
-                  <Select
+                  <SearchSelect
                     value={job.retry.backoff}
-                    onChange={(e) => patch({ retry: { ...job.retry!, backoff: e.target.value as 'fixed' | 'exponential' } })}
-                  >
-                    <option value="fixed">fixed</option>
-                    <option value="exponential">exponential</option>
-                  </Select>
+                    onChange={(v) => patch({ retry: { ...job.retry!, backoff: (v || 'fixed') as 'fixed' | 'exponential' } })}
+                    options={[{ value: 'fixed', label: 'fixed' }, { value: 'exponential', label: 'exponential' }]}
+                  />
                 </FieldWrap>
                 <FieldWrap>
                   <FieldLabel>{t('nomaflow.editor.retryBaseSeconds')}</FieldLabel>

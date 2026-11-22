@@ -7,17 +7,19 @@
 // raw-values fallback until increment 5 brings their SchemaForm.
 import { useRef, useEffect, useMemo, useState, type ReactNode } from 'react'
 import JobFlow from './JobFlow'
-import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { ChevronDown, ChevronRight, ArrowUp, ArrowDown, Trash2, Copy, Plus } from 'lucide-react'
-import { Input, Select, Button, Checkbox, Tag, StringListEditor, SearchSelect, type SearchSelectOption, PlaceholderPicker } from '../../common'
+import { ChevronDown, ChevronRight, ArrowUp, ArrowDown, Trash2, Copy } from 'lucide-react'
+import { Input, Checkbox, Tag, StringListEditor, SearchSelect, CallableSelect, type SearchSelectOption, PlaceholderPicker } from '../../common'
 import { NOTIFY_STEP_TOKENS } from '../../services/placeholders'
 import { isDirectory, poolSummary, urlParts } from '../../services/poolUrl'
 import { api } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { ConnectorMeta } from '../../types/connectors'
 import type { StepConfig, StepType } from './types'
+import { asOptions, connectorOptions, Field, FieldLabel, Grid, IconBtn, KeyValueEditor, SubHead } from './stepFields'
+import FileLoadForm from './FileLoadForm'
+import { fileSourceSummary } from '../../services/fileLoad'
 
 // ── styled ───────────────────────────────────────────────────────────────────────
 // the job as a flow: the canvas is the workspace, what is picked (a step, or the job at its start) is edited beside it
@@ -35,35 +37,7 @@ const HeadSummary = styled.span`
   font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.muted};
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
 `
-const IconBtn = styled.button`
-  display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px;
-  border: 1px solid ${colors.border}; border-radius: ${radius.sm}; background: transparent;
-  color: ${colors.text.muted}; cursor: pointer; flex-shrink: 0;
-  &:hover:not(:disabled) { color: ${colors.text.primary}; background: ${colors.bg.card}; }
-  &:disabled { opacity: 0.35; cursor: default; }
-`
 const Body = styled.div`padding: 12px; display: flex; flex-direction: column; gap: 12px;`
-const Grid = styled.div`display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;`
-const Field = styled.label<{ $span?: number }>`
-  display: flex; flex-direction: column; gap: 4px;
-  grid-column: ${({ $span }) => ($span ? `span ${$span}` : 'auto')};
-`
-// the same label as every editor's fields (common/Input FieldLabel)
-const FieldLabel = styled.span`font-size: ${fontSize.micro}; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: ${colors.text.muted};`
-const SubHead = styled.div`
-  font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.secondary};
-  text-transform: uppercase; letter-spacing: 0.04em;
-`
-// Grid (not flex) so the key + value columns stay equal width regardless of the value
-// widget's natural size — a Select for a short connector name was shrinking to its
-// content width and pushing all the space onto the key cell. ``minmax(0, 1fr)`` lets
-// long content overflow with text-ellipsis instead of blowing the column wider than 1fr.
-const KvRow = styled.div`
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-  gap: 6px; align-items: center;
-  & > *:not(button) { min-width: 0; width: 100%; }
-`
 const TextArea = styled.textarea`
   width: 100%; min-height: 72px; padding: 8px 10px; resize: vertical;
   border: 1px solid ${colors.border}; border-radius: ${radius.md};
@@ -116,345 +90,13 @@ function stepSummary(s: StepConfig): string {
     case 'ldap_sync': return String(f.server ?? '')
     case 'http': return `${f.method ?? 'GET'} ${f.url ?? ''}`
     case 'call_job': return `→ ${f.target_job_id ?? '?'}`
-    case 'file_load': return `${String(f.path ?? '').split('/').pop() || '?'} → ${ep(f.target)}`
+    case 'file_load': return `${fileSourceSummary(f)} → ${ep(f.target)}`.trim()
     case 'report': return `${String(f.report ?? '')} → ${String(f.format ?? 'xlsx')}${f.as_user ? ` as ${f.as_user}` : f.as_role ? ` as role ${f.as_role}` : ''}`
     case 'notify': return `${((f.recipients as string[] | undefined) ?? []).join(', ') || '?'} · ${String(f.subject ?? '')}`
     case 'file_export': return `${f.connector ?? '?'}.${f.query ?? '?'} → ${String(f.filename || f.query || '?')}.${String(f.format ?? 'xlsx')}`
     default: return ''
   }
 }
-
-// ── predefined key catalog for job-level ``params`` ────────────────────────────────
-// The python steps consume well-known kwargs (apps_id / source_connector / target_connector /
-// target_schema / …) — a typo here breaks the run with a generic "missing argument"
-// downstream. The schema below tells the KeyValueEditor which keys to OFFER from a
-// dropdown when the operator clicks "+ Add param", and how to render the VALUE cell
-// for each (connector picker, schema picker dependent on a sibling key, plain text).
-//
-// "Custom" stays available — the catalog is suggestion, not enforcement.
-export type ParamWidget =
-  | { type: 'text'; placeholder?: string }
-  | { type: 'connector' }                                  // dropdown of all SQL connectors
-  | { type: 'connector_schema'; dependsOn: string }        // dropdown of schemas for sibling key's connector
-  | { type: 'select'; options: string[] }
-
-export interface ParamKeySpec {
-  key: string
-  label: string
-  description?: string
-  widget: ParamWidget
-  /** Native type the value is serialized as. Without this, the editor stringifies
-   *  every value on save and a callable annotated ``int`` receives ``"1"`` — the
-   *  regression that motivated this field. ``'string'`` (the default) preserves
-   *  the historical behaviour. Server-side ``_build_kwargs`` coerces too, so this
-   *  is the cosmetic / disk-shape line of defence. */
-  type?: 'string' | 'int' | 'float' | 'bool'
-}
-
-export const JOB_PARAM_CATALOG: ParamKeySpec[] = [
-  { key: 'apps_id', label: 'apps_id',
-    description: 'Target application id (security-* / database-* / out-* jobs read this).',
-    // Numeric: the python steps annotate ``apps_id: int`` and asyncpg refuses a string
-    // bind value. ``type: 'int'`` makes the editor save an int (not "1") so the disk
-    // shape matches the callable contract. Server-side _build_kwargs coerces too as
-    // a backstop for legacy TOML.
-    type: 'int',
-    widget: { type: 'text', placeholder: 'e.g. 1' } },
-  { key: 'source_connector', label: 'source_connector',
-    description: 'SQL connector the python step reads from.',
-    widget: { type: 'connector' } },
-  { key: 'source_schema', label: 'source_schema',
-    description: 'Schema on the source connector.',
-    widget: { type: 'connector_schema', dependsOn: 'source_connector' } },
-  { key: 'target_connector', label: 'target_connector',
-    description: 'SQL connector the python step writes to.',
-    widget: { type: 'connector' } },
-  { key: 'target_schema', label: 'target_schema',
-    description: 'Schema on the target connector — populated lazily once you pick the connector.',
-    widget: { type: 'connector_schema', dependsOn: 'target_connector' } },
-]
-
-// ── small key/value editor — used by sql_query step params + job-level params ──────
-//
-// ``schema`` is optional. When provided (the job-level Shared params editor passes
-// JOB_PARAM_CATALOG), the "+ Add param" button opens a picker of predefined keys with
-// hints; each predefined value cell renders the right widget (connector dropdown,
-// schema dropdown that follows a sibling, …). When omitted (step-level sql_query
-// params), the editor stays the original flat key/value pair input.
-export function KeyValueEditor({ value, onChange, schema, sqlConnectors }: {
-  value: Record<string, unknown>
-  onChange: (v: Record<string, unknown>) => void
-  /** Predefined param catalog. When set, "+ Add param" opens a picker; values render
-   *  with the matching widget; custom keys stay possible via the "Custom key" option. */
-  schema?: ParamKeySpec[]
-  /** Required when ``schema`` carries connector / connector_schema widgets. */
-  sqlConnectors?: ConnectorMeta[]
-}) {
-  const { t } = useTranslation()
-  const entries = Object.entries(value ?? {})
-  // Value is ``unknown`` (not string) so typed params (int / bool / float) keep their
-  // native type all the way through to onChange. Without this, every edit round-tripped
-  // through String(...) and the next save serialized 1 as "1" — exactly the regression
-  // that broke apps_id.
-  const setEntry = (i: number, k: string, v: unknown) => {
-    const next = entries.map(([ek, ev], idx) => (idx === i ? [k, v] : [ek, ev])) as [string, unknown][]
-    onChange(Object.fromEntries(next))
-  }
-  const removeEntry = (i: number) => onChange(Object.fromEntries(entries.filter((_, idx) => idx !== i)))
-  const addCustom = () => onChange({ ...value, '': '' })
-  const specFor = (key: string): ParamKeySpec | undefined => schema?.find((s) => s.key === key)
-  const addPredefined = (key: string) => {
-    if (key in (value ?? {})) return                     // already present — no-op
-    // Initial value matches the spec's declared type so the first save preserves it
-    // (e.g. apps_id added with no edit lands on disk as null, not "").
-    const spec = specFor(key)
-    const init: unknown = spec?.type === 'bool' ? false : spec?.type ? null : ''
-    onChange({ ...value, [key]: init })
-  }
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      {entries.map(([k, v], i) => (
-        <KvRow key={i}>
-          <Input placeholder="key" value={k}
-            onChange={(e) => setEntry(i, e.target.value, v)}
-            disabled={!!specFor(k)} />
-          <ParamValueCell
-            spec={specFor(k)}
-            value={v}
-            onChange={(nv) => setEntry(i, k, nv)}
-            siblings={value ?? {}}
-            sqlConnectors={sqlConnectors ?? []}
-          />
-          <IconBtn type="button" onClick={() => removeEntry(i)}><Trash2 size={13} /></IconBtn>
-        </KvRow>
-      ))}
-      {schema && schema.length > 0 ? (
-        <ParamAddPicker
-          schema={schema}
-          existing={new Set(Object.keys(value ?? {}))}
-          onPickPredefined={addPredefined}
-          onPickCustom={addCustom}
-        />
-      ) : (
-        <Button type="button" $variant="ghost" $size="sm" onClick={addCustom} style={{ alignSelf: 'flex-start' }}>
-          <Plus size={13} /> {t('nomaflow.steps.addParam')}
-        </Button>
-      )}
-    </div>
-  )
-}
-
-// Renders the right value widget for a predefined param. Plain text fallback when the key
-// isn't in the catalog (operator typed a custom key). The value flows in/out as ``unknown``
-// so typed params (int / float / bool) keep their native type through the round trip —
-// HTML inputs still need a string for display, so we coerce at the boundary here, not
-// in the editor's state.
-function ParamValueCell({
-  spec, value, onChange, siblings, sqlConnectors,
-}: {
-  spec: ParamKeySpec | undefined
-  value: unknown
-  onChange: (v: unknown) => void
-  siblings: Record<string, unknown>
-  sqlConnectors: ConnectorMeta[]
-}) {
-  // Typed cells handle their own input renderer; only string-shaped paths use this.
-  const strValue = value == null ? '' : String(value)
-
-  // Typed inputs — declared on the spec, render the natural widget and emit native types.
-  // ``apps_id: int`` shows as a number input; an empty field saves null so the operator
-  // can't accidentally land "" on disk (asyncpg would then crash with an even worse error).
-  if (spec?.type === 'int' || spec?.type === 'float') {
-    const isInt = spec.type === 'int'
-    return (
-      <Input
-        type="number"
-        step={isInt ? '1' : 'any'}
-        placeholder={spec.widget.type === 'text' ? spec.widget.placeholder ?? 'value' : 'value'}
-        value={strValue}
-        onChange={(e) => {
-          const raw = e.target.value
-          if (raw === '') { onChange(null); return }
-          const n = isInt ? parseInt(raw, 10) : parseFloat(raw)
-          onChange(Number.isFinite(n) ? n : raw)         // fall back to raw so user sees what they typed
-        }}
-      />
-    )
-  }
-  if (spec?.type === 'bool') {
-    return (
-      <Checkbox checked={!!value} onChange={(c) => onChange(c)} label="" />
-    )
-  }
-
-  // Untyped (legacy / custom keys): the string-shaped path.
-  if (!spec) {
-    return <Input placeholder="value" value={strValue} onChange={(e) => onChange(e.target.value)} />
-  }
-  const widget = spec.widget
-  if (widget.type === 'connector') {
-    return (
-      <Select value={strValue} onChange={(e) => onChange(e.target.value)}>
-        <option value="">—</option>
-        {sqlConnectors.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-      </Select>
-    )
-  }
-  if (widget.type === 'connector_schema') {
-    const connector = String(siblings[widget.dependsOn] ?? '')
-    return <SchemaSelect connector={connector || null} value={strValue} onChange={(v) => onChange(v)} />
-  }
-  if (widget.type === 'select') {
-    return (
-      <Select value={strValue} onChange={(e) => onChange(e.target.value)}>
-        <option value="">—</option>
-        {widget.options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
-      </Select>
-    )
-  }
-  return <Input placeholder={widget.placeholder ?? 'value'} value={strValue} onChange={(e) => onChange(e.target.value)} />
-}
-
-// Lazy schema dropdown — fetches schemas for the picked connector once, caches via
-// poolSchema's session cache so picking the same connector twice is free. Falls back to
-// a plain text input if the fetch returns no schemas (SQLite, missing perms, etc.).
-function SchemaSelect({ connector, value, onChange }: {
-  connector: string | null; value: string; onChange: (v: string) => void
-}) {
-  const [schemas, setSchemas] = useState<string[] | null>(null)
-  const [loading, setLoading] = useState(false)
-  useEffect(() => {
-    if (!connector) { setSchemas(null); return }
-    let cancelled = false
-    setLoading(true)
-    import('../../services/poolSchema').then(({ getPoolSchemaNames }) =>
-      getPoolSchemaNames(connector).then((r) => {
-        if (cancelled) return
-        setSchemas(r?.schemas ?? [])
-        setLoading(false)
-      }),
-    )
-    return () => { cancelled = true }
-  }, [connector])
-  if (!connector) {
-    return <Input placeholder="pick connector first" value={value} disabled />
-  }
-  if (loading) {
-    return <Input placeholder="loading schemas…" value={value} disabled />
-  }
-  if (!schemas || schemas.length === 0) {
-    // Schema picker has nothing to offer (SQLite / permissions / connector down) —
-    // fall through to plain text so the operator can still type a value.
-    return <Input placeholder="schema (free text — none discovered)" value={value} onChange={(e) => onChange(e.target.value)} />
-  }
-  return (
-    <Select value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">—</option>
-      {schemas.map((s) => <option key={s} value={s}>{s}</option>)}
-    </Select>
-  )
-}
-
-// "+ Add param" button that opens a popover with the catalog of predefined keys
-// (greyed when already present) + a "Custom key" fallback. Picking a predefined key
-// inserts a row whose value cell renders the right widget; "Custom" inserts a blank
-// row matching the original behaviour.
-//
-// The panel is portaled to document.body with ``position: fixed`` so it escapes the
-// JobEditor's ``<Card>`` stacking context (the Steps section below was painting OVER
-// the popover otherwise — same problem the TagsField hit + solved the same way).
-function ParamAddPicker({
-  schema, existing, onPickPredefined, onPickCustom,
-}: {
-  schema: ParamKeySpec[]
-  existing: Set<string>
-  onPickPredefined: (key: string) => void
-  onPickCustom: () => void
-}) {
-  const { t } = useTranslation()
-  const [open, setOpen] = useState(false)
-  const btnRef = useRef<HTMLButtonElement>(null)
-  const [coords, setCoords] = useState<{ top?: number; bottom?: number; left: number; minWidth: number; maxHeight: number } | null>(null)
-  useEffect(() => {
-    if (!open) { setCoords(null); return }
-    const compute = () => {
-      const r = btnRef.current?.getBoundingClientRect()
-      if (!r) return
-      // Open downward when the panel fits below the button, else upward (the form sits at the
-      // bottom of a scrolling page more often than not); cap the height to the room available.
-      const below = window.innerHeight - r.bottom - 8
-      const above = r.top - 8
-      const wanted = 360
-      const base = { left: r.left, minWidth: Math.max(r.width, 360) }
-      if (below >= Math.min(wanted, above)) setCoords({ ...base, top: r.bottom + 4, maxHeight: Math.min(wanted, below) })
-      else setCoords({ ...base, bottom: window.innerHeight - r.top + 4, maxHeight: Math.min(wanted, above) })
-    }
-    compute()
-    window.addEventListener('resize', compute)
-    // capture:true catches scroll on every ancestor (the JobEditor form is inside a
-    // scrolling container) — bubbling scroll skips non-Window scrollers.
-    window.addEventListener('scroll', compute, true)
-    return () => {
-      window.removeEventListener('resize', compute)
-      window.removeEventListener('scroll', compute, true)
-    }
-  }, [open])
-  return (
-    <div style={{ alignSelf: 'flex-start' }}>
-      <Button ref={btnRef as never} type="button" $variant="ghost" $size="sm" onClick={() => setOpen((v) => !v)}>
-        <Plus size={13} /> {t('nomaflow.steps.addParam')}
-      </Button>
-      {open && coords && createPortal(
-        <>
-          {/* Backdrop swallows outside clicks to close the popover. Sits above the
-              app shell but below the panel itself so clicks on the panel still work. */}
-          <div style={{ position: 'fixed', inset: 0, zIndex: 9998 }} onClick={() => setOpen(false)} />
-          <PickerPanel
-            style={{ top: coords.top, bottom: coords.bottom, left: coords.left, minWidth: coords.minWidth, maxHeight: coords.maxHeight }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {schema.map((s) => {
-              const used = existing.has(s.key)
-              return (
-                <PickerRow key={s.key} type="button" $disabled={used} disabled={used}
-                  onClick={() => { if (!used) { onPickPredefined(s.key); setOpen(false) } }}>
-                  <span className="key">{s.label}{used ? ` · ${t('nomaflow.steps.alreadyAdded')}` : ''}</span>
-                  {s.description && <span className="desc">{s.description}</span>}
-                </PickerRow>
-              )
-            })}
-            <PickerDivider />
-            <PickerRow type="button" onClick={() => { onPickCustom(); setOpen(false) }}>
-              <span className="key">{t('nomaflow.steps.addCustomParam')}</span>
-              <span className="desc">{t('nomaflow.steps.addCustomParamDesc')}</span>
-            </PickerRow>
-          </PickerPanel>
-        </>,
-        document.body,
-      )}
-    </div>
-  )
-}
-
-const PickerPanel = styled.div`
-  position: fixed; z-index: 9999;
-  max-height: 360px; overflow-y: auto;
-  background: ${colors.bg.dropdown ?? colors.bg.input};
-  border: 1px solid ${colors.border}; border-radius: ${radius.md};
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.32);
-  padding: 4px 0;
-`
-const PickerRow = styled.button<{ $disabled?: boolean }>`
-  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
-  width: 100%; padding: 8px 12px; border: 0; background: transparent;
-  cursor: ${({ $disabled }) => ($disabled ? 'default' : 'pointer')};
-  text-align: left; color: ${colors.text.primary};
-  ${({ $disabled }) => ($disabled ? 'opacity: 0.5;' : '')}
-  & .key { font-family: ${fonts.mono}; font-size: ${fontSize.sm}; }
-  & .desc { color: ${colors.text.muted}; font-size: ${fontSize.micro}; }
-  &:hover:not(:disabled) { background: var(--hover-subtle); }
-`
-const PickerDivider = styled.div`height: 1px; background: ${colors.border}; margin: 4px 0;`
 
 // ── per-type forms ─────────────────────────────────────────────────────────────────
 interface FormProps {
@@ -476,10 +118,8 @@ function SqlCopyForm({ step, patch, sqlConnectors }: FormProps) {
       <Grid>
         <Field>
           <FieldLabel>{t('nomaflow.steps.connector')}</FieldLabel>
-          <Select value={String(src.connector ?? '')} onChange={(e) => setEndpoint('source', { connector: e.target.value })}>
-            <option value="">—</option>
-            {sqlConnectors.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-          </Select>
+          <SearchSelect sort clearable value={String(src.connector ?? '')} onChange={(v) => setEndpoint('source', { connector: v })}
+            options={connectorOptions(sqlConnectors)} placeholder="—" />
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.schema')}</FieldLabel>
@@ -494,10 +134,8 @@ function SqlCopyForm({ step, patch, sqlConnectors }: FormProps) {
       <Grid>
         <Field>
           <FieldLabel>{t('nomaflow.steps.connector')}</FieldLabel>
-          <Select value={String(tgt.connector ?? '')} onChange={(e) => setEndpoint('target', { connector: e.target.value })}>
-            <option value="">—</option>
-            {sqlConnectors.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-          </Select>
+          <SearchSelect sort clearable value={String(tgt.connector ?? '')} onChange={(v) => setEndpoint('target', { connector: v })}
+            options={connectorOptions(sqlConnectors)} placeholder="—" />
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.schema')}</FieldLabel>
@@ -512,25 +150,18 @@ function SqlCopyForm({ step, patch, sqlConnectors }: FormProps) {
       <Grid>
         <Field>
           <FieldLabel>{t('nomaflow.steps.mode')}</FieldLabel>
-          <Select value={String(f.mode ?? 'overwrite')} onChange={(e) => patch({ mode: e.target.value } as Partial<StepConfig>)}>
-            <option value="overwrite">overwrite</option>
-            <option value="append">append</option>
-            <option value="upsert">upsert</option>
-          </Select>
+          <SearchSelect value={String(f.mode ?? 'overwrite')} onChange={(v) => patch({ mode: v || 'overwrite' } as Partial<StepConfig>)}
+            options={asOptions(['overwrite', 'append', 'upsert'])} />
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.typeCoercion')}</FieldLabel>
-          <Select value={String(f.type_coercion ?? 'jde')} onChange={(e) => patch({ type_coercion: e.target.value } as Partial<StepConfig>)}>
-            <option value="jde">jde</option>
-            <option value="none">none</option>
-          </Select>
+          <SearchSelect value={String(f.type_coercion ?? 'jde')} onChange={(v) => patch({ type_coercion: v || 'jde' } as Partial<StepConfig>)}
+            options={asOptions(['jde', 'none'])} />
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.decimalMode')}</FieldLabel>
-          <Select value={String(f.decimal_mode ?? 'truncate')} onChange={(e) => patch({ decimal_mode: e.target.value } as Partial<StepConfig>)}>
-            <option value="truncate">truncate</option>
-            <option value="preserve">preserve</option>
-          </Select>
+          <SearchSelect value={String(f.decimal_mode ?? 'truncate')} onChange={(v) => patch({ decimal_mode: v || 'truncate' } as Partial<StepConfig>)}
+            options={asOptions(['truncate', 'preserve'])} />
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.batchSize')}</FieldLabel>
@@ -572,18 +203,14 @@ function SqlQueryForm({ step, patch, sqlConnectors }: FormProps) {
     <Grid>
       <Field>
         <FieldLabel>{t('nomaflow.steps.connector')}</FieldLabel>
-        <Select value={connName} onChange={(e) => patch({ connector: e.target.value } as Partial<StepConfig>)}>
-          <option value="">—</option>
-          {sqlConnectors.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-        </Select>
+        <SearchSelect sort clearable value={connName} onChange={(v) => patch({ connector: v } as Partial<StepConfig>)}
+          options={connectorOptions(sqlConnectors)} placeholder="—" />
       </Field>
       <Field $span={2}>
         <FieldLabel>{t('nomaflow.steps.query')}</FieldLabel>
         {queries.length > 0 ? (
-          <Select value={String(f.query ?? '')} onChange={(e) => patch({ query: e.target.value } as Partial<StepConfig>)}>
-            <option value="">—</option>
-            {queries.map((q) => <option key={q.name} value={q.name}>{q.name}</option>)}
-          </Select>
+          <SearchSelect sort clearable allowCustom value={String(f.query ?? '')} onChange={(v) => patch({ query: v } as Partial<StepConfig>)}
+            options={queries.map((q) => ({ value: q.name, label: q.description || q.label || q.name, mono: q.name }))} placeholder="—" />
         ) : (
           <Input
             value={String(f.query ?? '')}
@@ -607,56 +234,18 @@ function SqlQueryForm({ step, patch, sqlConnectors }: FormProps) {
 // steps in the same job (and across job edits in the same session) reuse
 // the same in-memory list — avoids hammering the backend on every step
 // expansion. ``null`` = not yet fetched; ``[]`` = fetched + empty (no
-// plugins installed). The promise field lets concurrent callers await the
-// same in-flight request instead of firing N parallel ones.
-type CallableDef = { callable: string; module: string; name: string; is_async: boolean; docstring: string | null }
-let _callablesCache: CallableDef[] | null = null
-let _callablesPromise: Promise<CallableDef[]> | null = null
-function loadCallables(): Promise<CallableDef[]> {
-  if (_callablesCache) return Promise.resolve(_callablesCache)
-  if (_callablesPromise) return _callablesPromise
-  _callablesPromise = api.get<{ callables: CallableDef[] }>('/admin/jobs/callables')
-    .then((r) => { _callablesCache = r.callables; return r.callables })
-    .finally(() => { _callablesPromise = null })
-  return _callablesPromise
-}
 
 function PythonForm({ step, patch }: FormProps) {
   const { t } = useTranslation()
   const f = step as Record<string, unknown>
-  // Callable catalog — fetched once at mount, kept in module-level cache for
-  // sibling steps. allowCustom stays on so an operator can type a callable
-  // outside the dropdown (e.g. an internal helper that doesn't follow the
-  // ``j_*`` convention; the validator at run time is the real gate).
-  const [catalog, setCatalog] = useState<CallableDef[]>(_callablesCache ?? [])
-  useEffect(() => {
-    if (_callablesCache) return  // already fetched
-    let cancelled = false
-    loadCallables().then((list) => { if (!cancelled) setCatalog(list) }).catch(() => { /* silent */ })
-    return () => { cancelled = true }
-  }, [])
-  const options = useMemo<SearchSelectOption[]>(
-    () => catalog.map((c) => ({
-      value: c.callable,
-      // Mono = the actual callable string the operator stores.
-      // Label = the docstring's first line (helps disambiguate two j_* with
-      // similar names). Falls back to the callable when no docstring exists.
-      mono: c.callable,
-      label: c.docstring || c.callable,
-    })),
-    [catalog],
-  )
   return (
     <Grid>
       <Field $span={3}>
         <FieldLabel>{t('nomaflow.steps.callable')}</FieldLabel>
-        <SearchSelect sort
+        <CallableSelect
           value={String(f.callable ?? '')}
           onChange={(v) => patch({ callable: v } as Partial<StepConfig>)}
-          options={options}
-          allowCustom
           placeholder={t('nomaflow.steps.callablePlaceholder')}
-          loading={catalog.length === 0 && _callablesPromise !== null}
         />
       </Field>
       <Field $span={3}>
@@ -725,13 +314,11 @@ function LdapSyncForm({ step, patch, sqlConnectors }: FormProps) {
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.targetConnector')}</FieldLabel>
-          <Select
+          <SearchSelect sort clearable
             value={String(f.target_connector ?? '')}
-            onChange={(e) => patch({ target_connector: e.target.value } as Partial<StepConfig>)}
-          >
-            <option value="">—</option>
-            {sqlConnectors.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-          </Select>
+            onChange={(v) => patch({ target_connector: v } as Partial<StepConfig>)}
+            options={connectorOptions(sqlConnectors)} placeholder="—"
+          />
         </Field>
         {text('target_query', t('nomaflow.steps.targetQuery'), 2)}
       </Grid>
@@ -752,9 +339,8 @@ function HttpForm({ step, patch }: FormProps) {
       <Grid>
         <Field>
           <FieldLabel>{t('nomaflow.steps.method')}</FieldLabel>
-          <Select value={String(f.method ?? 'GET')} onChange={(e) => patch({ method: e.target.value } as Partial<StepConfig>)}>
-            {['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].map((m) => <option key={m} value={m}>{m}</option>)}
-          </Select>
+          <SearchSelect value={String(f.method ?? 'GET')} onChange={(v) => patch({ method: v || 'GET' } as Partial<StepConfig>)}
+            options={asOptions(['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])} />
         </Field>
         <Field $span={2}>
           <FieldLabel>{t('nomaflow.steps.url')}</FieldLabel>
@@ -802,25 +388,7 @@ function loadJobIds(): Promise<JobBrief[]> {
   return _jobIdsPromise
 }
 
-/** A comma-separated list typed freely: the text is local state (so a trailing comma survives
- *  the keystroke) and the parsed list goes out on every change. */
-function ListInput({ value, onChange, placeholder, disabled }: { value: string[]; onChange: (v: string[]) => void; placeholder?: string; disabled?: boolean }) {
-  const joined = value.join(', ')
-  const [text, setText] = useState(joined)
-  const [lastValue, setLastValue] = useState(joined)
-  if (joined !== lastValue) {       // changed from outside (another step selected, a reset): resync
-    setLastValue(joined)
-    if (text.split(',').map((s) => s.trim()).filter(Boolean).join(', ') !== joined) setText(joined)
-  }
-  return (
-    <Input value={text} placeholder={placeholder} disabled={disabled}
-      onChange={(e) => { setText(e.target.value); onChange(e.target.value.split(',').map((s) => s.trim()).filter(Boolean)) }} />
-  )
-}
 
-// file_load — a spreadsheet / CSV into a table (liberty/jobs/steps/file_load.py). Path and
-// constants take ${params.x} / ${run.id}; columns map target ← header (or #position); the rest
-// match by name; replace_partition deletes the partitions the load carries, in one transaction.
 /** ``file_export``: a read query → an xlsx / csv file in the run's work area (``notify`` attaches
  *  it), optionally copied to a folder. */
 function FileExportForm({ step, patch, sqlConnectors }: FormProps) {
@@ -879,130 +447,6 @@ function FileExportForm({ step, patch, sqlConnectors }: FormProps) {
         <Field $span={3}>
           <FieldLabel>{t('nomaflow.steps.exportDir')}</FieldLabel>
           <Input value={String(f.export_dir ?? '')} onChange={(e) => set('export_dir', e.target.value || undefined)} placeholder="/data/out/${params.period}" />
-        </Field>
-      </Grid>
-    </>
-  )
-}
-
-function FileLoadForm({ step, patch, sqlConnectors }: FormProps) {
-  const { t } = useTranslation()
-  const f = step as Record<string, unknown>
-  const tgt = (f.target ?? {}) as Record<string, unknown>
-  const setTarget = (part: Record<string, unknown>) => patch({ target: { ...(f.target as object ?? {}), ...part } } as Partial<StepConfig>)
-  const connOpts: SearchSelectOption[] = sqlConnectors.map((c) => ({ value: c.name, label: c.name, mono: c.name }))
-  const modeOpts: SearchSelectOption[] = [
-    { value: 'append', label: t('nomaflow.steps.loadAppend') },
-    { value: 'replace_partition', label: t('nomaflow.steps.loadReplace') },
-  ]
-  const errorOpts: SearchSelectOption[] = [
-    { value: 'fail', label: t('nomaflow.steps.onErrorFail') },
-    { value: 'skip', label: t('nomaflow.steps.onErrorSkip') },
-  ]
-  const strMap = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {})
-  return (
-    <>
-      <SubHead>{t('nomaflow.steps.file')}</SubHead>
-      <Grid>
-        <Field $span={3}>
-          <FieldLabel>{t('nomaflow.steps.path')}</FieldLabel>
-          <Input value={String(f.path ?? '')} onChange={(e) => patch({ path: e.target.value } as Partial<StepConfig>)} placeholder="/data/in/sales-${params.period}.xlsx" />
-        </Field>
-        <Field $span={2}>
-          <FieldLabel>{t('nomaflow.steps.watchDir')}</FieldLabel>
-          <Input value={String(f.watch_dir ?? '')} onChange={(e) => patch({ watch_dir: e.target.value || undefined } as Partial<StepConfig>)} placeholder="/data/in/sales" />
-        </Field>
-        <Field>
-          <FieldLabel>{t('nomaflow.steps.watchPattern')}</FieldLabel>
-          <Input value={String(f.watch_pattern ?? '*')} onChange={(e) => patch({ watch_pattern: e.target.value || '*' } as Partial<StepConfig>)} placeholder="*.xlsx" />
-        </Field>
-        <Field>
-          <FieldLabel>{t('nomaflow.steps.sheet')}</FieldLabel>
-          <Input value={String(f.sheet ?? '')} onChange={(e) => patch({ sheet: e.target.value || undefined } as Partial<StepConfig>)} placeholder={t('nomaflow.steps.sheetPlaceholder')} />
-        </Field>
-        <Field>
-          <FieldLabel>{t('nomaflow.steps.headerRow')}</FieldLabel>
-          <Input type="number" min={1} value={String(f.header_row ?? 1)} onChange={(e) => patch({ header_row: Number(e.target.value) || 1 } as Partial<StepConfig>)} />
-        </Field>
-        <Field>
-          <FieldLabel>{t('nomaflow.steps.delimiter')}</FieldLabel>
-          <Input value={String(f.delimiter ?? '')} onChange={(e) => patch({ delimiter: e.target.value || undefined } as Partial<StepConfig>)} placeholder={t('nomaflow.steps.delimiterPlaceholder')} />
-        </Field>
-        <Field>
-          <FieldLabel>{t('nomaflow.steps.encoding')}</FieldLabel>
-          <Input value={String(f.encoding ?? 'utf-8-sig')} onChange={(e) => patch({ encoding: e.target.value || 'utf-8-sig' } as Partial<StepConfig>)} />
-        </Field>
-        <Field>
-          <FieldLabel>{t('nomaflow.steps.decimalSeparator')}</FieldLabel>
-          <SearchSelect value={String(f.decimal_separator ?? 'auto')} onChange={(v) => patch({ decimal_separator: v || 'auto' } as Partial<StepConfig>)}
-            options={[{ value: 'auto', label: t('nomaflow.steps.decimalAuto') }, { value: '.', label: t('nomaflow.steps.decimalDot') }, { value: ',', label: t('nomaflow.steps.decimalComma') }]} />
-        </Field>
-      </Grid>
-      <SubHead>{t('nomaflow.steps.target')}</SubHead>
-      <Grid>
-        <Field>
-          <FieldLabel>{t('nomaflow.steps.connector')}</FieldLabel>
-          <SearchSelect sort value={String(tgt.connector ?? '')} onChange={(v) => setTarget({ connector: v })} options={connOpts} placeholder="—" />
-        </Field>
-        <Field>
-          <FieldLabel>{t('nomaflow.steps.schema')}</FieldLabel>
-          <Input value={String(tgt.schema ?? '')} onChange={(e) => setTarget({ schema: e.target.value })} />
-        </Field>
-        <Field>
-          <FieldLabel>{t('nomaflow.steps.table')}</FieldLabel>
-          <Input value={String(tgt.table ?? '')} onChange={(e) => setTarget({ table: e.target.value })} />
-        </Field>
-        <Field $span={3}>
-          <FieldLabel>{t('nomaflow.steps.columnsMap')}</FieldLabel>
-          <KeyValueEditor value={strMap(f.columns)} onChange={(v) => patch({ columns: v } as Partial<StepConfig>)} />
-        </Field>
-        <Field $span={3}>
-          <FieldLabel>{t('nomaflow.steps.constants')}</FieldLabel>
-          <KeyValueEditor value={strMap(f.constants)} onChange={(v) => patch({ constants: v } as Partial<StepConfig>)} />
-        </Field>
-      </Grid>
-      <SubHead>{t('nomaflow.steps.options')}</SubHead>
-      <Grid>
-        <Field>
-          <FieldLabel>{t('nomaflow.steps.loadMode')}</FieldLabel>
-          <SearchSelect value={String(f.load_mode ?? 'append')} onChange={(v) => patch({ load_mode: v } as Partial<StepConfig>)} options={modeOpts} />
-        </Field>
-        <Field>
-          <FieldLabel>{t('nomaflow.steps.partitionBy')}</FieldLabel>
-          <ListInput value={Array.isArray(f.partition_by) ? (f.partition_by as string[]) : []}
-            onChange={(v) => patch({ partition_by: v } as Partial<StepConfig>)}
-            placeholder="period, company" disabled={f.load_mode !== 'replace_partition'} />
-        </Field>
-        <Field>
-          <FieldLabel>{t('nomaflow.steps.onError')}</FieldLabel>
-          <SearchSelect value={String(f.on_error ?? 'fail')} onChange={(v) => patch({ on_error: v } as Partial<StepConfig>)} options={errorOpts} />
-        </Field>
-        <Field>
-          <FieldLabel>{t('nomaflow.steps.batchSize')}</FieldLabel>
-          <Input type="number" min={1} value={String(f.batch_size ?? 10000)} onChange={(e) => patch({ batch_size: Number(e.target.value) || 10000 } as Partial<StepConfig>)} />
-        </Field>
-      </Grid>
-      <SubHead>{t('nomaflow.steps.guards')}</SubHead>
-      <Grid>
-        <Field $span={2}>
-          <FieldLabel>{t('nomaflow.steps.refuseQuery')}</FieldLabel>
-          <Input value={String(f.refuse_query ?? '')} onChange={(e) => patch({ refuse_query: e.target.value || undefined } as Partial<StepConfig>)} placeholder="period_closed_get" />
-        </Field>
-        <Field>
-          <FieldLabel>{t('nomaflow.steps.refuseConnector')}</FieldLabel>
-          <SearchSelect sort value={String(f.refuse_connector ?? '')} onChange={(v) => patch({ refuse_connector: v || undefined } as Partial<StepConfig>)} options={connOpts} anyLabel={t('nomaflow.steps.refuseConnectorTarget')} />
-        </Field>
-        <Field>
-          <FieldLabel>{t('nomaflow.steps.controlColumn')}</FieldLabel>
-          <Input value={String(f.control_column ?? '')} onChange={(e) => patch({ control_column: e.target.value || undefined } as Partial<StepConfig>)} placeholder="revenue" />
-        </Field>
-        <Field>
-          <FieldLabel>{t('nomaflow.steps.controlTotal')}</FieldLabel>
-          <Input value={String(f.control_total ?? '')} onChange={(e) => patch({ control_total: e.target.value || undefined } as Partial<StepConfig>)} placeholder="${params.total}  |  @Totals!B2" />
-        </Field>
-        <Field>
-          <FieldLabel>{t('nomaflow.steps.controlTolerance')}</FieldLabel>
-          <Input type="number" min={0} step="0.01" value={String(f.control_tolerance ?? 0)} onChange={(e) => patch({ control_tolerance: Number(e.target.value) || 0 } as Partial<StepConfig>)} />
         </Field>
       </Grid>
     </>

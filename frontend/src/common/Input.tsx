@@ -24,10 +24,7 @@ export const Input = styled.input`
   &:read-only { background: var(--bg-readonly); color: ${colors.text.muted}; }
 `
 
-export const Select = styled.select`
-  ${fieldBase}
-  cursor: pointer;
-`
+// No native <select> here on purpose: every dropdown is the shared SearchSelect (search, theme, portal).
 
 export const Textarea = styled.textarea`
   ${fieldBase}

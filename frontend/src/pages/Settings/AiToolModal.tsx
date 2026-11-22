@@ -1,15 +1,13 @@
 // One tool of ai.toml: an id (new ones only; the model sees it as `<app>_<id>`), the plugin
 // function it calls, the description the model picks it by, and the permission it needs.
-import { useEffect, useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api } from '../../api/client'
-import { Field, Input, SearchSelect, Textarea, type SearchSelectOption } from '../../common'
+import { CallableSelect, Field, Input, Textarea } from '../../common'
 import { EditorModalShell } from '../../common/EditorModalShell'
 import type { AiToolBody } from '../../types/config'
 import { colors, fontSize } from '../../theme'
 import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
-interface PluginCallable { callable: string; docstring: string | null }
 
 export function AiToolModal({ app, initial, takenIds, onSave, onClose }: {
   app: string
@@ -24,12 +22,6 @@ export function AiToolModal({ app, initial, takenIds, onSave, onClose }: {
   const [callable, setCallable] = useState(initial?.callable ?? '')
   const [description, setDescription] = useState(initial?.description ?? '')
   const [permission, setPermission] = useState(initial?.permission ?? '')
-  const [callables, setCallables] = useState<PluginCallable[]>([])
-  useEffect(() => {
-    // The picker only suggests: the server refuses a function that is not a plugin entry point.
-    api.get<{ callables: PluginCallable[] }>('/api/plugins/callables').then((r) => setCallables(r.callables)).catch(() => setCallables([]))
-  }, [])
-  const options = useMemo<SearchSelectOption[]>(() => callables.map((c) => ({ value: c.callable, label: c.docstring || c.callable, mono: c.callable })), [callables])
   const idOk = !!initial || (/^[a-z][a-z0-9_]{0,40}$/.test(id) && !takenIds.includes(id))
   const callableOk = /^[A-Za-z_][\w.]*:[A-Za-z_]\w*$/.test(callable)
   const dirty = initial
@@ -49,7 +41,7 @@ export function AiToolModal({ app, initial, takenIds, onSave, onClose }: {
           </Field>
         )}
         <Field label={t('settings.ai.toolCallable')}>
-          <SearchSelect sort allowCustom value={callable} onChange={setCallable} options={options} placeholder="module:j_function" />
+          <CallableSelect value={callable} onChange={setCallable} />
           <span style={{ color: colors.text.muted, fontSize: fontSize.micro }}>{t('settings.ai.toolCallableHint')}</span>
         </Field>
         <Field label={t('settings.ai.toolDescription')}>

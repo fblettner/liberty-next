@@ -27,14 +27,15 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import {
   Boxes, ChevronDown, ChevronRight, CornerDownLeft, Edit3, ExternalLink, FileText, GitBranch, LayoutList, Layers,
-  Link2, Plus, Repeat, Trash2, Zap,
+  Bell, Link2, Plus, Repeat, Trash2, Zap,
 } from 'lucide-react'
 import {
-  Button, Field, Row, SchemaForm, SearchSelect, Stack, useModals,
+  Button, CallableSelect, Field, Row, SchemaForm, SearchSelect, Stack, useModals,
   type JsonSchema, type SearchSelectOption,
 } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { api } from '../../api/client'
+import { actionRules, type ActionRule, type RuleRecord } from '../../services/notificationRules'
 import type { ScreenDetail } from '../../types/screens'
 import type { Column } from '../../types/connectors'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -127,6 +128,7 @@ function variantIcon(type: ActionType): ReactNode {
     case 'call_api': return <Layers size={13} />
     case 'call_plugin': return <Boxes size={13} />
     case 'call_action': return <Link2 size={13} />
+    case 'send_notification': return <Bell size={13} />
     case 'navigate': return <CornerDownLeft size={13} />
     case 'open_url': return <ExternalLink size={13} />
     case 'if': return <GitBranch size={13} />
@@ -194,6 +196,10 @@ function summarize(a: Row): string {
   if (t === 'notify') {
     const tone = a.tone ?? 'info'
     return `[${tone}] ${a.message ?? ''}`
+  }
+  if (t === 'send_notification') {
+    const binds = Array.isArray(a.param_binds) ? a.param_binds.length : 0
+    return `✉ ${a.rule || '?'}${binds ? ` · ${binds} bind${binds === 1 ? '' : 's'}` : ''}`
   }
   if (t === 'confirm') return `? ${a.message ?? ''}`
   if (t === 'set_field') return `→ ${a.target ?? '?'}`
@@ -270,25 +276,6 @@ export default function ActionTreeView({
     () => (wsConnectors ?? []).filter((c) => c.type === 'api').map((c) => ({ value: c.name, label: c.name, mono: c.name })),
     [wsConnectors],
   )
-  // Plugin callables for the ``call_plugin`` picker — the discovered ``j_*`` catalog (same one the
-  // Job Designer reads), fetched once. ``allowCustom`` on the picker lets the operator type a
-  // callable the AST walk didn't surface. Best-effort: a failure just leaves the dropdown empty.
-  const [pluginCallableOptions, setPluginCallableOptions] = useState<SearchSelectOption[]>([])
-  const [pluginCallablesLoading, setPluginCallablesLoading] = useState(false)
-  useEffect(() => {
-    let cancelled = false
-    setPluginCallablesLoading(true)
-    api.get<{ callables: { callable: string; module: string; name: string; docstring: string | null }[] }>('/api/plugins/callables')
-      .then((r) => {
-        if (cancelled) return
-        setPluginCallableOptions((r.callables ?? []).map((c) => ({
-          value: c.callable, label: c.docstring || c.callable, mono: c.callable,
-        })))
-      })
-      .catch(() => { /* leave empty; picker stays freeform */ })
-      .finally(() => { if (!cancelled) setPluginCallablesLoading(false) })
-    return () => { cancelled = true }
-  }, [])
   // Shared actions for the ``call_action`` ref picker + the per-ref declared params (so the bind
   // editor offers the action's INPUT names as bind targets). actions.toml, via /api/actions.
   const [sharedActionOptions, setSharedActionOptions] = useState<SearchSelectOption[]>([])
@@ -666,6 +653,23 @@ export default function ActionTreeView({
     onPathChange([...path, { field, i: existingNested.length }])
   }
 
+  // The notification rules a ``send_notification`` step may send: the rules of notifications.toml
+  // whose trigger is "action" (the server answers "not found" for any other), with the names each
+  // one's texts wait for — offered as the bind targets.
+  const [notifyRules, setNotifyRules] = useState<ActionRule[]>([])
+  const [notifyRulesLoaded, setNotifyRulesLoaded] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    api.get<{ notifications?: Record<string, RuleRecord> }>('/admin/config/notifications/parsed')
+      .then((r) => { if (!cancelled) setNotifyRules(actionRules(r.notifications)) })
+      .catch(() => { /* leave empty; the picker stays freeform */ })
+      .finally(() => { if (!cancelled) setNotifyRulesLoaded(true) })
+    return () => { cancelled = true }
+  }, [])
+  const notifyRuleOptions = useMemo<SearchSelectOption[]>(() => notifyRules.map((r) => ({
+    value: r.id, label: r.enabled ? r.label : t('settings.screens.action.notifyRuleOff', { label: r.label }), mono: r.id,
+  })), [notifyRules, t])
+
   // ── connector + target dropdowns for the three ParamBind-bearing variants ──────────────
   // Same logic as ``ActionListEditor.renderActionOverrides``; lifted here to avoid an extra
   // shared module (the function is ~40 LOC, copying is simpler than restructuring).
@@ -685,17 +689,39 @@ export default function ActionTreeView({
         </Field>
       )
     }
+    // send_notification: the rule to send. Channels and recipients are the rule's own.
+    if (aType === 'send_notification') {
+      const picked = String(a.rule ?? '')
+      const known = notifyRules.find((r) => r.id === picked)
+      return (
+        <div data-notify-rule>
+          <Field label={t('settings.screens.action.notifyRule')}>
+            <SearchSelect sort
+              value={picked}
+              options={notifyRuleOptions}
+              onChange={(v) => onPatch({ rule: v || '' })}
+              allowCustom
+              placeholder={t('settings.screens.action.notifyRulePick')}
+              loading={!notifyRulesLoaded}
+            />
+          </Field>
+          <Sub>
+            {notifyRulesLoaded && !notifyRules.length ? t('settings.screens.action.notifyRuleNone')
+              : picked && notifyRulesLoaded && !known ? t('settings.screens.action.notifyRuleUnknown', { rule: picked })
+              : known && !known.enabled ? t('settings.screens.action.notifyRuleDisabled')
+              : t('settings.screens.action.notifyRuleHint')}
+          </Sub>
+        </div>
+      )
+    }
     // call_plugin: a single ``callable`` picker (module:function) — no connector / query target.
     if (aType === 'call_plugin') {
       return (
         <Field label={t('settings.screens.action.callable')}>
-          <SearchSelect sort
+          <CallableSelect
             value={(a.callable as string | undefined) ?? ''}
-            options={pluginCallableOptions}
             onChange={(v) => onPatch({ callable: v || '' })}
-            allowCustom
             placeholder={t('settings.screens.action.callablePick')}
-            loading={pluginCallablesLoading}
           />
         </Field>
       )
@@ -1205,10 +1231,10 @@ export default function ActionTreeView({
             source field is the same chain-context autocomplete the Condition / LoopAction
             source fields use. ``param_binds`` is stripped from the variant SchemaForm via
             ACTION_OVERRIDE_KEYS so this is the single editing surface for binds. */}
-        {(sType === 'run_query' || sType === 'call_api' || sType === 'call_plugin' || sType === 'call_action' || sType === 'navigate') && (
+        {(sType === 'run_query' || sType === 'call_api' || sType === 'call_plugin' || sType === 'call_action' || sType === 'navigate' || sType === 'send_notification') && (
           <Stack gap={6}>
-            <SubHead>{t('settings.screens.paramBinds.heading')}</SubHead>
-            <Sub>{t('settings.screens.paramBinds.hint')}</Sub>
+            <SubHead>{t(sType === 'send_notification' ? 'settings.screens.action.notifyValues' : 'settings.screens.paramBinds.heading')}</SubHead>
+            <Sub>{t(sType === 'send_notification' ? 'settings.screens.action.notifyValuesHint' : 'settings.screens.paramBinds.hint')}</Sub>
             {/* ``paramOptions`` (target / left column) = the **destination** query / endpoint's
                 columns:
                   · declared ``params`` + scanned ``:bind_params`` (from the catalog), and
@@ -1227,9 +1253,11 @@ export default function ActionTreeView({
               sourceOptions={sourceOptions}
               paramOptions={sType === 'call_plugin' ? []
                 : sType === 'call_action' ? (sharedActionParams[String(selected.ref ?? '')] ?? [])
+                : sType === 'send_notification' ? (notifyRules.find((r) => r.id === String(selected.rule ?? ''))?.placeholders ?? []).map((n) => ({ value: n, label: n, mono: n }))
                 : mergeCandidates(selectedDeclaredParamOptions, targetScreenColumnOptions)}
               paramPlaceholder={sType === 'call_plugin' ? t('settings.screens.action.kwarg')
-                : sType === 'call_action' ? t('settings.screens.action.inputName') : undefined}
+                : sType === 'call_action' ? t('settings.screens.action.inputName')
+                : sType === 'send_notification' ? t('settings.screens.action.notifyValueName') : undefined}
             />
           </Stack>
         )}

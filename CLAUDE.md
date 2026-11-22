@@ -315,7 +315,7 @@ api/client.ts          fetch wrapper: X-Liberty-Lang / X-Liberty-Pool headers, s
 auth/ workspace/ tabs/ sio/ branding/   the contexts (tabs/dirtyGuard.ts = unsaved changes known to the shell: a page says `useDirtyGuard(dirty)`,
                        closing a tab / all tabs, the language switch and the browser's reload ask first; a dirty tab is never closed by single-tab mode or the cap — `tabs/openTab.ts`, tested — and the tab strip marks it; AuthContext, WorkspaceContext = connectors +
                        menus + screens + license + current app / pool, TabsContext, SioContext)
-common/                shared primitives: Button Card Input SearchSelect Checkbox FileInput Tag Banner Spinner
+common/                shared primitives: Button Card Input SearchSelect (a list of code + description lines is ordered on the CODE: services/options.ts) CallableSelect (THE picker of an application's function, grouped by application / module: services/callables.ts, tested) Checkbox FileInput Tag Banner Spinner
                        PageLayout HeaderActions (a page's Save / Discard placed in the page header) Modal Modals(useModals) ErrorDetails ErrorBoundary SchemaForm
                        SchemaNavigator SubNav EditorModalShell LocalizedTexts (a record's texts in the other languages — its `l` table —
                        under the field itself; logic in services/localized.ts, tested) DateRangeFilter (presets + two-month
@@ -352,7 +352,7 @@ pages/Settings/        one *Builder per config section + the Visual Designer (Sc
                        services/themeDraft.ts, tested), TechnicalDashboard,
                        Package / ChangePackages / IntegrityBuilder (reached from nomaflow pages)
 pages/Nomaflow/        JobsList, JobEditor (+ UserParamsEditor: what a user may set when starting the job — services/jobParams.ts, tested),
-                       StepEditor, RunDetail, Schedule, RetentionPanel
+                       StepEditor (the step forms; what they share — field grid, Hint, name = value rows, schema picker — is stepFields.tsx; a form in its own file imports from there: FileLoadForm.tsx, its logic in services/fileLoad.ts, tested), RunDetail, Schedule, RetentionPanel
 pages/Explorer/        the Data Explorer page: index (model, the AnalysisDefinition, runs, drill, views), FieldsPane
                        (+ calculated fields), Shelves (rows / measures / filters chips), PeriodBar, ResultTable, PivotView,
                        ChartView (bar / line / pie via TableView/ChartCanvas, KPI), CalcModal (Test before Save),
