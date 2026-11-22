@@ -13,7 +13,7 @@
   false`, où la page ouverte la remplaçait) et quand le nombre maximum d'onglets est atteint (c'est le plus
   ancien onglet sans modification en attente qui se ferme). **Un onglet qui contient des modifications non
   enregistrées porte un point orange** : on voit où revenir. **L'éditeur de traitement est lui aussi un
-  onglet** (un par traitement modifié, *Traitement · <id>*) : aller à la liste et revenir conserve ce qui a été
+  onglet** (un par traitement modifié, *Tâche · <id>*) : aller à la liste et revenir conserve ce qui a été
   saisi, et son bouton *Retour* demande avant d'abandonner des modifications non enregistrées (il les perdait
   sans prévenir). Rien n'est demandé quand rien n'est en attente.
 - **Une page fournie par une application dit à l'assistant ce que l'utilisateur regarde** — le contrat des
