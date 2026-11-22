@@ -147,8 +147,8 @@ def test_report_content_carries_overrides() -> None:
     c = ReportContent(
         markdown="# x",
         landscape_svg="<svg/>",
-        title="Audit Gerflor",
-        filename_base="audit-gerflor",
+        title="Audit Globex",
+        filename_base="audit-Globex",
         pdf_options={"subtitle": "v1", "primary_color": "#0b3a82"},
     )
     assert c.landscape_svg == "<svg/>"

@@ -66,13 +66,17 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
   const mark = <T,>(set: (v: T) => void) => (v: T) => { set(v); setDirty(true) }
 
   const effConnector = connector || app
-  const sqlConns = useMemo(() => (connectors ?? []).filter((c) => c.type === 'sql'), [connectors])
-  const connectorOpts = useMemo<SearchSelectOption[]>(() => sqlConns.map((c) => ({ value: c.name, label: c.name })), [sqlConns])
+  // An entity reads a query of a SQL connector — or an endpoint with rows of an API connector (read once,
+  // then filtered and grouped by the engine): the API connectors that have such an endpoint are offered too.
+  const sources = useMemo(() => (connectors ?? []).filter((c) => c.type === 'sql' || (c.type === 'api' && c.endpoints.some((e) => e.rows_field))), [connectors])
+  const connectorOpts = useMemo<SearchSelectOption[]>(() => sources.map((c) => ({ value: c.name, label: c.type === 'api' ? `${c.name} (API)` : c.name })), [sources])
+  const source = sources.find((x) => x.name === effConnector)
+  const onApi = source?.type === 'api'
   const queryOpts = useMemo<SearchSelectOption[]>(() => {
-    const c = sqlConns.find((x) => x.name === effConnector)
-    if (!c || c.type !== 'sql') return []
-    return c.queries.filter((q) => q.statement_type === 'SELECT').map((q) => ({ value: q.name, label: q.label || q.name, mono: q.name }))
-  }, [sqlConns, effConnector])
+    if (!source) return []
+    if (source.type === 'api') return source.endpoints.filter((e) => e.rows_field).map((e) => ({ value: e.name, label: e.label || e.name, mono: e.name }))
+    return source.type === 'sql' ? source.queries.filter((q) => q.statement_type === 'SELECT').map((q) => ({ value: q.name, label: q.label || q.name, mono: q.name })) : []
+  }, [source])
   const screenOpts = useMemo<SearchSelectOption[]>(() => {
     const list = screens?.[app] ?? []
     const matching = list.filter((s) => s.read_query === query && s.connector === effConnector)
@@ -87,10 +91,11 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
     if (!query && !table) { setColumns(null); return }
     let cancelled = false
     setDiscovering(true); setError(null)
-    const fetchCols: Promise<DiscoveredColumn[]> = query
+    // a query runs for one row; a table and an endpoint with rows are described by the model's own discovery
+    const fetchCols: Promise<DiscoveredColumn[]> = query && !onApi
       ? api.get<QueryResult>(`/api/sql/${encodeURIComponent(effConnector)}/${encodeURIComponent(query)}?_limit=1`)
         .then((r) => r.columns.map((c) => ({ name: c.name.toUpperCase(), type: c.type ?? null, label: c.label, key: c.key, hidden: c.hidden, format: c.format })))
-      : api.post<{ columns: { name: string; type: string; label?: string; hidden?: boolean; format?: string }[]; error: string | null }>('/admin/explorer/describe-entity', { app, entity: { table, schema: initial?.schema, connector: connector || undefined, screen: screen || undefined } })
+      : api.post<{ columns: { name: string; type: string; label?: string; hidden?: boolean; format?: string }[]; error: string | null }>('/admin/explorer/describe-entity', { app, entity: { ...(onApi ? { query } : { table, schema: initial?.schema }), connector: connector || undefined, screen: screen || undefined } })
         .then((r) => { if (r.error) throw new Error(r.error); return r.columns.map((c) => ({ name: c.name.toUpperCase(), type: c.type, label: c.label, hidden: c.hidden, format: c.format })) })
     fetchCols
       .then((cols) => {
@@ -106,7 +111,7 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
       .finally(() => { if (!cancelled) setDiscovering(false) })
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the key pre-fill reads the state once, on discovery
-  }, [effConnector, query, table, app, connector, screen])
+  }, [effConnector, query, table, app, connector, screen, onApi])
 
   const colNames = useMemo(() => new Set((columns ?? []).map((c) => c.name)), [columns])
   // Columns referenced by the record but absent from the discovered list (a renamed query) stay

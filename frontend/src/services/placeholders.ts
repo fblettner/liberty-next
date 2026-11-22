@@ -24,4 +24,5 @@ export const SCREEN_EVENT_TOKENS: Placeholder[] = [
 /** The notify step's fields. */
 export const NOTIFY_STEP_TOKENS: Placeholder[] = [
   { name: 'JOB', label: 'Job id' }, { name: 'RUN_ID', label: 'Run id' }, { name: 'FILES', label: 'The attached file names' }, { name: 'DATE', label: "Today's date" },
+  { name: 'USER', label: 'Who started the run' },
 ]

@@ -18,6 +18,12 @@
   it as its usual chip, sends it with each question while that page is on screen, and picks the starters the
   application declares for the page (`[ai.<app>.screens.<page>]` in `ai.toml`). So "where is this used?" needs
   no name on a page any more than on a screen.
+- **Found by the documentation review, fixed.** The endpoint setting `empty_on` (the refusals that mean "no
+  rows") is edited in the endpoint editor, with the other row settings. An Explorer entity on an API endpoint
+  with rows is picked in the entity form (the API connectors that have one are listed beside the SQL ones).
+  The Studio no longer says "nothing opens" of a screen an Explorer entity opens. The Authentication card of an
+  API connector names *Each user as himself* and says when its signing key is missing; `{USER}` is in the
+  notify step's list of placeholders.
 - **Integrity: a screen an Explorer entity opens is not an orphan.** An Explorer entity that names a screen
   opens a detail row in that screen's dialog: the screen is reached even when no menu leads to it.
 - **A page an application ships: a row of its grid can be opened** — the page contract (version 3) gives `Grid`

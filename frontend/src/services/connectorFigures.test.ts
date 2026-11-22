@@ -52,6 +52,8 @@ describe('what an API connector says', () => {
     expect(apiFigures({ auth_type: 'oauth2' }).authMissing).toBe('tokenEndpoint')
     expect(apiFigures({ auth_type: 'bearer' }).authMissing).toBe('token')
     expect(apiFigures({ auth_type: 'bearer', auth_token_endpoint: '/token' }).authMissing).toBe('')
+    expect(apiFigures({ auth_type: 'user_jwt' }).authMissing).toBe('key')
+    expect(apiFigures({ auth_type: 'user_jwt', auth_jwt_key: '/etc/liberty/jde.key' })).toMatchObject({ auth: 'user_jwt', authMissing: '' })
     expect(apiFigures({}).auth).toBe('none')
     expect(apiFigures({}).host).toBe('')
   })

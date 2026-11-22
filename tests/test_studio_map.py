@@ -122,5 +122,10 @@ def test_the_map_of_an_application(env) -> None:
         home = client.get("/admin/studio/overview", headers=h).json()
         assert home["apps"] == [{"app": "main", "screens": 3, "forms": 1, "menu": 2, "data": 4, "services": 1, "dashboards": 0,
                                  "unreached": 1, "unused": 1, "missing": 0}]
+        # a screen an Explorer entity names opens its detail rows: reached, as Integrity counts it
+        from types import SimpleNamespace as NS
+        client.app.state.explorer = NS(explorer={"main": {"m": NS(entities={"e": NS(screen="lost"), "f": NS(screen=None)})}})
+        again = {s["id"]: s for s in client.get("/admin/studio/map?app=main", headers=h).json()["screens"]}
+        assert again["lost"]["reached"] is True and again["lost"]["in_menu"] is False
         # an unknown application: the first one
         assert client.get("/admin/studio/map?app=nope", headers=h).json()["app"] == "main"

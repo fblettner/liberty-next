@@ -235,8 +235,11 @@ async def studio_map(request: Request, _: Superuser, app: str | None = None) -> 
                         "calls": list(dict.fromkeys(c for c in calls if c)), "services": list(dict.fromkeys(services)),
                         "nested": [n for n in dict.fromkeys(nested) if n], "form": getattr(sc, "dialog", None) is not None,
                         "read_only": bool(getattr(sc, "read_only", False)), "in_menu": sid in in_menu})
+    # a screen an Explorer entity names opens its detail rows: reached too (the rule Integrity applies)
+    explored = {entity.screen for model in ((getattr(getattr(state, "explorer", None), "explorer", None) or {}).get(app) or {}).values()
+                for entity in (getattr(model, "entities", None) or {}).values() if getattr(entity, "screen", None)}
     for sc in screens:                                 # a screen opened inside another's form is reached, menu entry or not
-        sc["reached"] = sc["in_menu"] or sc["id"] in nested_in
+        sc["reached"] = sc["in_menu"] or sc["id"] in nested_in or sc["id"] in explored
 
     # ── the application's own data nothing here reads (its connector's queries / endpoints) ──
     own = config(app)

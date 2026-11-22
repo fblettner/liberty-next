@@ -22,6 +22,13 @@
   page est à l'écran, et propose les questions de départ que l'application déclare pour la page
   (`[ai.<app>.screens.<page>]` dans `ai.toml`). « Où est-ce utilisé ? » n'a donc plus besoin de nom sur une
   page, pas plus que sur un écran.
+- **Relevé par la relecture de la documentation, corrigé.** Le réglage `empty_on` d'un point d'accès (les refus
+  qui signifient « aucune ligne ») se saisit dans l'éditeur de point d'accès, avec les autres réglages des
+  lignes. Une entité de l'Explorateur sur un point d'accès API avec lignes se choisit dans le formulaire de
+  l'entité (les connecteurs API qui en ont un sont proposés à côté des connecteurs SQL). Le Studio ne dit plus
+  « rien ne l'ouvre » d'un écran qu'une entité de l'Explorateur ouvre. La carte Authentification d'un
+  connecteur API nomme *Chaque utilisateur sous son nom* et signale l'absence de clé de signature ; `{USER}`
+  figure dans la liste des marqueurs de l'étape de notification.
 - **Intégrité : un écran qu'une entité de l'Explorateur ouvre n'est pas orphelin.** Une entité de
   l'Explorateur qui nomme un écran ouvre une ligne de détail dans la fenêtre de cet écran : l'écran est atteint
   même quand aucun menu n'y mène.

@@ -67,6 +67,8 @@ export type Endpoint = {
   row_map?: Record<string, string> | null
   labels_field?: string | null
   more_field?: string | null
+  /** The server's refusals that mean "no rows" (part of its error, or its HTTP status). */
+  empty_on?: string[] | null
   limit_param?: string | null
   skip_blank_query?: boolean
   callable?: string | null
@@ -1280,6 +1282,22 @@ export function EndpointEditor({ value, onChange, sourceLabel, onRefresh, onModi
               onChange={(e) => set({ more_field: e.target.value || undefined })}
               placeholder="data.hasMore"
               title={t('settings.api.endpoint.moreFieldHint')}
+            />
+          </FieldRow>
+          <FieldRow>
+            <label title={t('settings.api.endpoint.emptyOnHint')}>{t('settings.api.endpoint.emptyOn')}</label>
+            <Input
+              value={(value.empty_on ?? []).join(', ')}
+              onChange={(e) => {
+                const list = e.target.value.split(',').map((x) => x.trimStart())
+                set({ empty_on: list.some((x) => x.trim()) ? list.filter((x, k) => x.trim() || k === list.length - 1) : undefined })
+              }}
+              onBlur={() => {
+                const clean = (value.empty_on ?? []).map((x) => x.trim()).filter((x) => x)
+                set({ empty_on: clean.length ? clean : undefined })
+              }}
+              placeholder="404, no active users"
+              title={t('settings.api.endpoint.emptyOnHint')}
             />
           </FieldRow>
         </>

@@ -489,7 +489,7 @@ def test_resolve_query_options_maps_value_label_case_insensitively():
 
     payload = {
         "columns": [{"name": "apps_id"}, {"name": "apps_name"}],
-        "rows": [{"apps_id": 10, "apps_name": "Gerflor"}, {"apps_id": 20, "apps_name": "ACME"}],
+        "rows": [{"apps_id": 10, "apps_name": "Globex"}, {"apps_id": 20, "apps_name": "ACME"}],
     }
 
     class _Result:
@@ -529,4 +529,4 @@ def test_resolve_query_options_maps_value_label_case_insensitively():
     opts = asyncio.run(
         reports_mod._resolve_options(param, report, _Registry(), {"target_connector": "nomasx1"})
     )
-    assert [(o.value, o.label) for o in opts] == [("10", "Gerflor"), ("20", "ACME")]
+    assert [(o.value, o.label) for o in opts] == [("10", "Globex"), ("20", "ACME")]

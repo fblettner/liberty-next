@@ -88,7 +88,7 @@ export interface ApiFigures {
   host: string
   auth: string
   /** what the chosen authentication still lacks: 'username' | 'token' | 'tokenEndpoint' | '' */
-  authMissing: '' | 'username' | 'token' | 'tokenEndpoint'
+  authMissing: '' | 'username' | 'token' | 'tokenEndpoint' | 'key'
   pool: string
   /** the other environments that have their own server */
   targets: number
@@ -104,7 +104,8 @@ export function apiFigures(conn: Row | undefined): ApiFigures {
   const has = (k: string) => text(c[k]).trim() !== ''
   const authMissing = auth === 'basic' && !has('auth_username') ? 'username'
     : auth === 'oauth2' && !has('auth_token_endpoint') ? 'tokenEndpoint'
-      : (auth === 'bearer' || auth === 'api_key') && !has('auth_token') && !has('auth_token_endpoint') ? 'token' : ''
+      : (auth === 'bearer' || auth === 'api_key') && !has('auth_token') && !has('auth_token_endpoint') ? 'token'
+        : auth === 'user_jwt' && !has('auth_jwt_key') ? 'key' : ''                 // each call as the signed-in user: the key that signs
   const eps = Array.isArray(c.endpoints) ? (c.endpoints as Row[]) : []
   const targets = c.targets && typeof c.targets === 'object' && !Array.isArray(c.targets) ? Object.keys(c.targets as object).length : 0
   return {
