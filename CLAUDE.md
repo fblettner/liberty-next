@@ -82,6 +82,9 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
   theme.py                theme.toml + GET /api/theme (operator branding)
   framework_enums.py      the widget / enum registries the builders render from
   coercion.py             kwargs coercion shared by python job steps and reports
+  diagram.py              a diagram laid out ONCE on the server (model: tiers / hosts, cards with a state and `declared`, links with their
+                          evidence; `lay_out` → coordinates) and painted twice: `render_svg` for a PDF (one line, no foreignObject), and in
+                          a page by `frontend/src/common/Diagram.tsx` (`sdk.Diagram`, page contract version 5; helpers in services/diagram.ts)
   cli.py / admin_cli.py / migrate_cli.py / license_cli.py   the console scripts (below)
   connectors/             config.py (Pydantic for connectors.toml + ParamBind + ColumnHint),
                           db.py (PoolRegistry: lazy engines, ENC: passwords, terminal
@@ -109,6 +112,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
   auth/                   implied.py (what a MENU GRANT gives: a role stores `menu:<app>:<id>` = read, `edit:<app>:<id>` = change, on a folder or an entry;
                           `Principal.has_permission` asks it after the rules held by name; the answer is built from the loaded
                           configuration by web/menu_access.py — the dependency walker's references, read / change by `writable`),
+                          role_templates.py (the PREDEFINED roles the apps ship: `roles.toml` — `[auth] roles_path` —, listed by `GET /admin/access/role-templates`,
+                          opened as a new role in Access; a predefined role only gives, so a person's roles add up; merged at an app install),
                           scope.py (row-level data scope: role rules → resolved per user → JWT
                           `scope` claim → SQLConnector wrap / write check), authstore.py (AuthBackend: toml | db), tokens.py (PyJWT access /
                           refresh with rotation), throttle.py (login throttle), principal.py
@@ -284,6 +289,7 @@ hot-reloadable (`[app] hot_reload = true`, `web/hot_reload.py`) or reloaded via
 | `explorer.toml` | `[explorer]` | `explorer/config.py::ExplorerFile` (`[explorer.<app>.<model>]`, perm `explorer:<app>:<model>`) | Explorer (models per app: hub, entities, relations, bundled analyses) |
 | `ai.toml` | `[ai] config_path` | `ai/appconfig.py::AiFile` (`[ai.<app>] starters`, `[ai.<app>.screens.<id>] starters`, `.playbooks.<id>`, `.tools.<id>`) | AI (what the apps ship; the operator's `[ai] starters` in app.toml win) |
 | `notifications.toml` | `[notify] config_path` (+ the inbox pool and SMTP, edited under App) | `notify/rules.py::NotificationsFile` | Notifications |
+| `roles.toml` | `[auth] roles_path` | `auth/role_templates.py::RoleTemplatesFile` (`[roles.<id>]`: what the apps ship) | Access → Roles → *Add a predefined role* (read-only catalogue; the customer's roles live in the auth store) |
 | `auth.toml` | `[auth] backend = "toml"` | `auth/authstore.py::AuthFile` | Access |
 
 Secrets: `${ENV_VAR}` / `${VAR:-default}` substitution in every TOML; `ENC:` values decrypted
@@ -320,7 +326,7 @@ auth/ workspace/ tabs/ sio/ branding/   the contexts (tabs/dirtyGuard.ts = unsav
                        closing a tab / all tabs, the language switch and the browser's reload ask first; a dirty tab is never closed by single-tab mode or the cap — `tabs/openTab.ts`, tested — and the tab strip marks it; AuthContext, WorkspaceContext = connectors +
                        menus + screens + license + current app / pool, TabsContext, SioContext)
 common/                shared primitives: Button Card Input SearchSelect (a list of code + description lines is ordered on the CODE: services/options.ts) CallableSelect (THE picker of an application's function, grouped by application / module: services/callables.ts, tested) Checkbox FileInput Tag Banner Spinner
-                       PageLayout HeaderActions (a page's Save / Discard placed in the page header) Modal Modals(useModals) ErrorDetails ErrorBoundary SchemaForm
+                       PageLayout Diagram (a server-laid-out diagram, drawn: see liberty/diagram.py) flowKit (the flows' dotted canvas with zoom, shared with Diagram) HeaderActions (a page's Save / Discard placed in the page header) Modal Modals(useModals) ErrorDetails ErrorBoundary SchemaForm
                        SchemaNavigator SubNav EditorModalShell LocalizedTexts (a record's texts in the other languages — its `l` table —
                        under the field itself; logic in services/localized.ts, tested) DateRangeFilter (presets + two-month
                        calendar + date basis; logic in services/period.ts) DatePicker (one date, typed or picked;

@@ -46,7 +46,7 @@ _LAYOUT = "deployment layout — follows LIBERTY_APPS_DIR / the install; changed
 for _key in ("connectors.config_path", "connectors.dictionary_path", "connectors.pools_path", "menus.config_path", "screens.config_path",
              "charts.config_path", "actions.config_path", "dashboards.config_path", "explorer.config_path",
              "theme.config_path", "ai.config_path", "jobs.config_path", "reports.templates_config_path",
-             "notify.config_path", "auth.toml_path", "app.static_dir"):
+             "notify.config_path", "auth.toml_path", "auth.roles_path", "app.static_dir"):
     FILE_ONLY[_key] = _LAYOUT
 
 

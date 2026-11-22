@@ -15,6 +15,9 @@ The check, for a permission the caller does not hold by name:
 * an entry counts when its **nearest** node with a rule — itself, else its folder, else the
   folder above — allows it: ``menu:`` for read, and ``edit:`` as well for change. A deny
   (``!menu:<app>:<id>``, ``!edit:<app>:<id>``) on that nearest node stops it;
+* a rule written with ``*`` (``menu:<app>:*`` — the whole application) is the outermost one: it
+  only speaks when no node of the chain is named, so "the application in change, this folder
+  in read" reads as it is written;
 * an explicit deny of the permission itself (``!sql:…``) always wins — that is checked by
   :meth:`liberty.auth.principal.Principal.has_permission` before coming here.
 """
@@ -36,16 +39,22 @@ def _segment_match(pattern: str, value: str) -> bool:
     return match(pattern, value)
 
 
-def _rule_on(permissions: Iterable[str], key: str) -> bool | None:
+def _rule_on(permissions: Iterable[str], key: str, *, named: bool) -> bool | None:
     """What the caller's rules say of one node key: denied (False), allowed (True), nothing (None).
-    The bare ``*`` is not a rule on a node — who holds it never comes here."""
+    *named* = the rules that name this very node; else the rules written with ``*`` (a whole
+    application, every application). The bare ``*`` is not a rule on a node — who holds it never
+    comes here."""
     allowed = False
     for p in permissions:
-        if p.startswith("!"):
-            if _segment_match(p[1:], key):
-                return False
-        elif p != "*" and not allowed and _segment_match(p, key):
-            allowed = True
+        deny = p.startswith("!")
+        core = p[1:] if deny else p
+        if core == "*" or ("*" in core.split(":")) == named:
+            continue
+        if not (core == key if named else _segment_match(core, key)):
+            continue
+        if deny:
+            return False
+        allowed = True
     return True if allowed else None
 
 
@@ -70,11 +79,13 @@ class MenuAccess:
                 self.needed_by.setdefault(p, []).append((app, entry, level))
 
     def _granted(self, permissions: tuple[str, ...], prefix: str, app: str, entry: str) -> bool:
-        for node in self.chains.get((app, entry), (entry,)):
-            said = _rule_on(permissions, f"{prefix}:{app}:{node}")
+        chain = self.chains.get((app, entry), (entry,))
+        for node in chain:                              # the nearest node that is named decides
+            said = _rule_on(permissions, f"{prefix}:{app}:{node}", named=True)
             if said is not None:
                 return said
-        return False
+        # no node of the chain is named: the rules on the whole application (written with *)
+        return bool(_rule_on(permissions, f"{prefix}:{app}:{chain[0]}", named=False))
 
     def level(self, permissions: tuple[str, ...], app: str, entry: str) -> str | None:
         """The level the rules give on one entry: None, ``read`` or ``change``."""

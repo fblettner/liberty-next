@@ -9,15 +9,16 @@ builder (:mod:`liberty.web.dependencies` — one knowledge of "what a screen use
 * a screen → its read query, the lists behind its dropdowns (the dictionary's lookups, their
   queries), its chart, its export sheets, the screens of its record form's tabs, what its
   actions and hooks run (shared actions included);
-* a dashboard → the queries of its widgets and filters; a job → the job; a page → its own
-  permission; the Data Explorer page → the application's models.
+* a dashboard → the queries of its widgets and filters; a page → its own permission; the Data
+  Explorer page → the application's models.
 
 Two levels come out of it:
 
 * **read** — everything above that does not write;
-* **change** — what writes: the queries and endpoints marked ``writable`` (the screen's
-  update / insert / delete, a writing action) and the functions its actions call
-  (``plugin:<callable>``: what a function does is not known, so it is never given by "read").
+* **change** — what writes or acts: the queries and endpoints marked ``writable`` (the screen's
+  update / insert / delete, a writing action), the functions its actions call
+  (``plugin:<callable>``: what a function does is not known, so it is never given by "read"),
+  and **running a job** (``job:<id>``, for an entry that is a job): "read" never starts anything.
 
 Following a row click to another screen gives that screen's READ only: changing it needs a
 grant on its own entry. An endpoint served by a shared action is a gate of its own — the walk
@@ -61,7 +62,8 @@ def _walk(state: Any, start: Seed, memo: dict[tuple[str, str | None, str], tuple
             continue
         seen[key] = full
         if seed.kind == "job":
-            read.add(f"job:{seed.name}")
+            if full:
+                change.add(f"job:{seed.name}")           # running it: never given by "read"
             continue
         if seed.kind not in _FOLLOWED and seed.kind != "api_endpoint":
             continue                                    # connectors, pools: nothing a caller runs

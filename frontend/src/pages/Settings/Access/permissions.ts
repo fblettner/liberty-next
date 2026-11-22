@@ -148,6 +148,7 @@ export function leafVisible(perms: string[], node: MenuNode): boolean {
   if (node.type === 'page') return node.targetPerm == null || hasPermission(perms, node.key)
     || [node.targetPerm, ...(INCLUDED_IN[node.targetPerm] ?? [])].some((p) => hasPermission(perms, p))
   if (node.targetPerm == null) return hasPermission(perms, node.key)
+  if (node.type === 'job') return hasPermission(perms, node.targetPerm)   // a job is shown to who may run it
   return hasPermission(perms, node.targetPerm) || hasPermission(perms, node.key)
 }
 
@@ -155,11 +156,18 @@ export function leafVisible(perms: string[], node: MenuNode): boolean {
 export interface RoleModel {
   /** Baseline: `*` (everything, minus the denies) or nothing (plus the allows). */
   full: boolean
-  /** Explicit state per node key; a node without one inherits its nearest ancestor's, else the baseline. */
+  /** Explicit state per key — a menu node (`menu:<app>:<id>`) or a whole application
+   *  (`menu:<app>:*`); a node without one follows its nearest folder's, else its application's,
+   *  else the baseline. */
   states: Record<string, NodeState>
   /** Rules the tree doesn't express: connector / query / API / plugin / AI / dashboard-only patterns. */
   other: string[]
 }
+
+/** The whole application: `menu:<app>:*` (read) and `edit:<app>:*` (change). The server takes a
+ *  rule written with `*` as the outermost one: a folder's own choice wins over it. */
+export const appKey = (app: string): string => `menu:${app}:*`
+export const appEditKey = (app: string): string => `edit:${app}:*`
 
 const strip = (p: string): string => (p.startsWith('!') ? p.slice(1) : p)
 const allowed = (s: NodeState | null): boolean => s === 'allow' || s === 'change'
@@ -168,14 +176,15 @@ function generate(model: Pick<RoleModel, 'full' | 'states'>, forest: MenuForest)
   const out: string[] = []
   const push = (s: string) => { if (!out.includes(s)) out.push(s) }
   if (model.full) push('*')
+  // One choice = the fewest lines that say it: what an outer choice already gives is not repeated.
+  const say = (own: NodeState | null, inherited: NodeState | null, key: string, edit: string) => {
+    if (own === 'deny') push(`!${key}`)
+    else if (own === 'change') { if (!allowed(inherited)) push(key); push(edit) }
+    else if (own === 'allow') { if (inherited === 'change') push(`!${edit}`); else push(key) }   // read only, inside a change
+  }
   const walk = (n: MenuNode, inherited: NodeState | null) => {
     const own = model.states[n.key] ?? null
-    if (own === 'deny') push(`!${n.key}`)
-    else if (own === 'change') { push(n.key); push(n.editKey) }
-    else if (own === 'allow') {
-      push(n.key)
-      if (inherited === 'change') push(`!${n.editKey}`)     // read only, inside a folder given in change
-    }
+    say(own, inherited, n.key, n.editKey)
     const eff = own ?? inherited
     // hidden: each entry under it and its target by name — what takes it away from a role that has everything
     if (eff === 'deny' && isLeaf(n)) {
@@ -184,7 +193,11 @@ function generate(model: Pick<RoleModel, 'full' | 'states'>, forest: MenuForest)
     }
     n.children.forEach((c) => walk(c, eff))
   }
-  for (const roots of Object.values(forest)) roots.forEach((r) => walk(r, null))
+  for (const [app, roots] of Object.entries(forest)) {
+    const own = model.states[appKey(app)] ?? null
+    say(own, null, appKey(app), appEditKey(app))
+    roots.forEach((r) => walk(r, own))
+  }
   return out
 }
 
@@ -198,23 +211,30 @@ function normalize(states: Record<string, NodeState>, full: boolean, forest: Men
     const eff = (out[n.key] ?? null) ?? inherited
     n.children.forEach((c) => walk(c, eff))
   }
-  for (const roots of Object.values(forest)) roots.forEach((r) => walk(r, full ? 'allow' : null))
+  for (const [app, roots] of Object.entries(forest)) {
+    const base: NodeState | null = full ? 'allow' : null
+    if (out[appKey(app)] && out[appKey(app)] === base) delete out[appKey(app)]
+    roots.forEach((r) => walk(r, out[appKey(app)] ?? base))
+  }
   return out
 }
 
 export function parsePermissions(perms: string[], forest: MenuForest): RoleModel {
   const full = perms.includes('*')
   const nodes = flattenForest(forest)
-  const byKey = new Map(nodes.map((n) => [n.key, n]))
-  const byEdit = new Map(nodes.map((n) => [n.editKey, n]))
-  const parentOf = new Map<string, MenuNode>()
-  for (const n of nodes) for (const c of n.children) parentOf.set(c.key, n)
+  const apps = Object.keys(forest)
+  // every key the tree has a control for: a menu node, or a whole application
+  const menuKeys = new Set<string>([...nodes.map((n) => n.key), ...apps.map(appKey)])
+  const editToMenu = new Map<string, string>([...nodes.map((n): [string, string] => [n.editKey, n.key]), ...apps.map((a): [string, string] => [appEditKey(a), appKey(a)])])
+  const parentOf = new Map<string, string>()            // node key → its folder's key, else its application's
+  for (const [app, roots] of Object.entries(forest)) for (const r of roots) parentOf.set(r.key, appKey(app))
+  for (const n of nodes) for (const c of n.children) parentOf.set(c.key, n.key)
   const byTarget = new Map<string, MenuNode[]>()
   for (const n of nodes) if (n.targetPerm) byTarget.set(n.targetPerm, [...(byTarget.get(n.targetPerm) ?? []), n])
   let states: Record<string, NodeState> = {}
   for (const p of perms) {
     const core = strip(p)
-    if (!byKey.has(core)) continue
+    if (!menuKeys.has(core)) continue
     if (p.startsWith('!') || !states[core]) states[core] = p.startsWith('!') ? 'deny' : 'allow'   // deny wins
   }
   // A leaf whose target is granted / denied by name without a menu entry (roles written by hand or
@@ -224,19 +244,21 @@ export function parsePermissions(perms: string[], forest: MenuForest): RoleModel
       if (!states[n.key]) states[n.key] = p.startsWith('!') ? 'deny' : 'allow'
     }
   }
-  // "change" on a node that is allowed
-  for (const p of perms) {
-    const n = p.startsWith('!') ? undefined : byEdit.get(p)
-    if (n && states[n.key] === 'allow') states[n.key] = 'change'
-  }
-  // "read only" inside a folder given in change: the node carries its own allow (written with it)
-  const above = (n: MenuNode): NodeState | null => {
-    for (let a = parentOf.get(n.key); a; a = parentOf.get(a.key)) if (states[a.key]) return states[a.key]
+  // what the choices above a key give it (the baseline is not a choice)
+  const above = (key: string): NodeState | null => {
+    for (let a = parentOf.get(key); a; a = parentOf.get(a)) if (states[a]) return states[a]
     return null
   }
+  // "change": on a key that is allowed itself, or that an outer choice already allows
   for (const p of perms) {
-    const n = p.startsWith('!') ? byEdit.get(p.slice(1)) : undefined
-    if (n && !states[n.key] && above(n) === 'change') states[n.key] = 'allow'
+    const key = p.startsWith('!') ? undefined : editToMenu.get(p)
+    if (!key) continue
+    if (states[key] === 'allow' || (!states[key] && allowed(above(key)))) states[key] = 'change'
+  }
+  // "read only" inside a change: the key takes an allow of its own
+  for (const p of perms) {
+    const key = p.startsWith('!') ? editToMenu.get(p.slice(1)) : undefined
+    if (key && !states[key] && above(key) === 'change') states[key] = 'allow'
   }
   states = normalize(states, full, forest)
   const generated = new Set(generate({ full, states }, forest))
@@ -245,11 +267,11 @@ export function parsePermissions(perms: string[], forest: MenuForest): RoleModel
   const given = new Set<string>()
   const walk = (n: MenuNode, inherited: NodeState | null) => {
     const eff = states[n.key] ?? inherited
-    if (allowed(eff) && isLeaf(n) && n.targetPerm) given.add(n.targetPerm)
+    if (allowed(eff) && isLeaf(n) && n.targetPerm && n.type !== 'job') given.add(n.targetPerm)
     n.children.forEach((c) => walk(c, eff))
   }
-  for (const roots of Object.values(forest)) roots.forEach((r) => walk(r, null))
-  const other = perms.filter((p) => p !== '*' && p !== '!*' && !generated.has(p) && !byKey.has(strip(p)) && !given.has(p))
+  for (const [app, roots] of Object.entries(forest)) roots.forEach((r) => walk(r, states[appKey(app)] ?? null))
+  const other = perms.filter((p) => p !== '*' && p !== '!*' && !generated.has(p) && !menuKeys.has(strip(p)) && !given.has(p))
   return { full, states, other: [...new Set(other)] }
 }
 
@@ -261,7 +283,7 @@ export function buildPermissions(model: RoleModel, forest: MenuForest): string[]
 
 export interface NodeEffect {
   own: NodeState | null
-  /** The state the node takes without an own one: the nearest ancestor's, else the baseline. */
+  /** The state the node takes without an own one: the nearest folder's, else the application's, else the baseline. */
   inherited: NodeState | null
   /** For leaves: shown in the sidebar for a holder of the full rule set (globs in `other` included). */
   visible: boolean | null
@@ -270,16 +292,23 @@ export interface NodeEffect {
 export function nodeEffects(model: RoleModel, forest: MenuForest): Record<string, NodeEffect> {
   const perms = buildPermissions(model, forest)
   const out: Record<string, NodeEffect> = {}
+  const base: NodeState | null = model.full ? 'allow' : null
   const walk = (n: MenuNode, inherited: NodeState | null) => {
     const own = model.states[n.key] ?? null
     const eff = own ?? inherited
-    // an entry the menus allow is shown: the server gives it what it runs (unless a rule denies the target by name)
+    // An entry the menus allow is shown: the server gives it what it runs (unless a rule denies the
+    // target by name). A job is given by "read and change" only: reading never starts anything.
+    const viaMenu = n.type === 'job' ? eff === 'change' : allowed(eff)
     const shown = eff === 'deny' ? false
-      : allowed(eff) && !model.full ? !isDenied(perms, n.key) && !(n.targetPerm && isDenied(perms, n.targetPerm))
+      : viaMenu && !model.full ? !isDenied(perms, n.key) && !(n.targetPerm && isDenied(perms, n.targetPerm))
         : leafVisible(perms, n)
     out[n.key] = { own, inherited, visible: isLeaf(n) ? shown : null }
-    n.children.forEach((c) => walk(c, own ?? inherited))
+    n.children.forEach((c) => walk(c, eff))
   }
-  for (const roots of Object.values(forest)) roots.forEach((r) => walk(r, model.full ? 'allow' : null))
+  for (const [app, roots] of Object.entries(forest)) {
+    const own = model.states[appKey(app)] ?? null
+    out[appKey(app)] = { own, inherited: base, visible: null }
+    roots.forEach((r) => walk(r, own ?? base))
+  }
   return out
 }

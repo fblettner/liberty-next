@@ -24,11 +24,12 @@ import { iconFor } from '../../components/SidebarMenu'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 import { callableRef } from '../../tabs/pageTabs'
 import { PageGrid } from './PageGrid'
+import { Diagram } from '../../common/Diagram'
 import { can } from '../../services/permissions'
 import { pageFacts, setPageContext } from '../../services/aiContext'
 
-// 2: `Grid` (the shared grid) · 3: a row of the grid opens (`detail`) · 4: `useAssistantContext`
-export const PAGE_SDK_VERSION = 4
+// 2: `Grid` (the shared grid) · 3: a row of the grid opens (`detail`) · 4: `useAssistantContext` · 5: `Diagram`
+export const PAGE_SDK_VERSION = 5
 
 export interface PageSdk {
   /** the contract's version (this file) */
@@ -48,6 +49,13 @@ export interface PageSdk {
    *  views — `<Grid columns={[{ key, label, type?, mono?, render? }]} rows={rows} id="app:page:list" />` in a box
    *  that has a height. Since version 2. */
   Grid: typeof PageGrid
+  /** A diagram the server laid out, drawn — the tiers as columns, the hosts as boxes, a card per node (its state, a
+   *  dashed outline when it is not declared), the links on their paths, a legend:
+   *  `<Diagram layout={answer.diagram} picked={id} onPick={(node) => …} words={{ ok, warn, down, unknown, undeclared }} />`
+   *  in a box that has a height. `layout` is what `liberty.diagram.lay_out` answers (the application's function
+   *  builds the model and returns it laid out); the same data gives the PDF's picture (`render_svg`). The words
+   *  are the page's, in its language. Since version 5. */
+  Diagram: typeof Diagram
   /** a menu icon by its name ("search", "database"…), or null */
   icon: typeof iconFor
   /** the API client (get / post / put / delete on the server's routes, the session handled) */
@@ -78,6 +86,7 @@ export function buildSdk(app: string, page: string): PageSdk {
     version: PAGE_SDK_VERSION, app, page,
     React, styled, ui, api,
     Grid: PageGrid,
+    Diagram,
     theme: { colors, fontSize, fonts, radius, shadow },
     icon: iconFor,
     call: async <T,>(fn: string, params: Record<string, unknown> = {}) => {

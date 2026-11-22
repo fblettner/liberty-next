@@ -306,6 +306,9 @@ class AuthSettings(BaseModel):
     # tables on `pool` (created by `liberty-admin init-db`; for big user bases).
     backend: Literal["toml", "db"] = "toml"
     toml_path: Path = Path("config/auth.toml")  # used when backend == "toml"
+    # The predefined roles the applications ship (liberty.auth.role_templates) — next to the other
+    # config files; offered under Access → Roles, never a user's role by themselves.
+    roles_path: Path = Field(default_factory=lambda: _default_config_path("roles"))
     pool: str = "default"  # used when backend == "db" — which connector pool the ly2_* tables live on
     jwt_secret: str = ""  # ${LIBERTY_JWT_SECRET}; empty → ephemeral key generated at startup
     jwt_algorithm: str = "HS256"

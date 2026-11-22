@@ -190,12 +190,11 @@ def _keeper(
             # An external address: nothing of ours to run — the roles filter + the menu deny gate it.
             return True
         if item.type == "job":
-            # A job leaf opens the job for the user to run: ``job:<id>`` (or a menu allow) shows
-            # it, ``!job:<id>`` hides it. The user routes check the same permission.
-            jid = item.target or ""
-            if principal.is_denied(f"job:{jid}"):
-                return False
-            return principal.has_permission(f"job:{jid}") or principal.has_permission(menu_perm)
+            # A job leaf opens the job for the user to run: shown to who may run it — ``job:<id>``
+            # held by name, or given by "read and change" on the entry or its folder
+            # (liberty.auth.implied). The user routes check the same permission, so an entry is never
+            # shown to someone the run would refuse.
+            return principal.has_permission(f"job:{item.target or ''}")
         if item.type == "screen":
             # A screen leaf's target is a screen id — resolve it to the screen's read query and
             # gate on that (same ``sql:<connector>:<read_query>`` the screen catalog uses). When

@@ -81,12 +81,31 @@ describe('parsePermissions / buildPermissions', () => {
   it('read only on one entry of a folder given in change, and change on one entry of a folder that is read', () => {
     const m = { full: false, states: { 'menu:nomasx1:security': 'change' as const, 'menu:nomasx1:roles': 'allow' as const }, other: [] }
     const perms = buildPermissions(m, forest)
-    expect(perms).toEqual(['menu:nomasx1:security', 'edit:nomasx1:security', 'menu:nomasx1:roles', '!edit:nomasx1:roles'])
+    expect(perms).toEqual(['menu:nomasx1:security', 'edit:nomasx1:security', '!edit:nomasx1:roles'])
     expect(parsePermissions(perms, forest)).toEqual(m)
     const n = { full: false, states: { 'menu:nomasx1:security': 'allow' as const, 'menu:nomasx1:users': 'change' as const }, other: [] }
     const back = buildPermissions(n, forest)
-    expect(back).toEqual(['menu:nomasx1:security', 'menu:nomasx1:users', 'edit:nomasx1:users'])
+    expect(back).toEqual(['menu:nomasx1:security', 'edit:nomasx1:users'])     // the folder already gives the entry
     expect(parsePermissions(back, forest)).toEqual(n)
+  })
+
+  it('a whole application: read, with one folder in change — how the predefined roles are written', () => {
+    const shipped = ['menu:nomasx1:*', 'edit:nomasx1:security', 'ai:chat']
+    const m = parsePermissions(shipped, forest)
+    expect(m).toEqual({ full: false, states: { 'menu:nomasx1:*': 'allow', 'menu:nomasx1:security': 'change' }, other: ['ai:chat'] })
+    expect(buildPermissions(m, forest)).toEqual(shipped)                       // saved back as shipped
+    const eff = nodeEffects(m, forest)
+    expect(eff['menu:nomasx1:*']).toEqual({ own: 'allow', inherited: null, visible: null })
+    expect(eff['menu:nomasx1:users']).toEqual({ own: null, inherited: 'change', visible: true })
+    expect(eff['menu:nomasx1:help']).toEqual({ own: null, inherited: 'allow', visible: true })
+    expect(eff['menu:nomajde:ais'].visible).toBe(false)                        // another application
+  })
+
+  it('a whole application in change, one folder read only, one entry hidden', () => {
+    const m = { full: false, states: { 'menu:nomasx1:*': 'change' as const, 'menu:nomasx1:security': 'allow' as const, 'menu:nomasx1:board': 'deny' as const }, other: [] }
+    const perms = buildPermissions(m, forest)
+    expect(perms).toEqual(['menu:nomasx1:*', 'edit:nomasx1:*', '!edit:nomasx1:security', '!menu:nomasx1:board', '!dashboard:nomasx1.employees'])
+    expect(parsePermissions(perms, forest)).toEqual(m)
   })
 
   it('a change line that names no allowed node is kept as written, never dropped', () => {
@@ -164,5 +183,17 @@ describe('parsePermissions / buildPermissions', () => {
     expect(leafVisible(['nomaflow:edit'], jobs)).toBe(true)
     expect(leafVisible(['menu:nomaflow:jobs'], jobs)).toBe(true)
     expect(leafVisible(['*', '!menu:nomaflow:jobs'], jobs)).toBe(false)
+  })
+  it('a job entry is shown to who may run it: by name, or by "read and change" — never by "read"', () => {
+    const f = buildMenuForest({ shop: { items: [
+      { id: 'jobs', label: 'Jobs' },
+      { id: 'load', parent: 'jobs', label: 'Load', type: 'job', target: 'shop-load' },
+    ] } }, {})
+    const load = f.shop[0].children[0]
+    expect(leafVisible(['job:shop-load'], load)).toBe(true)
+    expect(leafVisible(['menu:shop:load'], load)).toBe(false)
+    const eff = (state: 'allow' | 'change') => nodeEffects({ full: false, states: { 'menu:shop:jobs': state }, other: [] }, f)['menu:shop:load'].visible
+    expect(eff('allow')).toBe(false)
+    expect(eff('change')).toBe(true)
   })
 })

@@ -122,7 +122,7 @@ def test_a_screen_entry_reads_what_it_shows_and_changes_what_it_writes(access) -
 
 def test_the_other_kinds_of_entry(access) -> None:
     assert access.needs[("shop", "board")]["read"] == ("dashboard:shop.board", "sql:shop:totals")
-    assert access.needs[("shop", "load")] == {"read": ("job:shop-load",), "change": ()}
+    assert access.needs[("shop", "load")] == {"read": (), "change": ("job:shop-load",)}      # running it is never "read"
     assert access.needs[("shop", "jobs")]["read"] == ("nomaflow:view",)
     assert access.needs[("shop", "site")] == {"read": (), "change": ()}
     assert ("shop", "sales") not in access.needs      # a folder gives through its entries
@@ -178,12 +178,29 @@ def test_an_explicit_deny_of_the_permission_wins_over_a_menu_grant(access) -> No
 
 def test_a_pattern_on_the_nodes_counts(access) -> None:
     u = _user("menu:shop:*")
-    assert u.has_permission("sql:shop:stock_get") and u.has_permission("job:shop-load") and u.has_permission("sql:shop:totals")
+    assert u.has_permission("sql:shop:stock_get") and u.has_permission("sql:shop:totals")
     assert not u.has_permission("sql:shop:orders_put")      # menu:shop:* is not edit:shop:*
+    assert not u.has_permission("job:shop-load")            # reading never runs a job
+    assert _user("menu:shop:*", "edit:shop:load").has_permission("job:shop-load")
+
+
+def test_a_rule_on_the_whole_application_is_the_outermost_one(access) -> None:
+    # the application in change, one folder read-only: the folder's own rule wins for what it holds
+    u = _user("menu:shop:*", "edit:shop:*", "!edit:shop:sales")
+    assert u.has_permission("sql:shop:orders_get") and not u.has_permission("sql:shop:orders_put")
+    assert u.has_permission("job:shop-load")                 # another folder: still in change
+    # the application in read, one folder hidden, one entry of it given back
+    u = _user("menu:shop:*", "!menu:shop:sales", "menu:shop:customers")
+    assert not u.has_permission("sql:shop:orders_get") and u.has_permission("sql:shop:customers_get")
+    assert u.has_permission("sql:shop:stock_get")
+    # the application in read, change on one folder (how the predefined roles are written)
+    u = _user("menu:shop:*", "edit:shop:sales")
+    assert u.has_permission("sql:shop:orders_put") and not u.has_permission("job:shop-load")
 
 
 def test_what_the_browser_is_told(access) -> None:
-    assert implied.implied(("menu:shop:warehouse",)) == ["job:shop-load", "nomaflow:view", "sql:shop:stock_get"]
+    assert implied.implied(("menu:shop:warehouse",)) == ["nomaflow:view", "sql:shop:stock_get"]
+    assert implied.implied(("menu:shop:warehouse", "edit:shop:warehouse")) == ["job:shop-load", "nomaflow:view", "sql:shop:stock_get"]
     assert implied.implied(("sql:shop:orders_get",)) == []
     got = implied.implied(("menu:shop:orders", "edit:shop:orders"))
     assert "sql:shop:orders_put" in got and "sql:shop:customers_put" not in got

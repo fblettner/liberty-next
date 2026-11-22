@@ -9,7 +9,7 @@ import styled from '@emotion/styled'
 import { Ban, BookOpen, ChevronDown, ChevronRight, Eye, EyeOff, Minus, Pencil } from 'lucide-react'
 import { colors, fontSize, fonts, radius } from '../../../theme'
 import type { MenuForest, MenuNode, NodeEffect, NodeState } from './permissions'
-import { isLeaf } from './permissions'
+import { appKey, isLeaf } from './permissions'
 
 const AppBlock = styled.div`
   border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input}; overflow: hidden;
@@ -18,7 +18,8 @@ const AppBlock = styled.div`
 const AppHead = styled.div`
   display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: ${colors.bg.card};
   border-bottom: 1px solid ${colors.border}; font-size: ${fontSize.sm}; font-weight: 700; color: ${colors.text.primary};
-  & .count { font-weight: 500; color: ${colors.text.muted}; }
+  & .count { font-weight: 500; color: ${colors.text.muted}; flex: 1; }
+  & .whole { font-weight: 500; font-size: ${fontSize.micro}; color: ${colors.text.muted}; }
 `
 const Row = styled.div<{ $depth: number; $eff: NodeState | null }>`
   display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 2px 8px 2px ${({ $depth }) => 8 + $depth * 18}px;
@@ -108,9 +109,20 @@ export default function MenuTree({ forest, effects, onSetState }: Props) {
       {apps.map(([app, roots]) => {
         const leaves = roots.flatMap(function count(n: MenuNode): MenuNode[] { return isLeaf(n) ? [n] : n.children.flatMap(count) })
         const shown = leaves.filter((l) => effects[l.key]?.visible).length
+        const own = effects[appKey(app)]?.own ?? null
         return (
           <AppBlock key={app}>
-            <AppHead>{app} <span className="count">· {t('settings.access.shownCount', { shown, total: leaves.length })}</span></AppHead>
+            <AppHead data-node={appKey(app)}>
+              {app} <span className="count">· {t('settings.access.shownCount', { shown, total: leaves.length })}</span>
+              {/* the whole application: what every folder follows unless it says otherwise */}
+              <span className="whole">{t('settings.access.wholeApp')}</span>
+              <Seg>
+                <SegBtn $active={own == null} $tone="none" title={t('settings.access.levelNone')} onClick={() => onSetState(appKey(app), null)}><Minus size={12} /></SegBtn>
+                <SegBtn $active={own === 'allow'} $tone="allow" title={t('settings.access.levelRead')} onClick={() => onSetState(appKey(app), 'allow')}><BookOpen size={12} /></SegBtn>
+                <SegBtn $active={own === 'change'} $tone="change" title={t('settings.access.levelChange')} onClick={() => onSetState(appKey(app), 'change')}><Pencil size={12} /></SegBtn>
+                <SegBtn $active={own === 'deny'} $tone="deny" title={t('settings.access.levelHidden')} onClick={() => onSetState(appKey(app), 'deny')}><Ban size={12} /></SegBtn>
+              </Seg>
+            </AppHead>
             {roots.map((r) => renderNode(r, 0))}
           </AppBlock>
         )

@@ -13,13 +13,15 @@ import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Centered, Checkbox, Field, Input, Overlay, Modal, ModalBody, ModalFooter, PasswordInput, SearchSelect, SpinnerRing, Tag, ViewCards, type SearchSelectOption } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
-import RoleEditor, { type AppRole } from './Access/RoleEditor'
+import RoleEditor, { type AppRole, type RoleSeed } from './Access/RoleEditor'
 import { PermChip } from './Access/OtherAccess'
 import { buildMenuForest, type MenuRules, type MenusCatalog } from './Access/permissions'
 import { attributeFromText, attributeKeys, attributeToText, screenColumnNames } from './Access/scopeRules'
 import type { DictionaryDoc, ScreensDoc } from '../../types/config'
 import { BuilderShell as Shell } from '../../common/builderShell'
 
+/** A predefined role an application ships (`GET /admin/access/role-templates`), in the user's language. */
+interface RoleTemplate { id: string; app: string | null; label: string; description: string | null; permissions: string[]; scope: AppRole['scope']; exists: boolean }
 interface AppUser { username: string; email: string | null; full_name: string | null; is_active: boolean; is_superuser: boolean; roles: string[]; attributes?: Record<string, string | string[]> | null; provider?: string; must_change_password?: boolean }
 
 const Bar = styled.div`display: flex; align-items: center; gap: 10px; flex-shrink: 0;`
@@ -153,7 +155,9 @@ export default function AccessBuilder() {
   // undefined = nothing open; null = a new role; a name = that role (keyed so the editor remounts on switch)
   const [roleEdit, setRoleEdit] = useState<string | null | undefined>(undefined)
   // a new role that starts as a copy of this one (Duplicate), else null
-  const [roleSeed, setRoleSeed] = useState<AppRole | null>(null)
+  const [roleSeed, setRoleSeed] = useState<RoleSeed | null>(null)
+  // the predefined roles the applications ship (GET /admin/access/role-templates)
+  const [templates, setTemplates] = useState<RoleTemplate[]>([])
 
   const load = useCallback(() => {
     setError(null)
@@ -165,9 +169,10 @@ export default function AccessBuilder() {
       api.get<DictionaryDoc>('/admin/config/dictionary/parsed').catch((): DictionaryDoc | null => null),
       api.get<ScreensDoc>('/admin/config/screens/parsed').catch((): ScreensDoc | null => null),
       api.get<MenuRules>('/admin/access/menu-rules').catch((): MenuRules | undefined => undefined),
+      api.get<{ templates: RoleTemplate[] }>('/admin/access/role-templates').catch(() => ({ templates: [] as RoleTemplate[] })),
     ])
-      .then(([u, r, m, d, dict, scr, rules]) => {
-        setMenuRules(rules)
+      .then(([u, r, m, d, dict, scr, rules, tpl]) => {
+        setMenuRules(rules); setTemplates(tpl.templates ?? [])
         setUsers(u.users); setRoles(r.roles); setMenus(m.menus ?? {}); setDashboardIds(Object.keys(d.dashboards ?? {})); setDictionary(dict); setColumnNames(screenColumnNames(scr))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
@@ -217,6 +222,22 @@ export default function AccessBuilder() {
         <Split>
           <Side>
             <Bar><div style={{ flex: 1 }} /><Button $size="sm" $variant="primary" onClick={() => { setRoleSeed(null); setRoleEdit(null) }}><Plus size={13} /> {t('settings.access.addRole')}</Button></Bar>
+            {/* the roles the applications ship: picked, a role opens ready to save (one already added opens as it is) */}
+            {templates.length > 0 && (
+              <div data-role-templates style={{ marginBottom: 8 }}>
+                <SearchSelect value="" placeholder={t('settings.access.addPredefined')}
+                  options={templates.map((x) => ({
+                    value: x.id, label: x.exists ? t('settings.access.predefinedAdded', { label: x.label }) : x.label, mono: x.id, group: x.app || undefined,
+                  }))}
+                  onChange={(id) => {
+                    const x = templates.find((y) => y.id === id)
+                    if (!x) return
+                    if (x.exists) { setRoleSeed(null); setRoleEdit(x.id); return }
+                    setRoleSeed({ kind: 'template', title: x.label, role: { name: x.id, permissions: x.permissions, description: x.description, scope: x.scope } })
+                    setRoleEdit(null)
+                  }} />
+              </div>
+            )}
             <List>
               {roles.map((r) => (
                 <Item key={r.name} $selected={roleEdit === r.name} onClick={() => setRoleEdit(r.name)}>
@@ -234,8 +255,8 @@ export default function AccessBuilder() {
             </List>
           </Side>
           {editing !== undefined ? (
-            <RoleEditor key={roleEdit ?? `__new__${roleSeed?.name ?? ''}`} initial={editing} seed={roleEdit === null ? roleSeed : null}
-              onDuplicate={editing ? () => { setRoleSeed(editing); setRoleEdit(null) } : undefined} takenNames={roleNames} forest={forest} dashboardIds={dashboardIds} dictionary={dictionary} attributeNames={attributeNames} columnNames={columnNames}
+            <RoleEditor key={roleEdit ?? `__new__${roleSeed?.kind ?? ''}:${roleSeed?.role.name ?? ''}`} initial={editing} seed={roleEdit === null ? roleSeed : null}
+              onDuplicate={editing ? () => { setRoleSeed({ kind: 'copy', role: editing }); setRoleEdit(null) } : undefined} takenNames={roleNames} forest={forest} dashboardIds={dashboardIds} dictionary={dictionary} attributeNames={attributeNames} columnNames={columnNames}
               onCancel={() => setRoleEdit(undefined)} onSaved={(name) => { setRoleEdit(name); load() }} />
           ) : (
             <Placeholder>{t('settings.access.pickRole')}</Placeholder>

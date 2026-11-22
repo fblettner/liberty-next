@@ -823,6 +823,28 @@
     données.
   - `GET /auth/me` indique au navigateur ce que les menus donnent (`implied`), pour qu'un bouton qu'une page
     affiche ou masque soit d'accord avec le serveur.
+- **Des rôles prédéfinis, livrés par les applications.** Une application livre ses rôles dans `roles.toml` (un
+  libellé et une description par langue, les dossiers de menu en lecture ou en lecture et modification, les
+  quelques règles au-delà des menus). **Accès → Rôles → *Ajouter un rôle prédéfini*** les liste par
+  application ; en choisir un l'ouvre comme un nouveau rôle, prêt à enregistrer — il appartient alors au
+  client, qui le modifie comme un autre (un rôle déjà ajouté s'ouvre tel qu'il est). L'installation d'une
+  application ajoute les nouveaux et rafraîchit ceux que personne n'a modifiés dans le fichier.
+  - **Une personne peut avoir plusieurs rôles : leurs droits s'additionnent** — un responsable sécurité qui
+    est aussi gestionnaire des licences. Un rôle prédéfini ne fait donc que donner : celui qui contient une
+    règle qui retire est refusé à la lecture du fichier.
+  - **L'application entière a son propre choix dans l'éditeur de rôle** (au-dessus de son menu : rien,
+    *Lecture*, *Lecture et modification*, *Masqué*), que chaque dossier suit sauf indication contraire —
+    « l'application en lecture, ce dossier en modification » tient en deux coches, et le serveur lit une règle
+    sur toute une application comme la plus extérieure.
+  - **Lancer un job fait partie de *Lecture et modification*** : lire ne lance jamais rien. Une entrée de job
+    est affichée à qui peut le lancer (elle l'était pour un rôle qui nommait l'entrée sans le job).
+- **Une page livrée par une application peut dessiner un schéma** (contrat de page version 5 : `sdk.Diagram`) :
+  les niveaux en colonnes, les hôtes en cadres, une carte par élément avec son état — un contour en pointillés
+  pour ce qui n'est pas déclaré —, les liens sur leur tracé avec la preuve qui justifie chacun, une légende, le
+  zoom. Le dessin est **disposé une seule fois sur le serveur** (`liberty.diagram` : le modèle, la disposition)
+  et peint deux fois à partir des mêmes coordonnées : dans la page, et en SVG pour un rapport PDF
+  (`render_svg` : couleurs d'impression, l'état en marque et en mot, texte coupé à la largeur). Le canevas des
+  flux rejoint les composants partagés (`common/flowKit`).
 
 ## 7.0.83 — 2026-11-19
 

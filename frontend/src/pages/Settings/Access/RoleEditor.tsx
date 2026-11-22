@@ -16,6 +16,9 @@ import { buildPermissions, nodeEffects, parsePermissions, type MenuForest, type 
 import { cleanRule, type ScopeRule } from './scopeRules'
 
 export interface AppRole { name: string; permissions: string[]; description: string | null; scope?: ScopeRule[] | null }
+/** What a NEW role starts from: a copy of an existing role (Duplicate), or a predefined role the
+ *  applications ship (its name and description are then proposed as they are). */
+export interface RoleSeed { kind: 'copy' | 'template'; role: AppRole; title?: string }
 
 const Panel = styled.div`
   flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;
@@ -50,8 +53,8 @@ const SegBtn = styled.button<{ $active?: boolean; $tone?: 'allow' | 'deny' }>`
 `
 interface Props {
   initial: AppRole | null
-  /** A new role that starts as a copy of this one (its rights, description and data scope). */
-  seed?: AppRole | null
+  /** A new role that starts from this (its rights, description and data scope). */
+  seed?: RoleSeed | null
   /** Asked from an existing role: open a new one that starts as its copy. */
   onDuplicate?: () => void
   takenNames: string[]
@@ -68,9 +71,10 @@ interface Props {
 export default function RoleEditor({ initial, seed, onDuplicate, takenNames, forest, dashboardIds, dictionary, attributeNames, columnNames, onSaved, onCancel }: Props) {
   const { t } = useTranslation()
   const isNew = initial == null
-  const from = initial ?? seed ?? null                    // what the fields start from: the role, or the one copied
-  const [name, setName] = useState(initial?.name ?? '')
-  const [description, setDescription] = useState(initial?.description ?? (seed ? t('settings.access.copyOf', { name: seed.description || seed.name }) : ''))
+  const from = initial ?? seed?.role ?? null              // what the fields start from: the role, or the one it is made from
+  const [name, setName] = useState(initial?.name ?? (seed?.kind === 'template' ? seed.role.name : ''))
+  const [description, setDescription] = useState(initial?.description ?? (
+    !seed ? '' : seed.kind === 'template' ? (seed.role.description ?? '') : t('settings.access.copyOf', { name: seed.role.description || seed.role.name })))
   const [model, setModel] = useState<RoleModel>(() => parsePermissions(from?.permissions ?? [], forest))
   const [scope, setScope] = useState<ScopeRule[]>(() => (from?.scope ?? []).map(cleanRule))
   const [tab, setTab] = useState<'access' | 'scope'>('access')
@@ -103,7 +107,7 @@ export default function RoleEditor({ initial, seed, onDuplicate, takenNames, for
     <Panel>
       <Head>
         <Shield size={16} color={colors.blue.main} />
-        <span className="title">{isNew ? (seed ? t('settings.access.copyOf', { name: seed.name }) : t('settings.access.addRole')) : initial?.name}</span>
+        <span className="title">{!isNew ? initial?.name : !seed ? t('settings.access.addRole') : seed.kind === 'template' ? (seed.title || seed.role.name) : t('settings.access.copyOf', { name: seed.role.name })}</span>
         {dirty && !isNew && <span className="dirty">{t('settings.access.unsaved')}</span>}
         <span style={{ flex: 1 }} />
         {!isNew && onDuplicate && (

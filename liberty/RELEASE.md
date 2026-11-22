@@ -707,6 +707,26 @@
   - **A role can be duplicated**: *Duplicate* opens a new role with the same rights and the same data scope.
   - `GET /auth/me` tells the browser what the menu grants give (`implied`), so a button a page shows or hides
     agrees with the server.
+- **Predefined roles, shipped by the applications.** An application ships its roles in `roles.toml` (a label and
+  a description per language, the menu folders in read or in read and change, the few rules beyond the menus).
+  **Access → Roles → *Add a predefined role*** lists them by application; picking one opens it as a new role,
+  ready to save — it is then the customer's, to change like any other (one already added opens as it is). An
+  application install adds the new ones and refreshes those nobody edited in the file.
+  - **A person may hold several roles: their rights add up** — a security officer who is also the licence
+    manager. A predefined role therefore only gives: one holding a rule that takes away is refused when the file
+    is read.
+  - **The whole application has its own choice in the role editor** (above its menu: nothing, *Read*, *Read
+    and change*, *Hidden*), which every folder follows unless it says otherwise — "the application in read,
+    this folder in change" is two ticks, and the server reads a rule on a whole application as the outermost
+    one.
+  - **Running a job is part of *Read and change***: reading never starts anything. A job entry is shown to
+    who may run it (it used to be shown to a role that named the entry without the job).
+- **A page an application ships can draw a diagram** (page contract version 5: `sdk.Diagram`): tiers as columns,
+  hosts as boxes, a card per element with its state — a dashed outline for what is not declared —, the links on
+  their paths with the evidence each one is drawn on, a legend, zoom. The picture is **laid out once on the
+  server** (`liberty.diagram`: the model, the layout) and painted twice from the same coordinates: in the page,
+  and as an SVG for a PDF report (`render_svg`: print colours, the state as a mark and a word, text cut to
+  fit). The flows' canvas moved to the shared components (`common/flowKit`).
 
 ## 7.0.83 — 2026-11-19
 

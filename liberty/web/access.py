@@ -164,6 +164,29 @@ async def menu_rules(request: Request, _: Superuser) -> dict[str, Any]:
     return {"dashboards": dashboards, "explorer": explorer, "needs": needs}
 
 
+@router.get("/role-templates", summary="List the predefined roles")
+async def role_templates(request: Request, _: Superuser, backend: Backend) -> dict[str, Any]:
+    """The predefined roles the applications ship (``roles.toml`` — :mod:`liberty.auth.role_templates`),
+    in the request's language, each with ``exists``: a role of that name is already in the store.
+    Picking one in *Access → Roles* opens it as a new role; saving it is the ordinary upsert."""
+    from liberty.auth.role_templates import load_role_templates
+    from liberty.web.deps import request_language
+
+    try:
+        catalogue = load_role_templates(request.app.state.settings.auth.roles_path)
+    except Exception as exc:  # noqa: BLE001 — a file that cannot be read is said, with its reason
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"predefined roles: {exc}") from exc
+    language = request_language(request)
+    held = {name for name, *_ in await backend.list_roles()}
+    return {"templates": [
+        {
+            "id": rid, "app": t.app, "label": t.text("label", language), "description": t.text("description", language),
+            "permissions": list(t.permissions), "scope": [r.model_dump(exclude_none=True) for r in t.scope], "exists": rid in held,
+        }
+        for rid, t in sorted(catalogue.roles.items(), key=lambda kv: (kv[1].app or "", kv[0]))
+    ]}
+
+
 @router.get("/roles", summary="List roles")
 async def list_roles(_: Superuser, backend: Backend) -> dict[str, Any]:
     return {"roles": [_role_dict(r) for r in await backend.list_roles()]}
