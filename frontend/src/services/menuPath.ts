@@ -33,6 +33,16 @@ export function leafPath(node: Pick<MenuNode, 'type' | 'target' | 'connector' | 
   return node.type === 'endpoint' ? `/http/${c}/${t}` : `/sql/${c}/${t}`
 }
 
+/** Where a leaf leads when it is opened: its route, with the entry's fixed parameters (`params` in menus.toml)
+ *  as the query string of a screen, a query or an endpoint — the page fills its inputs from it, as it does for
+ *  a link that opens it on something. A job keeps its own use of `params` (the preset, in its route). */
+export function leafRoute(node: Pick<MenuNode, 'type' | 'target' | 'connector' | 'params'>, app: string): string | null {
+  const path = leafPath(node, app)
+  if (!path || !(node.type === 'screen' || node.type === 'query' || node.type === 'endpoint')) return path
+  const fixed = Object.entries(node.params ?? {}).filter(([, v]) => v != null && v !== '' && typeof v !== 'object')
+  return fixed.length ? `${path}?${new URLSearchParams(fixed.map(([k, v]) => [k, String(v)])).toString()}` : path
+}
+
 /** The item *id* in *app*'s (permission-pruned) tree, at any depth; undefined when the user
  *  cannot see it or the app has no menu. */
 export function findMenuItem(menus: MenusByApp | null | undefined, app: string, id: string): MenuNode | undefined {

@@ -11,7 +11,7 @@
 // a small lucide whitelist (so the bundle doesn't have to ship all 1500 icons).
 import { useMemo, useState, type ComponentType } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
-import { leafPath } from '../services/menuPath'
+import { leafPath, leafRoute } from '../services/menuPath'
 import { fillUrlTemplate, safeUrl } from '../services/urlTemplate'
 import { resolveSource } from '../pages/TableView/actionRunner'
 import styled from '@emotion/styled'
@@ -242,7 +242,7 @@ function Node({ node, openIds, app, onAction }: { node: MenuNode; openIds: Set<s
       </>
     )
   }
-  const to = leafPath(node, app)
+  const to = leafRoute(node, app)           // with the entry's fixed parameters
   const inner = (
     <>
       <NodeIcon node={node} />

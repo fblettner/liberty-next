@@ -128,6 +128,7 @@ FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
             {"value": "dashboard", "label": "Dashboard (widget grid)"},
             {"value": "page", "label": "Page (frontend route)"},
             {"value": "job", "label": "Job (run it, follow its log)"},
+            {"value": "url", "label": "Link (an address, opened in a new tab)"},
         ],
     },
     "SUPPORTED_LANGUAGES": {

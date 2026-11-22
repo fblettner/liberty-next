@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { appOfPath, findMenuItem, jobTarget, leafPath, splitJobTarget } from './menuPath'
+import { appOfPath, findMenuItem, jobTarget, leafPath, leafRoute, splitJobTarget } from './menuPath'
 
 describe('menuPath', () => {
   it('routes every leaf kind', () => {
@@ -27,6 +27,16 @@ describe('menuPath', () => {
 })
 
 describe('appOfPath', () => {
+  it('opens an entry with its fixed parameters', () => {
+    expect(leafRoute({ type: 'screen', target: 'f0005', params: { SY: '01', RT: 'ST' } }, 'nomajde')).toBe('/screen/nomajde/f0005?SY=01&RT=ST')
+    expect(leafRoute({ type: 'query', target: 'q', connector: 'c', params: { N: 5, blank: '', none: null, nested: { a: 1 } } }, 'x')).toBe('/sql/c/q?N=5')
+    expect(leafRoute({ type: 'endpoint', target: 'e', connector: 'c', params: { A: 'a b' } }, 'x')).toBe('/http/c/e?A=a+b')
+    expect(leafRoute({ type: 'screen', target: 'f0005', params: {} }, 'nomajde')).toBe('/screen/nomajde/f0005')
+    // a job's params are its preset (in its route); a page and a dashboard take none; a folder leads nowhere
+    expect(leafRoute({ type: 'job', target: 'collect', params: { preset: 'Security' } }, 'x')).toBe(leafPath({ type: 'job', target: 'collect', params: { preset: 'Security' } }, 'x'))
+    expect(leafRoute({ type: 'page', target: '/nomaflow', params: { a: 1 } }, 'x')).toBe('/nomaflow')
+    expect(leafRoute({ target: undefined }, 'x')).toBeNull()
+  })
   it('reads the app of a page address', () => {
     expect(appOfPath('/screen/nomajde/jde_health')).toBe('nomajde')
     expect(appOfPath('/explorer/nomasx1/security')).toBe('nomasx1')

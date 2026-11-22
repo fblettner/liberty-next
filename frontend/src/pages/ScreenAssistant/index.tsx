@@ -669,9 +669,7 @@ export default function ScreenAssistant({ onClose }: { onClose: () => void }) {
           : true   // 'columns' (dialog) is optional — a screen with no dialog is a read-only grid
   )
   const stepState = (i: number): 'done' | 'active' | 'todo' => (i < step ? 'done' : i === step ? 'active' : 'todo')
-  const stepLabel = (k: StepKey) => t(`assistant.step.${k}`, {
-    target: 'Target', tables: 'Tables & joins', columns: 'Dialog columns', grid: 'Grid view', dictionary: 'Dictionary', menu: 'Menu', review: 'Review & create',
-  }[k])
+  const stepLabel = (k: StepKey) => t(`assistant.step.${k}`)
   const activeWizTab = tabs.find((tb) => tb.id === activeTab)
 
   return createPortal(

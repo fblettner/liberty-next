@@ -3571,6 +3571,8 @@ const en = {
     },
     notify: {
       job: 'job',
+      channel_portal: 'In the application', channel_email: 'Email', channel_action: 'A query or an endpoint',
+      rk_role: 'A role', rk_user: 'A user', rk_email: 'An email address',
       byAction: 'fired by a screen action',
       errSubject: 'A subject is required.',
       errScreen: 'Pick the app and the screen.',
@@ -3711,6 +3713,7 @@ const en = {
     noTokens: 'OIDC callback did not include tokens. Check [oidc] frontend_redirect on the server.',
   },
   assistant: {
+    step: { target: 'Target', tables: 'Tables & joins', columns: 'Dialog columns', grid: 'Grid view', dictionary: 'Dictionary', menu: 'Menu', review: 'Review & create' },
     module: {
       modeScreen: 'A screen',
       modeModule: 'A module',

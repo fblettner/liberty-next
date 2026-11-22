@@ -311,7 +311,7 @@ export default function StudioHome() {
         <MapBox ref={box}>
           <Wires>{wires.map((d, i) => <path key={i} d={d} fill="none" stroke={colors.blue.main} strokeWidth={1.6} strokeOpacity={0.75} />)}</Wires>
           <Col>
-            <div className="head"><Folder size={14} /> {t('studio.menu')}<span className="n">{map.menu.length}</span></div>
+            <div className="head"><Folder size={14} /> {t('studio.menu')}<span className="n">{map.menu.filter((i) => i.type).length}</span></div>
             <div className="list" {...scroll}>
               {shownMenu.map((m) => (
                 <Node key={m.id} ref={hold(menuKey(m.id))} type="button" $tone="orange" $indent={query ? 0 : m.depth} {...state(menuKey(m.id))} onClick={() => pick(menuKey(m.id))}>
@@ -370,7 +370,7 @@ export default function StudioHome() {
               <span style={{ flex: 1 }}>{t(editing.page === 'menus' ? 'studio.menu' : 'studio.dashboards')}</span>
               <Button $variant="ghost" $size="sm" onClick={done}>{t('common.close')}</Button>
             </ModalHeader>
-            <ModalBody><Suspense fallback={<Centered />}>{editing.page === 'menus' ? <MenusBuilder /> : <DashboardsBuilder />}</Suspense></ModalBody>
+            <ModalBody><Suspense fallback={<Centered />}>{editing.page === 'menus' ? <MenusBuilder app={map?.app} /> : <DashboardsBuilder />}</Suspense></ModalBody>
           </VisualBuilderModal>
         </Overlay>
       )}

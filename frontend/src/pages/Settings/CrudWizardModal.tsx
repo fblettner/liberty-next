@@ -380,7 +380,7 @@ export function CrudWizardModal({
                   loading={schema === undefined && !!pickedSchema}
                 />
               </Field>
-              {schema === null && (
+              {schema === null && (pickedSchema === '__nopicker__' || !!nameLike) && (
                 <ErrorLine>
                   {t('settings.scaffold.errors.noSchema')}
                 </ErrorLine>

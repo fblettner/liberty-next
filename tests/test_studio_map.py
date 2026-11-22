@@ -65,7 +65,7 @@ _MENUS = """
 items = [
   { id = "ref", label = "Reference" },
   { id = "codes", parent = "ref", label = "Codes", type = "screen", target = "codes" },
-  { id = "home", label = "Overview", type = "dashboard", target = "overview" },
+  { id = "home", label = "Overview", type = "dashboard", target = "main.overview" },
 ]
 """
 
@@ -101,7 +101,7 @@ def test_the_map_of_an_application(env) -> None:
         assert m["apps"] == ["main"] and m["app"] == "main"
         # the menu in display order, with its depth
         assert [(i["id"], i["depth"], i["type"], i["target"]) for i in m["menu"]] == [
-            ("ref", 0, None, None), ("codes", 1, "screen", "codes"), ("home", 0, "dashboard", "overview")]
+            ("ref", 0, None, None), ("codes", 1, "screen", "codes"), ("home", 0, "dashboard", "main.overview")]
         # a screen names what it reads, saves through, calls (nested steps included), the services and the screens inside its form
         by_id = {s["id"]: s for s in m["screens"]}
         assert by_id["codes"] == {
@@ -127,5 +127,9 @@ def test_the_map_of_an_application(env) -> None:
         client.app.state.explorer = NS(explorer={"main": {"m": NS(entities={"e": NS(screen="lost"), "f": NS(screen=None)})}})
         again = {s["id"]: s for s in client.get("/admin/studio/map?app=main", headers=h).json()["screens"]}
         assert again["lost"]["reached"] is True and again["lost"]["in_menu"] is False
+        # a dashboard is in the menu under its qualified id (<scope>.<id>), which is what an entry stores
+        client.app.state.dashboards = NS(dashboards={"main": {"overview": NS(label="Overview"), "side": NS(label=None)}})
+        boards = {d["id"]: d for d in client.get("/admin/studio/map?app=main", headers=h).json()["dashboards"]}
+        assert boards["overview"]["in_menu"] is True and boards["side"] == {"id": "side", "label": "side", "in_menu": False}
         # an unknown application: the first one
         assert client.get("/admin/studio/map?app=nope", headers=h).json()["app"] == "main"

@@ -211,7 +211,7 @@ function freshId(items: MenuItem[], seed: string): string {
 }
 
 // ── component ────────────────────────────────────────────────────────────────
-export default function MenusBuilder() {
+export default function MenusBuilder({ app: openOn }: { app?: string | null } = {}) {
   const { t } = useTranslation()
   const modals = useModals()
   // Aliased — this component already has a local ``currentApp`` (the selected app's menu tree).
@@ -261,7 +261,7 @@ export default function MenusBuilder() {
         setScreens(sc.screens)
         setDashboards(db.dashboards)
         setJobs(jb.jobs)
-        setSelApp((cur) => (cur && d.menus[cur] ? cur : (workspaceApp && d.menus[workspaceApp] ? workspaceApp : Object.keys(d.menus)[0] ?? null)))
+        setSelApp((cur) => (cur && d.menus[cur] ? cur : (openOn && d.menus[openOn] ? openOn : workspaceApp && d.menus[workspaceApp] ? workspaceApp : Object.keys(d.menus)[0] ?? null)))
       })
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
   }

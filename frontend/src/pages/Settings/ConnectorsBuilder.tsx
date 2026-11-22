@@ -777,7 +777,9 @@ export default function ConnectorsBuilder() {
   const holds = (c: Record<string, unknown>): string => {
     const f = connectorFigures(c)
     if (f.api) return `api · ${t('settings.connectors.fig.endpoints', { n: f.endpoints })}`
-    return ['sql', f.tables ? t('settings.connectors.fig.tables', { n: f.tables }) : '', f.queries + f.sequences + f.lookups ? t('settings.connectors.fig.queries', { n: f.queries + f.sequences + f.lookups }) : '']
+    // each kind under its own name: a sequence or a lookup is not counted as a query (the stage cards say the same)
+    return ['sql', f.tables ? t('settings.connectors.fig.tables', { n: f.tables }) : '', f.queries ? t('settings.connectors.fig.queries', { n: f.queries }) : '',
+      f.sequences ? t('settings.connectors.fig.sequences', { n: f.sequences }) : '', f.lookups ? t('settings.connectors.fig.lookups', { n: f.lookups }) : '']
       .filter(Boolean).join(' · ')
   }
   if (error && !conns) return <Banner $tone="error">{error}</Banner>

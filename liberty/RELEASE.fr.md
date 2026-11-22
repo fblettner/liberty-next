@@ -29,6 +29,16 @@
   « rien ne l'ouvre » d'un écran qu'une entité de l'Explorateur ouvre. La carte Authentification d'un
   connecteur API nomme *Chaque utilisateur sous son nom* et signale l'absence de clé de signature ; `{USER}`
   figure dans la liste des marqueurs de l'étape de notification.
+- **Studio et éditeurs, corrigés.** Le Studio dit d'un écran « rien ne l'ouvre » selon la règle même de
+  l'Intégrité (une navigation depuis un menu de ligne, un onglet d'un autre formulaire et une entité de
+  l'Explorateur comptent, comme là-bas) ; un tableau de bord qu'une entrée ouvre n'est plus marqué « hors du
+  menu » ; *Modifier le menu* s'ouvre sur l'application affichée ; la colonne Menu compte les entrées, comme la
+  vue d'ensemble (les dossiers ne sont pas des entrées). **Les paramètres fixes d'une entrée de menu sont
+  transmis** quand un écran, une requête ou un point d'accès s'ouvre depuis elle, et le type d'entrée *Lien*
+  (`url`) est proposé dans l'éditeur. *Générer depuis la base* n'affiche plus « introspection impossible »
+  pendant qu'il attend un filtre de table. L'étape d'état d'un traitement liste ses périodes par leur nom,
+  les règles de notification nomment leurs canaux et leurs types de destinataires, les étapes de l'assistant de
+  création d'écran sont traduites. La ligne d'un connecteur compte séparément requêtes, séquences et lookups.
 - **Intégrité : un écran qu'une entité de l'Explorateur ouvre n'est pas orphelin.** Une entité de
   l'Explorateur qui nomme un écran ouvre une ligne de détail dans la fenêtre de cet écran : l'écran est atteint
   même quand aucun menu n'y mène.

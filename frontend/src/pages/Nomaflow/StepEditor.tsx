@@ -1112,7 +1112,7 @@ function ReportForm({ step, patch }: FormProps) {
     { value: 'analysis', label: t('nomaflow.steps.reportAnalysis') }, { value: 'dashboard', label: t('nomaflow.steps.reportDashboard') }, { value: 'report', label: t('nomaflow.steps.reportPlugin') },
   ]
   const modelOpts: SearchSelectOption[] = models.map((m) => ({ value: `${m.app}/${m.model}`, label: m.label, mono: `${m.app} · ${m.model}` }))
-  const periodOpts: SearchSelectOption[] = PERIOD_PRESETS.map((p) => ({ value: p, label: p === 'all' ? t('explorer.bucket.none') : t(`period.presets.${p}`, p) }))
+  const periodOpts: SearchSelectOption[] = PERIOD_PRESETS.map((p) => ({ value: p, label: t(`period.${p}`) }))
   return (
     <>
       <SubHead>{t('nomaflow.steps.reportWhat')}</SubHead>

@@ -3564,6 +3564,8 @@ const fr: Resources = {
     },
     notify: {
       job: 'tâche',
+      channel_portal: 'Dans l\'application', channel_email: 'E-mail', channel_action: 'Une requête ou un point d\'accès',
+      rk_role: 'Un rôle', rk_user: 'Un utilisateur', rk_email: 'Une adresse e-mail',
       byAction: 'déclenchée par une action d\'écran',
       errSubject: 'Un objet est requis.',
       errScreen: 'Choisissez l\'application et l\'écran.',
@@ -3704,6 +3706,7 @@ const fr: Resources = {
     noTokens: "Le retour OIDC n'a pas fourni de jetons. Vérifiez [oidc] frontend_redirect côté serveur.",
   },
   assistant: {
+    step: { target: 'Cible', tables: 'Tables et jointures', columns: 'Colonnes du dialogue', grid: 'Vue de grille', dictionary: 'Dictionnaire', menu: 'Menu', review: 'Vérifier et créer' },
     module: {
       modeScreen: 'Un écran',
       modeModule: 'Un module',

@@ -591,9 +591,12 @@ def _check_unused_connectors(state: Any, idx: _Index, out: list[Issue]) -> None:
                          f"connector '{name}' is referenced by nothing and has no menu", _connector_deep_link(name)))
 
 
-def _check_orphan_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
-    """A screen reached from no menu, no drill (nested_table / row_click / navigate) and no Explorer
-    entity — likely dead, or a drill target the operator forgot to wire."""
+def reached_screens(state: Any, idx: _Index | None = None) -> set[tuple[str, str]]:
+    """The screens something opens, as ``(app, screen id)``: a menu entry (a screen, or a query a
+    screen reads), another screen (its row click, a tab of its form, a ``navigate`` action) or an
+    Explorer entity. THE rule of "is this screen reached" — the orphan check and the Studio's map
+    both read it."""
+    idx = idx if idx is not None else _build_index(state)
     reached: set[tuple[str, str]] = set()   # (app, screen_id)
     menus = getattr(state, "menus", None)
     if menus is not None:
@@ -647,6 +650,14 @@ def _check_orphan_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
             for entity in (getattr(model, "entities", None) or {}).values():
                 if getattr(entity, "screen", None):
                     reached.add((app, entity.screen))
+    return reached
+
+
+def _check_orphan_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
+    """A screen reached from no menu, no drill (nested_table / row_click / navigate) and no Explorer
+    entity — likely dead, or a drill target the operator forgot to wire."""
+    reached = reached_screens(state, idx)
+    screens = getattr(state, "screens", None)
     if screens is not None:
         for app, smap in (getattr(screens, "screens", None) or {}).items():
             for sid in smap:

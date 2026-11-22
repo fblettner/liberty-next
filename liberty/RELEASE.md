@@ -24,6 +24,14 @@
   The Studio no longer says "nothing opens" of a screen an Explorer entity opens. The Authentication card of an
   API connector names *Each user as himself* and says when its signing key is missing; `{USER}` is in the
   notify step's list of placeholders.
+- **Studio and builders, corrected.** The Studio says of a screen "nothing opens it" by Integrity's own rule (a
+  row-menu drill, a tab of another form and an Explorer entity count, as there); a dashboard an entry opens is
+  no longer tagged "not in the menu"; *Edit the menu* opens on the application shown; the Menu column counts
+  entries, as the overview does (folders are not entries). **A menu entry's fixed parameters are passed** when
+  a screen, a query or an endpoint opens from it, and the entry type *Link* (`url`) is offered in the editor.
+  *Generate from DB* no longer shows "couldn't introspect" while it waits for a table filter. The report step
+  of a job lists its periods by name, the notification rules name their channels and recipient kinds, the
+  screen assistant's steps are translated. A connector's line counts queries, sequences and lookups apart.
 - **Integrity: a screen an Explorer entity opens is not an orphan.** An Explorer entity that names a screen
   opens a detail row in that screen's dialog: the screen is reached even when no menu leads to it.
 - **A page an application ships: a row of its grid can be opened** — the page contract (version 3) gives `Grid`

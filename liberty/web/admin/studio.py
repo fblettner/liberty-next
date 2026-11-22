@@ -235,11 +235,13 @@ async def studio_map(request: Request, _: Superuser, app: str | None = None) -> 
                         "calls": list(dict.fromkeys(c for c in calls if c)), "services": list(dict.fromkeys(services)),
                         "nested": [n for n in dict.fromkeys(nested) if n], "form": getattr(sc, "dialog", None) is not None,
                         "read_only": bool(getattr(sc, "read_only", False)), "in_menu": sid in in_menu})
-    # a screen an Explorer entity names opens its detail rows: reached too (the rule Integrity applies)
-    explored = {entity.screen for model in ((getattr(getattr(state, "explorer", None), "explorer", None) or {}).get(app) or {}).values()
-                for entity in (getattr(model, "entities", None) or {}).values() if getattr(entity, "screen", None)}
-    for sc in screens:                                 # a screen opened inside another's form is reached, menu entry or not
-        sc["reached"] = sc["in_menu"] or sc["id"] in nested_in or sc["id"] in explored
+    # reached = what Integrity counts (a menu entry, another screen's form, row click or navigate action, an
+    # Explorer entity): one rule, so "nothing opens" here and "orphan screen" there never disagree
+    from liberty.web.integrity import reached_screens
+
+    opened = {sid for a, sid in reached_screens(state) if a == app}
+    for sc in screens:
+        sc["reached"] = sc["in_menu"] or sc["id"] in nested_in or sc["id"] in opened
 
     # ── the application's own data nothing here reads (its connector's queries / endpoints) ──
     own = config(app)
@@ -281,7 +283,7 @@ async def studio_map(request: Request, _: Superuser, app: str | None = None) -> 
     return {
         "apps": apps, "app": app, "menu": menu, "screens": screens,
         "data": sorted(data.values(), key=lambda d: (not d["used"], d["key"])), "services": services,
-        "dashboards": [{"id": did, "label": getattr(d, "label", None) or did, "in_menu": did in menu_dashboards}
+        "dashboards": [{"id": did, "label": getattr(d, "label", None) or did, "in_menu": did in menu_dashboards or f"{app}.{did}" in menu_dashboards}
                        for did, d in sorted((dashboards.get(app) or {}).items())],
     }
 

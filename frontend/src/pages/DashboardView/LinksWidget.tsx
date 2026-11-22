@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowRight, ExternalLink, type LucideIcon } from 'lucide-react'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { iconFor } from '../../components/SidebarMenu'
-import { findMenuItem, leafPath } from '../../services/menuPath'
+import { findMenuItem, leafRoute } from '../../services/menuPath'
 import type { LinksWidgetWire } from '../../types/dashboards'
 import { Card, Empty, Sub, Title } from './cardParts'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -36,7 +36,7 @@ export function LinksWidget({ widget, natural }: { widget: LinksWidgetWire; natu
       return [{ key: link.url, label: link.label ?? link.url, description: link.description ?? null, Icon, external: link.url, path: null }]
     }
     const item = link.menu ? findMenuItem(menus, widget.app, link.menu) : undefined
-    const path = item ? leafPath(item, widget.app) : null
+    const path = item ? leafRoute(item, widget.app) : null
     if (!item || !path) return []           // not visible to this user, or not a leaf
     const Icon = iconFor(link.icon ?? item.icon ?? undefined) ?? ArrowRight
     return [{ key: link.menu as string, label: link.label ?? item.label, description: link.description ?? null, Icon, external: null, path }]
