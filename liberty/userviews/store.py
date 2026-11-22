@@ -112,6 +112,23 @@ class UserViewStore:
             for r in rows
         ]
 
+    async def list_kinds(self, usernames: list[str], kinds: list[str]) -> list[dict[str, Any]]:
+        """Every view of *kinds* held by one of *usernames*, whatever its key — what a "find it
+        wherever it was saved" list reads in one query: ``[{username, kind, view_key, name,
+        payload, updated_at}]``, by key then name."""
+        stmt = (
+            select(UserView)
+            .where(UserView.username.in_(usernames), UserView.kind.in_(kinds))
+            .order_by(UserView.view_key, UserView.name)
+        )
+        async with self.session() as s:
+            rows = (await s.execute(stmt)).scalars().all()
+        return [
+            {"username": r.username, "kind": r.kind, "view_key": r.view_key, "name": r.name, "payload": dict(r.payload),
+             "updated_at": r.updated_at.isoformat() if r.updated_at else None}
+            for r in rows
+        ]
+
     async def save_view(self, username: str, kind: str, view_key: str, name: str, payload: dict) -> None:
         """Upsert one named view for this (user, kind, key)."""
         async with self.session() as s:

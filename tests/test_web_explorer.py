@@ -524,3 +524,30 @@ def test_publish_a_saved_analysis_in_a_menu(env) -> None:
         targets = lambda h: [i.get("target") for i in (client.get("/api/menus", headers=h).json().get("menus", {}).get("shop", {}).get("items") or [])]  # noqa: E731
         assert "/explorer/shop/sales/a/revenue-by-company" in targets(analyst)
         assert "/explorer/shop/sales/a/revenue-by-company" not in targets(nobody)
+
+
+def test_a_saved_object_is_found_whatever_its_model(env) -> None:
+    """An analysis is saved under one model and the page lists those of the model shown: one list
+    across the models the caller may use says where each one is."""
+    app, _ = env
+    with TestClient(app) as client:
+        admin, analyst = _h(client, "admin"), _h(client, "analyst")
+        put = lambda path, body, h: client.put(f"/api/explorer/{path}", json=body, headers=h)  # noqa: E731
+        put("shop/sales/saved/analyses", {"name": "Revenue by company", "definition": {"rows": []}, "shared": True, "audience": "finance"}, admin)
+        put("shop/sales/saved/analyses", {"name": "My draft", "definition": {}}, analyst)                       # private to the analyst
+        put("shop/sales/saved/dashboards", {"name": "Home", "definition": {"tiles": []}, "shared": True}, admin)
+        put("other/x/saved/analyses", {"name": "Elsewhere", "definition": {}, "shared": True}, admin)            # a model the analyst may not use
+        put("shop/sales/saved/analyses", {"name": "Admin only", "definition": {}}, admin)                         # private to the admin
+
+        found = client.get("/api/explorer/saved", headers=analyst).json()["items"]
+        assert [(i["app"], i["model"], i["kind"], i["name"]) for i in found] == [
+            ("shop", "sales", "analyses", "My draft"), ("shop", "sales", "analyses", "Revenue by company"), ("shop", "sales", "dashboards", "Home")]
+        shared = next(i for i in found if i["name"] == "Revenue by company")
+        assert shared["model_label"] == "Shop" and shared["shared"] is True and shared["audience"] == "finance" and shared["id"] == "revenue-by-company"
+        assert next(i for i in found if i["name"] == "My draft")["shared"] is False
+        assert "definition" not in shared                        # a list to find one in: opening it reads it
+        # the admin sees the other model's, and his own private one — not the analyst's
+        names = [i["name"] for i in client.get("/api/explorer/saved", headers=admin).json()["items"]]
+        assert "Elsewhere" in names and "Admin only" in names and "My draft" not in names
+        assert client.get("/api/explorer/saved", headers=_h(client, "nobody")).json()["items"] == []
+        assert client.get("/api/explorer/saved").status_code == 401

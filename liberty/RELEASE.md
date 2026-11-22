@@ -53,6 +53,13 @@
   **headings**, the grouped questions the chat shows first, which had no editor at all. The block is one shared
   component (`common/LocalizedTexts`, logic in `services/localized.ts`), the picker's logic is
   `services/aiStarters.ts`; both tested.
+- **Data Explorer: a saved analysis or dashboard is found whatever its model.** An object is saved under one
+  model and the page listed those of the model shown: one saved elsewhere was found by trying each model.
+  **Find**, beside *Analyses / Dashboards*, lists every saved object of the models the user may use — the
+  shared ones and his own — under its application and model; typing narrows it (name, description, audience,
+  owner, model; case and accents ignored), and picking a line opens it, switching to its model when it is
+  another. The model picker says what each model holds ("8 analyses · 1 dashboard"). One route behind it,
+  `GET /api/explorer/saved` (no definition in the list: opening reads it).
 - **The server of an API connector is a pool too.** A pool whose URL starts with `http://` or `https://` is an
   HTTP server (kind *HTTP server* in Liberty → Pools): its address with its account, its password — or its
   token when the server takes one —, the key that signs a token per user and its certificate, the TLS check.
@@ -81,7 +88,8 @@
   starting it*: per parameter its name, its label and the label in the other languages, the step it goes to,
   its choices (typed freely, a fixed list, the rows of a query, an application's Explorer models, the test
   suites), a default, required, several values — and **One run per value of** (`for_each`). The job's
-  **timeout** is there too. Saving writes exactly what was loaded plus the change (`services/jobParams.ts`,
+  **timeout** is there too, with its **position in the installation** (`install_step`) and **Keep this job as
+  it is on upgrade** (`override`): every setting of a job now has its field. Saving writes exactly what was loaded plus the change (`services/jobParams.ts`,
   tested).
 - **Studio and builders, corrected.** The Studio says of a screen "nothing opens it" by Integrity's own rule (a
   row-menu drill, a tab of another form and an Explorer entity count, as there); a dashboard an entry opens is

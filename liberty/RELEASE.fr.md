@@ -63,6 +63,14 @@
   l'application, ses écrans — et ses **rubriques**, les questions groupées que le chat montre en premier, qui
   n'avaient aucun éditeur. Le bloc est un composant partagé (`common/LocalizedTexts`, logique dans
   `services/localized.ts`), la logique du sélecteur est `services/aiStarters.ts` ; les deux testés.
+- **Data Explorer : une analyse ou un tableau de bord enregistré se retrouve quel que soit son modèle.** Un objet
+  est enregistré sous un modèle et la page listait ceux du modèle affiché : un objet enregistré ailleurs se
+  retrouvait en essayant chaque modèle. **Rechercher**, à côté d'*Analyses / Tableaux de bord*, liste tous les
+  objets enregistrés des modèles que l'utilisateur peut utiliser — les partagés et les siens — sous leur
+  application et leur modèle ; la saisie réduit la liste (nom, description, audience, propriétaire, modèle ;
+  casse et accents ignorés), et choisir une ligne l'ouvre, en passant à son modèle quand c'en est un autre. Le
+  sélecteur de modèle dit ce que chaque modèle contient (« 8 analyses · 1 tableau de bord »). Une seule route
+  derrière, `GET /api/explorer/saved` (pas de définition dans la liste : l'ouverture la lit).
 - **Le serveur d'un connecteur API est un pool lui aussi.** Un pool dont l'URL commence par `http://` ou
   `https://` est un serveur HTTP (type *HTTP server* dans Liberty → Pools) : son adresse avec son compte, son
   mot de passe — ou son jeton quand le serveur en prend un —, la clé qui signe un jeton par utilisateur et son
@@ -94,7 +102,8 @@
   et le libellé dans les autres langues, l'étape destinataire, ses choix (saisie libre, liste fixe, lignes
   d'une requête, modèles Explorer d'une application, suites de tests), une valeur par défaut, obligatoire,
   plusieurs valeurs — et **Une exécution par valeur de** (`for_each`). Le **délai maximal** de la tâche y est
-  aussi. L'enregistrement écrit exactement ce qui a été chargé, plus la modification (`services/jobParams.ts`,
+  aussi, avec sa **position dans l'installation** (`install_step`) et **Garder cette tâche telle quelle à la
+  mise à jour** (`override`) : chaque réglage d'une tâche a désormais son champ. L'enregistrement écrit exactement ce qui a été chargé, plus la modification (`services/jobParams.ts`,
   testé).
 - **Studio et éditeurs, corrigés.** Le Studio dit d'un écran « rien ne l'ouvre » selon la règle même de
   l'Intégrité (une navigation depuis un menu de ligne, un onglet d'un autre formulaire et une entité de

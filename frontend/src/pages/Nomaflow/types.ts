@@ -111,6 +111,10 @@ export interface JobConfig {
   user_params?: UserParamConfig[]
   /** A parameter whose several values make one run per value, one after another. */
   for_each?: string | null
+  /** When set, the installation runs this job once, in ascending order (deploy the databases, then the schema…). */
+  install_step?: number | null
+  /** The installation's own version of the job: an upgrade of the application leaves it exactly as saved. */
+  override?: boolean
   /** Per-run logging verbosity. INFO (default) gives row counts + business
    *  progress markers. DEBUG also emits the full SQL of every run_query.
    *  The Run-with-parameters modal can override this per-fire without editing

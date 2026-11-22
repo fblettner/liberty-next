@@ -383,7 +383,8 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
         return next as typeof s
       })
       // the user's parameters as the file holds them: what is blank left out, none → no key at all
-      const cleanedJob = { ...job, steps: cleaned, user_params: cleanUserParams(job.user_params), for_each: job.for_each?.trim() || undefined }
+      const cleanedJob = { ...job, steps: cleaned, user_params: cleanUserParams(job.user_params), for_each: job.for_each?.trim() || undefined,
+        install_step: job.install_step || undefined, override: job.override || undefined }
       // Merge the working copy into the full list: replace in place when editing,
       // append when new. `id` is immutable in edit mode (the field is read-only).
       const merged = isNew
@@ -490,6 +491,21 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
                   onChange={(checked) => patch({ enabled: checked })}
                   label={t('nomaflow.editor.fieldEnabled')}
                 />
+              </FieldWrap>
+              {/* what an installation and an upgrade do with this job */}
+              <FieldWrap>
+                <FieldLabel>{t('nomaflow.editor.fieldInstallStep')}</FieldLabel>
+                <Input type="number" min={1} value={job.install_step ?? ''} data-job-field="install_step"
+                  onChange={(e) => patch({ install_step: e.target.value ? Math.max(1, Math.floor(Number(e.target.value)) || 1) : null })} />
+                <FieldHint>{t('nomaflow.editor.fieldInstallStepHint')}</FieldHint>
+              </FieldWrap>
+              <FieldWrap>
+                <Checkbox
+                  checked={!!job.override}
+                  onChange={(checked) => patch({ override: checked })}
+                  label={t('nomaflow.editor.fieldOverride')}
+                />
+                <FieldHint>{t('nomaflow.editor.fieldOverrideHint')}</FieldHint>
               </FieldWrap>
             </Grid>
           </Section>

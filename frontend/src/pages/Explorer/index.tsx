@@ -9,14 +9,15 @@ import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
 import { setPageContext } from '../../services/aiContext'
-import { BookOpen, Compass, Play, Table2, List, ArrowLeft, Code2, X, Grid3x3, BarChart3, LineChart, PieChart, Gauge, Save, Copy, Trash2, LayoutDashboard, FlaskConical, Pencil, FileDown, LayoutGrid, SlidersHorizontal, ListPlus } from 'lucide-react'
+import { BookOpen, Compass, Play, Table2, List, ArrowLeft, Code2, X, Grid3x3, BarChart3, LineChart, PieChart, Gauge, Save, Copy, Trash2, LayoutDashboard, FlaskConical, Pencil, FileDown, LayoutGrid, SlidersHorizontal, ListPlus, Search } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { Banner, Button, Centered, Checkbox, Input, PageLayout, SearchSelect, SpinnerRing, useModals, type SearchSelectOption, HeaderActions, HeaderSlot, HeaderSlotProvider, Card } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import {
   addField, addFilter, buildAggregateRequest, buildDetailRequest, dateFields, drillCellsOf, emptyDefinition, fieldIndex, measureKey, usedKeys, withCalculated, showModes } from '../../services/explorer'
-import { deleteSaved, downloadExport, listSaved, saveSaved, savedOptions, type DashboardDefinition, type SavedAnalysis, type SavedDashboard } from '../../services/explorerSaved'
+import { deleteSaved, downloadExport, findSaved, listSaved, saveSaved, savedCounts, savedOptions, type DashboardDefinition, type FoundSaved, type SavedAnalysis, type SavedDashboard } from '../../services/explorerSaved'
+import { FindSavedModal } from './FindSavedModal'
 import type { AggregateResult, AnalysisDefinition, AnalysisView, CalcDef, DetailResult, DrillCell, ExplorerModel, ExplorerModelSummary, FieldType } from '../../types/explorer'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { ShelfBox, ShelfTitle } from './shelfKit'
@@ -105,6 +106,12 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
   const [published, setPublished] = useState<string | null>(null)
   // the saved lists of the model in view are there (a link to one of them waits for that)
   const [savedFor, setSavedFor] = useState('')
+  // every saved analysis and dashboard of the models the user may use — what "Find" lists and the model
+  // picker counts; one found in another model is opened once that model's lists are there
+  const [found, setFound] = useState<FoundSaved[]>([])
+  const [finding, setFinding] = useState(false)
+  const wanted = useRef<FoundSaved | null>(null)
+  const refreshFound = useCallback(() => { findSaved().then(setFound).catch(() => { /* the page works without it: the model's own lists stay */ }) }, [])
   const openedLink = useRef(false)
   const runId = useRef(0)
   const pendingDrill = useRef<DrillCell[] | null>(null)
@@ -138,8 +145,9 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
       const [an, da] = await Promise.all([listSaved<AnalysisDefinition>(a, m, 'analyses'), listSaved<DashboardDefinition>(a, m, 'dashboards')])
       if (n !== savedReq.current) return
       setAnalyses(an); setDashboards(da); setSavedFor(`${a}/${m}`)
+      refreshFound()                                          // a save or a delete changes what is found and counted
     } catch { if (n === savedReq.current) { setAnalyses([]); setDashboards([]); setSavedFor(`${a}/${m}`) } }
-  }, [])
+  }, [refreshFound])
   useEffect(() => {
     if (!app || !modelId) return
     setModel(null); setDef(null); setResult(null); setDetail(null); setDrill(null); setError(null); setDictNotice(null)
@@ -306,6 +314,31 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on the lists of the linked model
   }, [savedFor, model])
+  // "Find": the object picked is opened — at once when it is of the model in view, else when the lists of its
+  // model are there (the same wait as a menu link's)
+  const openFoundHere = (f: FoundSaved) => {
+    if (f.kind === 'dashboards') {
+      const d = dashboards.find((x) => x.id === f.id)
+      setMode('dashboards')
+      if (d) loadDashboard(d); else setError(t('explorer.publish.gone', { id: f.id }))
+    } else {
+      const a = analyses.find((x) => x.id === f.id)
+      if (a) loadAnalysis(a); else setError(t('explorer.publish.gone', { id: f.id }))
+    }
+  }
+  const openFound = (f: FoundSaved) => {
+    setFinding(false); setError(null)
+    if (f.app === app && f.model === modelId && savedFor === `${app}/${modelId}`) { openFoundHere(f); return }
+    wanted.current = f
+    setApp(f.app); setModelId(f.model)
+  }
+  useEffect(() => {
+    const f = wanted.current
+    if (!f || !model || app !== f.app || modelId !== f.model || savedFor !== `${app}/${modelId}`) return
+    wanted.current = null
+    openFoundHere(f)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on the lists of the model the object is in
+  }, [savedFor, model])
   const saveDashboard = async (fields: { name: string; description: string; audience: string; shared: boolean }, asNew: boolean) => {
     const item = await saveSaved<DashboardDefinition>(app, modelId, 'dashboards', { id: asNew ? null : currentDashboard?.id, as_new: asNew, name: fields.name, description: fields.description || null, audience: fields.audience || null, shared: fields.shared, definition: dashDef })
     setCurrentDashboard(item); setDashEditing(false)
@@ -327,6 +360,7 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
   const dimOpts: SearchSelectOption[] = def.rows.map((r) => ({ value: r.bucket ? `${r.field}@${r.bucket}` : r.field, label: fields.get(r.field)?.label ?? r.field }))
   const recordEntity = record ? model.entities.find((e) => e.id === record.entity) : null
   const canOpenRecord = !!model.entities.find((e) => e.id === def.entity)?.screen
+  const counts = savedCounts(found)
   const viewIcon: Record<AnalysisView, React.ReactNode> = { table: <Table2 size={13} />, pivot: <Grid3x3 size={13} />, bar: <BarChart3 size={13} />, line: <LineChart size={13} />, pie: <PieChart size={13} />, kpi: <Gauge size={13} />, detail: <List size={13} /> }
   const exportName = currentAnalysis?.name || `explorer-${modelId}`
   const canDeleteAnalysis = !!currentAnalysis && (currentAnalysis.owner === user?.username || !!user?.is_superuser)
@@ -338,6 +372,8 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
         <SegBtn type="button" $active={mode === 'analyses'} onClick={() => setMode('analyses')}><FlaskConical size={13} /> {t('explorer.analyses')} ({analyses.length})</SegBtn>
         <SegBtn type="button" $active={mode === 'dashboards'} onClick={() => setMode('dashboards')}><LayoutDashboard size={13} /> {t('explorer.dashboards')} ({dashboards.length})</SegBtn>
       </Seg>
+      {/* an object is saved under one model: this finds it wherever it is */}
+      <Button $size="sm" $variant="ghost" data-find-saved onClick={() => setFinding(true)} title={t('explorer.find.hint')}><Search size={13} /> {t('explorer.find.button')}</Button>
       {mode === 'analyses' ? (
         <>
           <div style={{ width: 300 }}>
@@ -380,7 +416,13 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
   return (
     <PageLayout icon={<Compass size={18} />} title={t('explorer.title')} description={<span>{model.label}{model.description ? ` — ${model.description}` : ''}{model.derived && model.preset ? ` · ${t('explorer.fromPreset', { preset: model.preset })}` : ''}</span>}
       headerRight={<><HeaderSlot ref={setHeaderSlot} />{models && models.length > 0 ? (
-        <div style={{ width: 380 }}><SearchSelect sort value={`${app}/${modelId}`} options={models.map((m) => ({ value: `${m.app}/${m.model}`, label: m.label, group: m.group || menus?.[m.app]?.label || m.app }))}
+        <div style={{ width: 380 }}><SearchSelect sort value={`${app}/${modelId}`} options={models.map((m) => {
+          // beside each model, what is saved in it: where to look before opening it
+          const c = counts[`${m.app}/${m.model}`]
+          const holds = c ? [c.analyses ? t('explorer.find.nAnalyses', { count: c.analyses }) : '', c.dashboards ? t('explorer.find.nDashboards', { count: c.dashboards }) : ''].filter(Boolean).join(', ') : ''
+          // in the label itself, and only where there is something: a column of its own squeezed the long names
+          return { value: `${m.app}/${m.model}`, label: holds ? `${m.label} (${holds})` : m.label, group: m.group || menus?.[m.app]?.label || m.app }
+        })}
           onChange={(v) => { const [a, m] = v.split('/'); if (a && m) { setApp(a); setModelId(m) } }} /></div>
       ) : null}</>}>
       <HeaderSlotProvider value={headerSlot}>
@@ -489,6 +531,9 @@ export default function ExplorerPage({ initial }: { initial?: { app: string; mod
       )}
       {record && recordEntity && (
         <RecordDialog app={app} entity={recordEntity} row={record.row} onClose={() => setRecord(null)} onSaved={() => void run(def, { drill, page })} />
+      )}
+      {finding && (
+        <FindSavedModal found={found} current={`${app}/${modelId}`} appLabel={(a) => menus?.[a]?.label || a} onOpen={openFound} onClose={() => setFinding(false)} />
       )}
       {publishing && (publishing === 'analysis' ? currentAnalysis : currentDashboard) && (() => {
         const obj = (publishing === 'analysis' ? currentAnalysis : currentDashboard)!

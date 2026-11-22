@@ -185,6 +185,25 @@ class SaveBody(BaseModel):
     definition: dict[str, Any] = Field(default_factory=dict)
 
 
+@router.get("/explorer/saved", summary="Find a saved analysis or dashboard, whatever its model")
+async def find_saved(request: Request, principal: CurrentPrincipal, explorer: Explorer) -> dict[str, Any]:
+    """Every saved analysis and dashboard of the models the caller may use — the shared ones and
+    his own — each with the model it was saved in: ``{items: [{app, model, model_label, kind
+    (analyses | dashboards), id, name, description, audience, owner, shared, updated_at}]}``.
+    An object is saved under one model, and the page lists those of the model shown: this is
+    how one is found without knowing where it is."""
+    labels = {_saved_key(app, mid): (app, mid, m.label or mid) for app, mid, m in explorer.items()
+              if principal.has_permission(permission_for(app, mid))}
+    items = []
+    for r in await _saved_store(request).everywhere(principal.username):
+        where = labels.get(r["key"])
+        if where is None:                                    # a model he may not use, or one that is gone
+            continue
+        items.append({**{k: v for k, v in r.items() if k != "key"}, "app": where[0], "model": where[1], "model_label": where[2],
+                      "kind": "dashboards" if r["kind"] == KIND_DASHBOARD else "analyses"})
+    return {"items": sorted(items, key=lambda i: (i["app"], i["model_label"].lower(), i["kind"], str(i["name"]).lower()))}
+
+
 @router.get("/explorer/{app}/{model}/saved/{kind}", summary="List saved analyses or dashboards",
              responses={200: {"model": SavedItems, "description": "The shared objects plus the caller's own."}})
 async def list_saved(app: str, model: str, kind: str, request: Request, principal: CurrentPrincipal, explorer: Explorer) -> dict[str, Any]:

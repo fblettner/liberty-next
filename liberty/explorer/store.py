@@ -59,6 +59,21 @@ class AnalysisStore:
         out = [self._public(r, shared=True) for r in shared] + [self._public(r, shared=False) for r in mine]
         return sorted(out, key=lambda x: (str(x.get("audience") or ""), str(x.get("name") or "").lower()))
 
+    async def everywhere(self, username: str) -> list[dict[str, Any]]:
+        """Every analysis and dashboard the caller can list — the shared ones and his own —
+        whatever the model it was saved in: ``[{key, kind, id, name, description, audience,
+        owner, shared, updated_at}]`` (``key`` = ``<app>/<model>``; no definition: this is the
+        list to find one in, opening it reads it). The caller filters the keys he may use."""
+        out = []
+        for r in await self._views.list_kinds([SHARED_USER, username], list(KINDS)):
+            rec = self._public(r, shared=r["username"] == SHARED_USER)
+            out.append({
+                "key": r["view_key"], "kind": r["kind"], "id": rec["id"], "name": rec.get("name") or rec["id"],
+                "description": rec.get("description"), "audience": rec.get("audience"), "owner": rec.get("owner"),
+                "shared": rec["shared"], "updated_at": rec.get("updated_at"),
+            })
+        return out
+
     async def get(self, app: str, kind: str, username: str, obj_id: str) -> dict[str, Any] | None:
         for r in await self.list(app, kind, username):
             if r["id"] == obj_id:
