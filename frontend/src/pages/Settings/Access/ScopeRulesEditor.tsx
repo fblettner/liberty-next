@@ -12,7 +12,7 @@ import { lookupOptions, useLookupTables, lookupKey } from '../../../services/loo
 import type { DictionaryDoc } from '../../../types/config'
 import { colors, fontSize, fonts, radius } from '../../../theme'
 import { PermChip } from './OtherAccess'
-import { attributeOf, cleanRule, describeRule, dictionaryItems, itemLabels, ruleTarget, sourceFor, valueSourceFor, type DictionaryItem, type ScopeRule } from './scopeRules'
+import { attributeOf, cleanRule, describeRule, dictionaryItems, itemLabels, ruleTarget, sourceFor, valueSourceFor, type DictionaryItem, type ScopeRule, type RuleWords } from './scopeRules'
 
 const Rows = styled.div`display: flex; flex-direction: column; gap: 6px;`
 const RuleRow = styled.div<{ $editing?: boolean }>`
@@ -50,6 +50,7 @@ const EMPTY: ScopeRule = { dd: '', values: [], exclude: false, mode: 'ignore', c
 
 export default function ScopeRulesEditor({ value, onChange, dictionary, attributeNames, columnNames }: Props) {
   const { t } = useTranslation()
+  const words = t('profile.scopeWords', { returnObjects: true }) as RuleWords      // the summary's words, in the interface's language
   const { connectors } = useWorkspace()
   const items = useMemo(() => dictionaryItems(dictionary), [dictionary])
   const labels = useMemo(() => itemLabels(items), [items])
@@ -134,7 +135,7 @@ export default function ScopeRulesEditor({ value, onChange, dictionary, attribut
         {value.map((r, idx) => (
           <RuleRow key={idx} $editing={editing === idx} role="button" tabIndex={0} onClick={() => start(idx)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); start(idx) } }}>
             <span className="and">{idx === 0 ? '' : t('settings.access.and')}</span>
-            <span className="text" title={describeRule(r, labels)}>{describeRule(r, labels)}</span>
+            <span className="text" title={describeRule(r, labels, words)}>{describeRule(r, labels, words)}</span>
             {r.mode === 'deny' && <Tag $tone="red">{t('settings.access.denyAbsent')}</Tag>}
             {r.connector && <Tag $tone="blue">{r.connector}</Tag>}
             <button type="button" className="icon" title={t('common.delete')} onClick={(e) => { e.stopPropagation(); remove(idx) }}><Trash2 size={13} /></button>

@@ -20,12 +20,13 @@ export default function Login() {
   const [busy, setBusy] = useState(false)
   // "Forgot password?" — offered only when the server can mail a reset link ([notify] SMTP).
   const [resetAvailable, setResetAvailable] = useState(false)
+  const [oidcAvailable, setOidcAvailable] = useState(false)       // single sign-on is offered only where it is set up
   const [mode, setMode] = useState<'login' | 'forgot'>('login')
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
   useEffect(() => {
-    api.get<{ auth?: { password_reset?: boolean } }>('/info')
-      .then((i) => setResetAvailable(!!i.auth?.password_reset))
+    api.get<{ auth?: { password_reset?: boolean; oidc_enabled?: boolean } }>('/info')
+      .then((i) => { setResetAvailable(!!i.auth?.password_reset); setOidcAvailable(!!i.auth?.oidc_enabled) })
       .catch(() => setResetAvailable(false))
   }, [])
 
@@ -115,10 +116,14 @@ export default function Login() {
               {t('password.forgotLink')}
             </LinkButton>
           )}
-          <Button $size="lg" type="button" onClick={oidcLogin}>
-            {t('login.oidcButton')}
-          </Button>
-          <Hint>{t('login.oidcHint')}</Hint>
+          {oidcAvailable && (
+            <>
+              <Button $size="lg" type="button" onClick={oidcLogin}>
+                {t('login.oidcButton')}
+              </Button>
+              <Hint>{t('login.oidcHint')}</Hint>
+            </>
+          )}
         </Stack>
       </Panel>
     </Center>

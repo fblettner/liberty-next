@@ -148,7 +148,7 @@ class NestedFormTab(_ScreenTabBase):
     type: Literal["nested_form"] = "nested_form"
     form_screen: str = Field(
         description=(
-            "ID of the existing v2 screen whose form this tab reuses (its read/update/insert "
+            "ID of the existing screen whose form this tab reuses (its read/update/insert "
             "queries + fields). Required — a nested_form is always a reference."
         ),
     )
@@ -177,7 +177,7 @@ class NestedTableTab(_ScreenTabBase):
     ``param_binds`` — the activity-log rows narrow to the current application's APPS_ID."""
 
     type: Literal["nested_table"] = "nested_table"
-    screen: str = Field(description="ID of the v2 screen to render as a TableView in this tab.")
+    screen: str = Field(description="ID of the screen whose rows this tab shows as a grid.")
     connector: str | None = Field(
         default=None,
         description="Connector that hosts the referenced screen; blank → the parent screen's effective connector.",
@@ -772,7 +772,7 @@ class SheetSpec(BaseModel):
         default=None,
         description=(
             "Optional: column on the sheet's query whose distinct values produce one worksheet "
-            "each (v1's ``tbl_sheet``). Blank produces a single worksheet. The query still runs "
+            "each. Blank produces a single worksheet. The query still runs "
             "once; partitioning is done client-side in declaration / first-seen order."
         ),
     )
@@ -1180,8 +1180,7 @@ class Screen(BaseModel):
             "Mirror every successful write on this screen into this audit table — convention is "
             "``AUD_<TABLE>``. Each row gets three extra columns: AUD_ACTION (INSERT/UPDATE/DELETE), "
             "AUD_USER (the caller's username), AUD_DATE (server timestamp). Blank = no auditing. "
-            "v1 only let you toggle audit on/off (the name was hardcoded); v2 lets you name the "
-            "table so several screens can share one (e.g. all security screens → ``AUD_SECURITY``)."
+            "Name the table so several screens can share one (e.g. all security screens → ``AUD_SECURITY``)."
         ),
         json_schema_extra={"x_placeholder": "e.g. AUD_USERS — leave blank to disable"},
     )
@@ -1329,18 +1328,17 @@ class Screen(BaseModel):
             "save charts from the TableView's Chart toggle (the floppy icon writes to "
             "``charts.toml``); pointing a screen at one of those ids means the Chart toggle "
             "renders with the saved spec instead of the empty default + a localStorage seed. "
-            "Blank = no default (the TableView falls back to its session-local localStorage "
-            "spec, the pre-Phase-F behaviour). Validated to exist at config-load time."
+            "Blank = no default chart (the grid keeps the one the user last drew in this browser). "
+            "Must name an existing chart."
         ),
         json_schema_extra={"x_enum_ref": "CHART_IDS"},
     )
     export: WorkbookExport | None = Field(
         default=None,
         description=(
-            "Multi-file / multi-sheet xlsx export config — v2's port of v1's "
-            "``tbl_workbook`` / ``tbl_sheet``. When set, the TableView gains an "
-            "``Export workbooks`` button that streams one xlsx (or a .zip of several) from "
-            "``POST /api/screens/{app}/{id}/export``. Blank hides the button."
+            "Excel export by workbook and sheet: one file per group (a department), one sheet per "
+            "sub-group (an application). When set, the grid gains an ``Export workbooks`` button "
+            "that downloads one xlsx, or a .zip of several. Blank hides the button."
         ),
     )
     dialog: ScreenDialog | None = Field(default=None, description="Form for adding / editing a row — optional.")
@@ -1355,7 +1353,7 @@ class Screen(BaseModel):
     )
     row_menu: list[Action] = Field(
         default_factory=list,
-        description="Right-click menu entries on a row (slice 6) — uses the same action shape.",
+        description="Right-click menu entries on a row — the same action shape as the toolbar's.",
     )
     # ── row-level lifecycle hooks ──────────────────────────────────────────────────────────
     # Fire after a row is mutated — whether via dialog Save (insert/update mode) or via inline
@@ -1396,7 +1394,7 @@ class Screen(BaseModel):
     row_click_screen: str | None = Field(
         default=None,
         description=(
-            "ID of a sibling v2 screen to open as a row-click dialog when *this* screen has "
+            "ID of a sibling screen to open as a row-click dialog when *this* screen has "
             "no own ``dialog``. The target screen's read_query is fetched narrowed by "
             "``row_click_binds``, then opened in its dialog as a modal."
         ),

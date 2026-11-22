@@ -35,7 +35,11 @@ export function cleanRule(r: ScopeRule): ScopeRule {
 
 /** "CO not in 00, 01" / "CO = user's company" / "COMPANY in A, B" — with the deny mode and the
  *  connector appended when set. *labels* maps an item key to its dictionary label. */
-export function describeRule(r: ScopeRule, labels: Record<string, string> = {}): string {
+/** The words of a rule's summary — English here (the tests, a log); the editor hands the interface's. */
+export interface RuleWords { in: string; notIn: string; nothingAllowed: string; nothingExcluded: string; denyWhenAbsent: string; and: string }
+export const RULE_WORDS: RuleWords = { in: 'in', notIn: 'not in', nothingAllowed: 'nothing allowed', nothingExcluded: 'nothing excluded', denyWhenAbsent: 'deny when absent', and: 'and' }
+
+export function describeRule(r: ScopeRule, labels: Record<string, string> = {}, words: RuleWords = RULE_WORDS): string {
   const target = ruleTarget(r)
   const name = labels[target] ? `${labels[target]} (${target})` : target
   const attr = attributeOf(r.source)
@@ -43,18 +47,18 @@ export function describeRule(r: ScopeRule, labels: Record<string, string> = {}):
   if (attr) body = `${name} ${r.exclude ? '≠' : '='} user.${attr}`
   else {
     const vals = r.values ?? []
-    body = vals.length === 0 ? `${name}: ${r.exclude ? 'nothing excluded' : 'nothing allowed'}` : `${name} ${r.exclude ? 'not in' : 'in'} ${vals.join(', ')}`
+    body = vals.length === 0 ? `${name}: ${r.exclude ? words.nothingExcluded : words.nothingAllowed}` : `${name} ${r.exclude ? words.notIn : words.in} ${vals.join(', ')}`
   }
   const extra: string[] = []
-  if (r.mode === 'deny') extra.push('deny when absent')
+  if (r.mode === 'deny') extra.push(words.denyWhenAbsent)
   if (r.connector) extra.push(r.connector)
   return extra.length ? `${body}  [${extra.join(', ')}]` : body
 }
 
 /** Groups OR together, rules AND within a group (the resolved `scope` claim). */
-export function describeScope(groups: ScopeRule[][] | null | undefined, labels: Record<string, string> = {}): string[] {
+export function describeScope(groups: ScopeRule[][] | null | undefined, labels: Record<string, string> = {}, words: RuleWords = RULE_WORDS): string[] {
   if (!groups || groups.length === 0) return []
-  return groups.map((g) => g.map((r) => describeRule(r, labels)).join('  and  '))
+  return groups.map((g) => g.map((r) => describeRule(r, labels, words)).join(`  ${words.and}  `))
 }
 
 export interface DictionaryItem {

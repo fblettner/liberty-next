@@ -158,9 +158,9 @@ export function FindDependenciesModal({
   const groups = useMemo(() => {
     if (!manifest) return []
     return KIND_ORDER
-      .map((k) => ({ kind: k, title: KIND_TITLES[k] ?? k, deps: manifest.by_kind[k] ?? [] }))
+      .map((k) => ({ kind: k, title: t(`developer.impactKind.${k}`, { defaultValue: KIND_TITLES[k] ?? k }), deps: manifest.by_kind[k] ?? [] }))
       .filter((g) => g.deps.length > 0)
-  }, [manifest])
+  }, [manifest, t])
 
   const total = manifest?.deps.length ?? 0
   const totalIncluded = included.size

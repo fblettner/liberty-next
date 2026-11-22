@@ -30,7 +30,7 @@ import StageStrip from './StageStrip'
 import { apiFigures } from '../../services/connectorFigures'
 import { api, ApiError } from '../../api/client'
 import {
-  Banner, Button, Checkbox, FrameworkEnumsContext, Input, Row, SearchSelect, SpinnerRing, Stack, useModals,
+  Banner, Button, Checkbox, FrameworkEnumsContext, Input, Row, SearchSelect, SpinnerRing, Stack, useModals, PasswordInput,
 } from '../../common'
 import { EndpointGeneratorModal, type EndpointGeneratorDef } from './EndpointGeneratorModal'
 import { mergeGenerated, type GeneratedEndpoint, mergeModified, rowKeys } from '../../services/endpointRefresh'
@@ -407,7 +407,7 @@ function AuthTab({
           <FieldRowTop>
             <label>{t('settings.api.auth.jwtKey')}</label>
             <div>
-              <Input type="password" value={value.auth_jwt_key ?? ''} onChange={(e) => patch({ auth_jwt_key: e.target.value || undefined })} placeholder="/etc/liberty/liberty-jde.key" />
+              <PasswordInput value={value.auth_jwt_key ?? ''} onChange={(e) => patch({ auth_jwt_key: e.target.value || undefined })} placeholder="/etc/liberty/liberty-jde.key" />
               <Hint>{t('settings.api.auth.jwtKeyHint')}</Hint>
             </div>
           </FieldRowTop>
@@ -477,8 +477,7 @@ function AuthTab({
           </FieldRow>
           <FieldRow>
             <label>{t('settings.api.auth.password')}</label>
-            <Input
-              type="password"
+            <PasswordInput
               value={value.auth_password ?? ''}
               onChange={(e) => patch({ auth_password: e.target.value || undefined })}
               placeholder={t('settings.api.auth.passwordPlaceholder')}
@@ -492,8 +491,7 @@ function AuthTab({
           <SectionHead>{t('settings.api.auth.token')}</SectionHead>
           <FieldRow>
             <label>{t('settings.api.auth.tokenLabel')}</label>
-            <Input
-              type="password"
+            <PasswordInput
               value={value.auth_token ?? ''}
               onChange={(e) => patch({ auth_token: e.target.value || undefined })}
               placeholder={t('settings.api.auth.tokenPlaceholder')}

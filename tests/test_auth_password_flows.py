@@ -166,6 +166,7 @@ def _link_token(body: str) -> str:
 def test_forgot_password_mails_a_single_use_link(env) -> None:
     client, mailbox = env
     assert client.get("/info").json()["auth"]["password_reset"] is True
+    assert client.get("/info").json()["auth"]["oidc_enabled"] is False       # no single sign-on set up: the login page offers none
     # username and e-mail must both match (the e-mail case-insensitively)
     r = client.post("/auth/forgot-password", json={"username": "carol", "email": "carol@example.COM"},
                     headers={"X-Liberty-Lang": "fr"})

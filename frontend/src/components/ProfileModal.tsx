@@ -16,7 +16,7 @@ import { api, apiDownload, ApiError, resolveApiPath } from '../api/client'
 import { hasPermission } from '../pages/Settings/Access/permissions'
 import { Overlay, Modal, ModalBody, ModalFooter, Button, Tag, FieldLabel, Input, PasswordInput, Banner } from '../common'
 import { colors, fontSize, fonts, radius } from '../theme'
-import { attributeToText, describeScope, type ScopeRule } from '../pages/Settings/Access/scopeRules'
+import { attributeToText, describeScope, type ScopeRule, type RuleWords } from '../pages/Settings/Access/scopeRules'
 
 interface Profile {
   username: string
@@ -284,7 +284,7 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
                 <ReadRow><span className="k">{t('profile.attributes')}</span><span className="v" style={{ fontFamily: fonts.mono }}>{Object.entries(profile?.attributes ?? {}).map(([k, v]) => `${k} = ${attributeToText(v)}`).join(' · ')}</span></ReadRow>
               )}
               <ReadRow><span className="k">{t('profile.dataScope')}</span><span className="v" style={{ fontFamily: fonts.mono }}>
-                {profile?.is_superuser || !profile?.scope?.length ? t('profile.unrestricted') : describeScope(profile.scope).join(`  ${t('profile.or')}  `)}
+                {profile?.is_superuser || !profile?.scope?.length ? t('profile.unrestricted') : describeScope(profile.scope, {}, t('profile.scopeWords', { returnObjects: true }) as RuleWords).join(`  ${t('profile.or')}  `)}
               </span></ReadRow>
               {!isLocal && <Note>{t('profile.passwordOidc')}</Note>}
             </>

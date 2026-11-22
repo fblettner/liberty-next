@@ -14,6 +14,8 @@
 // from `GET /admin/config/schema → framework_enums`, threaded through `FrameworkEnumsContext`. A
 // Literal-typed `x_enum_ref` field renders as a strict SearchSelect (the value MUST be in the set);
 // a free-text `x_enum_ref` field renders as a combobox (typing a custom value commits).
+import i18n from 'i18next'
+import { useTranslation } from 'react-i18next'
 import { createContext, lazy, Suspense, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { Plus, X, ChevronRight, ChevronDown, Search, Edit3, Copy, GripVertical, Wand2 } from 'lucide-react'
@@ -344,7 +346,7 @@ export function StringMapEditor({ value, onChange, keyEnum, valueEnum }: {
           <SmallX type="button" title="remove" onClick={() => onChange(Object.fromEntries(entries.filter((_, idx) => idx !== i)))}><X size={12} /></SmallX>
         </Row>
       ))}
-      <MiniBtn type="button" onClick={() => onChange({ ...value, '': '' })}><Plus size={12} /> add</MiniBtn>
+      <MiniBtn type="button" onClick={() => onChange({ ...value, '': '' })}><Plus size={12} /> {i18n.t('schemaForm.add')}</MiniBtn>
     </div>
   )
 }
@@ -387,7 +389,7 @@ export function StringListEditor(
           <SmallX type="button" title="remove" onClick={() => onChange(value.filter((_, idx) => idx !== i))}><X size={12} /></SmallX>
         </Row>
       ))}
-      <MiniBtn type="button" onClick={() => onChange([...value, ''])}><Plus size={12} /> add</MiniBtn>
+      <MiniBtn type="button" onClick={() => onChange([...value, ''])}><Plus size={12} /> {i18n.t('schemaForm.add')}</MiniBtn>
     </div>
   )
 }
@@ -398,6 +400,7 @@ export function StringListEditor(
 // An empty editor maps to `undefined` (an absent `sql` field) to match the old textarea's behaviour.
 // Reads the active connector from `SqlConnectorContext` (when set, schema-aware autocomplete is on).
 function SqlField({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
+  const { t } = useTranslation()
   const connector = useContext(SqlConnectorContext)
   const statementType = useContext(SqlStatementContext)
   const isMap = value != null && typeof value === 'object' && !Array.isArray(value)
@@ -408,7 +411,7 @@ function SqlField({ value, onChange }: { value: unknown; onChange: (v: unknown) 
         <Suspense fallback={<SpinnerRing size={18} />}>
           <SqlEditor value={text} rows={14} onChange={(v) => onChange(v === '' ? undefined : v)} connector={connector} statementType={statementType} />
         </Suspense>
-        <MiniBtn type="button" style={{ marginTop: 4 }} onClick={() => onChange({ default: text })}><Plus size={12} /> per-dialect variants</MiniBtn>
+        <MiniBtn type="button" style={{ marginTop: 4 }} onClick={() => onChange({ default: text })}><Plus size={12} /> {t('schemaForm.sqlVariants')}</MiniBtn>
       </div>
     )
   }
@@ -421,18 +424,18 @@ function SqlField({ value, onChange }: { value: unknown; onChange: (v: unknown) 
         <div key={d}>
           <Row style={{ alignItems: 'flex-start' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <DialectLabel>{d}{d === 'default' ? ' (required)' : ''}</DialectLabel>
+              <DialectLabel>{d}{d === 'default' ? ` (${t('schemaForm.sqlRequired')})` : ''}</DialectLabel>
               <Suspense fallback={<SpinnerRing size={18} />}>
                 <SqlEditor value={map[d] ?? ''} rows={10} onChange={(v) => set(d, v)} connector={connector} statementType={statementType} />
               </Suspense>
             </div>
-            {d !== 'default' && <SmallX type="button" title="remove variant" style={{ marginTop: 22 }} onClick={() => onChange(Object.fromEntries(Object.entries(map).filter(([k]) => k !== d)))}><X size={12} /></SmallX>}
+            {d !== 'default' && <SmallX type="button" title={t('schemaForm.sqlRemoveVariant')} style={{ marginTop: 22 }} onClick={() => onChange(Object.fromEntries(Object.entries(map).filter(([k]) => k !== d)))}><X size={12} /></SmallX>}
           </Row>
         </div>
       ))}
       <Row style={{ marginTop: 4 }}>
-        <Input placeholder="dialect (e.g. oracle)" onKeyDown={(e) => { if (e.key === 'Enter') { const k = e.currentTarget.value.trim(); if (k && !(k in map)) { set(k, ''); e.currentTarget.value = '' } } }} style={{ flex: '0 0 200px' }} />
-        <MiniBtn type="button" onClick={() => { if (Object.keys(map).length <= 1) onChange(map.default ?? '') }} title="back to a single statement (drops the extra variants)">single</MiniBtn>
+        <Input placeholder={t('schemaForm.sqlDialect')} onKeyDown={(e) => { if (e.key === 'Enter') { const k = e.currentTarget.value.trim(); if (k && !(k in map)) { set(k, ''); e.currentTarget.value = '' } } }} style={{ flex: '0 0 200px' }} />
+        <MiniBtn type="button" onClick={() => { if (Object.keys(map).length <= 1) onChange(map.default ?? '') }} title={t('schemaForm.sqlSingleHint')}>{t('schemaForm.sqlSingle')}</MiniBtn>
       </Row>
     </div>
   )
@@ -547,7 +550,7 @@ function ObjectNavList({ itemSchema, defs, value, onChange, onNavigate }: {
         </NavListRow>
       ))}
       {shown.length === 0 && needle && <div style={{ color: colors.text.muted, fontSize: fontSize.sm, padding: '4px 2px 8px' }}>no match</div>}
-      <MiniBtn type="button" onClick={() => { setQ(''); onChange([...value, {}]); onNavigate(value.length, '(new)') }}><Plus size={12} /> add</MiniBtn>
+      <MiniBtn type="button" onClick={() => { setQ(''); onChange([...value, {}]); onNavigate(value.length, '(new)') }}><Plus size={12} /> {i18n.t('schemaForm.add')}</MiniBtn>
     </div>
   )
 }
@@ -572,7 +575,7 @@ function ObjectListEditor({ itemSchema, defs, value, onChange, ancestors }: { it
           )}
         </ItemBox>
       ))}
-      <MiniBtn type="button" onClick={() => { onChange([...value, {}]); setOpen(value.length) }}><Plus size={12} /> add</MiniBtn>
+      <MiniBtn type="button" onClick={() => { onChange([...value, {}]); setOpen(value.length) }}><Plus size={12} /> {i18n.t('schemaForm.add')}</MiniBtn>
     </div>
   )
 }
@@ -795,7 +798,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
           const picker = (
             <SearchSelect value={cur == null ? '' : String(cur)}
               onChange={(v) => set(key, v === '' ? undefined : applyCase(v, sub))}
-              options={opts} anyLabel={isReq ? undefined : '(default)'} placeholder="(default)" allowCustom={!literalSet} />
+              options={opts} anyLabel={isReq ? undefined : i18n.t('schemaForm.byDefault')} placeholder={i18n.t('schemaForm.byDefault')} allowCustom={!literalSet} />
           )
           // Append the Edit / Clone / Add query trio when the field is one of the
           // query-bearing enum refs AND at least one of the handlers is wired. The
@@ -842,7 +845,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
         } else if (Array.isArray(sub.enum)) {
           control = (
             <SearchSelect value={cur == null ? '' : String(cur)} onChange={(v) => set(key, v === '' ? undefined : v)}
-              options={sub.enum.map((e) => ({ value: String(e), label: String(e) }))} anyLabel={isReq ? undefined : '(default)'} placeholder="(default)" />
+              options={sub.enum.map((e) => ({ value: String(e), label: String(e) }))} anyLabel={isReq ? undefined : i18n.t('schemaForm.byDefault')} placeholder={i18n.t('schemaForm.byDefault')} />
           )
         } else if (sub.type === 'boolean' && sub.x_nullable && sub.default == null) {
           // `bool | None` with no default: three states — not set (the fallback the field describes),
@@ -850,11 +853,11 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
           // no way back to "not set".
           control = (
             <SearchSelect value={cur == null ? '' : cur ? 'true' : 'false'} onChange={(v) => set(key, v === '' ? undefined : v === 'true')}
-              options={[{ value: 'true', label: 'yes' }, { value: 'false', label: 'no' }]} anyLabel="(default)" placeholder="(default)" />
+              options={[{ value: 'true', label: i18n.t('schemaForm.yes') }, { value: 'false', label: i18n.t('schemaForm.no') }]} anyLabel={i18n.t('schemaForm.byDefault')} placeholder={i18n.t('schemaForm.byDefault')} />
           )
         } else if (sub.type === 'boolean') {
           const checked = cur === undefined ? Boolean(sub.default) : Boolean(cur)
-          control = <Checkbox checked={checked} onChange={(v) => set(key, v)} label={checked ? 'enabled' : 'disabled'} />
+          control = <Checkbox checked={checked} onChange={(v) => set(key, v)} label={checked ? i18n.t('schemaForm.enabled') : i18n.t('schemaForm.disabled')} />
         } else if (sub.type === 'array') {
           const items = effective(sub.items ?? {}, allDefs)
           // `cur` may be a single object for the `T | list[T] | None` shape (a hand-written single rule)

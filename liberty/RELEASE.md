@@ -24,6 +24,16 @@
   The Studio no longer says "nothing opens" of a screen an Explorer entity opens. The Authentication card of an
   API connector names *Each user as himself* and says when its signing key is missing; `{USER}` is in the
   notify step's list of placeholders.
+- **Wording.** What the menu calls a *Service* is called so everywhere (the designer's title, "Served by a
+  service" on an endpoint, the package and dependency lists). Strings that stayed in English in a French
+  interface are translated: the job states in every list, the retention summary, relative times ("il y a 4
+  min", from the interface's language), the Live page's Runtime card, the dependency kinds, a data-scope rule's
+  summary, a test run's status, the shared form's own words (add, default, yes / no, the SQL field's
+  variants). The hints no longer speak of v1, v2 or internal phases; the hint of a condition says what it
+  tests whatever the condition; the events hint points to the Actions stage. French terms aligned (*Concepteur
+  d'écran*, *périmètre*, *Modèle du corps*, *point d'accès*, *Paquets de modifications*, the report templates).
+  **The sign-in page offers single sign-on only where it is set up**, with a hint meant for the user. An API
+  connector's password, token and signing key have the show / hide button the pool's password has.
 - **A screen, its tabs and its actions in the user's language.** A screen gains `l` (its label per language:
   the tab, the list of screens) and `description_l` (its heading); an action gains `l` (a row-menu entry, a
   toolbar or tab button, a step of a chain) — edited in the designer under *Translations*, like a menu entry's.

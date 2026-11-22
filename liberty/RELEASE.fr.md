@@ -29,6 +29,18 @@
   « rien ne l'ouvre » d'un écran qu'une entité de l'Explorateur ouvre. La carte Authentification d'un
   connecteur API nomme *Chaque utilisateur sous son nom* et signale l'absence de clé de signature ; `{USER}`
   figure dans la liste des marqueurs de l'étape de notification.
+- **Vocabulaire.** Ce que le menu appelle un *Service* s'appelle ainsi partout (le titre du concepteur, « Servi
+  par un service » sur un point d'accès, les listes de paquet et de dépendances). Les textes restés en anglais
+  dans une interface en français sont traduits : les états des traitements dans toutes les listes, le résumé de
+  la rétention, les durées relatives (« il y a 4 min », selon la langue de l'interface), la carte Exécution de
+  la page En direct, les familles de dépendances, le résumé d'une règle de périmètre de données, le statut d'un
+  passage de tests, les mots du formulaire commun (ajouter, par défaut, oui / non, les variantes du champ SQL).
+  Les aides ne parlent plus de v1, de v2 ni de phases internes ; l'aide d'une condition dit ce qu'elle teste
+  quelle que soit la condition ; l'aide des événements renvoie à l'étape Actions. Termes français alignés
+  (*Concepteur d'écran*, *périmètre*, *Modèle du corps*, *point d'accès*, *Paquets de modifications*, les
+  modèles d'états). **La page de connexion ne propose l'authentification unique que là où elle est
+  configurée**, avec une aide destinée à l'utilisateur. Le mot de passe, le jeton et la clé de signature d'un
+  connecteur API ont le bouton afficher / masquer qu'a le mot de passe d'un pool.
 - **Un écran, ses onglets et ses actions dans la langue de l'utilisateur.** Un écran gagne `l` (son libellé par
   langue : l'onglet, la liste des écrans) et `description_l` (son titre de page) ; une action gagne `l` (une
   entrée de menu de ligne, un bouton de barre d'outils ou d'onglet, une étape d'une chaîne) — saisis dans le

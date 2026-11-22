@@ -207,7 +207,7 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
           <Section>
             <SectionTitle>
               {t('nomaflow.run.summary')}
-              <Tag $tone={STATE_TONE[data.run.state]}>{data.run.state}</Tag>
+              <Tag $tone={STATE_TONE[data.run.state]}>{t(`jobrun.state.${data.run.state}`, { defaultValue: data.run.state })}</Tag>
             </SectionTitle>
             <SummaryGrid>
               <Field>
@@ -314,7 +314,7 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
                     </StepCell>
                     <StepCell>{s.step_type}</StepCell>
                     <StepCell>{s.attempt}</StepCell>
-                    <StepCell><Tag $tone={STATE_TONE[s.state]}>{s.state}</Tag></StepCell>
+                    <StepCell><Tag $tone={STATE_TONE[s.state]}>{t(`jobrun.state.${s.state}`, { defaultValue: s.state })}</Tag></StepCell>
                     {/* Errors are long (psycopg messages, stack traces) so the cell starts
                         truncated and clicks toggle a wrapped scroll-block. Empty errors aren't
                         clickable — there's nothing to expand. */}

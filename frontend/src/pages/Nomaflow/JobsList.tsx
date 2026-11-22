@@ -506,7 +506,7 @@ export default function JobsList() {
                       <span>
                         {job.last_run ? (
                           <RunLink onClick={() => navigate(`/nomaflow/runs/${encodeURIComponent(job.last_run!.run_id)}`)} title={`${t('nomaflow.jobs.viewRun')} · ${job.last_run.finished_at ? new Date(job.last_run.finished_at).toLocaleString() : ''}`}>
-                            <Tag $tone={STATE_TONE[job.last_run.state]}>{job.last_run.state}</Tag>
+                            <Tag $tone={STATE_TONE[job.last_run.state]}>{t(`jobrun.state.${job.last_run.state}`, { defaultValue: job.last_run.state })}</Tag>
                           </RunLink>
                         ) : <span style={{ color: colors.text.muted }}>—</span>}
                       </span>

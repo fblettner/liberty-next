@@ -361,14 +361,14 @@ export default function TechnicalDashboard(): ReactNode {
           <SectionTitle><Cpu size={12} /> {t('dashboard.tech.runtime.heading')}</SectionTitle>
           <ListTable>
             <tbody>
-              <tr><td>Connectors</td><td className="mono">{snap.runtime.connector_count}</td></tr>
-              <tr><td>Screens</td><td className="mono">{snap.runtime.screen_count}</td></tr>
-              <tr><td>Platform</td><td className="mono"><Mono>{snap.runtime.platform}</Mono></td></tr>
-              <tr><td>AI</td><td>{snap.ai.enabled ? <><Tag $tone="green">on</Tag> <Mono>{snap.ai.model ?? ''}</Mono></> : <Tag>off</Tag>}</td></tr>
+              <tr><td>{t('dashboard.tech.runtime.connectors')}</td><td className="mono">{snap.runtime.connector_count}</td></tr>
+              <tr><td>{t('dashboard.tech.runtime.screens')}</td><td className="mono">{snap.runtime.screen_count}</td></tr>
+              <tr><td>{t('dashboard.tech.runtime.platform')}</td><td className="mono"><Mono>{snap.runtime.platform}</Mono></td></tr>
+              <tr><td>{t('dashboard.tech.runtime.ai')}</td><td>{snap.ai.enabled ? <><Tag $tone="green">{t('dashboard.tech.runtime.on')}</Tag> <Mono>{snap.ai.model ?? ''}</Mono></> : <Tag>{t('dashboard.tech.runtime.off')}</Tag>}</td></tr>
               <tr>
-                <td><KeyRound size={11} style={{ verticalAlign: 'middle' }} /> License</td>
+                <td><KeyRound size={11} style={{ verticalAlign: 'middle' }} /> {t('dashboard.tech.runtime.license')}</td>
                 <td>
-                  {license.mode === 'full' ? <Tag $tone="green">full</Tag> : <Tag $tone="orange">restricted</Tag>}
+                  {license.mode === 'full' ? <Tag $tone="green">{t('dashboard.tech.runtime.full')}</Tag> : <Tag $tone="orange">{t('dashboard.tech.runtime.restricted')}</Tag>}
                   {license.customer ? <> <Mono>{license.customer}</Mono></> : null}
                 </td>
               </tr>

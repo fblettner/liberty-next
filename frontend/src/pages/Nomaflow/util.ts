@@ -1,4 +1,5 @@
 // Shared bits for the nomaflow feature-area pages (JobsList + Schedule).
+import i18n from 'i18next'
 import { apiDownload, apiUpload } from '../../api/client'
 import type { RunState } from './types'
 
@@ -7,20 +8,20 @@ export const STATE_TONE: Record<RunState, 'green' | 'red' | 'orange' | 'blue' | 
   SUCCEEDED: 'green', FAILED: 'red', CANCELED: 'orange', MISSED: 'red', RUNNING: 'blue', QUEUED: 'neutral',
 }
 
-/** A compact relative-time label — "2h ago" / "in 30m" / "just now". Past and
- *  future both supported (the schedule view shows future fires, the runs view past). */
-export function relative(iso: string | null): string {
+/** A compact relative-time label in the language of the interface — "2 hr. ago" / "in 30 min." /
+ *  "il y a 2 h" / "dans 30 min". Past and future both supported (the schedule view shows future fires,
+ *  the runs view past). *lang* is for tests; the interface's language otherwise. */
+export function relative(iso: string | null, lang?: string): string {
   if (!iso) return '—'
   const diffMs = Date.now() - new Date(iso).getTime()
-  const abs = Math.abs(diffMs)
-  const future = diffMs < 0
-  const mins = Math.round(abs / 60000)
-  if (mins < 1) return future ? 'in <1m' : 'just now'
-  if (mins < 60) return future ? `in ${mins}m` : `${mins}m ago`
+  const sign = diffMs < 0 ? 1 : -1                     // the future counts up, the past down
+  const mins = Math.round(Math.abs(diffMs) / 60000)
+  const say = new Intl.RelativeTimeFormat(lang || i18n.language || 'en', { numeric: 'auto', style: 'short' })
+  if (mins < 1) return say.format(0, 'second')         // "now" / "maintenant"
+  if (mins < 60) return say.format(sign * mins, 'minute')
   const hrs = Math.round(mins / 60)
-  if (hrs < 48) return future ? `in ${hrs}h` : `${hrs}h ago`
-  const days = Math.round(hrs / 24)
-  return future ? `in ${days}d` : `${days}d ago`
+  if (hrs < 48) return say.format(sign * hrs, 'hour')
+  return say.format(sign * Math.round(hrs / 24), 'day')
 }
 
 

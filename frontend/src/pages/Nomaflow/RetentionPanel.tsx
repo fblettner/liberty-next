@@ -13,6 +13,7 @@ import { Archive, ChevronDown, ChevronRight, Save, Trash2 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Input, Mono, SpinnerRing } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { relative } from './util'
 
 interface RetentionPolicy {
   enabled: boolean
@@ -148,9 +149,7 @@ export function RetentionPanel({ onChanged }: RetentionPanelProps) {
       const r = await api.post<SweepReport>('/admin/jobs/retention/sweep')
       setStatus((s) => s ? { ...s, last_sweep: r } : s)
       setToast(t(
-        'nomaflow.retention.swept',
-        `Deleted ${r.total_deleted} run${r.total_deleted === 1 ? '' : 's'} (age: ${r.deleted_by_age}, cap: ${r.deleted_by_cap}).`,
-        { total: r.total_deleted, age: r.deleted_by_age, cap: r.deleted_by_cap },
+        'nomaflow.retention.swept', { count: r.total_deleted, age: r.deleted_by_age, cap: r.deleted_by_cap },
       ) + (r.files_deleted ? ' ' + t('nomaflow.retention.sweptFiles', { n: r.files_deleted, mb: ((r.files_bytes ?? 0) / 1_048_576).toFixed(1) }) : ''))
       onChanged?.()
     } catch (e) {
@@ -162,16 +161,13 @@ export function RetentionPanel({ onChanged }: RetentionPanelProps) {
 
   const headerSummary = status
     ? status.policy.enabled
-      ? t('nomaflow.retention.summary',
-          `${status.policy.days}d · cap ${status.policy.keep_last_per_job}/job · every ${status.policy.sweep_interval_minutes} min`,
-          { days: status.policy.days, cap: status.policy.keep_last_per_job, interval: status.policy.sweep_interval_minutes })
+      ? t('nomaflow.retention.summary', { days: status.policy.days, cap: status.policy.keep_last_per_job, interval: status.policy.sweep_interval_minutes })
       : t('nomaflow.retention.disabled')
     : '…'
 
   const lastSweepPill = status?.last_sweep ? (
     <SweepPill $tone={status.last_sweep.total_deleted > 0 ? 'green' : 'neutral'}>
-      {t('nomaflow.retention.lastSwept', `last swept ${formatRelative(status.last_sweep.swept_at)} · ${status.last_sweep.total_deleted} deleted`,
-        { when: formatRelative(status.last_sweep.swept_at), deleted: status.last_sweep.total_deleted })}
+      {t('nomaflow.retention.lastSwept', { when: relative(status.last_sweep.swept_at), deleted: status.last_sweep.total_deleted })}
     </SweepPill>
   ) : null
 
@@ -262,16 +258,3 @@ function policyChanged(draft: RetentionPolicy, current: RetentionPolicy | undefi
     || (draft.files_days ?? null) !== (current.files_days ?? null)
 }
 
-/** Compact "5 min ago" / "2 h ago" / "Apr 12" — enough resolution to know whether
- *  the sweep is fresh without dumping a full timestamp into the header pill. */
-function formatRelative(isoTs: string): string {
-  const now = Date.now()
-  const t = new Date(isoTs).getTime()
-  const diff = Math.max(0, now - t)
-  const min = Math.round(diff / 60_000)
-  if (min < 1) return 'just now'
-  if (min < 60) return `${min}m ago`
-  const hr = Math.round(min / 60)
-  if (hr < 24) return `${hr}h ago`
-  return new Date(isoTs).toLocaleDateString()
-}

@@ -324,7 +324,7 @@ export default function ConfigVersions() {
                 <Tree>
                   {groups.map((kindKey) => (
                     <Group key={kindKey}>
-                      <GroupHead>{KIND_TITLES[kindKey] ?? kindKey} · {m.by_kind[kindKey].length}</GroupHead>
+                      <GroupHead>{t(`developer.impactKind.${kindKey}`, { defaultValue: KIND_TITLES[kindKey] ?? kindKey })} · {m.by_kind[kindKey].length}</GroupHead>
                       {m.by_kind[kindKey].map((d, i) => (
                         <DepRow key={`${d.scope ?? ''}:${d.name}:${i}`}>
                           <span className="nm">{d.name}</span>

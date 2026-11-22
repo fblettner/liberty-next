@@ -128,7 +128,7 @@ export default function Schedule() {
   }
   const lastRun = (j: JobSummary) => j.in_flight
     ? <Tag $tone="blue">{t('nomaflow.jobs.running')}</Tag>
-    : j.last_run ? <Tag $tone={STATE_TONE[j.last_run.state]}>{j.last_run.state}</Tag> : <span>—</span>
+    : j.last_run ? <Tag $tone={STATE_TONE[j.last_run.state]}>{t(`jobrun.state.${j.last_run.state}`, { defaultValue: j.last_run.state })}</Tag> : <span>—</span>
   const row = (e: SchedEntry, withTime: boolean) => {
     const h = human(e.schedule)
     return (

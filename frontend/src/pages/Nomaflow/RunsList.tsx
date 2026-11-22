@@ -168,7 +168,7 @@ export default function RunsList() {
             return (
               <Row key={r.id} onClick={() => navigate(`/nomaflow/runs/${encodeURIComponent(r.id)}`)} title={iso ? new Date(iso).toLocaleString() : undefined}>
                 <div className="main">
-                  <span><Tag $tone={STATE_TONE[r.state]}>{r.state}</Tag></span>
+                  <span><Tag $tone={STATE_TONE[r.state]}>{t(`jobrun.state.${r.state}`, { defaultValue: r.state })}</Tag></span>
                   <span className="time">{iso ? new Date(iso).toLocaleTimeString(i18n.language, { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
                   <span className="job">
                     <span className="id">{r.job_id}</span>

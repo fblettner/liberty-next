@@ -383,7 +383,7 @@ function BuildPanel() {
               return (
                 <Group key={kind}>
                   <GroupTitle>
-                    {KIND_TITLES[kind] ?? kind} · {groupTicked}/{deps.length}
+                    {t(`developer.impactKind.${kind}`, { defaultValue: KIND_TITLES[kind] ?? kind })} · {groupTicked}/{deps.length}
                     <button className="toggle" onClick={() => toggleDepGroup(kind, !allOn)}>
                       {allOn ? t('findDeps.deselectAll') : t('findDeps.selectAll')}
                     </button>

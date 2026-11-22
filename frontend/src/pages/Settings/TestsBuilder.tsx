@@ -272,7 +272,7 @@ export default function TestsBuilder() {
         {(loaded?.results[current.id] ?? []).length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <h3>{t('tests.lastRuns')}</h3>
-            {(loaded?.results[current.id] ?? []).slice(0, 8).map((r, i) => <Run key={i} $tone={TONE[r.status] ?? null}>{statusIcon(r.status)}<b>{r.status}</b>{r.mode === 'record' && <span>{t('tests.reference')}</span>}<i>{when(r.at)}</i></Run>)}
+            {(loaded?.results[current.id] ?? []).slice(0, 8).map((r, i) => <Run key={i} $tone={TONE[r.status] ?? null}>{statusIcon(r.status)}<b>{t(`testResults.${r.status}`, { defaultValue: r.status })}</b>{r.mode === 'record' && <span>{t('tests.reference')}</span>}<i>{when(r.at)}</i></Run>)}
           </div>
         )}
         {mayEdit && <Bar><Button $variant="ghost" $size="sm" style={{ color: colors.red.main }} onClick={() => { setDoc({ ...doc, case: doc.case.filter((c) => c !== current) }); setCaseId(null) }}>

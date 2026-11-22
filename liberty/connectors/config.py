@@ -174,7 +174,7 @@ class VisibleWhen(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     field: str = Field(
-        description="The filter column whose value gates this column's visibility.",
+        description="The column whose value is tested (the condition holds when it is one of the values below).",
         json_schema_extra={"x_enum_ref": "SCREEN_COLUMNS", "x_case": "upper"},
     )
     value: str | list[str] = Field(description="The allowed value, or list of allowed values.")
@@ -525,10 +525,9 @@ class ColumnHint(BaseModel):
         json_schema_extra={"x_group": "Edit"},
         description=(
             "Read-only when EDITING an existing row (still editable when adding a new one). "
-            "Use for a key whose value must not change after creation — replaces v1's blanket "
-            "'lock all keys on edit' with per-column control, so a key that genuinely needs "
-            "editing (e.g. on f00950) stays editable. Honoured by BOTH the dialog and the grid "
-            "bulk-edit, since it lives on the column."
+            "Use for a key whose value must not change after creation; a key that does need "
+            "editing stays editable when this is off. Honoured by both the dialog and the grid's "
+            "bulk edit, since it lives on the column."
         ),
     )
     justify: Literal["right_blank", "right_zero", "left"] | None = Field(
