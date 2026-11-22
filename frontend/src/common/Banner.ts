@@ -6,6 +6,8 @@ export const Banner = styled.div<{ $tone?: 'error' | 'warning' | 'ok' | 'info' }
   padding: 8px 12px;
   border-radius: ${radius.md};
   font-size: ${fontSize.base};
+  /* a refused save lists what to correct one per line */
+  white-space: pre-line;
   ${({ $tone = 'info' }) => {
     const c = $tone === 'error' ? colors.red
       : $tone === 'warning' ? colors.orange

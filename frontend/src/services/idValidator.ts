@@ -81,7 +81,9 @@ export function validateId(opts: ValidateIdOptions): ValidateIdResult {
   const pattern = ID_PATTERNS[opts.kind]
   if (pattern && !pattern.test(v)) {
     const hint = ID_HINTS[opts.kind] ?? 'invalid characters'
-    return { error: `${v.toUpperCase() === v ? 'name' : 'name'} doesn't match the expected pattern — ${hint}` }
+    // said as what to type, not as a rule: no space, no accent, no punctuation
+    const letters = pattern.test('A') && !pattern.test('a') ? 'capital letters' : pattern.test('a') && !pattern.test('A') ? 'small letters' : 'letters'
+    return { error: `Use ${letters}, digits and _ only, without space or accent — ${hint}` }
   }
 
   // Duplicate within same kind+scope — hard error.
@@ -104,6 +106,27 @@ export function validateId(opts: ValidateIdOptions): ValidateIdResult {
   }
 
   return warnings.length > 0 ? { warning: warnings.join(' · ') } : {}
+}
+
+/** A technical id made from a label a person typed: small letters, accents dropped, anything
+ *  else turned into ``_`` — "Customer orders (late)" → ``customer_orders_late``. A label that
+ *  starts with a digit gets a leading ``_`` (an id starts with a letter). */
+export function idFromLabel(label: string): string {
+  const base = label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+  return /^[0-9]/.test(base) ? `_${base}` : base
+}
+
+/** *id* made free among *existing*: ``orders`` → ``orders_2`` → ``orders_3``… */
+export function freeId(id: string, existing: string[]): string {
+  if (!existing.includes(id)) return id
+  for (let n = 2; ; n++) if (!existing.includes(`${id}_${n}`)) return `${id}_${n}`
+}
+
+/** What a "new object" window gives back when the person types its NAME: the label as typed and
+ *  the id made from it, free among *existing*; null when the name has nothing an id can be made of. */
+export function newObjectFromLabel(label: string, existing: string[]): { id: string; label: string } | null {
+  const id = idFromLabel(label)
+  return id ? { id: freeId(id, existing), label: label.trim() } : null
 }
 
 /** Suggest a unique id for a Clone operation. Appends ``_copy`` / ``_copy2`` / ``_copy3``

@@ -1,6 +1,44 @@
 # Liberty Next — Release notes
 
-## 7.0.84 — unreleased
+## 7.0.84 — 2026-11-22
+
+- **Configuring without knowing the file behind it** — what a consultant met when building an application:
+  - **A configuration that cannot be saved says which object and which field**, in the builders' own words
+    (*demo › Screen "Orders" › Column "B" › Kind of field: must be text*), with **Open** to go there; a refused
+    save no longer closes the designer or replaces it by the message. Jobs and menus are checked before they
+    are sent (a step without what it acts on, an entry that opens nothing, an id used twice).
+  - **The generated forms have plain labels** ("Dictionary item", "Kind of field", "History table") and one
+    short sentence of help, the longer explanation behind *more*.
+  - **A column's *Kind of field* is one choice in plain words** ("A yes / no box", "A list read from a table",
+    "A number given automatically"…) with only the field that kind needs; *a list read from a table* is made
+    in one step from the column.
+  - **Settings that had no field now have one**: a menu entry's fixed values, the application's name, an API
+    connector's home per role and licence, a service's questions and its inputs' labels, a dashboard filter's
+    opening value, chart options, an Explorer entity read from a table, a model's heading and what it delivers,
+    a step's timeout / default / environment, a job's log level, presets (rename, change, delete), a rule's
+    action values, a report's formats, PDF settings and parameter choices, a test suite's name, a post-apply
+    step's values, a screen's own assistant headings.
+  - **Editors name things by their label**; a new screen, dashboard or service is given a name and its id is
+    made from it; step kinds, modes and events are said in words; the role panel saves from the page header and
+    asks before unsaved changes are lost.
+  - **Jobs: tables, time zone and recipients are picked**, and a schedule is said in words (every N minutes or
+    hours, chosen days at a time, once a month). **Services: a step picks its values** from the inputs and from
+    what earlier steps returned.
+
+- **A record opened by clicking a row is the one clicked**: its key is matched exactly. It could open — and
+  save — another record whose key contained the first.
+
+- **Jobs: saving a job no longer fails when another job of the file carries shared step settings.** **Reports:
+  a template with a parameter can be saved** (it answered an error).
+
+- **Jobs: a *notify* step sends to the inbox and by e-mail only.** It also accepted an "action" channel that did
+  nothing there (it is a notification rule's: it runs the rule's query or endpoint). A job that must call an
+  endpoint has its own step for it.
+
+- **Tests of an application: a first case from an endpoint.** *Case from an endpoint* on the Tests page asks
+  which endpoint and prepares the case: a step calling it with the example values of its variables, expecting
+  what it answers now (at least one row, or the values it holds). An endpoint that changes data is not called:
+  its case comes marked as writing. Nothing is saved until you save the suite.
 
 - **Unsaved changes are no longer lost without a word.** A page that holds edits not yet saved — every Settings
   builder and editor window, a job being edited, a data grid in bulk edit, an open record form — now tells the
@@ -721,6 +759,10 @@
     one.
   - **Running a job is part of *Read and change***: reading never starts anything. A job entry is shown to
     who may run it (it used to be shown to a role that named the entry without the job).
+- **A page an application ships can give the user a file** (page contract version 6: `sdk.download(path, name, body)`): a report as
+  a PDF, an export — the file a route of the server answers, saved under the name the server gives it. The applications'
+  pages use it for their documents (the platform report, the OCI estimate, the weekly upgrade report).
+
 - **A page an application ships can draw a diagram** (page contract version 5: `sdk.Diagram`): tiers as columns,
   hosts as boxes, a card per element with its state — a dashed outline for what is not declared —, the links on
   their paths with the evidence each one is drawn on, a legend, zoom. The picture is **laid out once on the

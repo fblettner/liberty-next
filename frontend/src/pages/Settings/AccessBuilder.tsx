@@ -5,12 +5,12 @@
 // RoleEditor): a baseline (`*` or nothing), the menu tree with inherit / allow / deny per node,
 // the rules beyond menus, and the resulting permission strings. The strings written are the
 // same `menu:<app>:<id>` / `sql:…` / `!…` the chip editor wrote, so nothing changes server-side.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Users, Shield, Plus, X } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Centered, Checkbox, Field, Input, Overlay, Modal, ModalBody, ModalFooter, PasswordInput, SearchSelect, SpinnerRing, Tag, ViewCards, type SearchSelectOption } from '../../common'
+import { Banner, Button, Card, Centered, Checkbox, Field, Input, Overlay, Modal, ModalBody, ModalFooter, PasswordInput, SearchSelect, SpinnerRing, Tag, ViewCards, useModals, type SearchSelectOption } from '../../common'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import RoleEditor, { type AppRole, type RoleSeed } from './Access/RoleEditor'
@@ -156,6 +156,19 @@ export default function AccessBuilder() {
   const [roleEdit, setRoleEdit] = useState<string | null | undefined>(undefined)
   // a new role that starts as a copy of this one (Duplicate), else null
   const [roleSeed, setRoleSeed] = useState<RoleSeed | null>(null)
+  // The role panel says when it holds changes that are not saved: leaving it — another role, a new
+  // one, the users — then asks first. (It used to lose them without a word.)
+  const modals = useModals()
+  const roleDirty = useRef(false)
+  const onRoleDirty = useCallback((dirty: boolean) => { roleDirty.current = dirty }, [])
+  const leaveRole = async (go: () => void) => {
+    if (roleDirty.current && !(await modals.confirm({
+      title: t('tabs.unsavedTitle'), message: t('settings.access.unsavedRole'), variant: 'danger',
+      confirmLabel: t('tabs.unsavedDiscard'), cancelLabel: t('tabs.unsavedStay'),
+    }))) return
+    roleDirty.current = false
+    go()
+  }
   // the predefined roles the applications ship (GET /admin/access/role-templates)
   const [templates, setTemplates] = useState<RoleTemplate[]>([])
 
@@ -191,7 +204,7 @@ export default function AccessBuilder() {
 
   return (
     <Shell>
-      <ViewCards compact value={tab} onChange={setTab} items={[
+      <ViewCards compact value={tab} onChange={(next) => void leaveRole(() => setTab(next))} items={[
         { id: 'users', label: t('settings.access.users'), desc: t('settings.access.usersDesc'), icon: <Users size={15} />, color: colors.blue.main },
         { id: 'roles', label: t('settings.access.roles'), desc: t('settings.access.rolesDesc'), icon: <Shield size={15} />, color: colors.purple.main },
       ]} />
@@ -221,7 +234,7 @@ export default function AccessBuilder() {
       ) : (
         <Split>
           <Side>
-            <Bar><div style={{ flex: 1 }} /><Button $size="sm" $variant="primary" onClick={() => { setRoleSeed(null); setRoleEdit(null) }}><Plus size={13} /> {t('settings.access.addRole')}</Button></Bar>
+            <Bar><div style={{ flex: 1 }} /><Button $size="sm" $variant="primary" onClick={() => void leaveRole(() => { setRoleSeed(null); setRoleEdit(null) })}><Plus size={13} /> {t('settings.access.addRole')}</Button></Bar>
             {/* the roles the applications ship: picked, a role opens ready to save (one already added opens as it is) */}
             {templates.length > 0 && (
               <div data-role-templates style={{ marginBottom: 8 }}>
@@ -232,15 +245,17 @@ export default function AccessBuilder() {
                   onChange={(id) => {
                     const x = templates.find((y) => y.id === id)
                     if (!x) return
-                    if (x.exists) { setRoleSeed(null); setRoleEdit(x.id); return }
-                    setRoleSeed({ kind: 'template', title: x.label, role: { name: x.id, permissions: x.permissions, description: x.description, scope: x.scope } })
-                    setRoleEdit(null)
+                    void leaveRole(() => {
+                      if (x.exists) { setRoleSeed(null); setRoleEdit(x.id); return }
+                      setRoleSeed({ kind: 'template', title: x.label, role: { name: x.id, permissions: x.permissions, description: x.description, scope: x.scope } })
+                      setRoleEdit(null)
+                    })
                   }} />
               </div>
             )}
             <List>
               {roles.map((r) => (
-                <Item key={r.name} $selected={roleEdit === r.name} onClick={() => setRoleEdit(r.name)}>
+                <Item key={r.name} $selected={roleEdit === r.name} onClick={() => { if (roleEdit !== r.name) void leaveRole(() => setRoleEdit(r.name)) }}>
                   <Shield size={15} color={colors.text.muted} />
                   <span className="text">
                     <span className="name">{r.name}</span>
@@ -257,7 +272,8 @@ export default function AccessBuilder() {
           {editing !== undefined ? (
             <RoleEditor key={roleEdit ?? `__new__${roleSeed?.kind ?? ''}:${roleSeed?.role.name ?? ''}`} initial={editing} seed={roleEdit === null ? roleSeed : null}
               onDuplicate={editing ? () => { setRoleSeed({ kind: 'copy', role: editing }); setRoleEdit(null) } : undefined} takenNames={roleNames} forest={forest} dashboardIds={dashboardIds} dictionary={dictionary} attributeNames={attributeNames} columnNames={columnNames}
-              onCancel={() => setRoleEdit(undefined)} onSaved={(name) => { setRoleEdit(name); load() }} />
+              onDirtyChange={onRoleDirty}
+              onCancel={() => void leaveRole(() => setRoleEdit(undefined))} onSaved={(name) => { roleDirty.current = false; setRoleEdit(name); load() }} />
           ) : (
             <Placeholder>{t('settings.access.pickRole')}</Placeholder>
           )}

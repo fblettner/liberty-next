@@ -1,6 +1,6 @@
 // Helpers that derive ParamBind autocomplete candidates from the workspace catalog + the
 // surrounding screen's read-query columns. Used by ``ActionTreeView`` (Visual Designer's
-// Inspector) and ``ActionListEditor`` (ScreenEditor's dialog hooks) to populate the
+// Inspector) and ``ScreenEditor`` to populate the
 // ``param`` / ``source`` SearchSelects on each :class:`ParamBind` row.
 //
 // v1 surfaced these suggestions everywhere a param/source needed typing — the developer

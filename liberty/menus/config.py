@@ -96,7 +96,8 @@ class MenuItem(BaseModel):
     params: dict[str, Any] = Field(
         default_factory=dict,
         description="Fixed parameters passed to the target when it opens.",
-        json_schema_extra={"x_group": "Advanced"},
+        # the names are offered from what the entry opens: a screen's filters, a query's parameters
+        json_schema_extra={"x_group": "Advanced", "x_key_enum_ref": "MENU_TARGET_PARAMS"},
     )
     roles: list[str] = Field(
         default_factory=list,

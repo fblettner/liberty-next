@@ -1139,6 +1139,39 @@ def test_reports_templates_round_trip(env, tmp_path, monkeypatch) -> None:
         assert ("custom", "answer-summary") in ids
 
 
+def test_reports_templates_saves_a_parameter_with_and_without_its_extras(env, tmp_path, monkeypatch) -> None:
+    """A template's parameter is saved whatever it leaves unset. TOML has no null: a parameter
+    without a default value or without choices made the whole save fail (500), so that no template
+    with a parameter could be saved from the builder."""
+    app, _, _ = env
+    reports_toml = tmp_path / "reports.toml"
+    monkeypatch.setenv("LIBERTY_APP_CONFIG", str(tmp_path / "app.toml"))     # nothing of the real config is touched
+    with TestClient(app) as client:
+        app.state.settings.reports.templates_config_path = reports_toml
+        h = _h(client, "admin")
+        template = {
+            "id": "by-year", "title": "By year", "formats": ["pdf"],
+            "params": [
+                {"name": "PLAIN", "label": "Plain", "type": "string", "required": False, "default": None, "description": ""},
+                {"name": "YEAR", "label": "Year", "type": "string", "required": True, "default": "2026",
+                 "description": "The year the report covers",
+                 "options": {"kind": "static", "values": [{"value": "2025", "label": "Last year"}, {"value": "2026", "label": "This year"}]}},
+            ],
+            "data": {"connector": "db", "query": "answer"},
+            "template_inline": "## {{ ctx.params.YEAR }}",
+            "pdf_options": {"subtitle": "Fiscal year"},
+        }
+        r = client.put("/admin/config/reports/parsed", json={"templates": [template]}, headers=h)
+        assert r.status_code == 200, r.text
+        saved = client.get("/admin/config/reports/parsed", headers=h).json()["templates"][0]
+    plain, year = saved["params"]
+    assert plain["name"] == "PLAIN" and plain["default"] is None and plain.get("options") is None
+    assert year["default"] == "2026" and year["description"] == "The year the report covers"
+    assert year["options"]["kind"] == "static"
+    assert [v["value"] for v in year["options"]["values"]] == ["2025", "2026"]
+    assert saved["formats"] == ["pdf"] and saved["pdf_options"] == {"subtitle": "Fiscal year"}
+
+
 def test_reports_templates_rejects_duplicate_id(env, tmp_path, monkeypatch) -> None:
     """Two templates with the same id in one PUT payload → 422 before the
     file is touched. Mirrors the registry's collision contract."""

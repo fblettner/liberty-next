@@ -48,6 +48,7 @@ import json
 import re
 import time
 import tomllib
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -267,6 +268,52 @@ def check(step: Step, *, success: bool, error: str | None, warnings: Any, answer
     out.extend(f"{path}: nothing there" for path in e.present if _empty(extract_path(answer, path)))
     out.extend(f"{path}: holds {_text(extract_path(answer, path))[:120]!r}, nothing expected" for path in e.absent if not _empty(extract_path(answer, path)))
     return out
+
+
+_ID_CHARS = re.compile(r"[^A-Za-z0-9_.\-]+")
+STARTER_PRESENT = 6
+
+
+def starter_params(endpoint: Any) -> dict[str, str]:
+    """The values a first call of *endpoint* is made with: each variable's example, else its default,
+    else the first of its choices — a variable with none of them is left out (blank)."""
+    out: dict[str, str] = {}
+    for p in getattr(endpoint, "params", None) or []:
+        value = getattr(p, "example", None) or getattr(p, "default", None) or next(iter(getattr(p, "choices", None) or []), None)
+        if value not in (None, ""):
+            out[p.name] = str(value)
+    return out
+
+
+def starter_case(endpoint: Any, *, answer: Any = None, rows: list[Any] | None = None, taken: Iterable[str] = ()) -> dict[str, Any]:
+    """A first case for *endpoint*, to be completed: one step calling it with :func:`starter_params`,
+    expecting what its answer shows NOW — at least one row when it holds rows, else the first keys
+    that hold something. An endpoint that changes data gives a case marked ``writes`` (never played
+    to prepare it): the call must work, the rest is the author's."""
+    used = set(taken)
+    base = _ID_CHARS.sub("-", str(endpoint.name)).strip("-") or "case"
+    cid, n = base, 1
+    while cid in used:
+        n += 1
+        cid = f"{base}-{n}"
+    said = str(getattr(endpoint, "label", None) or getattr(endpoint, "description", None) or endpoint.name).strip()
+    step: dict[str, Any] = {"name": "call", "endpoint": endpoint.name}
+    params = starter_params(endpoint)
+    if params:
+        step["params"] = params
+    expect: dict[str, Any] = {}
+    if rows:
+        expect["rows_min"] = 1
+    elif isinstance(answer, dict):
+        present = [str(k) for k, v in answer.items() if not _empty(v)][:STARTER_PRESENT]
+        if present:
+            expect["present"] = present
+    if expect:
+        step["expect"] = expect
+    case: dict[str, Any] = {"id": cid, "label": said.split(". ")[0][:120], "steps": [step]}
+    if getattr(endpoint, "writable", False):
+        case["writes"] = True
+    return case
 
 
 def differences(reference: Any, now: Any, path: str = "", limit: int = 40) -> list[str]:

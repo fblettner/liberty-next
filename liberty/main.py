@@ -19,6 +19,7 @@ from liberty import __version__
 from liberty.ai.assistant import build_assistant
 from liberty.ai.routes import router as ai_router
 from liberty.web.ai_usage import router as ai_usage_router
+from liberty.web.save_errors import install as install_save_errors
 from liberty.auth.authstore import build_auth_backend
 from liberty.auth.oidc import build_oidc
 from liberty.auth.oauth import router as oauth_router
@@ -728,6 +729,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.add_middleware(
             SessionMiddleware, secret_key=session_secret, same_site="lax", https_only=False
         )
+
+    install_save_errors(app)
 
     @app.exception_handler(ConnectorError)
     async def _connector_error_handler(_request: Request, exc: ConnectorError) -> JSONResponse:

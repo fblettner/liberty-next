@@ -135,3 +135,39 @@ def test_the_suites_are_edited_played_and_kept(env) -> None:  # noqa: F811
         assert client.delete("/admin/tests/smoke", headers=h).json() == {"deleted": "smoke"}
         assert not (folder / "smoke.toml").exists() and not (folder / ".results" / "smoke.json").exists()
         assert client.get("/admin/tests/smoke", headers=h).status_code == 404
+
+
+def _endpoint(name: str, *, params: list[dict] | None = None, writable: bool = False, label: str | None = None, description: str | None = None):
+    return SimpleNamespace(name=name, writable=writable, label=label, description=description, rows_field=None, row_map={},
+                           params=[SimpleNamespace(name=p["name"], example=p.get("example"), default=p.get("default"), choices=p.get("choices", [])) for p in params or []])
+
+
+def test_a_first_case_is_prepared_from_an_endpoint() -> None:
+    e = _endpoint("data query", description="Read. Rows of a JDE table. Or their count.", params=[
+        {"name": "TABLE", "example": "F0101"}, {"name": "TYPE", "choices": ["table", "view"]}, {"name": "MAX", "default": "5"}, {"name": "MATCH"}])
+    assert r.starter_params(e) == {"TABLE": "F0101", "TYPE": "table", "MAX": "5"}              # a variable with nothing to offer is left blank
+    case = r.starter_case(e, rows=[{"AN8": 1}], taken=["data-query", "other"])
+    assert case == {"id": "data-query-2", "label": "Read", "steps": [
+        {"name": "call", "endpoint": "data query", "params": {"TABLE": "F0101", "TYPE": "table", "MAX": "5"}, "expect": {"rows_min": 1}}]}
+    r.parse_suite({"case": [case]})                                                         # what is prepared is a valid case
+    # no rows: the keys that hold something; nothing known of the answer: the call must simply work
+    assert r.starter_case(_endpoint("config"), answer={"aisVersion": "9.2", "jasHost": "h", "errors": "", "none": None})["steps"][0]["expect"] == {"present": ["aisVersion", "jasHost"]}
+    assert "expect" not in r.starter_case(_endpoint("ping"))["steps"][0]
+    # an endpoint that changes data: marked, never played to prepare it
+    w = r.starter_case(_endpoint("add_address", writable=True, label="Add an address"))
+    assert w["writes"] is True and w["label"] == "Add an address" and w["steps"] == [{"name": "call", "endpoint": "add_address"}]
+
+
+def test_the_starter_route_plays_a_reading_endpoint_only(env) -> None:  # noqa: F811
+    with TestClient(env) as client:
+        h = _h(client, "admin")
+        assert client.post("/admin/tests/starter", headers=_h(client, "caller"), json={"connector": "studio", "endpoint": "code_rows"}).status_code == 403
+        got = client.post("/admin/tests/starter", headers=h, json={"connector": "studio", "endpoint": "code_rows", "taken": ["code_rows"]}).json()
+        assert got["case"]["id"] == "code_rows-2" and got["case"]["steps"][0]["endpoint"] == "code_rows" and "writes" not in got["case"]
+        assert got["played"] is True and got["note"] is None
+        wrote = client.post("/admin/tests/starter", headers=h, json={"connector": "studio", "endpoint": "rename_code"}).json()
+        assert wrote["case"]["writes"] is True and wrote["played"] is False and "was not called" in wrote["note"]
+        refused = client.post("/admin/tests/starter", headers=h, json={"connector": "studio", "endpoint": "describe_code"}).json()   # KY is required, no example
+        assert refused["played"] is False and "did not work" in refused["note"] and refused["case"]["steps"][0]["endpoint"] == "describe_code"
+        assert client.post("/admin/tests/starter", headers=h, json={"connector": "studio", "endpoint": "nope"}).status_code == 404
+        assert client.post("/admin/tests/starter", headers=h, json={"connector": "nope", "endpoint": "x"}).status_code == 404

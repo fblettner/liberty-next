@@ -7,13 +7,13 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
 import {
-  Banner, Centered, FrameworkEnumsContext, useModals,
+  Banner, Centered, FrameworkEnumsContext, ObjectTitle, SaveProblems, useModals,
   type FrameworkEnums, type JsonSchema,
 } from '../../common'
+import { failureOf, type SaveFailure } from '../../services/saveProblems'
 import { EditorModalShell } from '../../common/EditorModalShell'
 import type { ConfigSchemas, ScreensDoc, Screen } from '../../types/config'
 import ScreenEditor from './ScreenEditor'
-import { colors, fonts } from '../../theme'
 import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 type AppScreens = Record<string, Record<string, Screen>>
@@ -37,6 +37,8 @@ export function ScreenDesignerModal({ app, screenId, onClose, onSaved }: Props) 
   const [original, setOriginal] = useState<string>('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // a save the server refused: shown above the designer, which stays as it is
+  const [failure, setFailure] = useState<SaveFailure | null>(null)
   const [fullscreen, setFullscreen] = useState(true)
   const closedRef = useRef(false)
 
@@ -74,7 +76,7 @@ export function ScreenDesignerModal({ app, screenId, onClose, onSaved }: Props) 
 
   const save = async () => {
     if (!doc || !value) return
-    setBusy(true); setError(null)
+    setBusy(true); setError(null); setFailure(null)
     try {
       const appCur = { ...(doc[app] ?? {}) }
       const newId = (typeof value.id === 'string' && value.id.trim()) ? value.id.trim() : currentId
@@ -112,7 +114,9 @@ export function ScreenDesignerModal({ app, screenId, onClose, onSaved }: Props) 
       onSaved?.()
       onClose()
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      // not ``setError``: that one replaces the designer by the message, and what was built could
+      // no longer be corrected
+      setFailure(failureOf(e))
     } finally { setBusy(false) }
   }
 
@@ -158,9 +162,7 @@ export function ScreenDesignerModal({ app, screenId, onClose, onSaved }: Props) 
         title={(
           <>
             {t('settings.screens.designerTitle')} ·{' '}
-            <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>
-              [screens.{app}.{currentId}]
-            </span>
+            <ObjectTitle label={typeof value?.label === 'string' ? value.label : null} id={currentId} scope={app} />
           </>
         )}
         onClose={() => void cancel()}
@@ -172,6 +174,7 @@ export function ScreenDesignerModal({ app, screenId, onClose, onSaved }: Props) 
         onToggleFullscreen={() => setFullscreen((v) => !v)}
         scrollBody={false}  /* ScreenEditor manages its own per-tab scroll */
       >
+        {failure && <div style={{ marginBottom: 12, flex: '0 0 auto' }}><SaveProblems failure={failure} /></div>}
         {inner}
       </EditorModalShell>
     </FrameworkEnumsContext.Provider>

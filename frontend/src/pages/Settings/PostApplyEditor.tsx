@@ -6,7 +6,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { ChevronRight, ChevronDown, Plus, Trash2, Save, Settings2 } from 'lucide-react'
-import { Banner, Button, CallableSelect, Input, SearchSelect } from '../../common'
+import { Banner, Button, CallableSelect, Input, SearchSelect, StringMapEditor } from '../../common'
+import { freeMapText, mergeFreeMap } from '../../services/freeMap'
 import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 
@@ -62,9 +63,15 @@ export function PostApplyEditor({ onSaved }: { onSaved?: () => void }) {
   const remove = (i: number) => setSteps((s) => s.filter((_, j) => j !== i))
 
   const save = async () => {
+    // a step is referenced by its id and runs its target: both are needed, and the id is its own
+    const ids = steps.map((st) => st.id.trim())
+    const bad = steps.findIndex((st, i) => !st.id.trim() || !st.target.trim() || ids.indexOf(st.id.trim()) !== i)
+    if (bad >= 0) { setError(t('settings.changes.paIncomplete', { n: bad + 1 })); setSaved(false); return }
     setBusy(true); setError(null); setSaved(false)
     try {
-      await api.put('/admin/changesets/config/post-apply', { post_apply: steps })
+      // a value added and left without a name is not one
+      const cleaned = steps.map((st) => ({ ...st, params: Object.fromEntries(Object.entries(st.params ?? {}).filter(([k]) => k.trim() !== '')) }))
+      await api.put('/admin/changesets/config/post-apply', { post_apply: cleaned })
       setSaved(true)
       onSaved?.()
     } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) }
@@ -116,6 +123,14 @@ export function PostApplyEditor({ onSaved }: { onSaved?: () => void }) {
                 <Input value={st.label ?? ''} onChange={(e) => update(i, { label: e.target.value || null })} />
               </div>
               <Del type="button" title={t('common.delete')} onClick={() => remove(i)}><Trash2 size={13} /></Del>
+              {/* the fixed values the call receives, under the step they belong to */}
+              <div style={{ gridColumn: '1 / -1' }} data-post-apply-params>
+                <Lbl>{t('settings.changes.paParams')}</Lbl>
+                <StringMapEditor
+                  value={freeMapText((st.params ?? {}) as Record<string, unknown>)}
+                  onChange={(v) => update(i, { params: mergeFreeMap((st.params ?? {}) as Record<string, unknown>, v) })}
+                />
+              </div>
             </Row>
           ))}
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>

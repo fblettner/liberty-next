@@ -9,13 +9,14 @@
 // changed connector's subtree is re-rendered, so its inline `columns = [{…}]` may become
 // `[[…]]` — review in git), then reloads. No rename yet — delete + re-add. Renders the body
 // only; pages/Liberty wraps the page.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { Save, Plus, Trash2, Database, Globe, Search, FileCog, Copy, Edit3, Layers, Undo2, GitBranch, Shuffle, ArrowRightLeft, Hash, List as ListIcon, Tag, Braces } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, HeaderActions, Row, Stack, SpinnerRing, Mono, SchemaForm, SearchSelect, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Input, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
+import { failureOf, targetOf, type SaveFailure, type SaveProblem } from '../../services/saveProblems'
+import { Button, Banner, Centered, Card, HeaderActions, ObjectTitle, Row, SaveProblems, Stack, SpinnerRing, Mono, SchemaForm, SearchSelect, FrameworkEnumsContext, SqlConnectorContext, useModals, Modal, ModalBody, ModalFooter, ModalHeader, Overlay, Input, type FrameworkEnum, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc } from '../../types/config'
 import ApiConnectorEditor, { type ApiConnector as ApiConnectorEditorValue } from './ApiConnectorEditor'
 import type { SqlPools } from '../../services/apiTargets'
@@ -185,6 +186,9 @@ export default function ConnectorsBuilder() {
   const [queryStage, setQueryStage] = useState<'general' | 'sql' | 'params'>('sql')
   const [tq, setTq] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // a save the server refused: its problems one by one, each opening the table or query it is in
+  const [failure, setFailure] = useState<SaveFailure | null>(null)
+  const pendingOpen = useRef<{ mode: 'tables' | 'custom' | 'sequences' | 'lookups' | 'settings'; table: string | null; query: string | null } | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   // Connector names the framework hardcodes as licensed — checkbox locked in the editor;
@@ -218,10 +222,20 @@ export default function ConnectorsBuilder() {
   }
   useEffect(load, [t])
 
-  // reset table selection + search when switching connectors
-  useEffect(() => { setSelTable(null); setSelQuery(null); setTq(''); setMode('settings') }, [sel])
+  // reset table selection + search when switching connectors — unless a problem of a refused save
+  // asked for one of its tables or queries (``pendingOpen``, used up by whichever effect runs last)
+  useEffect(() => {
+    const asked = pendingOpen.current
+    if (asked && asked.mode === mode) pendingOpen.current = null     // the mode effect will not run
+    setSelTable(asked?.table ?? null); setSelQuery(asked?.query ?? null); setTq(''); setMode(asked?.mode ?? 'settings')
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs on a connector change only
+  }, [sel])
   // reset list selection + search when switching mode (different list, different selection)
-  useEffect(() => { setSelTable(null); setSelQuery(null); setTq('') }, [mode])
+  useEffect(() => {
+    const asked = pendingOpen.current
+    pendingOpen.current = null
+    setSelTable(asked?.table ?? null); setSelQuery(asked?.query ?? null); setTq('')
+  }, [mode])
 
   const dirty = useMemo(() => {
     const connsDirty = conns != null && JSON.stringify(conns) !== original
@@ -747,7 +761,7 @@ export default function ConnectorsBuilder() {
 
   async function save() {
     if (!conns) return
-    setBusy(true); setError(null); setStatus(null)
+    setBusy(true); setError(null); setStatus(null); setFailure(null)
     try {
       const connsDirty = JSON.stringify(conns) !== original
       const dictDirty = dictionary != null && JSON.stringify(dictionary) !== dictOriginal
@@ -765,8 +779,28 @@ export default function ConnectorsBuilder() {
       setStatus(t('settings.connectors.saved', { connectors: r.connectors.join(', ') || `(${t('common.none')})` }))
       load()
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      setFailure(failureOf(e))
     } finally { setBusy(false) }
+  }
+  // "Open" on a problem of a refused save: the connector, and the table or query it is in.
+  const problemOpener = (p: SaveProblem): (() => void) | null => {
+    const target = targetOf('connectors', p.path)
+    const conn = target?.scope ? conns?.[target.scope] : undefined
+    if (!target?.scope || !conn) return null
+    const name = target.scope
+    const modes: Record<string, typeof mode> = { tables: 'tables', queries: 'custom', sequences: 'sequences', lookups: 'lookups' }
+    const toMode = (target.kind && modes[target.kind]) || 'settings'
+    const list = target.kind ? (conn as Record<string, unknown>)[target.kind] : undefined
+    const rec = Array.isArray(list) && target.index !== undefined ? (list[target.index] as { name?: unknown } | undefined) : undefined
+    const recName = typeof rec?.name === 'string' ? rec.name : null
+    const asked = { mode: toMode, table: toMode === 'tables' ? recName : null, query: toMode !== 'tables' && toMode !== 'settings' ? recName : null }
+    if (name === sel && toMode === mode && asked.table === selTable && asked.query === selQuery) return null
+    return () => {
+      if (name === sel && toMode === mode) { setTq(''); setSelTable(asked.table); setSelQuery(asked.query); return }
+      pendingOpen.current = asked
+      if (name === sel) setMode(toMode)
+      else setSel(name)
+    }
   }
 
   // (Sequences / Lookups tabs now filter by each query's explicit ``type`` — see ``sequenceQueries``
@@ -937,6 +971,7 @@ export default function ConnectorsBuilder() {
       </HeaderActions>
       {status && <Banner $tone="ok">{status}</Banner>}
       {error && <Banner $tone="error">{error}</Banner>}
+      <SaveProblems failure={failure} opener={problemOpener} />
       <Split>
         <NavCol>
           {names.length > 6 && (
@@ -970,9 +1005,7 @@ export default function ConnectorsBuilder() {
             <Stack gap={12}>
               <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
                 <Row gap={10} style={{ alignItems: 'center' }}>
-                  <strong style={{ fontFamily: fonts.mono, color: colors.text.primary }}>
-                    [connectors.{sel}] <span style={{ color: colors.text.muted, fontWeight: 400 }}>· {String(selConn.type)}</span>
-                  </strong>
+                  <ObjectTitle id={sel ?? ''} scope={selConn.type === 'api' ? t('settings.connectors.kindService') : t('settings.connectors.kindDatabase')} />
                   {/* Mode switcher — Tables / Sequences / Lookups. Filters which queries are
                       shown + which editor opens on click. SQL connectors only — API connectors
                       have no CRUD / sequence / lookup grouping (queries aren't even a concept
@@ -1063,7 +1096,7 @@ export default function ConnectorsBuilder() {
                 // (no need to save first). SchemaNavigator was the previous render path; it
                 // surfaced 20+ flat fields including OAuth2 ones that didn't apply to a basic
                 // connector and vice versa, which made the editor noisy and hard to scan.
-                <ApiConnectorEditor name={sel!} value={selConn as ApiConnectorEditorValue} hasMenu={appSet.has(sel!)} sqlConnectors={sqlPools} openGenerator={asked && asked.connector === sel ? asked : null} onChange={(v) => update(sel!, v as unknown as Record<string, unknown>)} />
+                <ApiConnectorEditor name={sel!} value={selConn as ApiConnectorEditorValue} hasMenu={appSet.has(sel!)} licenceLocked={alwaysLicensed.has(sel!)} sqlConnectors={sqlPools} openGenerator={asked && asked.connector === sel ? asked : null} onChange={(v) => update(sel!, v as unknown as Record<string, unknown>)} />
               )}
               {/* Tables view = CRUD-grouped tables ONLY. Custom (non-CRUD) queries live in their
                   own tab now, so this list isn't mixed with them anymore. */}

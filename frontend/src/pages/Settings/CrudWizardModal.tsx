@@ -317,7 +317,7 @@ export function CrudWizardModal({
           <span>
             {t('settings.crudWizard.title')} ·{' '}
             <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>
-              [connectors.{connector}]
+              {connector}
             </span>
           </span>
         </ModalHeader>

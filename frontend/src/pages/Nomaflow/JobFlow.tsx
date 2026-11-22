@@ -43,7 +43,7 @@ const Menu = styled.div`
   background: var(--bg-modal); border: 1px solid ${colors.border}; border-radius: ${radius.md}; box-shadow: ${shadow.modal};
   display: flex; flex-direction: column; gap: 2px;
   & button { padding: 5px 8px; background: transparent; border: none; cursor: pointer; text-align: left; border-radius: ${radius.sm};
-    color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.mono}; }
+    color: ${colors.text.primary}; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; }
   & button:hover { background: var(--hover-subtle); }
 `
 const toneOf = (tone: string): Tone => (['blue', 'green', 'orange', 'purple', 'yellow'].includes(tone) ? (tone as Tone) : 'blue')
@@ -73,7 +73,7 @@ export default function JobFlow({ steps, kinds, selected, onSelect, onStart, onI
         onMouseDown={(e) => e.stopPropagation()} onClick={() => setAdding(adding === index ? null : index)}><Plus size={12} /></AddBtn>
       {adding === index && (
         <Menu onMouseDown={(e) => e.stopPropagation()}>
-          {kinds.map((kind) => <button type="button" key={kind} onClick={() => { setAdding(null); onInsert(index, kind) }}>{kind}</button>)}
+          {kinds.map((kind) => <button type="button" key={kind} data-kind={kind} onClick={() => { setAdding(null); onInsert(index, kind) }}>{t(`nomaflow.steps.kind.${kind}`, { defaultValue: kind })}</button>)}
         </Menu>
       )}
     </LinkWrap>
@@ -86,7 +86,7 @@ export default function JobFlow({ steps, kinds, selected, onSelect, onStart, onI
           <Line key={i}>
             {link(i)}
             <Card type="button" $tone={toneOf(s.tone)} $on={selected === i} $off={s.off} onClick={() => onSelect(i)}>
-              <span className="kind">{s.kind}{s.off ? ` · ${t('nomaflow.steps.turnedOffTag')}` : ''}</span>
+              <span className="kind">{t(`nomaflow.steps.kind.${s.kind}`, { defaultValue: s.kind })}{s.off ? ` · ${t('nomaflow.steps.turnedOffTag')}` : ''}</span>
               <span className="name">{s.name}</span>
               <span className="what">{s.summary}</span>
             </Card>

@@ -1,6 +1,47 @@
 # Liberty Next — Notes de version
 
-## 7.0.84 — non publiée
+## 7.0.84 — 2026-11-22
+
+- **Configurer sans connaître le fichier derrière** — ce qu'un consultant rencontrait en construisant une
+  application :
+  - **Une configuration qui ne peut pas être enregistrée dit quel objet et quel champ**, avec les mots des
+    éditeurs, et **Ouvrir** y conduit ; un enregistrement refusé ne ferme plus le concepteur et ne le remplace
+    plus par le message. Les traitements et les menus sont vérifiés avant l'envoi (une étape sans ce sur quoi
+    elle agit, une entrée qui n'ouvre rien, un identifiant utilisé deux fois).
+  - **Les formulaires générés ont des libellés clairs** (« Dictionary item », « Kind of field ») et une phrase
+    d'aide courte, l'explication longue derrière *more*.
+  - **Le type de champ d'une colonne est un seul choix en clair**, avec le seul champ dont ce type a besoin ;
+    *une liste lue dans une table* se crée en une étape depuis la colonne.
+  - **Des réglages sans champ en ont un** : valeurs fixes d'une entrée de menu, nom de l'application, accueil
+    par rôle et licence d'un connecteur d'API, questions d'un service et libellés de ses entrées, valeur
+    d'ouverture d'un filtre de tableau de bord, options d'un graphique, entité d'Explorateur lue dans une table,
+    titre d'un modèle et ce qu'il livre, délai / exécution par défaut / environnement d'une étape, niveau de
+    journal d'un traitement, préréglages (renommer, modifier, supprimer), valeurs de l'action d'une règle,
+    formats, réglages PDF et choix des paramètres d'un rapport, nom d'une suite de tests, valeurs d'une étape
+    après application, titres propres à un écran pour l'assistant.
+  - **Les éditeurs nomment les objets par leur libellé** ; un nouvel écran, tableau de bord ou service reçoit
+    un nom, son identifiant en est tiré ; les types d'étape, modes et événements sont dits en clair ; le panneau
+    des rôles enregistre depuis l'en-tête et demande avant de perdre des modifications.
+  - **Traitements : tables, fuseau horaire et destinataires se choisissent**, et la planification se dit en
+    clair (toutes les N minutes ou heures, certains jours à une heure, une fois par mois). **Services : une
+    étape choisit ses valeurs** parmi les entrées et les résultats des étapes précédentes.
+
+- **La fiche ouverte en cliquant sur une ligne est bien celle cliquée** : sa clé est comparée exactement. Une
+  autre fiche dont la clé contenait la première pouvait s'ouvrir — et être enregistrée.
+
+- **Traitements : l'enregistrement n'échoue plus quand un autre traitement du fichier porte des réglages
+  d'étapes communs.** **Rapports : un modèle avec un paramètre s'enregistre** (il répondait une erreur).
+
+- **Traitements : une étape *notify* envoie dans la boîte de réception et par e-mail seulement.** Elle acceptait
+  aussi un canal « action » qui n'y faisait rien (il appartient à une règle de notification : il lance la
+  requête ou le point d'accès de la règle). Un traitement qui doit appeler un point d'accès a son étape pour
+  cela.
+
+- **Tests d'une application : un premier cas depuis un point d'accès.** *Cas depuis un point d'accès*, sur la
+  page Tests, demande lequel et prépare le cas : une étape qui l'appelle avec les valeurs d'exemple de ses
+  variables, et qui attend ce qu'il répond maintenant (au moins une ligne, ou les valeurs qu'il contient). Un
+  point d'accès qui modifie des données n'est pas appelé : son cas arrive marqué comme écrivant. Rien n'est
+  enregistré tant que la suite ne l'est pas.
 
 - **Les modifications non enregistrées ne se perdent plus sans prévenir.** Une page qui contient des
   modifications non enregistrées — chaque éditeur des Paramètres et chaque fenêtre d'édition, un traitement en
@@ -838,6 +879,11 @@
     sur toute une application comme la plus extérieure.
   - **Lancer un job fait partie de *Lecture et modification*** : lire ne lance jamais rien. Une entrée de job
     est affichée à qui peut le lancer (elle l'était pour un rôle qui nommait l'entrée sans le job).
+- **Une page livrée par une application peut remettre un fichier à l'utilisateur** (contrat de page version 6 :
+  `sdk.download(path, name, body)`) : un rapport en PDF, un export — le fichier que répond une route du serveur,
+  enregistré sous le nom que le serveur lui donne. Les pages des applications s'en servent pour leurs documents (le
+  rapport de plateforme, l'estimation OCI, le rapport hebdomadaire de montée de version).
+
 - **Une page livrée par une application peut dessiner un schéma** (contrat de page version 5 : `sdk.Diagram`) :
   les niveaux en colonnes, les hôtes en cadres, une carte par élément avec son état — un contour en pointillés
   pour ce qui n'est pas déclaré —, les liens sur leur tracé avec la preuve qui justifie chacun, une légende, le

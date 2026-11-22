@@ -219,10 +219,15 @@ async def put_post_apply(body: PostApplyBody, request: Request, _: Superuser) ->
     from pydantic import ValidationError
     from liberty.config import PostApplyStep
     from liberty.web.admin import _app_config_path
-    try:
-        steps = [PostApplyStep.model_validate(s) for s in body.post_apply]
-    except ValidationError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid post-apply steps: {exc}") from exc
+    from liberty.web.save_errors import config_invalid
+    steps = []
+    for i, raw in enumerate(body.post_apply):
+        try:
+            steps.append(PostApplyStep.model_validate(raw))
+        except ValidationError as exc:
+            name = (raw.get("label") or raw.get("id") or f"#{i + 1}") if isinstance(raw, dict) else f"#{i + 1}"
+            raise config_invalid("post_apply", exc, raw, PostApplyStep, prefix=("post_apply", i),
+                                 prefix_where=f'Step "{name}"') from exc
 
     path = _app_config_path()
     text = path.read_text(encoding="utf-8") if path.exists() else ""

@@ -11,7 +11,7 @@ import {
   PenLine, Play, Plus, RefreshCw, Repeat, Trash2,
 } from 'lucide-react'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
-import { type ActionType, blankActionOfType } from './ActionListEditor'
+import { type ActionType, blankActionOfType } from './actionKinds'
 import { FlowCanvas, FlowRows } from './flowKit'
 import { type ActionPath, pathEquals, removeAtPath, resolveAtPath, updateAtPath } from './actionPath'
 

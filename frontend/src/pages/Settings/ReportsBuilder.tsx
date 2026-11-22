@@ -25,6 +25,9 @@ import {
 import { api, ApiError } from '../../api/client'
 import { Banner, Button, Card, Field, Input, SearchSelect, Tag, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, SpinnerRing, Checkbox, Centered, useIsLight, useModals, HeaderActions, Row } from '../../common'
 import { Markdown } from '../../common/Markdown'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
+import { ReportOutput, ReportParamExtras } from './ReportParamExtras'
+import { choicesProblem, cleanChoices, type ParamChoices } from '../../services/reportParams'
 import {
   attachTemplateContext,
   type TemplateColumn,
@@ -44,6 +47,8 @@ interface TemplateParam {
   required: boolean
   default: unknown
   description: string
+  /** Where the choices of its dropdown come from (services/reportParams.ts). */
+  options?: ParamChoices | null
 }
 
 interface TemplateData {
@@ -449,6 +454,16 @@ function TemplateEditDialog({
   const modals = useModals()
   const isLight = useIsLight()
   const [tpl, setTpl] = useState<CustomTemplate>(template)
+  // what was typed is not lost without a word: closing the window asks first, and so does the tab
+  const changed = JSON.stringify(tpl) !== JSON.stringify(template)
+  useDirtyGuard(changed)
+  const cancel = async () => {
+    if (changed && !(await modals.confirm({
+      title: t('tabs.unsavedTitle'), message: t('settings.templates.unsavedClose'), variant: 'danger',
+      confirmLabel: t('tabs.unsavedDiscard'), cancelLabel: t('tabs.unsavedStay'),
+    }))) return
+    onCancel()
+  }
   const [localError, setLocalError] = useState<string | null>(null)
   // Preview state — `null` means "no preview yet"; the pane only renders once
   // the operator clicks Test render. Errors are surfaced in the same slot.
@@ -630,8 +645,15 @@ function TemplateEditDialog({
   const handleSave = () => {
     const err = validate()
     if (err) { setLocalError(err); return }
+    // a parameter's choices: complete, or said which one is not; saved with only what their kind uses
+    for (const p of tpl.params) {
+      const problem = choicesProblem(p.options)
+      if (problem) { setLocalError(t(`settings.templates.choices.err${problem[0].toUpperCase()}${problem.slice(1)}`, { name: p.name || p.label })); return }
+    }
     setLocalError(null)
-    void onSave(tpl)
+    const params = tpl.params.map((p) => { const { options, ...rest } = p; const kept = cleanChoices(options); return kept ? { ...rest, options: kept } : rest })
+    const pdf = Object.fromEntries(Object.entries(tpl.pdf_options ?? {}).filter(([k]) => k.trim() !== ''))
+    void onSave({ ...tpl, params, pdf_options: pdf })
   }
 
   // Build the typed params payload from the test-form. Each param picks the
@@ -779,6 +801,19 @@ function TemplateEditDialog({
                   >
                     <X size={14} />
                   </Button>
+                  {/* the value it starts with, the help under it, where its choices come from */}
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <ReportParamExtras
+                      value={p}
+                      otherParams={tpl.params.filter((_, j) => j !== i).map((o) => o.name).filter(Boolean)}
+                      connectors={Object.keys(connectors)}
+                      onChange={(patch) => {
+                        const next = [...tpl.params]
+                        next[i] = { ...next[i], ...patch }
+                        update('params', next)
+                      }}
+                    />
+                  </div>
                 </ParamRow>
               ))}
               <div style={{ marginTop: 8 }}>
@@ -791,6 +826,10 @@ function TemplateEditDialog({
               </div>
             </ParamsBox>
           </Field>
+
+          {/* the formats it is produced in, and what its PDF does differently */}
+          <ReportOutput formats={tpl.formats} pdfOptions={tpl.pdf_options ?? {}}
+            onFormats={(v) => update('formats', v)} onPdfOptions={(v) => update('pdf_options', v)} />
 
           {/* Template body + live preview */}
           <Field
@@ -940,7 +979,7 @@ function TemplateEditDialog({
           </PreviewToolbar>
         </ModalBody>
         <ModalFooter>
-          <Button $size="sm" $variant="ghost" onClick={onCancel} disabled={busy}>
+          <Button $size="sm" $variant="ghost" onClick={() => void cancel()} disabled={busy}>
             {t('common.cancel')}
           </Button>
           <Button $size="sm" $variant="primary" onClick={handleSave} disabled={busy}>

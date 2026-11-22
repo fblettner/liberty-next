@@ -11,12 +11,15 @@ from liberty.web.admin._base import Superuser, _drop_none, _reinject_action_type
 from pydantic import BaseModel, ValidationError
 
 from liberty.actions import load_actions
-from liberty.actions.config import parse_actions
-from liberty.ai.appconfig import parse_ai_config
+from liberty.actions.config import SharedActionsFile, parse_actions
+from liberty.ai.appconfig import AiFile, parse_ai_config
 from liberty.charts import load_charts
-from liberty.charts.config import parse_charts
+from liberty.charts.config import ChartsFile, parse_charts
 from liberty.dashboards import load_dashboards
-from liberty.dashboards.config import parse_dashboards
+from liberty.dashboards.config import DashboardsFile, parse_dashboards
+from liberty.explorer.config import ExplorerFile
+from liberty.notify.rules import NotificationsFile
+from liberty.web.save_errors import config_invalid
 
 # ── module catalogues (catalogue v2): list, preview, apply ───────────────────────────────────
 # A module (``[[modules]]`` in the presets files, :mod:`liberty.modules`) is applied in one pass:
@@ -179,10 +182,8 @@ async def put_charts_parsed(body: ChartsBody, request: Request, _: Superuser) ->
     Re-parses the resulting text before writing. Does not reload — call ``POST /admin/reload``."""
     try:
         validated = parse_charts({"charts": body.charts})
-    except ValidationError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid charts: {exc}") from exc
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid charts: {exc}") from exc
+    except ValueError as exc:                                # a ValidationError is one
+        raise config_invalid("charts", exc, {"charts": body.charts}, ChartsFile) from exc
 
     normalized = validated.model_dump(exclude_defaults=False, exclude_none=True)
     # id + connector are the table keys (path-derived) — keep them out of the written body.
@@ -308,7 +309,7 @@ async def put_ai_parsed(body: AiBody, request: Request, _: Superuser) -> dict[st
     try:
         validated = parse_ai_config({"ai": _drop_none(body.ai)})
     except (ValidationError, ValueError) as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid ai config: {exc}") from exc
+        raise config_invalid("ai", exc, {"ai": _drop_none(body.ai)}, AiFile) from exc
     normalized: dict[str, Any] = {"ai": {}}
     for app, block in validated.ai.items():
         d: dict[str, Any] = {}
@@ -347,7 +348,7 @@ async def put_explorer_parsed(body: ExplorerBody, request: Request, _: Superuser
     try:
         validated = parse_explorer({"explorer": _drop_none(body.explorer)})
     except (ValidationError, ValueError) as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid explorer config: {exc}") from exc
+        raise config_invalid("explorer", exc, {"explorer": _drop_none(body.explorer)}, ExplorerFile) from exc
     normalized: dict[str, Any] = {"explorer": {}}
     for app, mid, m in validated.items():
         normalized["explorer"].setdefault(app, {})[mid] = _explorer_model_dump(m)
@@ -393,10 +394,8 @@ async def put_actions_parsed(body: ActionsBody, request: Request, _: Superuser) 
     the written text. Does not reload — call ``POST /admin/reload``."""
     try:
         validated = parse_actions({"actions": body.actions})
-    except ValidationError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid actions: {exc}") from exc
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid actions: {exc}") from exc
+    except ValueError as exc:                                # a ValidationError is one
+        raise config_invalid("actions", exc, {"actions": body.actions}, SharedActionsFile) from exc
 
     # ``exclude_defaults=False`` is intentional — the same reason as screens / menus: an Action's
     # ``type`` discriminator equals its Literal default, so excluding defaults would strip it and
@@ -441,7 +440,7 @@ async def put_notifications_parsed(body: NotificationsBody, request: Request, _:
     try:
         validated = parse_notification_rules({"notifications": _drop_none(body.notifications)})
     except (ValidationError, ValueError) as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid notifications: {exc}") from exc
+        raise config_invalid("notifications", exc, {"notifications": _drop_none(body.notifications)}, NotificationsFile) from exc
     import tomli_w
     new_text = tomli_w.dumps(validated.model_dump(exclude_none=True))
     try:
@@ -492,10 +491,8 @@ async def put_dashboards_parsed(body: DashboardsBody, request: Request, _: Super
     :func:`put_screens_parsed`. Does not reload."""
     try:
         validated = parse_dashboards({"dashboards": body.dashboards})
-    except ValidationError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid dashboards: {exc}") from exc
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid dashboards: {exc}") from exc
+    except ValueError as exc:                                # a ValidationError is one
+        raise config_invalid("dashboards", exc, {"dashboards": body.dashboards}, DashboardsFile) from exc
 
     normalized = validated.model_dump(exclude_defaults=False, exclude_none=True)
     # id + connector are the table keys (path-derived) — keep them out of the written body.

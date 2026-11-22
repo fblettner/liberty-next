@@ -8,7 +8,7 @@ import { resolveColumnName } from '../../services/chartData'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { Plus, X } from 'lucide-react'
-import { Field, SearchSelect, type SearchSelectOption } from '../../common'
+import { Checkbox, Field, SearchSelect, type SearchSelectOption } from '../../common'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { Aggregation, ChartSpec, ChartType, YAxisSide } from '../../types/charts'
 import { AGGREGATIONS, CHART_TYPES } from '../../types/charts'
@@ -19,6 +19,7 @@ const SpecBar = styled.div`
   display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end;
 `
 const SpecCell = styled.div`min-width: 140px;`
+const Options = styled.div`display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; min-height: 38px;`
 const SeriesList = styled.div`
   display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
   padding: 6px; border: 1px dashed ${themeColors.border}; border-radius: ${radius.md};
@@ -138,6 +139,21 @@ export function ChartSpecEditor({ result, spec, onChange, trailing }: ChartSpecE
           <SearchSelect value={spec.aggregation} onChange={(v) => onChange({ ...spec, aggregation: v as Aggregation })} options={aggOpts} />
         </Field>
       </SpecCell>
+      {/* how it is drawn: each box shows what the chart does now (the legend shows by itself once there
+          are several series), a click sets it */}
+      <Field label={t('chart.spec.options')}>
+        <Options data-chart-options>
+          {(spec.type === 'bar' || spec.type === 'area') && (
+            <Checkbox checked={!!spec.stacked} onChange={(v: boolean) => onChange({ ...spec, stacked: v })} label={t('chart.spec.stacked')} />
+          )}
+          <Checkbox checked={spec.showLegend ?? (spec.series ? true : spec.y.length > 1)}
+            onChange={(v: boolean) => onChange({ ...spec, showLegend: v })} label={t('chart.spec.legend')} />
+          {spec.type !== 'pie' && (
+            <Checkbox checked={spec.showGrid !== false} onChange={(v: boolean) => onChange({ ...spec, showGrid: v })} label={t('chart.spec.grid')} />
+          )}
+          <Checkbox checked={!!spec.sortByX} onChange={(v: boolean) => onChange({ ...spec, sortByX: v })} label={t('chart.spec.sortByX')} />
+        </Options>
+      </Field>
       {trailing}
     </SpecBar>
   )

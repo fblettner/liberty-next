@@ -255,6 +255,11 @@ export interface ExplorerModelBody {
   entities: Record<string, ExplorerEntityBody>
   relations?: ExplorerRelationBody[]
   override?: boolean
+  /** The heading the model is listed under in the Explorer's list of models. */
+  group?: string | null
+  /** What the model delivers with itself (services/explorerShipped.ts). */
+  analyses?: Record<string, { label?: string | null; description?: string | null; audience?: string | null; version?: number; definition?: Record<string, unknown> }>
+  dashboards?: Record<string, { label?: string | null; description?: string | null; audience?: string | null; version?: number; definition?: Record<string, unknown> }>
 }
 /** `GET /admin/config/explorer/parsed` — the models per app: `{app: {model: body}}`. */
 export interface ExplorerDoc {

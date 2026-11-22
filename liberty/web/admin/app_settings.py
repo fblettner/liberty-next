@@ -27,6 +27,7 @@ from liberty.config import (
 )
 from liberty.crypto import CryptoError, encrypt
 from liberty.licensing import verify_license
+from liberty.web.save_errors import config_invalid
 
 # ── app.toml (master settings — host, port, log level, AI exposure) ─────────────────────────
 # The UI exposes a curated subset of AppSettings + AISettings (see liberty.config). Secrets
@@ -205,6 +206,13 @@ def _encrypt_sensitives(section: str, fields: dict[str, Any], master_key: str) -
     return out
 
 
+# What each section of app.toml is called in the App settings page.
+_SECTION_NAMES = {
+    "app": "Application", "ai": "AI assistant", "license": "License", "oidc": "Single sign-on",
+    "notify": "Notifications", "auth": "Sign-in", "jobs": "Jobs", "changesets": "Change packages",
+}
+
+
 @router.put("/config/app/parsed", summary="Update app config")
 async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) -> dict[str, object]:
     """Validate the submitted ``[app]`` + ``[ai]`` + ``[license]`` + ``[oidc]`` against
@@ -230,17 +238,18 @@ async def put_app_parsed(body: AppConfigBody, request: Request, _: Superuser) ->
             if section == "jobs" and not picked.get("files_dir"):
                 picked.pop("files_dir", None)   # blank = the default work area (next to the config)
             extra_in[section] = (picked, model)
-    try:
-        for _sec, (picked, model) in extra_in.items():
+    # Each section against its own model, so that a refusal names the section it is in.
+    checks: list[tuple[str, dict[str, Any], Any]] = [(sec, picked, model) for sec, (picked, model) in extra_in.items()]
+    checks += [("app", app_in, AppSettings), ("ai", ai_in, AISettings), ("license", license_in, LicenseSettings),
+               ("oidc", oidc_in, OIDCSettings)]
+    if notify_in is not None:
+        checks.append(("notify", notify_in, NotifySettings))
+    for section, picked, model in checks:
+        try:
             model.model_validate(picked)
-        AppSettings.model_validate(app_in)
-        AISettings.model_validate(ai_in)
-        LicenseSettings.model_validate(license_in)
-        OIDCSettings.model_validate(oidc_in)
-        if notify_in is not None:
-            NotifySettings.model_validate(notify_in)
-    except ValidationError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid app settings: {exc}") from exc
+        except ValidationError as exc:
+            raise config_invalid("app", exc, picked, model, prefix=(section,),
+                                 prefix_where=_SECTION_NAMES.get(section, section)) from exc
 
     # Encrypt sensitive fields before writing. Master key comes from the LIVE settings
     # (operator can rotate it via env without restart for this purpose — though full
@@ -411,10 +420,8 @@ async def put_reports_branding(
     try:
         model = ReportsBrandingSettings.model_validate(body.branding or {})
     except ValidationError as exc:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"invalid branding: {exc}",
-        ) from exc
+        raise config_invalid("branding", exc, body.branding or {}, ReportsBrandingSettings,
+                             prefix=("branding",), prefix_where="Report branding") from exc
 
     path = _app_config_path()
     text = path.read_text(encoding="utf-8") if path.exists() else ""
@@ -564,7 +571,10 @@ async def put_reports_parsed(
         if t.params:
             params_array = tomlkit.array()
             for p in t.params:
-                params_array.append(p.model_dump(exclude_defaults=False))
+                # TOML has no null: a parameter without a default value or without choices used to
+                # make the whole save fail (500) — what is not set is left out, the model's default
+                # takes over on the next read
+                params_array.append(p.model_dump(exclude_none=True))
             body_table["params"] = params_array
         data_tbl = tomlkit.table()
         data_tbl["connector"] = t.data.connector

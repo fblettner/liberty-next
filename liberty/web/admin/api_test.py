@@ -46,11 +46,12 @@ async def test_api_connector(body: ApiTestBody, request: Request, _: Superuser) 
     """
     from liberty.connectors.api import APIConnector
     from liberty.connectors.config import ApiConnectorConfig
+    from liberty.web.save_errors import config_invalid
 
     try:
         cfg = ApiConnectorConfig.model_validate(substitute_env(body.config))
     except ValidationError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid api connector config: {exc}") from exc
+        raise config_invalid("connectors", exc, body.config, ApiConnectorConfig) from exc
 
     settings = request.app.state.settings
     # a connector that names a server pool is tested as it runs: with the pool's address, account and secrets

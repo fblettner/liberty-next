@@ -18,7 +18,7 @@ import styled from '@emotion/styled'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import * as ui from '../../common'
-import { api } from '../../api/client'
+import { api, apiDownload } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { iconFor } from '../../components/SidebarMenu'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
@@ -29,7 +29,7 @@ import { can } from '../../services/permissions'
 import { pageFacts, setPageContext } from '../../services/aiContext'
 
 // 2: `Grid` (the shared grid) · 3: a row of the grid opens (`detail`) · 4: `useAssistantContext` · 5: `Diagram`
-export const PAGE_SDK_VERSION = 5
+export const PAGE_SDK_VERSION = 6
 
 export interface PageSdk {
   /** the contract's version (this file) */
@@ -70,6 +70,10 @@ export interface PageSdk {
   useUser: () => { username: string; is_superuser: boolean; permissions: string[] } | null
   /** hook: a function that opens a route of the application in its tab ('/screen/<app>/<id>', '/explorer'…) */
   useOpen: () => (path: string) => void
+  /** Give the user a FILE a route answers (a report as PDF, an export): `download('/api/reports/<scope>/<id>/run',
+   *  'report.pdf', { format: 'pdf', params })` posts the body when there is one, else GETs; the file takes the name
+   *  the server gives it, else the one passed. Rejects with the server's message. Since version 6. */
+  download: (path: string, name: string, body?: unknown) => Promise<void>
   /** hook: a function that says whether the caller holds a permission ('job:<id>', 'plugin:…'; a superuser
    *  holds them all) — to show a button only to who may use it. The server decides in the end. */
   useCan: () => (permission: string) => boolean
@@ -98,6 +102,7 @@ export function buildSdk(app: string, page: string): PageSdk {
       const { user } = useAuth()
       return user ? { username: user.username, is_superuser: !!user.is_superuser, permissions: user.permissions ?? [] } : null
     },
+    download: (path: string, name: string, body?: unknown) => apiDownload(path, name, body === undefined ? {} : { json: body }),
     useOpen: () => {
       const navigate = useNavigate()
       return (path: string) => { void navigate(path) }

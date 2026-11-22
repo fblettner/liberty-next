@@ -25,6 +25,7 @@ import type { NestedFormTab, NestedTableTab, ScreenDetail, ScreenField } from '.
 import { bindsComplete, evalConditions, originalKeys, resolveBindList, type Row, valueFor, withUpper } from './dialogHelpers'
 import { CellWrap, FieldRow, isPassword } from './FieldRow'
 import { colors, fontSize, media } from '../../theme'
+import { bindsToQuery } from '../../services/bindQuery'
 // Circular import: ResultTable → ScreenDialog → (this module's) NestedFormView/NestedTableView,
 // and NestedTableView → ResultTable. ESM resolves the bindings at module-eval; they're only *used*
 // at render time (inside JSX), so the cycle resolves fully before React renders — the same lazy-
@@ -46,23 +47,6 @@ const LoadingRow = styled.div`
 const TableWrap = styled.div`
   display: flex; flex-direction: column; min-height: 0; height: 100%;
 `
-
-/** Build the query-string for a bound GET — same convention the TableView uses. Empty when
- *  there are no resolved binds (the param form expects narrowing; no narrowing → the URL
- *  carries no params, which we treat as "skip fetch" so a not-yet-saved parent doesn't
- *  trigger a giant SELECT).
- *
- *  A nested bind is a foreign-KEY relationship (parent column → child param), so it must match
- *  EXACTLY. We send a ``<param>_op=equals`` companion for each: without it a text/CHAR column
- *  filter defaults to ``contains`` (LIKE ``%value%``), so binding ``RLTOROLE=DEMO`` would wrongly
- *  pull DEMO **and** DEMO2 into the child table. */
-function bindsToQuery(bound: Record<string, string>): string {
-  const parts = Object.entries(bound).flatMap(([k, v]) => [
-    `${encodeURIComponent(k)}=${encodeURIComponent(v)}`,
-    `${encodeURIComponent(`${k}_op`)}=equals`,
-  ])
-  return parts.length ? `?${parts.join('&')}` : ''
-}
 
 /** Resolve `tab.connector` against the parent screen's effective connector (the dialog's
  *  `connector` prop). Matches the migration / runtime convention: blank → parent's. */
@@ -397,9 +381,8 @@ export function NestedTableView({
     // ``_screen`` / ``_app`` pin THIS screen's hints — several screens can share one read_query
     // (a copy with different hidden columns), and without this the backend would apply the first
     // matching screen's hints (the original), so the copy's hide/show wouldn't take effect.
-    const qs = bindsToQuery(bound)
-    const pin = `_screen=${encodeURIComponent(tab.screen)}&_app=${encodeURIComponent(app)}`
-    api.get<QueryResult>(`/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(q)}${qs ? `${qs}&` : '?'}${pin}`)
+    const qs = bindsToQuery(bound, { app, screen: tab.screen })
+    api.get<QueryResult>(`/api/sql/${encodeURIComponent(connector)}/${encodeURIComponent(q)}${qs}`)
       .then((r) => setResult(r))
       .catch((e) => setError(e instanceof ApiError ? e.message : String(e)))
       .finally(() => setLoading(false))

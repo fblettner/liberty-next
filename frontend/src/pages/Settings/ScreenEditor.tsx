@@ -38,7 +38,8 @@ import ScreenColumnsPane from './ScreenColumnsPane'
 import ActionTreeView from './ActionTreeView'
 import ActionEditorModal from './ActionEditorModal'
 import ExportEditor from './ExportEditor'
-import type { ActionPath } from './actionPath'
+import { NewListFromTable } from './NewListFromTable'
+import { withCapturedResults, type ActionPath } from './actionPath'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { DictionaryDoc } from '../../types/config'
 import { api } from '../../api/client'
@@ -142,12 +143,7 @@ const PlaceholderChip = styled.button`
   background: transparent; color: ${colors.text.secondary}; cursor: pointer;
   &:hover { background: ${colors.bg.card}; color: ${colors.text.primary}; border-color: ${colors.text.muted}; }
 `
-// (``FieldList`` / ``FieldHeader`` / ``FieldBody`` moved into ``ActionListEditor.tsx`` — the
-// shared editor owns its own row look.)
-
-// (Action discriminated union + ``blankActionOfType`` + ``ACTION_*`` constants moved into
-// ``ActionListEditor.tsx`` — the shared editor used by both this file and the visual builder's
-// Tab Settings panel.)
+// (Action discriminated union + ``blankActionOfType`` + ``ACTION_*`` constants: ``actionKinds.ts``.)
 // (``pickFromDefs`` removed — it was used by the now-deleted schema-mode field/tab editor.
 // The visual builder picks its sub-schemas internally.)
 
@@ -284,6 +280,10 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
       .catch(() => { /* silent — dropdowns just stay empty */ })
     return () => { cancelled = true }
   }, [])
+  // read again once something was added to it from here (a list made from a column)
+  const reloadDict = async () => {
+    try { setDict((await api.get<DictionaryDoc>('/admin/config/dictionary/parsed')).dictionary) } catch { /* the dropdown keeps what it had */ }
+  }
 
   // Fetch the post-apply step library ([changesets] post_apply) — powers the POST_APPLY_STEPS enum
   // for Screen.post_apply (which run-once steps this change-tracked screen's changes require).
@@ -974,21 +974,39 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
         || rw.some((e) => typeof e?.rules === 'string' && want.includes(e.rules.toUpperCase()))
       const canLookup = ruleIs(['LOOKUP'])
       const canBind = canLookup || ruleIs(['SEQUENCE', 'NN'])
+      // The second choice of a kind ("List or source") shows only for a kind that has one — the
+      // column's own kind, or the dictionary's when the column leaves its kind blank.
+      const withSource = ['BOOLEAN', 'ENUM', 'LOOKUP', 'SEQUENCE', 'NN', 'POOL'].includes(effective ?? '')
+      const notes: Record<string, ReactNode> = {}
+      if (!override && ddRule) {
+        notes.rules = (
+          <div style={{ fontSize: fontSize.micro, color: colors.text.muted, marginTop: 4 }}>
+            {t('settings.screens.editor.ddDefaultRule',
+              { rule: ddRuleVal ? `${ddRule} (${ddRuleVal})` : ddRule })}
+          </div>
+        )
+      }
+      // a list read from a table that does not exist yet is made here, in one step, and picked
+      if (override === 'LOOKUP') {
+        notes.rules_values = (
+          <NewListFromTable app={app} connector={(typeof value.connector === 'string' && value.connector) || app}
+            onCreated={async (listId) => {
+              await reloadDict()
+              const cols = Array.isArray(value.columns) ? (value.columns as Record<string, unknown>[]) : []
+              setProp('columns', cols.map((c) => (c === col ? { ...c, rules_values: listId } : c)))
+            }} />
+        )
+      }
       return {
         // The Rules tab always shows (it holds the rule); hide the rule-specific fields when
         // they don't apply — the declutter the old "Lookup tab only" gave us.
         hiddenFields: [
+          ...(withSource ? [] : ['rules_values']),
+          ...(effective === 'BOOLEAN' ? [] : ['false_value']),
           ...(canLookup ? [] : ['hide_label', 'return_binds']),
           ...(canBind ? [] : ['lookup_param_binds']),
         ],
-        fieldNotes: !override && ddRule
-          ? { rules: (
-              <div style={{ fontSize: fontSize.micro, color: colors.text.muted, marginTop: 4 }}>
-                {t('settings.screens.editor.ddDefaultRule',
-                  { rule: ddRuleVal ? `${ddRule} (${ddRuleVal})` : ddRule })}
-              </div>
-            ) }
-          : undefined,
+        fieldNotes: Object.keys(notes).length ? notes : undefined,
       }
     }
     return (
@@ -1088,7 +1106,7 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
 
   // ── action editors (shared component) ──────────────────────────────────────────────
   // ``renderActionList`` + its inline ``renderPromptFields`` / ``renderActionOverrides`` /
-  // ``actionVariantSchema`` blocks moved into ``ActionListEditor.tsx`` / ``ActionTreeView.tsx``.
+  // ``actionVariantSchema`` blocks moved into ``ActionTreeView.tsx``.
   //
   // Theme A extended to this surface: each hook list (on_load / on_save / on_cancel /
   // screen.actions / on_insert / on_update / on_delete / row_menu) renders as a flat
@@ -1150,7 +1168,8 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
     const tree = (
       <ActionTreeView
         actions={actions}
-        onChange={onChange}
+        // a step whose result another step reads is marked as keeping it: nobody ticks the box by hand
+        onChange={(next) => onChange(withCapturedResults(next))}
         path={null}
         onPathChange={(p) => p && p.length > 0 && setOpenEditor({ listKey, path: p })}
         selectedPath={openEditor?.listKey === listKey ? openEditor.path : null}

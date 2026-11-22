@@ -42,6 +42,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
+from liberty.framework_enums import RULE_SOURCE_TITLE_WHEN, RULE_SOURCE_WHEN
+
 
 class DictionaryEntry(BaseModel):
     """One shared field definition. ``l`` maps a language code → translated label
@@ -77,6 +79,9 @@ class DictionaryEntry(BaseModel):
         description="The rule's argument — true-value for BOOLEAN, enum id for ENUM, lookup id for LOOKUP, sequence id for SEQUENCE / NN, for POOL a connector (only the pools it may run on; blank = every pool). The dropdown changes based on the chosen rule.",
         json_schema_extra={
             "x_group": "Rule",
+            # shown only for a kind that needs it, under the name of what it is for that kind
+            "x_visible_when": RULE_SOURCE_WHEN,
+            "x_title_when": RULE_SOURCE_TITLE_WHEN,
             "x_enum_ref_when": {
                 "field": "rules",
                 "map": {
@@ -96,7 +101,7 @@ class DictionaryEntry(BaseModel):
             "BOOLEAN-only — value to write when the checkbox is unchecked. Blank infers it from "
             "the true value (``Y``→``N``, ``1``→``0``, ``true``→``false``); anything else sends NULL."
         ),
-        json_schema_extra={"x_group": "Rule"},
+        json_schema_extra={"x_group": "Rule", "x_visible_when": {"field": "rules", "value": "BOOLEAN"}},
     )
     default: str | None = Field(
         default=None,
@@ -112,7 +117,7 @@ class DictionaryEntry(BaseModel):
             "INSERT / UPDATE values and the WHERE keys, so a right-justified code (e.g. F0005's KY) "
             "matches the stored value without an LPAD in the query. Override per column on the screen."
         ),
-        json_schema_extra={"x_group": "Rule"},
+        json_schema_extra={"x_group": "Advanced"},
     )
     size: int | None = Field(
         default=None,
@@ -122,7 +127,7 @@ class DictionaryEntry(BaseModel):
             "FSFRDV / FSTHDV right-justify to the width of the data item named in FSDTAI, not their "
             "own (wider) column. Empty = fall back to the column's physical width."
         ),
-        json_schema_extra={"x_group": "Rule"},
+        json_schema_extra={"x_group": "Advanced"},
     )
     sensitive: bool = Field(
         default=False,
@@ -142,7 +147,8 @@ class DictionaryEntry(BaseModel):
             "``:param`` placeholders (a JDE UDC query usually needs SY / RT to return rows). "
             "Keys auto-suggest the params declared on the picked lookup."
         ),
-        json_schema_extra={"x_group": "Rule", "x_key_enum_ref": "CURRENT_LOOKUP_PARAMS"},
+        json_schema_extra={"x_group": "Rule", "x_key_enum_ref": "CURRENT_LOOKUP_PARAMS",
+                           "x_visible_when": {"field": "rules", "value": "LOOKUP"}},
     )
     l: dict[str, str] = Field(
         default_factory=dict,

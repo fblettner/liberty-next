@@ -27,6 +27,7 @@ from liberty.auth.dependencies import require_superuser
 from liberty.auth.principal import Principal
 from liberty.config import PromotionSettings, PromotionTarget, resolve_app_config_path, substitute_env
 from liberty.crypto import encrypt
+from liberty.web.save_errors import config_invalid
 from liberty.promotion import PromotionError, client_for, history_for, push_changes, push_config, sign_in, target_info
 
 router = APIRouter(prefix="/admin/promotion", tags=["admin"])
@@ -90,7 +91,7 @@ async def put_targets(body: TargetsBody, request: Request, _: Superuser) -> dict
     try:
         live = PromotionSettings.model_validate(substitute_env({"targets": clean}))
     except ValidationError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid targets: {exc}") from exc
+        raise config_invalid("promotion", exc, {"targets": clean}, PromotionSettings) from exc
 
     path = resolve_app_config_path()
     text = path.read_text(encoding="utf-8") if path.exists() else ""

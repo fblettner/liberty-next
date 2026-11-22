@@ -7,7 +7,8 @@ import styled from '@emotion/styled'
 import { Plus, Trash2, LayoutDashboard, Search, Edit3, Copy, GitMerge } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Centered, SpinnerRing, Tag, useModals, HeaderActions } from '../../common'
+import { failureOf, type SaveFailure } from '../../services/saveProblems'
+import { Banner, Button, Card, Centered, SaveProblems, SpinnerRing, Tag, useModals, HeaderActions } from '../../common'
 import type { ChartsDoc, DashboardsDoc } from '../../types/config'
 import type { SavedChartSpec } from '../../types/charts'
 import { DashboardEditorModal } from './DashboardEditorModal'
@@ -16,7 +17,7 @@ import { AddScopeModal } from './AddScopeModal'
 import { FindDependenciesModal, type DependencySeed } from './FindDependenciesModal'
 import { CloneWithDepsModal } from './CloneWithDepsModal'
 import { DeleteWithDepsModal } from './DeleteWithDepsModal'
-import { validateId as validateIdShared } from '../../services/idValidator'
+import { newObjectFromLabel, validateId as validateIdShared } from '../../services/idValidator'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { BuilderEmpty as Empty, BuilderShell as Shell } from '../../common/builderShell'
@@ -63,6 +64,8 @@ export default function DashboardsBuilder() {
   const [addScopeOpen, setAddScopeOpen] = useState(false)
   const [depsSeeds, setDepsSeeds] = useState<DependencySeed[] | null>(null)
   const [editing, setEditing] = useState<Raw | undefined>(undefined)
+  // a save the server refused: shown in the editor, which stays open with what was typed
+  const [failure, setFailure] = useState<SaveFailure | null>(null)
 
   const load = () => {
     setError(null)
@@ -75,16 +78,18 @@ export default function DashboardsBuilder() {
   }
   useEffect(load, [t])
 
-  const persist = async (next: Dashboards, okMsg: string) => {
-    setBusy(true); setError(null); setStatus(null)
+  const persist = async (next: Dashboards, okMsg: string): Promise<boolean> => {
+    setBusy(true); setError(null); setStatus(null); setFailure(null)
     const pruned = Object.fromEntries(Object.entries(next).filter(([, byId]) => Object.keys(byId).length > 0))
     try {
       await api.put<{ saved: boolean }>('/admin/config/dashboards/parsed', { dashboards: pruned })
       await api.post('/admin/reload')
       setDoc(next)
       setStatus(okMsg)
+      return true
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      setFailure(failureOf(e))
+      return false
     } finally { setBusy(false) }
   }
 
@@ -93,20 +98,23 @@ export default function DashboardsBuilder() {
     const byId = { ...(doc?.[scope] ?? {}) }
     if (prevId && prevId !== id) delete byId[prevId]
     byId[id] = record
-    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.dashboards.saved'))
-    setEditing(undefined)
+    // closed once saved: a refused save leaves the editor open on what was typed
+    void persist({ ...(doc ?? {}), [scope]: byId }, t('settings.dashboards.saved')).then((ok) => { if (ok) setEditing(undefined) })
   }
 
   const addDashboard = async () => {
     const existing = Object.keys(doc?.[scope] ?? {})
-    const id = (await modals.prompt({
+    // the NAME is asked for; the id is made from it (shown while it is typed)
+    const name = (await modals.prompt({
       title: t('settings.dashboards.add'),
-      message: t('settings.dashboards.namePrompt'),
-      placeholder: 'snake_case',
-      validate: (v) => validateIdShared({ kind: 'dashboard', proposed: v, existing, mode: 'add' }),
+      message: t('settings.newObject.name'),
+      placeholder: t('settings.dashboards.nameExample'),
+      validate: (v) => (newObjectFromLabel(v, existing) ? null : t('settings.newObject.noLetters')),
+      note: (v) => t('settings.newObject.idWillBe', { id: newObjectFromLabel(v, existing)?.id ?? '' }),
     }))?.trim()
-    if (!id) return
-    setEditing({ id, label: id, widgets: [] })
+    const made = name ? newObjectFromLabel(name, existing) : null
+    if (!made) return
+    setEditing({ id: made.id, label: made.label, widgets: [] })
     setStatus(null)
   }
 
@@ -189,6 +197,7 @@ export default function DashboardsBuilder() {
       </HeaderActions>
       {status && <Banner $tone="ok">{status}</Banner>}
       {error && <Banner $tone="error">{error}</Banner>}
+      {editing === undefined && <SaveProblems failure={failure} />}
 
       {allIds.length > 0 && (
         <FilterBar>
@@ -261,7 +270,8 @@ export default function DashboardsBuilder() {
           scope={scope}
           chartsCatalog={chartsCatalog}
           onSave={onEditorSave}
-          onClose={() => setEditing(undefined)}
+          failure={failure}
+          onClose={() => { setEditing(undefined); setFailure(null) }}
         />
       )}
       {addScopeOpen && (

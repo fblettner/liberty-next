@@ -288,7 +288,9 @@ class Step(BaseModel):
     recipients: list[str] = Field(default_factory=list)
     subject: str | None = None
     attach: list[str] = Field(default_factory=lambda: ["*"])
-    channels: list[Literal["portal", "email", "action"]] = Field(default_factory=lambda: ["portal", "email"])
+    # (No ``action`` channel here: it runs a rule's query or endpoint, and a step has none — a job that
+    # must call an endpoint has the ``http`` step.)
+    channels: list[Literal["portal", "email"]] = Field(default_factory=lambda: ["portal", "email"])
 
     # universal
     timeout_seconds: int = Field(3600, ge=1)

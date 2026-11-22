@@ -1,6 +1,6 @@
 // The target picker for a `navigate` action — a Query | Screen type toggle + one dropdown that
-// swaps its source by the choice (mirrors the menu editor). Shared by ActionListEditor and the
-// Screen Designer's ActionTreeView.
+// swaps its source by the choice (mirrors the menu editor). Used by the Screen Designer's
+// ActionTreeView.
 //
 // Why the type lives in LOCAL state, not the action data: the action-patch path strips empty
 // values (updateAtPath / setProp drop '' / null), so "Screen mode, nothing picked yet" can't be

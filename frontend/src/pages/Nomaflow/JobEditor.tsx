@@ -14,8 +14,10 @@ import { ArrowLeft, Save, Workflow, Layers, X, Plus, Check } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
   PageLayout, Button, Banner, Centered, Card, Input, Checkbox,
-  SearchSelect, SpinnerRing, Stack, useModals,
+  RecipientsField, SaveProblems, SearchSelect, SpinnerRing, Stack, TimezoneSelect, useModals,
 } from '../../common'
+import { failureOf, targetOf, type SaveFailure, type SaveProblem } from '../../services/saveProblems'
+import { checkJob, type JobIssue } from '../../services/jobChecks'
 import { UserParamsEditor } from './UserParamsEditor'
 import { cleanUserParams, forEachCandidates } from '../../services/jobParams'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
@@ -23,17 +25,12 @@ import { useWorkspace } from '../../workspace/WorkspaceContext'
 import StepEditor from './StepEditor'
 import { KeyValueEditor, JOB_PARAM_CATALOG } from './stepFields'
 import ScheduleField from './ScheduleField'
+import { LOG_LEVELS, PresetEditor } from './PresetEditor'
 import type { JobConfig, JobPreset, JobsParsedResponse } from './types'
 import { TabIdContext, useDirtyGuard } from '../../tabs/dirtyGuard'
 import { useTabs } from '../../tabs/TabsContext'
 
 const Section = styled(Card)`display: flex; flex-direction: column; gap: 12px;`
-const PresetCard = styled.div`
-  display: flex; flex-direction: column; gap: 10px;
-  padding: 12px; border: 1px solid ${colors.border}; border-radius: ${radius.sm};
-  background: ${colors.bg.input};
-`
-const PresetHead = styled.div`display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;`
 const SectionTitle = styled.div`
   display: flex; align-items: center; gap: 7px;
   font-weight: 600; color: ${colors.text.primary}; font-size: ${fontSize.md};
@@ -293,19 +290,6 @@ function TagsField(
 
 const blankJob = (): JobConfig => ({ id: '', description: '', schedule: '', enabled: true, tags: [], steps: [] })
 
-/** One-line summary of what a preset overrides — shown next to its name in the editor. */
-function presetOverrideSummary(p: JobPreset): string {
-  const bits: string[] = []
-  if (p.log_level) bits.push(p.log_level)
-  const np = Object.keys(p.params ?? {}).length
-  if (np) bits.push(`${np} ${np > 1 ? 'params' : 'param'}`)
-  const nk = Object.keys(p.op_kwargs ?? {}).length
-  if (nk) bits.push(`${nk} step-kwargs`)
-  const ne = Object.keys(p.step_enabled ?? {}).length
-  if (ne) bits.push(`${ne} step ${ne > 1 ? 'toggles' : 'toggle'}`)
-  return bits.length ? bits.join(' · ') : 'no overrides'
-}
-
 /** The job editor — a tab of its own (one per job edited): *jobId* is the job, ``''`` a new one. Outside the
  *  tab host (a direct route) the id comes from the address, as before. */
 export default function JobEditor({ jobId }: { jobId?: string } = {}) {
@@ -325,6 +309,9 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
   const [job, setJob] = useState<JobConfig | null>(null)
   const [original, setOriginal] = useState('')        // JSON snapshot for the dirty check
   const [error, setError] = useState<string | null>(null)
+  // what stops the save — found here before sending, or listed by the server — each opening its step
+  const [failure, setFailure] = useState<SaveFailure | null>(null)
+  const [stepPick, setStepPick] = useState<{ index: number | null; tick: number } | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -364,11 +351,46 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
     return [...acc].sort((a, b) => a.localeCompare(b))
   }, [allJobs])
 
+  // Where this job sits in the list that is sent: a problem the server lists names it by that place.
+  const jobIndex = allJobs ? (isNew ? allJobs.length : allJobs.findIndex((j) => j.id === id)) : -1
+  // A check made here, as a problem the page shows like the server's.
+  const issueProblem = (issue: JobIssue): SaveProblem => {
+    const step = issue.step === undefined ? undefined : job?.steps[issue.step]
+    const where = issue.preset !== undefined ? t('nomaflow.editor.checks.preset', { n: issue.preset + 1 })
+      : issue.step === undefined ? t('nomaflow.editor.checks.job')
+      : step?.name?.trim() ? t('nomaflow.editor.checks.step', { n: issue.step + 1, name: step.name.trim() })
+      : t('nomaflow.editor.checks.stepUnnamed', { n: issue.step + 1 })
+    const fields = (issue.fields ?? []).map((f) => t(`nomaflow.editor.checks.field.${f}`)).join(', ')
+    return {
+      path: issue.preset !== undefined ? ['jobs', jobIndex, 'presets', issue.preset]
+        : issue.step === undefined ? ['jobs', jobIndex, 'id'] : ['jobs', jobIndex, 'steps', issue.step],
+      where, message: t(`nomaflow.editor.checks.${issue.code}`, { name: issue.name ?? '', fields }), code: 'check',
+    }
+  }
+  // "Open" on a problem: the step it is on, or the job's own settings.
+  const problemOpener = (p: SaveProblem): (() => void) | null => {
+    const target = targetOf('jobs', p.path)
+    if (!target || target.index !== jobIndex) return null          // another job of the file: named, not opened
+    const [part, n] = target.inner
+    const index = part === 'steps' && typeof n === 'number' ? n : null
+    return () => setStepPick({ index, tick: Date.now() })
+  }
+  const removePreset = async (idx: number) => {
+    const name = job?.presets?.[idx]?.name ?? ''
+    if (!(await modals.confirm({ title: t('nomaflow.editor.presetDelete'), message: t('nomaflow.editor.presetDeleteConfirm', { name }), variant: 'danger', confirmLabel: t('common.delete') }))) return
+    setJob((j) => (j?.presets ? { ...j, presets: j.presets.filter((_, i) => i !== idx) } : j))
+  }
   const save = useCallback(async () => {
     if (!job || !allJobs) return
-    const jid = job.id.trim()
-    if (!jid) { setError(t('nomaflow.editor.idRequired')); return }
-    setBusy(true); setError(null); setStatus(null)
+    setError(null); setStatus(null); setFailure(null)
+    // The cheap checks first: what the server would refuse is said at once, on its step.
+    const issues = checkJob(job, allJobs.filter((j) => isNew || j.id !== id).map((j) => j.id))
+    if (issues.length) {
+      const problems = issues.map(issueProblem)
+      setFailure({ message: problems.map((p) => `${p.where} ${p.message}`).join('\n'), problems })
+      return
+    }
+    setBusy(true)
     try {
       // Sanitise list-of-strings fields: drop empty/whitespace-only rows the operator may have
       // added but not filled in (StringListEditor keeps the blank row alive so they can type
@@ -395,9 +417,10 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
       await api.post('/admin/jobs/reload')   // the jobs part of the reload — open to nomaflow:edit
       leave()
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      setFailure(failureOf(e))
       setBusy(false)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- issueProblem reads the same job
   }, [job, allJobs, id, isNew, leave, t])
 
   const back = async () => {
@@ -424,10 +447,12 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
       </Toolbar>
 
       {error && <Banner $tone="error" style={{ marginBottom: 12 }}>{error}</Banner>}
+      {failure && <div style={{ marginBottom: 12 }}><SaveProblems failure={failure} opener={problemOpener} /></div>}
       {!job && !error && <Centered />}
 
       {job && (
         <StepEditor
+          pick={stepPick}
           steps={job.steps}
           onChange={(steps) => patch({ steps })}
           connectors={connectors}
@@ -465,11 +490,7 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
               </FieldWrap>
               <FieldWrap>
                 <FieldLabel>{t('nomaflow.editor.fieldTimezone')}</FieldLabel>
-                <Input
-                  value={job.timezone ?? ''}
-                  onChange={(e) => patch({ timezone: e.target.value || null })}
-                  placeholder="Europe/Paris"
-                />
+                <div data-job-timezone><TimezoneSelect value={job.timezone ?? ''} onChange={(v) => patch({ timezone: v || null })} placeholder="Europe/Paris" /></div>
               </FieldWrap>
               <FieldWrap>
                 <FieldLabel>{t('nomaflow.editor.fieldTags')}</FieldLabel>
@@ -485,6 +506,12 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
                 <Input type="number" min={1} value={job.timeout_seconds ?? ''} placeholder="14400"
                   onChange={(e) => patch({ timeout_seconds: e.target.value ? Math.max(1, Number(e.target.value) || 1) : undefined })} />
                 <FieldHint>{t('nomaflow.editor.fieldTimeoutHint')}</FieldHint>
+              </FieldWrap>
+              <FieldWrap data-job-log-level>
+                <FieldLabel>{t('nomaflow.editor.fieldLogLevel')}</FieldLabel>
+                <SearchSelect value={job.log_level ?? 'INFO'} onChange={(v) => patch({ log_level: v && v !== 'INFO' ? (v as JobConfig['log_level']) : undefined })}
+                  options={LOG_LEVELS.map((l) => ({ value: l, label: t(`nomaflow.editor.logLevel.${l}`) }))} />
+                <FieldHint>{t('nomaflow.editor.fieldLogLevelHint')}</FieldHint>
               </FieldWrap>
               <FieldWrap>
                 <Checkbox
@@ -523,39 +550,12 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
                 <FieldHint>
                   {t('nomaflow.editor.presetsHint')}
                 </FieldHint>
+                {/* a preset is renamed, changed and removed here (by its place: its name is being typed) */}
                 {(job.presets ?? []).map((p, i) => (
-                  <PresetCard key={p.name}>
-                    <PresetHead>
-                      <strong>{p.name}</strong>
-                      <FieldHint>{presetOverrideSummary(p)}</FieldHint>
-                      {p.schedule && (
-                        <span style={{ marginLeft: 'auto' }}>
-                          <Checkbox
-                            checked={p.enabled ?? true}
-                            onChange={(checked) => patchPreset(i, { enabled: checked })}
-                            label={t('nomaflow.editor.presetEnabled')}
-                          />
-                        </span>
-                      )}
-                    </PresetHead>
-                    <Grid>
-                      <FieldWrap $full as="div">
-                        <ScheduleField
-                          value={p.schedule ?? null}
-                          timezone={p.timezone ?? job.timezone ?? null}
-                          onChange={(schedule) => patchPreset(i, { schedule })}
-                        />
-                      </FieldWrap>
-                      <FieldWrap>
-                        <FieldLabel>{t('nomaflow.editor.fieldTimezone')}</FieldLabel>
-                        <Input
-                          value={p.timezone ?? ''}
-                          onChange={(e) => patchPreset(i, { timezone: e.target.value || null })}
-                          placeholder={job.timezone ?? 'Europe/Paris'}
-                        />
-                      </FieldWrap>
-                    </Grid>
-                  </PresetCard>
+                  <PresetEditor key={i} preset={p} steps={job.steps.map((s) => s.name).filter(Boolean)} jobTimezone={job.timezone ?? null}
+                    sqlConnectors={(connectors ?? []).filter((c) => c.type === 'sql')}
+                    onChange={(patchOf) => patchPreset(i, patchOf)}
+                    onDelete={() => void removePreset(i)} />
                 ))}
               </>
             )}
@@ -643,16 +643,8 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
                 </FieldWrap>
                 <FieldWrap $full>
                   <FieldLabel>{t('nomaflow.editor.alertsRecipients')}</FieldLabel>
-                  <Input
-                    value={(job.alerts.recipients ?? []).join(', ')}
-                    onChange={(e) => patch({
-                      alerts: {
-                        ...job.alerts!,
-                        recipients: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
-                      },
-                    })}
-                    placeholder="admin"
-                  />
+                  {/* a role, a user or an address, picked — a bare word typed here went nowhere */}
+                  <RecipientsField value={job.alerts.recipients ?? []} onChange={(recipients) => patch({ alerts: { ...job.alerts!, recipients } })} />
                 </FieldWrap>
               </Grid>
             )}

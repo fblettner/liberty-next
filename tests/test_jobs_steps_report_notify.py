@@ -153,6 +153,10 @@ def test_schema_and_wiring() -> None:
     with pytest.raises(ValueError, match="missing required field"):
         Step(type=StepType.NOTIFY, name="n", subject="s")
     assert Step(type=StepType.NOTIFY, name="n", subject="s", recipients=["user:a"]).attach == ["*"]
+    # the portal and e-mail only: the "action" channel belongs to a notification rule (it runs the rule's query or endpoint)
+    assert Step(type=StepType.NOTIFY, name="n", subject="s", recipients=["user:a"]).channels == ["portal", "email"]
+    with pytest.raises(ValueError, match="channels"):
+        Step(type=StepType.NOTIFY, name="n", subject="s", recipients=["user:a"], channels=["action"])
     from liberty.connectors.config import ConnectorsFile
     from liberty.connectors.registry import ConnectorRegistry
     reg = ConnectorRegistry(ConnectorsFile())

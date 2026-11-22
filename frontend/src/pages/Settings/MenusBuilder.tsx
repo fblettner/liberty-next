@@ -15,7 +15,10 @@ import styled from '@emotion/styled'
 import { Save, Plus, Trash2, Search, FolderOpen, Folder, FileText, ChevronRight, ChevronDown, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Copy, Undo2, GitBranch, GitMerge, Table, LayoutDashboard, Workflow, Database, Globe, AppWindow, GripVertical } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Card, Centered, HeaderActions, Stack, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
+import { failureOf, targetOf, type SaveFailure, type SaveProblem } from '../../services/saveProblems'
+import { checkMenus, cleanMenus } from '../../services/menuChecks'
+import { targetParamNames } from '../../services/freeMap'
+import { Button, Banner, Card, Centered, Field, HeaderActions, Input, SaveProblems, Stack, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals, type FrameworkEnums, type JsonSchema } from '../../common'
 import type { AppMenu, ConfigSchemas, ConnectorsDoc, DashboardsDoc, MenuItem, MenusDoc, ScreensDoc } from '../../types/config'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
@@ -50,10 +53,6 @@ const TreeSplit = styled.div`
 const TreeCol = styled(Card)`
   flex: 0 0 min(420px, 36%); padding: 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0;
 `
-const PanelTitle = styled.div`
-  display: flex; align-items: center; gap: 8px; font-family: ${fonts.sans}; font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.primary};
-  & .count { font-weight: 400; color: ${colors.text.muted}; }
-`
 const TreeBox = styled.div`flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 2px;`
 const InspectorCol = styled(Card)`flex: 1; min-width: 0; min-height: 0; padding: 0; display: flex; flex-direction: column; overflow: hidden;`
 const InspectorHead = styled.div`
@@ -65,6 +64,17 @@ const InspectorBody = styled.div`flex: 1; min-height: 0; overflow-y: auto; paddi
 // Cap the inspector form's width so on a wide screen the inputs aren't half-a-page wide. The
 // container still flexes (it can be narrower); this is just the upper bound.
 const InspectorInner = styled.div`max-width: 720px;`
+const AppHint = styled.div`font-size: ${fontSize.micro}; color: ${colors.text.muted}; margin: 4px 0 14px; line-height: 1.4;`
+// The application's own line, above its entries: picked, the application's settings show beside.
+const AppLine = styled.button<{ $on?: boolean }>`
+  display: flex; align-items: baseline; gap: 6px; width: 100%; padding: 6px 8px; text-align: left; cursor: pointer;
+  background: ${({ $on }) => ($on ? colors.blue.bg : 'transparent')};
+  border: 1px solid ${({ $on }) => ($on ? colors.blue.border : 'transparent')}; border-radius: ${radius.sm};
+  font-family: ${fonts.sans}; font-size: ${fontSize.base}; color: ${colors.text.primary};
+  & .name { font-weight: 600; }
+  & .count { color: ${colors.text.muted}; font-size: ${fontSize.sm}; }
+  &:hover { background: var(--hover-subtle); }
+`
 // The row shows [chev] [icon] [label] [id]  · on hover an overlay [actions] fades in. The id and
 // actions are LAYOUT-stable — actions are absolutely positioned over the right edge with
 // `opacity` for show/hide, the id fades the opposite way. No `display` toggles, so the row
@@ -237,6 +247,9 @@ export default function MenusBuilder({ app: openOn }: { app?: string | null } = 
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [treeQ, setTreeQ] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // a save the server refused: its problems one by one, each opening the entry it is in
+  const [failure, setFailure] = useState<SaveFailure | null>(null)
+  const pendingOpen = useRef<{ id: string; expand: string[] } | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [addScopeOpen, setAddScopeOpen] = useState(false)
@@ -266,7 +279,12 @@ export default function MenusBuilder({ app: openOn }: { app?: string | null } = 
       .catch((e) => setError(e instanceof ApiError ? (e.status === 403 ? t('settings.superuserRequired') : e.message) : String(e)))
   }
   useEffect(load, [t])
-  useEffect(() => { setSelItem(null); setTreeQ(''); setExpanded(new Set()) }, [selApp])
+  useEffect(() => {
+    // another application: nothing picked — unless a problem of a refused save asked for one of its entries
+    const asked = pendingOpen.current
+    pendingOpen.current = null
+    setSelItem(asked?.id ?? null); setTreeQ(''); setExpanded(new Set(asked?.expand ?? []))
+  }, [selApp])
 
   const dirty = useMemo(() => apps != null && JSON.stringify(apps) !== original, [apps, original])
   useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
@@ -389,6 +407,14 @@ export default function MenusBuilder({ app: openOn }: { app?: string | null } = 
       for (const j of jobs) targets.push({ value: j.id, label: (j.description || j.id).split('\n')[0], mono: j.id })
       targets.sort((a, b) => a.value.localeCompare(b.value))
     }
+    // MENU_TARGET_PARAMS — what the entry may give a fixed value to: the filters of the screen it
+    // opens, the declared parameters of the query it opens (services/freeMap.ts)
+    const targetScreen = selRec?.type === 'screen' && connKey && selRec.target ? screens?.[connKey]?.[selRec.target] : undefined
+    base.MENU_TARGET_PARAMS = {
+      label: t('settings.menus.paramName'),
+      values: targetParamNames(selRec, targetScreen as { columns?: { name?: unknown; filter?: unknown }[] } | undefined, conn)
+        .map((n) => ({ value: n, label: n })),
+    }
     base.MENU_TARGETS = {
       label: selRec?.type === 'endpoint'
         ? `Endpoints — ${connKey ?? ''}`
@@ -403,7 +429,7 @@ export default function MenusBuilder({ app: openOn }: { app?: string | null } = 
     }
 
     return base
-  }, [schemas, connectors, screens, dashboards, apps, selApp, selItem, jobs])
+  }, [schemas, connectors, screens, dashboards, apps, selApp, selItem, jobs, t])
 
   if (error && !apps) return <Banner $tone="error">{error}</Banner>
   if (!apps || !schemas) return <Centered />
@@ -576,15 +602,45 @@ export default function MenusBuilder({ app: openOn }: { app?: string | null } = 
 
   async function save() {
     if (!apps) return
-    setBusy(true); setError(null); setStatus(null)
+    setError(null); setStatus(null); setFailure(null)
+    // The cheap checks first: what the server would refuse is said at once, on its entry.
+    const issues = checkMenus(apps)
+    if (issues.length) {
+      const problems: SaveProblem[] = issues.map((issue) => {
+        const rec = apps[issue.app]?.items?.[issue.index]
+        return {
+          path: ['menus', issue.app, 'items', issue.index, issue.code === 'target' ? 'target' : issue.code === 'parent' ? 'parent' : 'id'],
+          where: t('settings.menus.checks.entry', { app: issue.app, label: rec?.label || rec?.id || issue.name }),
+          message: t(`settings.menus.checks.${issue.code}`, { name: issue.name }), code: 'check',
+        }
+      })
+      setFailure({ message: problems.map((p) => `${p.where} ${p.message}`).join('\n'), problems })
+      return
+    }
+    setBusy(true)
     try {
-      await api.put<{ saved: boolean }>('/admin/config/menus/parsed', { menus: apps })
+      await api.put<{ saved: boolean }>('/admin/config/menus/parsed', { menus: cleanMenus(apps) })
       await api.post<{ menu_apps: string[] }>('/admin/reload')
       setStatus(t('settings.menus.saved'))
       load()
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      setFailure(failureOf(e))
     } finally { setBusy(false) }
+  }
+  // "Open" on a problem of a refused save: the entry it is in, shown in the tree and beside it.
+  const problemOpener = (p: SaveProblem): (() => void) | null => {
+    const target = targetOf('menus', p.path)
+    const list = target?.scope ? apps?.[target.scope]?.items : undefined
+    const rec = list && target?.index !== undefined ? list[target.index] : undefined
+    if (!target?.scope || !list) return null
+    const scope = target.scope
+    if (!rec) return scope === selApp ? null : () => setSelApp(scope)
+    const expand: string[] = []
+    for (let up = rec.parent; up && !expand.includes(up); up = list.find((it) => it.id === up)?.parent) expand.push(up)
+    return () => {
+      if (scope === selApp) { setTreeQ(''); setExpanded((s) => new Set([...s, ...expand])); setSelItem(rec.id) }
+      else { pendingOpen.current = { id: rec.id, expand }; setSelApp(scope) }
+    }
   }
 
   // ── tree rendering ────────────────────────────────────────────────────────
@@ -663,11 +719,16 @@ export default function MenusBuilder({ app: openOn }: { app?: string | null } = 
       </HeaderActions>
       {status && <Banner $tone="ok">{status}</Banner>}
       {error && <Banner $tone="error">{error}</Banner>}
+      <SaveProblems failure={failure} opener={problemOpener} />
       {selApp && currentApp ? (
         <Stack gap={12} style={{ flex: 1, minHeight: 0 }}>
           <TreeSplit>
                 <TreeCol>
-                  <PanelTitle>{selApp} <span className="count">· {items.length} {t('settings.menus.item.count', { count: items.length })}</span></PanelTitle>
+                  {/* the application itself is picked from its line: its own settings show beside, as an entry's do */}
+                  <AppLine type="button" $on={!selItemRec} data-app-line onClick={() => setSelItem(null)} title={t('settings.menus.app.open')}>
+                    <span className="name">{currentApp.label || selApp}</span>
+                    <span className="count">· {items.length} {t('settings.menus.item.count', { count: items.length })}</span>
+                  </AppLine>
                   <NavSearch>
                     <Search size={13} />
                     <input value={treeQ} onChange={(e) => setTreeQ(e.target.value)} placeholder={t('settings.menus.tree.filterPlaceholder', { count: items.length })} />
@@ -715,7 +776,22 @@ export default function MenusBuilder({ app: openOn }: { app?: string | null } = 
                       </InspectorBody>
                     </>
                   ) : (
-                    <Empty style={{ textAlign: 'center' }}>{items.length ? t('settings.menus.inspector.pickOne') : t('settings.menus.inspector.empty')}</Empty>
+                    <>
+                      <InspectorHead>
+                        <span className="name">{currentApp.label || selApp}<span className="id">{selApp}</span></span>
+                        <Tag $tone="purple">{t('settings.menus.app.tag')}</Tag>
+                      </InspectorHead>
+                      <InspectorBody>
+                        <InspectorInner>
+                          <Field label={t('settings.menus.app.name')}>
+                            <Input data-app-name value={currentApp.label ?? ''} placeholder={selApp}
+                              onChange={(e) => updateApp(selApp, { ...currentApp, label: e.target.value || undefined })} />
+                          </Field>
+                          <AppHint>{t('settings.menus.app.nameHint', { id: selApp })}</AppHint>
+                          <AppHint>{items.length ? t('settings.menus.inspector.pickOne') : t('settings.menus.inspector.empty')}</AppHint>
+                        </InspectorInner>
+                      </InspectorBody>
+                    </>
                   )}
                 </InspectorCol>
               </TreeSplit>

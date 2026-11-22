@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import textwrap
+import time
 from pathlib import Path
 
 import pytest
@@ -546,8 +547,12 @@ def test_screen_write_fires_notification_rules(app) -> None:
         h = _h(client, "admin")
         r = client.post("/api/sql/app1/periods_put", json={"params": {"ID": 7, "STATUS": "closed", "STATUS_ORIGINAL": "open"}}, headers=h)
         assert r.status_code == 200
-        client.get("/api/notifications/unread_count", headers=h)
-        rows = client.get("/api/notifications", headers=h).json()["notifications"]
+        rows: list = []
+        for _ in range(100):                # the dispatch is a task: each request lets it run — asked until it has landed, not once
+            rows = client.get("/api/notifications", headers=h).json()["notifications"]
+            if rows:
+                break
+            time.sleep(0.02)
         assert [n["subject"] for n in rows] == ["Period 7 closed by admin"] and rows[0]["rule"] == "period_closed" and rows[0]["link"] == "/screen/app1/periods"
         assert rows[0]["payload"]["STATUS_ORIGINAL"] == "open" and rows[0]["payload"]["EVENT"] == "update"
         client.post("/api/sql/app1/periods_put", json={"params": {"ID": 8, "STATUS": "validated", "STATUS_ORIGINAL": "open"}}, headers=h)

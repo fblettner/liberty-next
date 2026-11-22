@@ -8,7 +8,8 @@ import styled from '@emotion/styled'
 import { Plus, Trash2, BarChart3, Search, Edit3, Copy, GitBranch, GitMerge } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Centered, SpinnerRing, Tag, useModals, HeaderActions } from '../../common'
+import { failureOf, type SaveFailure } from '../../services/saveProblems'
+import { Banner, Button, Card, Centered, SaveProblems, SpinnerRing, Tag, useModals, HeaderActions } from '../../common'
 import type { ChartsDoc } from '../../types/config'
 import { ChartEditorModal, type ChartRecord } from './ChartEditorModal'
 import { ScopeBar, type ScopeOption } from './ScopeBar'
@@ -62,6 +63,8 @@ export default function ChartsBuilder() {
   const [depsSeeds, setDepsSeeds] = useState<DependencySeed[] | null>(null)
   // editing === undefined → closed; null → new chart; ChartRecord → editing that chart.
   const [editing, setEditing] = useState<ChartRecord | null | undefined>(undefined)
+  // a save the server refused: shown in the editor, which stays open with what was typed
+  const [failure, setFailure] = useState<SaveFailure | null>(null)
 
   const load = () => {
     setError(null)
@@ -72,16 +75,18 @@ export default function ChartsBuilder() {
   useEffect(load, [t])
 
   // Persist + reload. Empty scopes are pruned so they don't write a dangling `[charts.<scope>]`.
-  const persist = async (next: Charts, okMsg: string) => {
-    setBusy(true); setError(null); setStatus(null)
+  const persist = async (next: Charts, okMsg: string): Promise<boolean> => {
+    setBusy(true); setError(null); setStatus(null); setFailure(null)
     const pruned = Object.fromEntries(Object.entries(next).filter(([, byId]) => Object.keys(byId).length > 0))
     try {
       await api.put<{ saved: boolean }>('/admin/config/charts/parsed', { charts: pruned })
       await api.post('/admin/reload')
       setDoc(next)
       setStatus(okMsg)
+      return true
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      setFailure(failureOf(e))
+      return false
     } finally { setBusy(false) }
   }
 
@@ -90,8 +95,8 @@ export default function ChartsBuilder() {
     if (editing && editing.id && editing.id !== id) delete byId[editing.id]
     byId[id] = record
     const next: Charts = { ...(doc ?? {}), [scope]: byId }
-    setEditing(undefined)
-    void persist(next, t('settings.charts.saved'))
+    // closed once saved: a refused save leaves the editor open on what was typed
+    void persist(next, t('settings.charts.saved')).then((ok) => { if (ok) setEditing(undefined) })
   }
 
   const validateChartId = (v: string, oldId: string | null) => {
@@ -173,6 +178,7 @@ export default function ChartsBuilder() {
       </HeaderActions>
       {status && <Banner $tone="ok">{status}</Banner>}
       {error && <Banner $tone="error">{error}</Banner>}
+      {editing === undefined && <SaveProblems failure={failure} />}
 
       {allIds.length > 0 && (
         <FilterBar>
@@ -245,7 +251,8 @@ export default function ChartsBuilder() {
           scope={scope}
           takenIds={allIds.filter((x) => x !== (editing?.id ?? ''))}
           onSave={onModalSave}
-          onClose={() => setEditing(undefined)}
+          failure={failure}
+          onClose={() => { setEditing(undefined); setFailure(null) }}
         />
       )}
       {addScopeOpen && (

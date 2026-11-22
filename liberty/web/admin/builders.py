@@ -43,6 +43,8 @@ from liberty.menus import load_menus
 from liberty.menus.config import MenusFile, parse_menus
 from liberty.screens import Screen, load_screens
 from liberty.screens.config import ScreensFile, parse_screens
+from liberty.field_labels import apply_labels
+from liberty.web.save_errors import config_invalid
 
 
 # ── structured config: the Phase-7 builders ───────────────────────────────────────────────
@@ -64,15 +66,20 @@ async def get_config_schema(request: Request, _: Superuser) -> dict[str, Any]:
                 for v in ed.values
             ],
         }
+    # The forms drawn from a schema get their labels and short hints from the catalogue
+    # (liberty/field_labels.py); the other sections have editors of their own.
+    def labelled(model: Any) -> dict[str, Any]:
+        return apply_labels(model.model_json_schema(), model)
+
     return {
-        "pool": PoolConfig.model_json_schema(),
-        "sql": SqlConnectorConfig.model_json_schema(),
+        "pool": labelled(PoolConfig),
+        "sql": labelled(SqlConnectorConfig),
         "api": ApiConnectorConfig.model_json_schema(),
-        "dictionary": DictionaryFile.model_json_schema(),
-        "menus": MenusFile.model_json_schema(),
-        "screens": ScreensFile.model_json_schema(),
+        "dictionary": labelled(DictionaryFile),
+        "menus": labelled(MenusFile),
+        "screens": labelled(ScreensFile),
         "charts": ChartsFile.model_json_schema(),
-        "actions": SharedActionsFile.model_json_schema(),
+        "actions": labelled(SharedActionsFile),
         "dashboards": DashboardsFile.model_json_schema(),
         "explorer": ExplorerFile.model_json_schema(),
         "ai": AiFile.model_json_schema(),
@@ -184,7 +191,7 @@ async def put_pools_config(body: PoolsBody, request: Request, _: Superuser) -> d
         try:
             normalised = PoolConfig.model_validate(raw).model_dump(exclude_defaults=True)
         except ValidationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"pool {name!r}: {exc}") from exc
+            raise config_invalid("pools", exc, raw, PoolConfig, prefix=("pools", name), prefix_where=f'Pool "{name}"') from exc
         normalised = keep_env_refs(normalised, raw_pools.get(name) or {})
         new_pools[name] = _encrypt_secret_fields(
             normalised, _POOL_PASSWORD_FIELDS, master_key, context=f"pool {name!r}",
@@ -291,7 +298,7 @@ async def put_connectors_parsed(body: ConnectorsParsedBody, request: Request, _:
             # verify_ssl may be one), the raw value is what gets written
             ConnectorsFile.model_validate(substitute_env({"connectors": {name: raw}}))
         except ValidationError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"connector {name!r}: {exc}") from exc
+            raise config_invalid("connectors", exc, {"connectors": {name: raw}}, ConnectorsFile) from exc
         if raw.get("type") == "api":
             # Mutate in place so the tomlkit write below picks up the encrypted values.
             body.connectors[name] = _encrypt_secret_fields(
@@ -374,7 +381,7 @@ async def put_dictionary_parsed(body: DictionaryBody, request: Request, _: Super
     try:
         validated = DictionaryFile.model_validate(body.dictionary)
     except ValidationError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid dictionary: {exc}") from exc
+        raise config_invalid("dictionary", exc, body.dictionary, DictionaryFile) from exc
     normalized = validated.model_dump(exclude_defaults=True)
 
     import tomli_w
@@ -414,7 +421,7 @@ async def put_menus_parsed(body: MenusBody, request: Request, _: Superuser) -> d
     try:
         validated = MenusFile.model_validate({"menus": body.menus})
     except ValidationError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid menus: {exc}") from exc
+        raise config_invalid("menus", exc, {"menus": body.menus}, MenusFile) from exc
 
     # ``exclude_defaults=False`` for the same reason as screens — menu items are not
     # discriminated unions today, but folder-vs-leaf detection in the validator relies on
@@ -542,10 +549,8 @@ async def put_screens_parsed(body: ScreensBody, request: Request, _: Superuser) 
         # it in TOML, and the wire payload follows the same convention. Then the model_validator
         # enforces that an explicit `id` (if present) matches its key.
         validated = parse_screens({"screens": body.screens})
-    except ValidationError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid screens: {exc}") from exc
-    except ValueError as exc:                                # id != key, etc.
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid screens: {exc}") from exc
+    except ValueError as exc:                                # a ValidationError, or id != key, etc.
+        raise config_invalid("screens", exc, {"screens": body.screens}, ScreensFile) from exc
 
     # Only the screens the designer changed are rewritten (_merge_screens): the others keep their
     # table as on disk; a changed one is written without its defaults, the ``type`` discriminators

@@ -9,7 +9,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Plus, Pencil, Trash2, GripVertical, BarChart3, Hash, Table as TableIcon, LayoutDashboard, List as ListIcon, BarChartHorizontal, FileText, Link2, Workflow } from 'lucide-react'
-import { Button, Checkbox, Input, Field, Banner, SearchSelect, LocalizedTexts, useModals, type SearchSelectOption } from '../../common'
+import { Button, Checkbox, Input, Field, Banner, ObjectTitle, SaveProblems, SearchSelect, LocalizedTexts, useModals, type SearchSelectOption } from '../../common'
+import type { SaveFailure } from '../../services/saveProblems'
 import { prunedLocalized, type Localized } from '../../services/localized'
 import { api } from '../../api/client'
 import type { QueryResult } from '../../types/connectors'
@@ -87,7 +88,7 @@ const Reach = styled.div`
   font-size: ${fontSize.micro}; color: ${colors.text.secondary}; font-family: ${fonts.sans}; margin: -4px 0 4px 2px;
   & .warn { color: ${colors.orange.main}; } & .muted { color: ${colors.text.muted}; }
 `
-const FilterRow = styled.div`display: grid; grid-template-columns: repeat(7, 1fr) auto; gap: 8px; align-items: end;`
+const FilterRow = styled.div`display: grid; grid-template-columns: repeat(8, 1fr) auto; gap: 8px; align-items: end;`
 
 const snum = (v: unknown, d: number) => (typeof v === 'number' ? v : d)
 const sstr = (v: unknown) => (typeof v === 'string' ? v : '')
@@ -151,7 +152,7 @@ function toWire(w: Raw, charts: ChartsCatalog, scope: string): DashboardWidget |
 const KIND_ICON = { chart: BarChart3, kpi: Hash, table: TableIcon, stat: Hash, list: ListIcon, bars: BarChartHorizontal, text: FileText, links: Link2, jobs: Workflow } as const
 
 export function DashboardEditorModal({
-  initial, scope, chartsCatalog, onSave, onClose,
+  initial, scope, chartsCatalog, onSave, onClose, failure,
 }: {
   initial: Raw
   /** The owning connector scope — dashboards are stored at `[dashboards.<scope>.<id>]`. Fixed by
@@ -160,6 +161,8 @@ export function DashboardEditorModal({
   chartsCatalog: ChartsCatalog
   onSave: (id: string, record: Raw) => void
   onClose: () => void
+  /** The save the server refused: the editor stays open and shows what to correct. */
+  failure?: SaveFailure | null
 }) {
   const { t } = useTranslation()
   const modals = useModals()
@@ -350,7 +353,7 @@ export function DashboardEditorModal({
         title={(
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
             <LayoutDashboard size={16} color={colors.blue.main} />
-            <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>[dashboards.{scope}.{id}]</span>
+            <ObjectTitle label={label} id={id} scope={scope} />
           </span>
         )}
         onClose={() => void requestClose()}
@@ -360,6 +363,7 @@ export function DashboardEditorModal({
         footerLeft={<span style={{ fontSize: fontSize.sm, color: colors.text.muted }}>{t('settings.dash.widgetCount', { n: widgets.length })}</span>}
       >
           {error && <Banner $tone="error">{error}</Banner>}
+          <SaveProblems failure={failure ?? null} />
           <MetaRow>
             <Field label={t('settings.dash.dLabel')}>
               <Input value={label} onChange={(e) => setLabel(e.target.value)} />
@@ -521,6 +525,11 @@ export function DashboardEditorModal({
                   </Field>
                   <Field label={t('settings.dash.filter.labelColumn')}>
                     <Input value={sstr(o.label_column)} onChange={(e) => patchFilterOpt(i, { label_column: e.target.value })} placeholder="APPS_NAME" />
+                  </Field>
+                  {/* the value the dashboard opens on — blank: every value */}
+                  <Field label={t('settings.dash.filter.defaultValue')}>
+                    <Input data-filter-default value={sstr(f.default_value)} placeholder={t('settings.dash.filter.defaultValueNone')}
+                      onChange={(e) => patchFilter(i, { default_value: e.target.value || undefined })} />
                   </Field>
                   <CloseBtn onClick={() => setFilters((fs) => fs.filter((_, j) => j !== i))} title={t('common.delete')}><Trash2 size={14} /></CloseBtn>
                 </FilterRow>

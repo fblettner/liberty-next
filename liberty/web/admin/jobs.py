@@ -12,6 +12,7 @@ from liberty.web.admin._base import _drop_none, _snapshot_config, router
 from pydantic import BaseModel, ValidationError
 
 from liberty.web.jobs import Editor as JobsEditor
+from liberty.web.save_errors import config_invalid
 
 # ── nomaflow jobs.toml (Phase 13 — see docs/NOMAFLOW-UI.md §5) ────────────────────────────────
 # Unlike pools/connectors/charts/dashboards (dict-keyed sections), jobs.toml's top level is a
@@ -144,7 +145,7 @@ async def put_jobs_parsed(body: JobsBody, request: Request, principal: JobsEdito
             validate_payload["meta"] = body.meta
         JobsFile.model_validate(validate_payload)
     except ValidationError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid jobs: {exc}") from exc
+        raise config_invalid("jobs", exc, validate_payload, JobsFile) from exc
 
     path = Path(request.app.state.settings.jobs.config_path)
     text = path.read_text(encoding="utf-8") if path.exists() else ""
@@ -166,8 +167,12 @@ async def put_jobs_parsed(body: JobsBody, request: Request, principal: JobsEdito
     new_text = tomlkit.dumps(doc)
     try:
         # Validate the FULL re-parsed document, not just the jobs list — a meta-only
-        # change wouldn't be caught by the jobs-only validate above.
-        JobsFile.model_validate(tomllib.loads(new_text))
+        # change wouldn't be caught by the jobs-only validate above. Read as the loader reads it:
+        # a job left unchanged keeps its ``step_defaults`` on disk, which the bare model refuses —
+        # saving any job then failed as soon as another job of the file carried that block.
+        from liberty.jobs.registry import parse_jobs_data
+
+        parse_jobs_data(tomllib.loads(new_text))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"resulting jobs are invalid: {exc}") from exc
     path.parent.mkdir(parents=True, exist_ok=True)

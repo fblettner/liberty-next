@@ -73,7 +73,18 @@ export function resolveApiPath(path: string): string {
   return joinBase(BASE, path);
 }
 
+/** One thing wrong in a configuration that a save route refused (liberty/web/save_errors.py):
+ *  where it is in what was sent, said with the labels of what holds it, and what is wrong. */
+export interface SaveProblem {
+  path: (string | number)[];
+  where: string;
+  message: string;
+  code: string;
+}
+
 export class ApiError extends Error {
+  /** The problems of a refused configuration save, one by one — empty for any other error. */
+  public problems: SaveProblem[] = [];
   constructor(public status: number, message: string, public detail?: unknown) {
     super(message);
     this.name = "ApiError";
@@ -98,6 +109,7 @@ export function authHeaders(extra?: Record<string, string>): Record<string, stri
 async function parseError(res: Response): Promise<ApiError> {
   let detail: unknown;
   let message = `HTTP ${res.status}`;
+  let problems: SaveProblem[] = [];
   try {
     const body = await res.json();
     detail = body?.detail ?? body;
@@ -106,10 +118,13 @@ async function parseError(res: Response): Promise<ApiError> {
       message = detail
         .map((d: unknown) => (d && typeof d === "object" && "msg" in d ? String((d as { msg: unknown }).msg) : JSON.stringify(d)))
         .join("; ");
+    if (Array.isArray(body?.errors)) problems = body.errors as SaveProblem[];
   } catch {
     /* non-JSON body */
   }
-  return new ApiError(res.status, message, detail);
+  const error = new ApiError(res.status, message, detail);
+  error.problems = problems;
+  return error;
 }
 
 async function request<T>(method: string, path: string, body?: unknown, asText = false): Promise<T> {

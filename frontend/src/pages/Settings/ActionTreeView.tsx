@@ -16,12 +16,9 @@
 //     ``else_steps`` lists; loop shows the ``source`` field + ``steps`` list. Clicking any
 //     row in those sub-lists dives one level deeper (push to ``path``).
 //
-// Why a separate component from :file:`ActionListEditor.tsx`: the Visual Designer wants to
-// pull the editor *out* of the canvas column into the Inspector (Theme A — biggest reduction
-// in vertical sprawl), with breadcrumb-based dive-in instead of inline accordion expansion.
-// :file:`ActionListEditor` keeps the inline-expansion behaviour for its other consumers
-// (ScreenEditor's hook attachments — dialog on_save / screen.on_insert / etc., where the
-// lists are usually short and an Inspector isn't available).
+// The editor lives in the Inspector, out of the canvas column, with a breadcrumb to dive into
+// a step instead of an inline accordion. (The older inline list editor, ActionListEditor, was
+// rendered nowhere and is gone; the kinds it declared are in ``actionKinds.ts``.)
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
@@ -46,7 +43,7 @@ import {
   PROMPT_FIELDS_KEY, PROMPT_FIELD_ADVANCED_KEYS, PROMPT_FIELD_BASIC_KEYS, PROMPT_FIELD_BINDS_KEY,
   PROMPT_FIELD_CONDITION_KEYS, PROMPT_FIELD_DEF_NAME, PROMPTABLE_ACTION_TYPES,
   type ActionType,
-} from './ActionListEditor'
+} from './actionKinds'
 import {
   appendAtPath, breadcrumbCrumbs, chainContextCandidates, pathEquals, removeAtPath,
   resolveAtPath, updateAtPath, type ActionPath, type SourceCandidate,
@@ -60,8 +57,7 @@ type Row = Record<string, unknown>
 
 // ── styled bits ────────────────────────────────────────────────────────────────────────────
 // The list-mode rows + the editor-mode breadcrumb + the editor's sub-list rows all share the
-// same "monospaced id + variant chip + label" style. ``ActionListEditor`` uses a similar look
-// for its inline-expansion rows; we don't share components because the list-mode rows have a
+// same "monospaced id + variant chip + label" style; the list-mode rows have a
 // different right-icon (chevron) than the editor-mode sub-list rows (also chevron, but
 // semantically different — "dive in" vs "expand inline").
 const RowBox = styled.div`display: flex; flex-direction: column; gap: 6px;`
@@ -298,7 +294,7 @@ export default function ActionTreeView({
     return () => { cancelled = true }
   }, [])
 
-  // ── variant + PromptField sub-schemas (memoised against defs — identical to ActionListEditor) ──
+  // ── variant + PromptField sub-schemas (memoised against defs) ──
   const actionVariantSchema = (a: Row): JsonSchema | null => {
     const defName = ACTION_DEF_NAME[(a.type as ActionType) || 'run_query']
     const v = defs[defName] as JsonSchema | undefined
@@ -385,9 +381,37 @@ export default function ActionTreeView({
   // suggestions don't cover (``#LOGIN_USER#`` built-ins, dotted suffixes after a
   // ``.first_row`` capture, etc.). Recomputed when the path or the underlying actions
   // list shifts.
+  // The columns an earlier query step returns, when its query is the read of a screen: each is
+  // then a pick of its own ("EMAIL — first row of …") instead of a path to finish by hand.
+  const [stepColumns, setStepColumns] = useState<Record<string, string[]>>({})
+  const stepKey = (step: Record<string, unknown>): string =>
+    `${(typeof step.connector === 'string' && step.connector) || effectiveConnector}/${String(step.query ?? '')}`
+  useEffect(() => {
+    const wanted: { key: string; app: string; id: string }[] = []
+    const walk = (list: unknown) => {
+      for (const a of Array.isArray(list) ? (list as Record<string, unknown>[]) : []) {
+        if (a.type === 'run_query' && typeof a.query === 'string' && a.query) {
+          const key = stepKey(a)
+          const hit = findScreen(key.slice(0, key.indexOf('/')), a.query)
+          if (hit && !(key in stepColumns) && !wanted.some((w) => w.key === key)) wanted.push({ key, app: hit.app, id: hit.id })
+        }
+        walk(a.steps); walk(a.then_steps); walk(a.else_steps)
+      }
+    }
+    walk(actions)
+    if (wanted.length === 0) return
+    let on = true
+    void Promise.all(wanted.map((w) => api.get<ScreenDetail>(`/api/screens/${encodeURIComponent(w.app)}/${encodeURIComponent(w.id)}`)
+      .then((d) => [w.key, (Array.isArray(d.columns) ? d.columns : []).map((c) => c.name)] as const)
+      .catch(() => [w.key, [] as string[]] as const)))
+      .then((found) => { if (on) setStepColumns((cur) => ({ ...cur, ...Object.fromEntries(found) })) })
+    return () => { on = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- asked once per query: the answers are kept in stepColumns
+  }, [actions, effectiveConnector, findScreen])
   const sourceCandidates = useMemo<SourceCandidate[]>(
-    () => (path && path.length > 0 ? chainContextCandidates(actions, path) : []),
-    [actions, path],
+    () => (path && path.length > 0 ? chainContextCandidates(actions, path, (step) => stepColumns[stepKey(step)] ?? []) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stepKey reads effectiveConnector only
+    [actions, path, stepColumns, effectiveConnector],
   )
   const screenColumnOptions = useMemo<SearchSelectOption[]>(
     () => screenReadColumnOptions(screenReadColumns),
@@ -671,7 +695,7 @@ export default function ActionTreeView({
   })), [notifyRules, t])
 
   // ── connector + target dropdowns for the three ParamBind-bearing variants ──────────────
-  // Same logic as ``ActionListEditor.renderActionOverrides``; lifted here to avoid an extra
+  // Lifted here to avoid an extra
   // shared module (the function is ~40 LOC, copying is simpler than restructuring).
   const renderActionOverrides = (a: Row, onPatch: (patch: Row) => void): ReactNode => {
     const aType = (a.type as ActionType) || 'run_query'
@@ -796,7 +820,7 @@ export default function ActionTreeView({
     )
   }
 
-  // ── PromptField list — same shape as ActionListEditor's version ────────────────────────
+  // ── PromptField list ─────────────────────────────────────────────────────────────────
   const renderPromptFields = (action: Row, onPatch: (patch: Row) => void): ReactNode => {
     const aType = String(action.type ?? 'run_query') as ActionType
     if (!PROMPTABLE_ACTION_TYPES.has(aType)) return null
@@ -1207,7 +1231,7 @@ export default function ActionTreeView({
         <Field label={t('settings.screens.action.type')}>
           <SearchSelect
             value={sType}
-            options={ACTION_TYPES.map((tt) => ({ value: tt, label: tt, mono: tt }))}
+            options={ACTION_TYPES.map((tt) => ({ value: tt, label: t(`settings.studio.kind.${tt}`), mono: tt }))}
             onChange={(v) => changeSelectedType(v as ActionType)}
           />
         </Field>

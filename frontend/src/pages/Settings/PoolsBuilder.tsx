@@ -12,8 +12,9 @@ import styled from '@emotion/styled'
 import { Save, RefreshCw, Plus, Trash2, Database, Edit3, Undo2, GitBranch, PlugZap, KeyRound, Layers, Link2, SlidersHorizontal, ChevronDown, ChevronRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
+import { failureOf, targetOf, type SaveFailure, type SaveProblem } from '../../services/saveProblems'
 import {
-  Button, Banner, Centered, Card, FieldLabel, HeaderActions, Input, SearchSelect, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals,
+  Button, Banner, Centered, Card, FieldLabel, HeaderActions, Input, SaveProblems, SearchSelect, SpinnerRing, SchemaForm, FrameworkEnumsContext, useModals,
   type FrameworkEnums, type JsonSchema,
 } from '../../common'
 import type { ConfigSchemas, PoolsDoc } from '../../types/config'
@@ -99,6 +100,8 @@ export default function PoolsBuilder() {
   const [sel, setSel] = useState<string | null>(null)
   const [usagesTarget, setUsagesTarget] = useState<FindUsagesTarget | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // a save the server refused: its problems one by one, each opening the pool it is in
+  const [failure, setFailure] = useState<SaveFailure | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [stage, setStage] = useState<PoolStage>('database')
@@ -181,7 +184,7 @@ export default function PoolsBuilder() {
     const orig = JSON.parse(original) as Pools
     setPools(orig)
     setSel((s) => (s && orig[s] ? s : Object.keys(orig)[0] ?? null))
-    setStatus(null); setError(null)
+    setStatus(null); setError(null); setFailure(null)
   }
   // Rename the selected pool's dict key. Order-preserving (the renamed item stays in place in the
   // left nav). Validation: non-empty, not colliding with another existing pool — handled by the
@@ -206,15 +209,20 @@ export default function PoolsBuilder() {
 
   async function save() {
     if (!pools) return
-    setBusy(true); setError(null); setStatus(null)
+    setBusy(true); setError(null); setStatus(null); setFailure(null)
     try {
       await api.put<{ saved: boolean }>('/admin/config/pools', { pools })
       const r = await api.post<{ pools: string[] }>('/admin/reload')
       setStatus(t('settings.pools.saved', { pools: r.pools.join(', ') || `(${t('common.none')})` }))
       load()  // re-fetch the normalised file (defaults dropped) so the form reflects what's on disk
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      setFailure(failureOf(e))
     } finally { setBusy(false) }
+  }
+  // "Open" on a problem of a refused save: the pool it is in.
+  const problemOpener = (p: SaveProblem): (() => void) | null => {
+    const id = targetOf('pools', p.path)?.id
+    return id && pools?.[id] && id !== sel ? () => setSel(id) : null
   }
 
   if (error && !pools) return <Banner $tone="error">{error}</Banner>
@@ -384,6 +392,7 @@ export default function PoolsBuilder() {
       </HeaderActions>
       {status && <Banner $tone="ok">{status}</Banner>}
       {error && <Banner $tone="error">{error}</Banner>}
+      <SaveProblems failure={failure} opener={problemOpener} />
       <Split>
         <PoolList>
           {names.map((n) => {

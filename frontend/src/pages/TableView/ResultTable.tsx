@@ -45,6 +45,7 @@ import { useRowMenu } from './useRowMenu'
 import { useBatchEdit } from './useBatchEdit'
 import { useImport } from './useImport'
 import { useActionPrompt } from './useActionPrompt'
+import { bindsToQuery } from '../../services/bindQuery'
 
 // (``withUpper`` / ``originalKeys`` — the UPPERCASE-key duplication + the pre-edit
 // ``<NAME>_ORIGINAL`` WHERE binds — now live in ``saveScreenRow`` / ``dialogHelpers``, the single
@@ -272,10 +273,11 @@ export function ResultTable({
       // Resolve the row_click binds against the clicked row. The dialog needs both the row
       // (matching its own columns) AND the binds to set up :ORIGINAL keys on save.
       const bound = resolveBindList(screen.row_click_binds, row)
-      const qs = Object.entries(bound)
-        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-        .join('&')
-      const url = `/api/sql/${encodeURIComponent(targetConn)}/${encodeURIComponent(detail.read_query)}${qs ? `?${qs}` : ''}`
+      // A key handed to another screen: matched exactly (a text filter column defaults to
+      // "contains" on the server, and the form takes the first row — the record of another key
+      // that contains this one), and read with the settings of the screen that is opened.
+      const qs = bindsToQuery(bound, { app: screen.app, screen: screen.row_click_screen })
+      const url = `/api/sql/${encodeURIComponent(targetConn)}/${encodeURIComponent(detail.read_query)}${qs}`
       const res = await api.get<QueryResult>(url)
       setProxyScreen(detail)
       setProxyColumns(res.columns)

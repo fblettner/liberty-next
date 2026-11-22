@@ -56,7 +56,7 @@ export function resolveAtPath(root: Row[], path: ActionPath): Row | undefined {
 /** Apply a patch to the action at the given path; returns a fresh root list with only the
  *  affected branches re-built (immutable update). ``patch`` is merged onto the target action;
  *  keys whose value is ``undefined`` / ``null`` / ``''`` / ``false`` / an empty array are
- *  dropped (terser saved TOML, matches :func:`ActionListEditor.updateAction`'s behaviour).
+ *  dropped (terser saved TOML).
  *
  *  An invalid path (missing segments / out-of-bounds index) returns the root unchanged. */
 export function updateAtPath(root: Row[], path: ActionPath, patch: Row): Row[] {
@@ -222,7 +222,7 @@ export interface SourceCandidate {
  *  results (the workflow-internal data), then the loop binding (transient, only inside a loop).
  *
  *  An empty / invalid ``path`` returns ``[]`` — callers gate the suggestions with a length check. */
-export function chainContextCandidates(root: Row[], path: ActionPath): SourceCandidate[] {
+export function chainContextCandidates(root: Row[], path: ActionPath, columnsOf?: (step: Row) => string[]): SourceCandidate[] {
   if (path.length === 0) return []
   const seen = new Set<string>()
   const out: SourceCandidate[] = []
@@ -244,7 +244,7 @@ export function chainContextCandidates(root: Row[], path: ActionPath): SourceCan
     }
     // Preceding siblings at this depth ran *before* the action we're editing.
     for (let i = 0; i < seg.i; i++) {
-      addStepResultCandidates(arr[i] as Row, add)
+      addStepResultCandidates(arr[i] as Row, add, columnsOf)
     }
     cur = arr[seg.i]
     if (!cur) break
@@ -267,12 +267,82 @@ export function chainContextCandidates(root: Row[], path: ActionPath): SourceCan
   return out
 }
 
-function addStepResultCandidates(action: Row, add: (c: SourceCandidate) => void): void {
-  const t = action?.type
-  if ((t === 'run_query' || t === 'call_api') && action?.bind_result) {
-    const id = String(action.id ?? '').trim()
-    if (!id) return
-    add({ value: `${id}.first_row`, label: '(1st row — append .<col>)', group: 'step_results' })
-    add({ value: `${id}.rows`, label: '(all rows)', group: 'step_results' })
+/** What a value field holds once a suggestion is picked. A suggestion is a whole place a value
+ *  comes from — an input, a column of an earlier step, the signed-in user — so it REPLACES what
+ *  was there. One case continues instead: a bare column name picked at the end of a path that
+ *  waits for one (``find_user.first_row`` + ``EMAIL`` → ``find_user.first_row.EMAIL``). */
+export function applyPick(value: string, start: number, end: number, picked: string): { next: string; cursor: number } {
+  const before = value.slice(0, start)
+  const bare = !/[.#]/.test(picked)
+  const waits = /(\.first_row|\.rows|^loop|\.)$/.test(before.trim()) && value.slice(end).trim() === ''
+  const next = bare && waits ? `${before}${before.endsWith('.') ? '' : '.'}${picked}` : picked
+  return { next, cursor: next.length }
+}
+
+/** The kinds of step whose result the following steps can read. */
+const RESULT_STEPS = new Set(['run_query', 'call_api', 'call_plugin'])
+
+// What an earlier step returned is offered whether or not the step is marked as keeping its
+// result: picking it marks the step (:func:`withCapturedResults`), so nobody has to know the
+// flag exists. When the columns of the step are known (*columnsOf*: its query is a screen's
+// read), each column of its first row is a pick of its own.
+function addStepResultCandidates(action: Row, add: (c: SourceCandidate) => void, columnsOf?: (step: Row) => string[]): void {
+  if (!RESULT_STEPS.has(String(action?.type ?? ''))) return
+  const id = String(action.id ?? '').trim()
+  if (!id) return
+  const name = String(action.label ?? '').trim() || id
+  for (const col of columnsOf?.(action) ?? []) {
+    add({ value: `${id}.first_row.${col}`, label: `${col} — first row of "${name}"`, group: 'step_results' })
   }
+  add({ value: `${id}.first_row`, label: `first row of "${name}" (add .COLUMN)`, group: 'step_results' })
+  add({ value: `${id}.rows`, label: `every row of "${name}"`, group: 'step_results' })
+}
+
+/** Every value a step reads from somewhere (its binds, its condition, its loop, what it sets or answers). */
+function sourcesOf(action: Row): string[] {
+  const out: string[] = []
+  const text = (v: unknown) => { if (typeof v === 'string' && v.trim()) out.push(v.trim()) }
+  for (const key of ['param_binds', 'lookup_param_binds']) {
+    for (const b of Array.isArray(action[key]) ? (action[key] as Row[]) : []) text(b?.source)
+  }
+  text(action.source)
+  text((action.condition as Row | undefined)?.source)
+  for (const v of Object.values((action.bindings as Record<string, unknown> | undefined) ?? {})) text(v)
+  return out
+}
+
+/** *root* with every step whose result another step reads marked as keeping it
+ *  (``bind_result``). A step already marked, or read by nobody, is left as it is — the flag is
+ *  never taken away here. Returns *root* itself when nothing changes. */
+export function withCapturedResults(root: Row[]): Row[] {
+  const read = new Set<string>()
+  const collect = (list: unknown): void => {
+    for (const a of Array.isArray(list) ? (list as Row[]) : []) {
+      for (const s of sourcesOf(a)) {
+        const m = /^([^.\s#]+)\.(first_row|rows)\b/.exec(s)
+        if (m) read.add(m[1])
+      }
+      collect(a.steps); collect(a.then_steps); collect(a.else_steps)
+    }
+  }
+  collect(root)
+  if (read.size === 0) return root
+  // a list comes back as the same array when none of its steps changed
+  const mark = (list: Row[]): Row[] => {
+    const out = list.map((a) => {
+      let next = a
+      for (const field of ['steps', 'then_steps', 'else_steps']) {
+        if (Array.isArray(a[field])) {
+          const inner = mark(a[field] as Row[])
+          if (inner !== a[field]) next = { ...next, [field]: inner }
+        }
+      }
+      if (RESULT_STEPS.has(String(a.type ?? '')) && read.has(String(a.id ?? '').trim()) && a.bind_result !== true) {
+        next = { ...next, bind_result: true }
+      }
+      return next
+    })
+    return out.every((a, i) => a === list[i]) ? list : out
+  }
+  return mark(root)
 }

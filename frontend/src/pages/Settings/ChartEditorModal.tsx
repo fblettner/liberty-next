@@ -10,7 +10,8 @@ import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { SlidersHorizontal, BarChart3 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Checkbox, Field, Input, SearchSelect, SpinnerRing, useModals, type SearchSelectOption } from '../../common'
+import { Banner, Checkbox, Field, Input, ObjectTitle, SaveProblems, SearchSelect, SpinnerRing, useModals, type SearchSelectOption } from '../../common'
+import type { SaveFailure } from '../../services/saveProblems'
 import { EditorModalShell } from '../../common/EditorModalShell'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { ChartSpecEditor } from '../TableView/ChartSpecEditor'
@@ -54,7 +55,7 @@ const Msg = styled.div`
 const slug = (s: string) => s.trim()
 
 export function ChartEditorModal({
-  initial, scope, takenIds, onSave, onClose,
+  initial, scope, takenIds, onSave, onClose, failure,
 }: {
   initial: ChartRecord | null
   /** The connector scope this chart belongs to — charts are stored at `[charts.<scope>.<id>]`,
@@ -63,6 +64,8 @@ export function ChartEditorModal({
   takenIds: string[]            // ids already used by OTHER charts in this scope (uniqueness check)
   onSave: (id: string, record: Record<string, unknown>) => void
   onClose: () => void
+  /** The save the server refused: the editor stays open and shows what to correct. */
+  failure?: SaveFailure | null
 }) {
   const { t } = useTranslation()
   const modals = useModals()
@@ -148,9 +151,9 @@ export function ChartEditorModal({
   return (
     <EditorModalShell
       title={(
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontFamily: fonts.mono }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <BarChart3 size={16} color={colors.blue.main} />
-          {isNew ? t('settings.charts.add') : `[charts.${scope}.${initial?.id}]`}
+          {isNew ? t('settings.charts.add') : <ObjectTitle label={label} id={initial?.id ?? ''} scope={scope} />}
         </span>
       )}
       onClose={() => void requestClose()}
@@ -165,6 +168,7 @@ export function ChartEditorModal({
       )}
     >
       {error && <Banner $tone="error">{error}</Banner>}
+      <SaveProblems failure={failure ?? null} />
           {tab === 'general' ? (
             <>
               <Grid2>

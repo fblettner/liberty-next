@@ -10,14 +10,14 @@ import JobFlow from './JobFlow'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, ArrowUp, ArrowDown, Trash2, Copy } from 'lucide-react'
-import { Input, Checkbox, Tag, StringListEditor, SearchSelect, CallableSelect, type SearchSelectOption, PlaceholderPicker } from '../../common'
+import { Input, Checkbox, Tag, StringListEditor, SearchSelect, CallableSelect, type SearchSelectOption, PlaceholderPicker, DatePicker, TableSelect, RecipientsField } from '../../common'
 import { NOTIFY_STEP_TOKENS } from '../../services/placeholders'
 import { isDirectory, poolSummary, urlParts } from '../../services/poolUrl'
 import { api } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { ConnectorMeta } from '../../types/connectors'
 import type { StepConfig, StepType } from './types'
-import { asOptions, connectorOptions, Field, FieldLabel, Grid, IconBtn, KeyValueEditor, SubHead } from './stepFields'
+import { asOptions, connectorOptions, Field, FieldLabel, Grid, Hint, IconBtn, KeyValueEditor, SchemaSelect, SubHead } from './stepFields'
 import FileLoadForm from './FileLoadForm'
 import { fileSourceSummary } from '../../services/fileLoad'
 
@@ -105,6 +105,16 @@ interface FormProps {
   sqlConnectors: ConnectorMeta[]
 }
 
+const poolsOf = (c: ConnectorMeta | undefined): string[] => (c && c.type === 'sql' ? c.pools ?? [] : [])
+// The environments a connector may run on (its pools) — offered only when it has several.
+const poolOptionsOf = (list: ConnectorMeta[], name: string): SearchSelectOption[] => {
+  const pools = poolsOf(list.find((c) => c.name === name))
+  return pools.length > 1 ? pools.map((p) => ({ value: p, label: p })) : []
+}
+// Every environment the installation's connectors run on, for a step that names no connector.
+const allPoolOptions = (list: ConnectorMeta[]): SearchSelectOption[] =>
+  [...new Set(list.flatMap((c) => poolsOf(c)))].sort().map((p) => ({ value: p, label: p }))
+
 function SqlCopyForm({ step, patch, sqlConnectors }: FormProps) {
   const { t } = useTranslation()
   const f = step as Record<string, unknown>
@@ -123,12 +133,20 @@ function SqlCopyForm({ step, patch, sqlConnectors }: FormProps) {
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.schema')}</FieldLabel>
-          <Input value={String(src.schema ?? '')} onChange={(e) => setEndpoint('source', { schema: e.target.value })} />
+          <SchemaSelect connector={String(src.connector ?? '') || null} value={String(src.schema ?? '')} onChange={(v) => setEndpoint('source', { schema: v })} />
         </Field>
-        <Field>
+        <Field data-step-source-table>
           <FieldLabel>{t('nomaflow.steps.table')}</FieldLabel>
-          <Input value={String(src.table ?? '')} onChange={(e) => setEndpoint('source', { table: e.target.value })} />
+          <TableSelect connector={String(src.connector ?? '') || null} schema={String(src.schema ?? '')} value={String(src.table ?? '')} onChange={(v) => setEndpoint('source', { table: v })} />
         </Field>
+        {/* the environment read from: asked only when the connector runs on several */}
+        {(poolOptionsOf(sqlConnectors, String(src.connector ?? '')).length > 0 || !!src.pool) && (
+          <Field data-step-source-pool>
+            <FieldLabel>{t('nomaflow.steps.environment')}</FieldLabel>
+            <SearchSelect value={String(src.pool ?? '')} onChange={(v) => setEndpoint('source', { pool: v || undefined })}
+              options={poolOptionsOf(sqlConnectors, String(src.connector ?? ''))} anyLabel={t('nomaflow.steps.environmentOwn')} allowCustom />
+          </Field>
+        )}
       </Grid>
       <SubHead>{t('nomaflow.steps.target')}</SubHead>
       <Grid>
@@ -139,29 +157,36 @@ function SqlCopyForm({ step, patch, sqlConnectors }: FormProps) {
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.schema')}</FieldLabel>
-          <Input value={String(tgt.schema ?? '')} onChange={(e) => setEndpoint('target', { schema: e.target.value })} />
+          <SchemaSelect connector={String(tgt.connector ?? '') || null} value={String(tgt.schema ?? '')} onChange={(v) => setEndpoint('target', { schema: v })} />
         </Field>
-        <Field>
+        <Field data-step-target-table>
           <FieldLabel>{t('nomaflow.steps.table')}</FieldLabel>
-          <Input value={String(tgt.table ?? '')} onChange={(e) => setEndpoint('target', { table: e.target.value })} />
+          <TableSelect connector={String(tgt.connector ?? '') || null} schema={String(tgt.schema ?? '')} value={String(tgt.table ?? '')} onChange={(v) => setEndpoint('target', { table: v })} />
         </Field>
+        {(poolOptionsOf(sqlConnectors, String(tgt.connector ?? '')).length > 0 || !!tgt.pool) && (
+          <Field data-step-target-pool>
+            <FieldLabel>{t('nomaflow.steps.environment')}</FieldLabel>
+            <SearchSelect value={String(tgt.pool ?? '')} onChange={(v) => setEndpoint('target', { pool: v || undefined })}
+              options={poolOptionsOf(sqlConnectors, String(tgt.connector ?? ''))} anyLabel={t('nomaflow.steps.environmentOwn')} allowCustom />
+          </Field>
+        )}
       </Grid>
       <SubHead>{t('nomaflow.steps.options')}</SubHead>
       <Grid>
         <Field>
           <FieldLabel>{t('nomaflow.steps.mode')}</FieldLabel>
           <SearchSelect value={String(f.mode ?? 'overwrite')} onChange={(v) => patch({ mode: v || 'overwrite' } as Partial<StepConfig>)}
-            options={asOptions(['overwrite', 'append', 'upsert'])} />
+            options={(['overwrite', 'append', 'upsert'] as const).map((m) => ({ value: m, label: t(`nomaflow.steps.copyMode.${m}`), mono: m }))} />
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.typeCoercion')}</FieldLabel>
           <SearchSelect value={String(f.type_coercion ?? 'jde')} onChange={(v) => patch({ type_coercion: v || 'jde' } as Partial<StepConfig>)}
-            options={asOptions(['jde', 'none'])} />
+            options={(['jde', 'none'] as const).map((m) => ({ value: m, label: t(`nomaflow.steps.coercion.${m}`), mono: m }))} />
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.decimalMode')}</FieldLabel>
           <SearchSelect value={String(f.decimal_mode ?? 'truncate')} onChange={(v) => patch({ decimal_mode: v || 'truncate' } as Partial<StepConfig>)}
-            options={asOptions(['truncate', 'preserve'])} />
+            options={(['truncate', 'preserve'] as const).map((m) => ({ value: m, label: t(`nomaflow.steps.decimal.${m}`), mono: m }))} />
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.batchSize')}</FieldLabel>
@@ -511,7 +536,7 @@ function StepCard({ step, index, count, sqlConnectors, onPatch, turnedOff, onTur
     <Card style={alwaysOpen ? { border: 'none', overflow: 'visible' } : undefined}>
       <Head onClick={() => { if (!alwaysOpen) setOpen((o) => !o) }} style={alwaysOpen ? { cursor: 'default', padding: '0 0 10px' } : undefined}>
         {!alwaysOpen && <Chev size={14} />}
-        <Tag $tone={STEP_TONE[step.type] ?? 'neutral'}>{step.type}</Tag>
+        <Tag $tone={STEP_TONE[step.type] ?? 'neutral'} title={step.type}>{t(`nomaflow.steps.kind.${step.type}`, { defaultValue: step.type })}</Tag>
         <HeadName>{step.name || t('nomaflow.steps.unnamed')}</HeadName>
         <HeadSummary>{stepSummary(step)}</HeadSummary>
         {turnedOff && <Tag $tone="neutral">{t('nomaflow.steps.turnedOffTag')}</Tag>}
@@ -535,6 +560,7 @@ function StepCard({ step, index, count, sqlConnectors, onPatch, turnedOff, onTur
           {onTurnedOff && (
             <Checkbox checked={!!turnedOff} label={t('nomaflow.steps.turnedOff')} onChange={(c) => onTurnedOff(c)} />
           )}
+          <StepAdvanced step={step} onPatch={onPatch} sqlConnectors={sqlConnectors} />
           {step.type === 'sql_copy' && <SqlCopyForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
           {step.type === 'sql_query' && <SqlQueryForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
           {step.type === 'python' && <PythonForm step={step} patch={onPatch} sqlConnectors={sqlConnectors} />}
@@ -548,6 +574,55 @@ function StepCard({ step, index, count, sqlConnectors, onPatch, turnedOff, onTur
         </Body>
       )}
     </Card>
+  )
+}
+
+const AdvancedToggle = styled.button`
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 0; background: none; border: none; cursor: pointer;
+  color: ${colors.text.muted}; font-size: ${fontSize.sm}; font-family: inherit;
+  &:hover { color: ${colors.text.primary}; }
+`
+
+// What every step has and few change: whether it runs by default, how long it may take, the
+// environment it works on. Folded until one of them is set.
+function StepAdvanced({ step, onPatch, sqlConnectors }: { step: StepConfig; onPatch: (p: Partial<StepConfig>) => void; sqlConnectors: ConnectorMeta[] }) {
+  const { t } = useTranslation()
+  const f = step as Record<string, unknown>
+  // the copy step names an environment per side, the directory step its directory: no single one there
+  const hasPool = step.type !== 'sql_copy' && step.type !== 'ldap_sync'
+  const set = step.enabled === false || f.timeout_seconds != null || (hasPool && !!f.pool)
+  const [open, setOpen] = useState(set)
+  const Chev = open ? ChevronDown : ChevronRight
+  const own = step.type === 'sql_query' ? poolOptionsOf(sqlConnectors, String(f.connector ?? '')) : []
+  return (
+    <div data-step-advanced>
+      <AdvancedToggle type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        <Chev size={13} /> {t('nomaflow.steps.advanced')}
+      </AdvancedToggle>
+      {open && (
+        <Grid style={{ marginTop: 8 }}>
+          <Field $span={3}>
+            <Checkbox checked={step.enabled !== false} label={t('nomaflow.steps.runsByDefault')}
+              onChange={(c) => onPatch({ enabled: c ? undefined : false })} />
+            <Hint>{t('nomaflow.steps.runsByDefaultHint')}</Hint>
+          </Field>
+          <Field>
+            <FieldLabel>{t('nomaflow.steps.timeout')}</FieldLabel>
+            <Input type="number" min={1} data-step-timeout value={f.timeout_seconds == null ? '' : String(f.timeout_seconds)} placeholder="3600"
+              onChange={(e) => onPatch({ timeout_seconds: e.target.value === '' ? undefined : Math.max(1, Math.trunc(Number(e.target.value))) } as Partial<StepConfig>)} />
+            <Hint>{t('nomaflow.steps.timeoutHint')}</Hint>
+          </Field>
+          {hasPool && (
+            <Field $span={2} data-step-pool>
+              <FieldLabel>{t('nomaflow.steps.environment')}</FieldLabel>
+              <SearchSelect value={String(f.pool ?? '')} onChange={(v) => onPatch({ pool: v || undefined } as Partial<StepConfig>)}
+                options={own.length ? own : allPoolOptions(sqlConnectors)} anyLabel={t('nomaflow.steps.environmentOwn')} allowCustom />
+              <Hint>{t('nomaflow.steps.environmentHint')}</Hint>
+            </Field>
+          )}
+        </Grid>
+      )}
+    </div>
   )
 }
 
@@ -614,6 +689,16 @@ function ReportForm({ step, patch }: FormProps) {
           <FieldLabel>{t('nomaflow.steps.reportPeriod')}</FieldLabel>
           <SearchSelect value={String(f.period ?? '')} onChange={(v) => patch({ period: v || undefined } as Partial<StepConfig>)} options={periodOpts} anyLabel={t('nomaflow.steps.reportPeriodOwn')} />
         </Field>
+        {/* fixed dates instead of a period: both, or neither */}
+        <Field data-step-window>
+          <FieldLabel>{t('nomaflow.steps.reportFrom')}</FieldLabel>
+          <DatePicker value={String(f.window_from ?? '')} onChange={(v) => patch({ window_from: v || undefined } as Partial<StepConfig>)} />
+        </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.reportTo')}</FieldLabel>
+          <DatePicker value={String(f.window_to ?? '')} onChange={(v) => patch({ window_to: v || undefined } as Partial<StepConfig>)} />
+          <Hint>{t('nomaflow.steps.reportWindowHint')}</Hint>
+        </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.reportFilename')}</FieldLabel>
           <Input value={String(f.filename ?? '')} onChange={(e) => patch({ filename: e.target.value || undefined } as Partial<StepConfig>)} placeholder="monthly-sales" />
@@ -627,6 +712,18 @@ function ReportForm({ step, patch }: FormProps) {
           <SearchSelect sort value={String(f.as_role ?? '')} onChange={(v) => patch({ as_role: v || undefined } as Partial<StepConfig>)} options={roles.map((r) => ({ value: r, label: r }))} anyLabel={t('nomaflow.steps.reportUnrestricted')} allowCustom />
         </Field>
       </Grid>
+      {/* what a report of an application asks for (its own parameters) */}
+      {kind === 'report' && (
+        <div data-step-report-params>
+          <SubHead>{t('nomaflow.steps.reportParams')}</SubHead>
+          <KeyValueEditor
+            value={(f.params as Record<string, unknown>) ?? {}}
+            onChange={(v) => patch({ params: Object.keys(v).length ? v : undefined } as Partial<StepConfig>)}
+            heads={[t('nomaflow.steps.reportParamName'), t('nomaflow.steps.reportParamValue')]}
+            keyPlaceholder="YEAR" valuePlaceholder="2026" addLabel={t('nomaflow.steps.reportParamAdd')}
+          />
+        </div>
+      )}
     </>
   )
 }
@@ -645,7 +742,8 @@ function NotifyForm({ step, patch }: FormProps) {
       <Grid>
         <Field $span={3}>
           <FieldLabel>{t('nomaflow.steps.notifyRecipients')}</FieldLabel>
-          <StringListEditor value={(f.recipients as string[] | undefined) ?? []} onChange={(v) => patch({ recipients: v } as Partial<StepConfig>)} allowCustom />
+          <RecipientsField value={(f.recipients as string[] | undefined) ?? []} onChange={(v) => patch({ recipients: v } as Partial<StepConfig>)}
+            extra={[{ value: 'user:{USER}', label: t('recipients.starter') }]} />
         </Field>
         <Field $span={3}>
           <FieldLabel>{t('nomaflow.steps.notifySubject')}</FieldLabel>
@@ -677,7 +775,10 @@ function NotifyForm({ step, patch }: FormProps) {
 }
 
 // ── the editor ─────────────────────────────────────────────────────────────────────
-export default function StepEditor({ steps, onChange, connectors, turnedOff = [], onTurnedOff, settings }: {
+export default function StepEditor({ steps, onChange, connectors, turnedOff = [], onTurnedOff, settings, pick }: {
+  /** Asked from outside (a problem of a refused save): the step to show — ``index`` null = the job's own settings.
+   *  A new ``tick`` asks again. */
+  pick?: { index: number | null; tick: number } | null
   /** What the side panel shows while no step is picked (the flow's start): the job's own settings. */
   settings?: ReactNode
   steps: StepConfig[]
@@ -710,6 +811,9 @@ export default function StepEditor({ steps, onChange, connectors, turnedOff = []
   const deleteStep = (i: number) => onChange(steps.filter((_, idx) => idx !== i))
   // the flow above the list: a card picks its step (opened and brought into view), a "+" inserts one at its place
   const [focus, setFocus] = useState<{ index: number; tick: number } | null>(null)
+  useEffect(() => {
+    if (pick) setFocus(pick.index == null ? null : { index: pick.index, tick: pick.tick })
+  }, [pick])
   const picked = focus && focus.index < steps.length ? focus.index : null
   const insertStep = (index: number, type: StepType) => {
     onChange([...steps.slice(0, index), blankStep(type), ...steps.slice(index)])

@@ -1,5 +1,5 @@
-"""``notify`` step — send a message through the notification dispatcher (portal / e-mail /
-action), with the files this run produced attached (C5: the digest's delivery). Placeholders
+"""``notify`` step — send a message through the notification dispatcher (portal / e-mail),
+with the files this run produced attached (C5: the digest's delivery). Placeholders
 in the subject and body: ``{JOB}``, ``{RUN_ID}``, ``{FILES}`` (the attached names), ``{DATE}``,
 ``{USER}`` (who started the run).
 

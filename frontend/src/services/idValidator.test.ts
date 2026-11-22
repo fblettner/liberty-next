@@ -1,7 +1,28 @@
 // The shared id validator behind every "Add / Rename / Clone" prompt in Settings, plus the
 // clone-name suggester.
 import { describe, expect, it } from 'vitest'
-import { suggestCloneId, validateId } from './idValidator'
+import { freeId, idFromLabel, newObjectFromLabel, suggestCloneId, validateId } from './idValidator'
+
+describe('an id made from a label', () => {
+  it('keeps letters and digits, drops accents, joins the rest with _', () => {
+    expect(idFromLabel('Customer orders (late)')).toBe('customer_orders_late')
+    expect(idFromLabel('Écritures à valider')).toBe('ecritures_a_valider')
+    expect(idFromLabel('  2026 budget ')).toBe('_2026_budget')
+    expect(idFromLabel('???')).toBe('')
+  })
+  it('is made free among the existing ones', () => {
+    expect(freeId('orders', [])).toBe('orders')
+    expect(freeId('orders', ['orders', 'orders_2'])).toBe('orders_3')
+  })
+  it('gives the label back with its id', () => {
+    expect(newObjectFromLabel(' Customer orders ', ['customer_orders'])).toEqual({ id: 'customer_orders_2', label: 'Customer orders' })
+    expect(newObjectFromLabel('!!', [])).toBeNull()
+  })
+  it('says what to type when a typed id is refused', () => {
+    expect(validateId({ kind: 'screen', proposed: 'Users List', existing: [] }).error).toMatch(/^Use small letters, digits and _ only/)
+    expect(validateId({ kind: 'entries', proposed: 'usr name', existing: [] }).error).toMatch(/^Use capital letters, digits and _ only/)
+  })
+})
 
 describe('validateId', () => {
   it('requires a value and enforces the kind pattern', () => {

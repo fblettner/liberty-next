@@ -518,6 +518,31 @@ def test_put_jobs_parsed_rewrites_only_the_changed_job(env, monkeypatch) -> None
     assert 'path = "${SAMPLES_DIR}/sales.xlsx"' in text and 'schedule = "0 6 * * *"' in text
 
 
+def test_put_jobs_parsed_saves_beside_a_job_that_carries_step_defaults(env) -> None:
+    """A job left unchanged keeps its ``step_defaults`` block on disk. The check made before
+    writing read the raw file, where the bare model refuses that block: once one job of the file
+    carried it, no job could be saved any more ("resulting jobs are invalid")."""
+    app, jobs_toml = env
+    jobs_toml.write_text(
+        "[[jobs]]\nid = \"keep\"\n"
+        "[jobs.step_defaults]\ncontinue_on_failure = true\n"
+        "[[jobs.steps]]\ntype = \"sql_query\"\nname = \"one\"\nconnector = \"db\"\nquery = \"q\"\n\n"
+        "[[jobs]]\nid = \"edit\"\nschedule = \"0 5 * * *\"\n"
+        "[[jobs.steps]]\ntype = \"sql_query\"\nname = \"two\"\nconnector = \"db\"\nquery = \"q\"\n"
+    )
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        jobs = client.get("/admin/config/jobs/parsed", headers=h).json()["jobs"]
+        assert jobs[0]["steps"][0]["continue_on_failure"] is True              # the defaults reach the step
+        jobs[1]["schedule"] = "0 6 * * *"
+        r = client.put("/admin/config/jobs/parsed", json={"jobs": jobs}, headers=h)
+        assert r.status_code == 200, r.text
+        again = client.get("/admin/config/jobs/parsed", headers=h).json()["jobs"]
+    text = jobs_toml.read_text()
+    assert "[jobs.step_defaults]" in text and 'schedule = "0 6 * * *"' in text    # kept as written; the edit landed
+    assert again[0]["steps"][0]["continue_on_failure"] is True and again[1]["schedule"] == "0 6 * * *"
+
+
 def test_put_jobs_parsed_rejects_invalid(env) -> None:
     """A job with an unknown step type → 422, file untouched."""
     app, jobs_toml = env

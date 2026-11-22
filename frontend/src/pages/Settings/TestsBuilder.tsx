@@ -108,6 +108,7 @@ export default function TestsBuilder() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [picking, setPicking] = useState(false)                     // "a case from an endpoint": the endpoint is being picked
   const [writes, setWrites] = useState(false)
 
   const fail = (e: unknown) => setError(e instanceof ApiError ? e.message : String(e))
@@ -188,6 +189,18 @@ export default function TestsBuilder() {
     while (doc.case.some((c) => c.id === `case-${n}`)) n += 1
     setDoc({ ...doc, case: [...doc.case, { id: `case-${n}`, steps: [] }] }); setCaseId(`case-${n}`); setStepAt(null)
   }
+  // a first case prepared by the server from one endpoint: its example values, what it answers now
+  const caseFromEndpoint = async (endpoint: string | null) => {
+    setPicking(false)
+    if (!doc || !endpoint || !target) return
+    setBusy(true); setError(null)
+    try {
+      const r = await api.post<{ case: TestSuite['case'][number]; played: boolean; note: string | null }>(
+        '/admin/tests/starter', { connector: target, endpoint, taken: doc.case.map((c) => c.id) })
+      setDoc({ ...doc, case: [...doc.case, r.case] }); setCaseId(r.case.id); setStepAt(0)
+      setNotice(r.note ?? t('tests.starterReady'))
+    } catch (e) { fail(e) } finally { setBusy(false) }
+  }
   const removeSuite = async () => {
     if (!loaded || !(await modals.confirm({ title: t('tests.deleteSuite'), message: t('tests.deleteSuiteConfirm', { name: loaded.name }), variant: 'danger' }))) return
     try { await api.del(`/admin/tests/${encodeURIComponent(loaded.name)}`); setLoaded(null); setDoc(null); setCaseId(null); void list() } catch (e) { fail(e) }
@@ -259,11 +272,23 @@ export default function TestsBuilder() {
   } else if (doc && current) {
     side = (
       <>
+        {/* the suite this case belongs to: its name and the connector its cases call */}
+        <h3>{t('tests.suite')}</h3>
+        <div className="two" data-suite-settings>
+          <Field label={t('tests.suiteLabel')}><Input data-suite-label value={doc.label ?? ''} placeholder={loaded?.name} onChange={(ev) => setDoc({ ...doc, label: ev.target.value || null })} /></Field>
+          <Field label={t('tests.connector')}>
+            <SearchSelect value={doc.connector ?? ''} options={apiConnectors.map((c) => ({ value: c.name, label: c.name }))} onChange={(v: string | null) => setDoc({ ...doc, connector: v || null })} placeholder={t('common.pick')} />
+          </Field>
+        </div>
         <h3>{t('tests.case')}</h3>
         <div className="two">
           <Field label={t('tests.caseId')}><Input value={current.id} style={{ fontFamily: fonts.mono }} onChange={(ev) => patchCase({ id: ev.target.value.replace(/[^A-Za-z0-9_.-]/g, '-') })} /></Field>
-          <Field label={t('tests.connector')}>
-            <SearchSelect value={doc.connector ?? ''} options={apiConnectors.map((c) => ({ value: c.name, label: c.name }))} onChange={(v: string | null) => setDoc({ ...doc, connector: v || null })} placeholder={t('common.pick')} />
+          {/* a case may call another connector than the suite's */}
+          <Field label={t('tests.caseConnector')}>
+            <div data-case-connector>
+              <SearchSelect value={current.connector ?? ''} options={apiConnectors.map((c) => ({ value: c.name, label: c.name }))}
+                onChange={(v: string | null) => patchCase({ connector: v || null })} anyLabel={t('tests.caseConnectorSuite')} placeholder={t('tests.caseConnectorSuite')} />
+            </div>
           </Field>
         </div>
         <Field label={t('tests.caseLabel')}><Input value={current.label ?? ''} onChange={(ev) => patchCase({ label: ev.target.value || null })} /></Field>
@@ -299,6 +324,16 @@ export default function TestsBuilder() {
                 </CaseRow>
               ))}
               {mine && mayEdit && <CaseRow type="button" $on={false} onClick={newCase} style={{ color: colors.text.muted }}><Plus size={13} /><span>{t('tests.newCase')}</span></CaseRow>}
+              {mine && mayEdit && mayRun && endpoints.length > 0 && !picking && (
+                <CaseRow type="button" $on={false} onClick={() => setPicking(true)} style={{ color: colors.text.muted }} title={t('tests.fromEndpointHint')}>
+                  <Wand2 size={13} /><span>{t('tests.fromEndpoint')}</span>
+                </CaseRow>
+              )}
+              {mine && picking && (
+                <SearchSelect value="" placeholder={t('tests.fromEndpointPick')}
+                  options={endpoints.map((x) => ({ value: x.name, label: x.label || x.name, mono: x.name }))}
+                  onChange={(v: string | null) => void caseFromEndpoint(v)} />
+              )}
               {!mine && s.cases.length === 0 && !s.error && <CaseRow type="button" $on={false} onClick={() => open(s.name)} style={{ color: colors.text.muted }}><span>{t('tests.openSuite')}</span></CaseRow>}
             </div>
           )

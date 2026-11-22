@@ -16,8 +16,9 @@ import {
   Monitor, ExternalLink,
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
+import { failureOf, type SaveFailure } from '../../services/saveProblems'
 import {
-  Banner, Button, Card, HeaderActions, Checkbox, FieldLabel, Input, PasswordInput, SearchSelect, SpinnerRing, Tag, Textarea,
+  Banner, Button, Card, HeaderActions, Checkbox, FieldLabel, Input, PasswordInput, SaveProblems, SearchSelect, SpinnerRing, Tag, Textarea,
 } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { AiStartersEditor, ModelsPicker } from './AiStartersEditor'
@@ -265,6 +266,8 @@ export default function AppBuilder() {
   const [brandingDefaults, setBrandingDefaults] = useState<BrandingFields>(DEFAULTS.branding)
   const [choices, setChoices] = useState<Choices>({ log_levels: [], effort_levels: [], connectors: [], models: [] })
   const [path, setPath] = useState('')
+  // a save the server refused: each problem names the section and the field it is in
+  const [failure, setFailure] = useState<SaveFailure | null>(null)
   const [original, setOriginal] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -341,7 +344,7 @@ export default function AppBuilder() {
   }
 
   const save = async () => {
-    setBusy(true); setError(null); setStatus(null)
+    setBusy(true); setError(null); setStatus(null); setFailure(null)
     try {
       // Sensitive fields (ai.api_key, license.key, oidc.client_secret) round-trip
       // their on-disk value naturally: when the operator hasn't touched the field,
@@ -366,7 +369,7 @@ export default function AppBuilder() {
       setStatus(t('settings.app.saved', { path }))
       if (r?.requires_restart) setRestartHint(true)
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      setFailure(failureOf(e))
     } finally { setBusy(false) }
   }
 
@@ -397,6 +400,7 @@ export default function AppBuilder() {
       </Hint>
       {status && !restartHint && <Banner $tone="ok">{status}</Banner>}
       {error && <Banner $tone="error">{error}</Banner>}
+      <SaveProblems failure={failure} />
       {restartHint && (
         <Banner $tone="info">
           <AlertTriangle size={14} style={{ marginRight: 6, verticalAlign: -2 }} />

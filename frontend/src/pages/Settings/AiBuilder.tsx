@@ -7,7 +7,8 @@ import styled from '@emotion/styled'
 import { Save, Sparkles, LayoutList, Trash2, BookOpen, Plus, Edit3, Wrench, Undo2, Languages, ListTree } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Centered, Input, SearchSelect, SpinnerRing, languageName, useModals, useOtherLanguages, type SearchSelectOption, HeaderActions } from '../../common'
+import { failureOf, targetOf, type SaveFailure, type SaveProblem } from '../../services/saveProblems'
+import { Banner, Button, Card, Centered, Input, SaveProblems, SearchSelect, SpinnerRing, languageName, useModals, useOtherLanguages, type SearchSelectOption, HeaderActions } from '../../common'
 import type { AiDoc, AiLocaleBody, AiToolBody, AppAiBody, PlaybookBody, ScreensDoc, StarterGroupBody } from '../../types/config'
 import { starterView, withStarters } from '../../services/aiStarters'
 import { QuestionsList } from './AiStartersEditor'
@@ -52,6 +53,8 @@ export default function AiBuilder() {
   const [editingTool, setEditingTool] = useState<(AiToolBody & { id: string }) | null | undefined>(undefined)
   const [doc, setDoc] = useState<Record<string, AppAiBody> | null>(null)
   const [saved, setSaved] = useState<Record<string, AppAiBody> | null>(null)
+  // a save the server refused: its problems one by one
+  const [failure, setFailure] = useState<SaveFailure | null>(null)
   const [screens, setScreens] = useState<ScreensDoc['screens']>({})
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
@@ -99,6 +102,11 @@ export default function AiBuilder() {
   const groups: StarterGroupBody[] = view.groups ?? []
   const setGroup = (i: number, patch: Partial<StarterGroupBody>) => updateView({ groups: groups.map((g, j) => (j === i ? { ...g, ...patch } : g)) })
   const setScreen = (id: string, starters: string[]) => updateView({ screens: { ...(view.screens ?? {}), [id]: { ...(view.screens?.[id] ?? {}), starters } } })
+  // a screen's questions under headings (the same shape as the application's): none → the key leaves the file
+  const setScreenGroups = (id: string, list: StarterGroupBody[]) => {
+    const { groups: _dropped, ...rest } = view.screens?.[id] ?? {}
+    updateView({ screens: { ...(view.screens ?? {}), [id]: list.length ? { ...rest, groups: list } : rest } })
+  }
   // a screen taken out leaves every language with it
   const dropScreen = (id: string) => setDoc((p) => {
     if (!p || !scope) return p
@@ -126,15 +134,20 @@ export default function AiBuilder() {
 
   const persist = async () => {
     if (!doc) return
-    setBusy(true); setError(null); setStatus(null)
+    setBusy(true); setError(null); setStatus(null); setFailure(null)
     try {
       await api.put('/admin/config/ai/parsed', { ai: doc })
       await api.post('/admin/reload')
       setSaved(doc)
       setStatus(t('settings.ai.saved'))
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      setFailure(failureOf(e))
     } finally { setBusy(false) }
+  }
+  // "Open" on a problem of a refused save: the application it is in.
+  const problemOpener = (p: SaveProblem): (() => void) | null => {
+    const app = targetOf('ai', p.path)?.scope
+    return app && doc?.[app] && app !== scope ? () => setScope(app) : null
   }
 
   if (error && !doc) return <Banner $tone="error">{error}</Banner>
@@ -155,6 +168,7 @@ export default function AiBuilder() {
       <Hint>{t('settings.ai.hint')}</Hint>
       {status && <Banner $tone="ok">{status}</Banner>}
       {error && <Banner $tone="error">{error}</Banner>}
+      <SaveProblems failure={failure} opener={problemOpener} />
       {scope && (
         <Body>
           {languages.length > 0 && (
@@ -206,6 +220,25 @@ export default function AiBuilder() {
                   <Button $variant="ghost" $size="sm" onClick={() => dropScreen(id)} style={{ color: colors.red.main }} title={t('common.remove')}><Trash2 size={12} /></Button>
                 </ScreenHead>
                 <QuestionsList value={view.screens?.[id]?.starters ?? []} onChange={(starters) => setScreen(id, starters)} />
+                {/* the screen's own headings: shown in place of its plain questions when there are some */}
+                <div data-screen-groups={id} style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+                  {(view.screens?.[id]?.groups ?? []).map((g, i) => (
+                    <Section key={i}>
+                      <ScreenHead>
+                        <Input value={g.label} onChange={(e) => setScreenGroups(id, (view.screens?.[id]?.groups ?? []).map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                          placeholder={t('settings.ai.groupLabel')} style={{ maxWidth: 320 }} />
+                        <span className="spacer" />
+                        <Button $variant="ghost" $size="sm" onClick={() => setScreenGroups(id, (view.screens?.[id]?.groups ?? []).filter((_, j) => j !== i))} style={{ color: colors.red.main }} title={t('common.remove')}><Trash2 size={12} /></Button>
+                      </ScreenHead>
+                      <QuestionsList value={g.starters ?? []} onChange={(starters) => setScreenGroups(id, (view.screens?.[id]?.groups ?? []).map((x, j) => (j === i ? { ...x, starters } : x)))} />
+                    </Section>
+                  ))}
+                  <div>
+                    <Button $variant="ghost" $size="sm" onClick={() => setScreenGroups(id, [...(view.screens?.[id]?.groups ?? []), { label: t('settings.ai.groupNew'), starters: [] }])}>
+                      <Plus size={13} /> {t('settings.ai.addScreenGroup')}
+                    </Button>
+                  </div>
+                </div>
               </Section>
             ))}
           </Section>

@@ -23,6 +23,8 @@ import {
   ModalHeader,
   Overlay,
   Row,
+  ObjectTitle,
+  SaveProblems,
   SpinnerRing,
   Tag,
   FrameworkEnumsContext,
@@ -34,7 +36,8 @@ import {
 import type { ConfigSchemas, ConnectorsDoc, ScreensDoc, Screen, DictionaryDoc } from '../../types/config'
 import { AddScopeModal } from './AddScopeModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
-import { validateId } from '../../services/idValidator'
+import { newObjectFromLabel, validateId } from '../../services/idValidator'
+import { failureOf, targetOf, type SaveFailure, type SaveProblem } from '../../services/saveProblems'
 import { FindDependenciesModal, type DependencySeed } from './FindDependenciesModal'
 import { CloneWithDepsModal } from './CloneWithDepsModal'
 import { DeleteWithDepsModal } from './DeleteWithDepsModal'
@@ -102,6 +105,8 @@ export default function ScreensBuilder({ embedded, onDone }: { embedded?: { app:
   const [selId, setSelId] = useState<string | null>(null)
   const [q, setQ] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // a save the server refused: its problems one by one, each opening the screen it is in
+  const [failure, setFailure] = useState<SaveFailure | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [addScopeOpen, setAddScopeOpen] = useState(false)
@@ -168,7 +173,7 @@ export default function ScreensBuilder({ embedded, onDone }: { embedded?: { app:
       })
       if (choice === 'keep' || choice == null) return  // dismiss the close
       if (choice === 'save') {
-        await save()
+        if (!(await save())) return          // refused: the designer stays, the problems are shown in it
         setDesignerSnapshot(null)
         setDesignerOpen(false)
         return
@@ -350,17 +355,23 @@ export default function ScreensBuilder({ embedded, onDone }: { embedded?: { app:
     return validateId({ kind: 'screen', proposed: v, existing, mode: oldId ? 'rename' : 'add', currentName: oldId ?? undefined })
   }
   const addScreen = async (app: string) => {
-    const id = (await modals.prompt({
+    // the NAME is asked for; the id is made from it (shown while it is typed)
+    const existing = Object.keys(doc?.[app] ?? {})
+    const name = (await modals.prompt({
       title: t('settings.screens.add'),
-      message: t('settings.screens.namePrompt'),
-      validate: (v) => validateScreenId(v.trim(), app, null),
+      message: t('settings.newObject.name'),
+      placeholder: t('settings.screens.nameExample'),
+      validate: (v) => (newObjectFromLabel(v, existing) ? null : t('settings.newObject.noLetters')),
+      note: (v) => t('settings.newObject.idWillBe', { id: newObjectFromLabel(v, existing)?.id ?? '' }),
     }))?.trim()
-    if (!id) return
+    const made = name ? newObjectFromLabel(name, existing) : null
+    if (!made) return
+    const id = made.id
     setDoc((p) => {
       const cur = p ?? {}
       const appCur = { ...(cur[app] ?? {}) }
       if (appCur[id]) return cur
-      appCur[id] = { id, read_query: '' }
+      appCur[id] = { id, label: made.label, read_query: '' }
       return { ...cur, [app]: appCur }
     })
     setSelId(id); setStatus(null)
@@ -410,7 +421,7 @@ export default function ScreensBuilder({ embedded, onDone }: { embedded?: { app:
   const cloneScreen = (app: string, oldId: string) => setCloneTarget({ app, oldId })
   const discard = () => {
     if (!original) return
-    try { setDoc(JSON.parse(original) as AppScreens); setStatus(null); setError(null) } catch { /* ignore */ }
+    try { setDoc(JSON.parse(original) as AppScreens); setStatus(null); setError(null); setFailure(null) } catch { /* ignore */ }
   }
   // Delete now opens DeleteWithDepsModal — the operator gets a checkbox to also delete
   // queries exclusively used by this screen. The backend's safe-delete walker enforces
@@ -421,8 +432,8 @@ export default function ScreensBuilder({ embedded, onDone }: { embedded?: { app:
 
   // Write the whole screens.toml + reload (the shared persist path for Save + the immediate
   // deletes). ``after`` runs on success (clear the relevant selection) before re-loading.
-  async function persistScreens(next: AppScreens, after?: () => void) {
-    setBusy(true); setError(null); setStatus(null)
+  async function persistScreens(next: AppScreens, after?: () => void): Promise<boolean> {
+    setBusy(true); setError(null); setStatus(null); setFailure(null)
     try {
       await api.put<{ saved: boolean }>('/admin/config/screens/parsed', { screens: next })
       const r = await api.post<{ screen_apps: string[] }>('/admin/reload')
@@ -430,14 +441,24 @@ export default function ScreensBuilder({ embedded, onDone }: { embedded?: { app:
       const list = (r.screen_apps ?? []).join(', ') || `(${t('common.none')})`
       setStatus(t('settings.screens.saved', { apps: list }))
       load()
+      return true
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      setFailure(failureOf(e))
+      return false
     } finally { setBusy(false) }
   }
 
-  async function save() {
-    if (!doc) return
-    await persistScreens(doc)
+  async function save(): Promise<boolean> {
+    if (!doc) return false
+    return persistScreens(doc)
+  }
+  // "Open" on a problem of a refused save: the screen it is in, in the designer.
+  const problemOpener = (p: SaveProblem): (() => void) | null => {
+    const target = targetOf('screens', p.path)
+    if (!target?.scope || !target.id || !doc?.[target.scope]?.[target.id]) return null
+    const { scope, id } = target
+    if (designerOpen && selApp === scope && selId === id) return null      // already in front
+    return () => { setSelApp(scope); setSelId(id); setAutoOpenDesigner(true) }
   }
 
   // Per-app dynamic enum: DD_ENTRIES = the dictionary entries available to ``selApp``'s screens
@@ -524,6 +545,7 @@ export default function ScreensBuilder({ embedded, onDone }: { embedded?: { app:
           </>
         }
       />
+      <SaveProblems failure={failure} opener={problemOpener} />
       {selApp && ids.length > 0 && (
         <FilterBar>
           <Search size={14} />
@@ -633,9 +655,7 @@ export default function ScreensBuilder({ embedded, onDone }: { embedded?: { app:
             <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
               <span>
                 {t('settings.screens.designerTitle')} ·{' '}
-                <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>
-                  [screens.{selApp}.{selId}]
-                </span>
+                <ObjectTitle label={(selScreen as { label?: string | null }).label} id={selId} scope={selApp} />
               </span>
               <Row gap={8} style={{ alignItems: 'center' }}>
                 {dirty && <span style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
@@ -669,6 +689,7 @@ export default function ScreensBuilder({ embedded, onDone }: { embedded?: { app:
             color: colors.text.secondary,
             fontSize: fontSize.md,
           }}>
+            {failure && <div style={{ marginBottom: 12, flex: '0 0 auto' }}><SaveProblems failure={failure} opener={problemOpener} /></div>}
             <ScreenEditor
               app={selApp}
               id={selId}
@@ -696,8 +717,8 @@ export default function ScreensBuilder({ embedded, onDone }: { embedded?: { app:
                 $size="sm"
                 disabled={busy || !dirty}
                 onClick={async () => {
-                  await save()
-                  closeDesigner()
+                  // a refused save keeps the designer open: what to correct is shown above
+                  if (await save()) closeDesigner()
                 }}
               >
                 {busy ? <SpinnerRing size={13} thickness={2} /> : <Save size={13} />} {t('common.save')}

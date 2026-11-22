@@ -1,12 +1,13 @@
 // The role editor panel (Liberty Next → Administer → Access → Roles): name + description, the baseline, the menu
 // tree, the rules beyond menus, and the resulting permission strings for the curious. It edits
 // `RoleModel` and writes `buildPermissions(model)` — the same strings the chip editor wrote.
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Ban, Check, Copy, Database, KeyRound, Shield } from 'lucide-react'
 import { api, ApiError } from '../../../api/client'
-import { Banner, Button, Field, Input, SpinnerRing } from '../../../common'
+import { Banner, Button, Field, HeaderActions, Input, SpinnerRing } from '../../../common'
+import { useDirtyGuard } from '../../../tabs/dirtyGuard'
 import { colors, fontSize, fonts, radius } from '../../../theme'
 import type { DictionaryDoc } from '../../../types/config'
 import MenuTree from './MenuTree'
@@ -39,7 +40,6 @@ const TabBtn = styled.button<{ $active?: boolean }>`
   &:hover { color: ${colors.text.primary}; }
   & .n { font-weight: 500; color: ${colors.text.muted}; }
 `
-const Foot = styled.div`display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid ${colors.border}; flex-shrink: 0;`
 const Section = styled.div`
   & > .h { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: ${fontSize.sm}; font-weight: 700; color: ${colors.text.primary}; }
   & > .h .hint { font-weight: 500; color: ${colors.text.muted}; }
@@ -66,9 +66,11 @@ interface Props {
   columnNames: Record<string, string[]>
   onSaved: (name: string) => void
   onCancel: () => void
+  /** Told whenever the panel starts or stops holding changes that are not saved: the list asks before another role is opened. */
+  onDirtyChange?: (dirty: boolean) => void
 }
 
-export default function RoleEditor({ initial, seed, onDuplicate, takenNames, forest, dashboardIds, dictionary, attributeNames, columnNames, onSaved, onCancel }: Props) {
+export default function RoleEditor({ initial, seed, onDuplicate, takenNames, forest, dashboardIds, dictionary, attributeNames, columnNames, onSaved, onCancel, onDirtyChange }: Props) {
   const { t } = useTranslation()
   const isNew = initial == null
   const from = initial ?? seed?.role ?? null              // what the fields start from: the role, or the one it is made from
@@ -85,6 +87,11 @@ export default function RoleEditor({ initial, seed, onDuplicate, takenNames, for
   const effects = useMemo(() => nodeEffects(model, forest), [model, forest])
   const scopeDirty = JSON.stringify(scope) !== JSON.stringify((initial?.scope ?? []).map(cleanRule))
   const dirty = isNew || description !== (initial?.description ?? '') || JSON.stringify(permissions) !== JSON.stringify(initial?.permissions ?? []) || scopeDirty
+
+  // What would be lost by leaving: an existing role's changes; a new role once something is in it.
+  const changed = isNew ? (name.trim() !== '' || description !== '' || permissions.length > 0 || scope.length > 0) : dirty
+  useDirtyGuard(changed)                                  // the shell asks before the tab is closed
+  useEffect(() => { onDirtyChange?.(changed); return () => onDirtyChange?.(false) }, [changed, onDirtyChange])
 
   const setState = (key: string, state: NodeState | null) => setModel((m) => {
     const states = { ...m.states }
@@ -132,7 +139,7 @@ export default function RoleEditor({ initial, seed, onDuplicate, takenNames, for
             <Input value={name} disabled={!isNew} onChange={(e) => setName(e.target.value)} placeholder="reader" />
           </Field>
           <Field label={t('settings.access.description')}>
-            <Input value={description} onChange={(e) => setDescription(e.target.value)} />
+            <Input data-role-description value={description} onChange={(e) => setDescription(e.target.value)} />
           </Field>
         </div>
 
@@ -163,10 +170,12 @@ export default function RoleEditor({ initial, seed, onDuplicate, takenNames, for
         </>
         )}
       </Body>
-      <Foot>
-        <Button $size="sm" $variant="ghost" onClick={onCancel}>{t('common.cancel')}</Button>
-        <Button $size="sm" $variant="primary" onClick={() => void save()} disabled={busy || (!dirty && !isNew)}>{busy ? <SpinnerRing size={13} thickness={2} /> : t('common.save')}</Button>
-      </Foot>
+      {/* Save and Discard are in the page header, as in every editor — not at the bottom of the panel */}
+      <HeaderActions>
+        {changed && <span data-role-unsaved style={{ color: colors.text.muted, fontSize: fontSize.sm }}>{t('settings.unsaved')}</span>}
+        <Button $size="sm" $variant="ghost" onClick={onCancel} disabled={busy}>{t('common.discard')}</Button>
+        <Button $size="sm" $variant="primary" data-role-save onClick={() => void save()} disabled={busy || (!dirty && !isNew)}>{busy ? <SpinnerRing size={13} thickness={2} /> : t('common.save')}</Button>
+      </HeaderActions>
     </Panel>
   )
 }

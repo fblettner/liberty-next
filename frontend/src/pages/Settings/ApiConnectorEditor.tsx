@@ -30,7 +30,7 @@ import StageStrip from './StageStrip'
 import { apiFigures } from '../../services/connectorFigures'
 import { api, ApiError } from '../../api/client'
 import {
-  Banner, Button, CallableSelect, Checkbox, FrameworkEnumsContext, Input, Row, SearchSelect, SpinnerRing, Stack, useModals, PasswordInput,
+  Banner, Button, CallableSelect, Checkbox, FrameworkEnumsContext, Input, Row, SearchSelect, SpinnerRing, Stack, StringMapEditor, useModals, PasswordInput,
 } from '../../common'
 import { EndpointGeneratorModal, type EndpointGeneratorDef } from './EndpointGeneratorModal'
 import { mergeGenerated, type GeneratedEndpoint, mergeModified, rowKeys } from '../../services/endpointRefresh'
@@ -86,6 +86,8 @@ export type ApiConnector = {
   licensed?: boolean
   show_in_switcher?: boolean
   home?: string | null
+  /** A different home page for the users of a role: {role: menu entry}. */
+  home_by_role?: Record<string, string>
   /** The HTTP server pool the connector names: its address, account and secrets are then the pool's. */
   server?: string | null
   base_url?: string
@@ -131,6 +133,8 @@ interface ApiConnectorEditorProps {
    *  the workspace can't render anything when it's picked, so the runtime filters it out. The
    *  editor uses this to flag the misleading "enabled but invisible" state. */
   hasMenu?: boolean
+  /** The framework itself requires a licence for this connector: the box is ticked and cannot be changed. */
+  licenceLocked?: boolean
   /** Every SQL connector's pools — the Environments tab lists the environments without a server. */
   sqlConnectors?: SqlPools[]
   onChange: (next: ApiConnector) => void
@@ -221,7 +225,7 @@ const queryFromString = (s: string): Record<string, string> => {
 // ── main component ─────────────────────────────────────────────────────────────────────────
 type TabKey = 'connection' | 'auth' | 'environments' | 'endpoints' | 'webhooks' | 'test'
 
-export default function ApiConnectorEditor({ name, value, hasMenu, sqlConnectors, onChange, openGenerator }: ApiConnectorEditorProps) {
+export default function ApiConnectorEditor({ name, value, hasMenu, licenceLocked, sqlConnectors, onChange, openGenerator }: ApiConnectorEditorProps) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<TabKey>('connection')
   const fig = apiFigures(value as unknown as Record<string, unknown>)
@@ -259,7 +263,7 @@ export default function ApiConnectorEditor({ name, value, hasMenu, sqlConnectors
         { id: 'webhooks', tone: 'orange', icon: <Bell size={15} />, title: t('settings.api.tab.webhooks'), what: t('settings.api.stage.notYet') },
         { id: 'test', tone: 'orange', icon: <Play size={15} />, title: t('settings.api.tab.test'), what: t('settings.api.stage.tryIt') },
       ]} />
-      {tab === 'connection' && <ConnectionTab value={value} patch={patch} hasMenu={hasMenu} />}
+      {tab === 'connection' && <ConnectionTab value={value} patch={patch} hasMenu={hasMenu} licenceLocked={licenceLocked} />}
       {tab === 'auth' && <AuthTab value={value} patch={patch} />}
       {tab === 'environments' && <ApiEnvironmentsTab value={value} patch={patch} sqlConnectors={sqlConnectors ?? []} />}
       {tab === 'endpoints' && <EndpointsTab connectorName={name} value={value} patch={patch} openGenerator={openGenerator} />}
@@ -271,8 +275,8 @@ export default function ApiConnectorEditor({ name, value, hasMenu, sqlConnectors
 
 // ── Connection tab ─────────────────────────────────────────────────────────────────────────
 function ConnectionTab({
-  value, patch, hasMenu,
-}: { value: ApiConnector; patch: (p: Partial<ApiConnector>) => void; hasMenu?: boolean }) {
+  value, patch, hasMenu, licenceLocked,
+}: { value: ApiConnector; patch: (p: Partial<ApiConnector>) => void; hasMenu?: boolean; licenceLocked?: boolean }) {
   const { t } = useTranslation()
   // Timeout displayed in milliseconds (nomaubl convention) — Pydantic stores seconds. Round
   // on display so a fractional second doesn't surprise the operator.
@@ -313,6 +317,31 @@ function ConnectionTab({
           onChange={(v) => patch({ home: v || null })}
           placeholder={t('common.pick')}
         />
+      </FieldRow>
+      {/* a different home page for the users of a role: the role and the menu entry are both picked */}
+      <FieldRow>
+        <label>{t('settings.api.app.homeByRole')}</label>
+        <div data-api-home-by-role>
+          <StringMapEditor
+            keyEnum={enums?.ROLE_NAMES ?? { label: t('settings.api.app.role'), values: [] }}
+            valueEnum={{ label: t('settings.api.app.home'), values: homeOpts }}
+            value={value.home_by_role ?? {}}
+            onChange={(v) => patch({ home_by_role: Object.keys(v).length ? v : undefined })}
+          />
+          <Hint>{t('settings.api.app.homeByRoleHint')}</Hint>
+        </div>
+      </FieldRow>
+      <FieldRow>
+        <label>{t('settings.api.app.licensed')}</label>
+        <div data-api-licensed>
+          <Checkbox
+            checked={licenceLocked || value.licensed === true}
+            disabled={licenceLocked}
+            onChange={(v: boolean) => patch({ licensed: v ? true : undefined })}
+            label={licenceLocked ? t('settings.api.app.licensedAlways') : t('settings.api.app.licensedLabel')}
+          />
+          <Hint>{t('settings.api.app.licensedHint')}</Hint>
+        </div>
       </FieldRow>
       <SectionHead>{t('settings.api.connection.section')}</SectionHead>
       {/* the server: a pool (Liberty → Pools, kind HTTP server) that holds the address, the account and the

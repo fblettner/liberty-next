@@ -8,7 +8,9 @@ import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Bell, Plus, Send, Trash2, X } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Centered, Checkbox, Field, HeaderActions, Input, SearchSelect, SpinnerRing, Tag, Textarea, useModals, type SearchSelectOption, PlaceholderPicker, SearchSelectMulti } from '../../common'
+import { failureOf, type SaveFailure } from '../../services/saveProblems'
+import { freeMapText, mergeFreeMap } from '../../services/freeMap'
+import { Banner, Button, Card, Centered, Checkbox, Field, HeaderActions, Input, ObjectTitle, SaveProblems, SearchSelect, StringMapEditor, SpinnerRing, Tag, Textarea, useModals, type SearchSelectOption, PlaceholderPicker, SearchSelectMulti } from '../../common'
 import { JOB_EVENT_TOKENS, SCREEN_EVENT_TOKENS } from '../../services/placeholders'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { validateId } from '../../services/idValidator'
@@ -35,6 +37,7 @@ const Body = styled.div`flex: 1; min-height: 0; overflow-y: auto; padding: 14px 
 const Foot = styled.div`display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid ${colors.border}; align-items: center;`
 const Section = styled.div`& > .h { font-size: ${fontSize.sm}; font-weight: 700; color: ${colors.text.primary}; margin-bottom: 6px; } & > .h .hint { font-weight: 500; color: ${colors.text.muted}; margin-left: 6px; }`
 const Grid = styled.div`display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;`
+const Hint = styled.div`font-size: ${fontSize.micro}; color: ${colors.text.muted}; margin-top: 3px; line-height: 1.4;`
 const Seg = styled.div`display: inline-flex; border: 1px solid ${colors.border}; border-radius: ${radius.md}; overflow: hidden;`
 const SegBtn = styled.button<{ $active?: boolean }>`
   padding: 5px 10px; border: 0; cursor: pointer; font-size: ${fontSize.sm}; font-family: ${fonts.sans}; font-weight: 600;
@@ -71,6 +74,8 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
   const [recipientText, setRecipientText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // a save the server refused: what to correct in this rule
+  const [failure, setFailure] = useState<SaveFailure | null>(null)
   const [testReport, setTestReport] = useState<DispatchReportWire | null>(null)
   const [users, setUsers] = useState<string[]>([])
   const [roles, setRoles] = useState<string[]>([])
@@ -96,6 +101,11 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
   const sqlConns = (connectors ?? []).filter((c) => c.type === 'sql')
   const connOpts: SearchSelectOption[] = (connectors ?? []).map((c) => ({ value: c.name, label: `${c.name} (${c.type})`, mono: c.name }))
   const recipientOpts: SearchSelectOption[] = recipientKind === 'user' ? users.map((u) => ({ value: u, label: u, mono: u })) : recipientKind === 'role' ? roles.map((r) => ({ value: r, label: r, mono: r })) : []
+  // what the action channel may run: the queries of the picked database connector, or the services of the picked service connector
+  const actionConn = (connectors ?? []).find((c) => c.name === rule.action?.connector)
+  const actionTargets: SearchSelectOption[] = actionConn?.type === 'sql'
+    ? (actionConn.queries ?? []).map((q) => ({ value: q.name, label: q.description || q.label || q.name, mono: q.name }))
+    : actionConn?.type === 'api' ? (actionConn.endpoints ?? []).map((e) => ({ value: e.name, label: e.description || e.label || e.name, mono: e.name })) : []
   const channels = rule.channels ?? ['portal']
   const toggleIn = <T,>(list: T[] | undefined, v: T, fallback: T[]): T[] => { const cur = list ?? fallback; return cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v] }
   const addRecipient = (v: string) => { const s = v.trim(); if (!s) return; const entry = `${recipientKind}:${s}`; if (!(rule.recipients ?? []).includes(entry)) patch({ recipients: [...(rule.recipients ?? []), entry] }); setRecipientText('') }
@@ -105,8 +115,13 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
     if (check.error) { setError(check.error); return }
     if (!rule.subject.trim()) { setError(t('settings.notify.errSubject')); return }
     if (tr.kind === 'screen' && (!tr.app || !tr.screen)) { setError(t('settings.notify.errScreen')); return }
-    setBusy(true); setError(null)
-    try { await onSaved(rid.trim(), rule) } catch (e) { setError(e instanceof ApiError ? e.message : String(e)) } finally { setBusy(false) }
+    // the "query or endpoint" channel runs something: it must say what
+    if (channels.includes('action') && (!rule.action?.connector || !(rule.action.query || rule.action.endpoint))) { setError(t('settings.notify.errAction')); return }
+    setBusy(true); setError(null); setFailure(null)
+    // a value added and left without a name is not one
+    const named = Object.fromEntries(Object.entries(rule.action?.params ?? {}).filter(([k]) => k.trim() !== ''))
+    const toSave: NotificationRule = rule.action ? { ...rule, action: { ...rule.action, params: named } } : rule
+    try { await onSaved(rid.trim(), toSave) } catch (e) { setFailure(failureOf(e)) } finally { setBusy(false) }
   }
   const sendTest = async () => {
     setBusy(true); setError(null); setTestReport(null)
@@ -119,9 +134,10 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
 
   return (
     <Panel>
-      <Head><Bell size={16} color={colors.blue.main} /><span className="title">{isNew ? t('settings.notify.newRule') : `[notifications.${id}]`}</span>{dirty && !isNew && <span className="dirty">{t('settings.access.unsaved')}</span>}</Head>
+      <Head><Bell size={16} color={colors.blue.main} /><span className="title">{isNew ? t('settings.notify.newRule') : <ObjectTitle label={rule.label} id={id ?? ''} />}</span>{dirty && !isNew && <span className="dirty">{t('settings.access.unsaved')}</span>}</Head>
       <Body>
         {error && <Banner $tone="error">{error}</Banner>}
+        <SaveProblems failure={failure} />
         {testReport && (
           <Banner $tone={Object.keys(testReport.errors).length ? 'error' : 'ok'}>
             {t('settings.notify.testResult', { portal: testReport.portal_users.join(', ') || '—', email: testReport.emails.join(', ') || '—', action: testReport.action_ran ? 'ok' : '—' })}
@@ -132,6 +148,9 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
           <Field label={t('settings.notify.id')}><Input value={rid} disabled={!isNew} onChange={(e) => setRid(e.target.value)} placeholder="period_closed" /></Field>
           <Field label={t('settings.notify.label')}><Input value={rule.label ?? ''} onChange={(e) => patch({ label: e.target.value || null })} /></Field>
           <div style={{ display: 'flex', alignItems: 'end', paddingBottom: 6 }}><Checkbox checked={rule.enabled !== false} onChange={(v: boolean) => patch({ enabled: v })} label={t('settings.notify.enabled')} /></div>
+          <div style={{ gridColumn: '1 / -1' }} data-rule-keep>
+            <Checkbox checked={rule.override === true} onChange={(v: boolean) => patch({ override: v || undefined })} label={t('settings.notify.keepOnUpgrade')} />
+          </div>
         </Grid>
 
         <Section>
@@ -148,7 +167,7 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
                 <Field label={t('settings.notify.screen')}><SearchSelect sort value={tr.screen} onChange={(v) => setTrigger({ ...tr, screen: v })} options={screenOpts} allowCustom /></Field>
                 <Field label={t('settings.notify.events')}>
                   <div style={{ display: 'flex', gap: 12, paddingTop: 8 }}>
-                    {SCREEN_EVENTS.map((ev) => <Checkbox key={ev} checked={(tr.events ?? SCREEN_EVENTS).includes(ev)} onChange={() => setTrigger({ ...tr, events: toggleIn(tr.events, ev, SCREEN_EVENTS) })} label={ev} />)}
+                    {SCREEN_EVENTS.map((ev) => <Checkbox key={ev} checked={(tr.events ?? SCREEN_EVENTS).includes(ev)} onChange={() => setTrigger({ ...tr, events: toggleIn(tr.events, ev, SCREEN_EVENTS) })} label={t(`settings.notify.event.${ev}`)} />)}
                   </div>
                 </Field>
               </Grid>
@@ -173,7 +192,7 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
               </Field>
               <Field label={t('settings.notify.events')}>
                 <div style={{ display: 'flex', gap: 12, paddingTop: 8, flexWrap: 'wrap' }}>
-                  {JOB_EVENTS.map((ev) => <Checkbox key={ev} checked={(tr.events ?? ['failure']).includes(ev)} onChange={() => setTrigger({ ...tr, events: toggleIn(tr.events, ev, ['failure']) })} label={ev} />)}
+                  {JOB_EVENTS.map((ev) => <Checkbox key={ev} checked={(tr.events ?? ['failure']).includes(ev)} onChange={() => setTrigger({ ...tr, events: toggleIn(tr.events, ev, ['failure']) })} label={t(`settings.notify.event.${ev}`)} />)}
                 </div>
               </Field>
               <Field label={t('settings.notify.longRun')}>
@@ -202,8 +221,27 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
           {channels.includes('action') && (
             <Grid style={{ marginTop: 10 }}>
               <Field label={t('settings.notify.actionConnector')}><SearchSelect sort value={rule.action?.connector ?? ''} onChange={(v) => patch({ action: { ...(rule.action ?? { connector: '' }), connector: v } })} options={connOpts} /></Field>
-              <Field label={t('settings.notify.actionQuery')}><Input value={rule.action?.query ?? ''} onChange={(e) => patch({ action: { ...(rule.action ?? { connector: '' }), query: e.target.value || null } })} disabled={!sqlConns.some((c) => c.name === rule.action?.connector)} /></Field>
-              <Field label={t('settings.notify.actionEndpoint')}><Input value={rule.action?.endpoint ?? ''} onChange={(e) => patch({ action: { ...(rule.action ?? { connector: '' }), endpoint: e.target.value || null } })} /></Field>
+              {/* what is run: a query of a database connector, or a service of a service connector — picked from the connector's own */}
+              {sqlConns.some((c) => c.name === rule.action?.connector) ? (
+                <Field label={t('settings.notify.actionQuery')}>
+                  <SearchSelect sort allowCustom value={rule.action?.query ?? ''} options={actionTargets}
+                    onChange={(v) => patch({ action: { ...(rule.action ?? { connector: '' }), query: v || null, endpoint: null } })} />
+                </Field>
+              ) : (
+                <Field label={t('settings.notify.actionEndpoint')}>
+                  <SearchSelect sort allowCustom value={rule.action?.endpoint ?? ''} options={actionTargets}
+                    onChange={(v) => patch({ action: { ...(rule.action ?? { connector: '' }), endpoint: v || null, query: null } })} />
+                </Field>
+              )}
+              <div style={{ gridColumn: '1 / -1' }} data-rule-action-params>
+                <Field label={t('settings.notify.actionParams')}>
+                  <StringMapEditor
+                    value={freeMapText((rule.action?.params ?? {}) as Record<string, unknown>)}
+                    onChange={(v) => patch({ action: { ...(rule.action ?? { connector: '' }), params: mergeFreeMap((rule.action?.params ?? {}) as Record<string, unknown>, v) } })}
+                  />
+                </Field>
+                <Hint>{t('settings.notify.actionParamsHint')}</Hint>
+              </div>
             </Grid>
           )}
         </Section>

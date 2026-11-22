@@ -6,7 +6,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { api, ApiError } from '../../api/client'
-import { Banner, Checkbox, Field, Input, SearchSelect, SpinnerRing, type SearchSelectOption } from '../../common'
+import { Banner, Checkbox, Field, Input, SearchSelect, SpinnerRing, TableSelect, type SearchSelectOption } from '../../common'
+import { SchemaSelect } from '../Nomaflow/stepFields'
 import { EditorModalShell } from '../../common/EditorModalShell'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import type { QueryResult } from '../../types/connectors'
@@ -51,6 +52,10 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
   const [description, setDescription] = useState(initial?.description ?? '')
   const [connector, setConnector] = useState(initial?.connector ?? '')
   const [query, setQuery] = useState(initial?.query ?? '')
+  // an entity reads a query — or a table as it is (every column): which one, and the table with its schema
+  const [reads, setReads] = useState<'query' | 'table'>(initial?.table && !initial?.query ? 'table' : 'query')
+  const [tableName, setTableName] = useState(initial?.table ?? '')
+  const [schemaName, setSchemaName] = useState(initial?.schema ?? '')
   const [screen, setScreen] = useState(initial?.screen ?? '')
   const [cardinality, setCardinality] = useState<'one' | 'many'>(initial?.cardinality ?? 'one')
   // Column names are kept UPPERCASE (the framework's convention — Oracle's case; Postgres
@@ -95,16 +100,17 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
 
   // Discover the columns whenever the query changes (one row — the row cap keeps it cheap); a
   // table entity (from a preset) goes through the model's own discovery.
-  const table = initial?.table
+  const table = reads === 'table' ? tableName.trim() : ''
+  const tableSchema = schemaName.trim()
   useEffect(() => {
-    if (!query && !table) { setColumns(null); return }
+    if ((reads === 'query' && !query) || (reads === 'table' && !table)) { setColumns(null); return }
     let cancelled = false
     setDiscovering(true); setError(null)
     // a query runs for one row; a table and an endpoint with rows are described by the model's own discovery
-    const fetchCols: Promise<DiscoveredColumn[]> = query && !onApi
+    const fetchCols: Promise<DiscoveredColumn[]> = reads === 'query' && query && !onApi
       ? api.get<QueryResult>(`/api/sql/${encodeURIComponent(effConnector)}/${encodeURIComponent(query)}?_limit=1`)
         .then((r) => r.columns.map((c) => ({ name: c.name.toUpperCase(), type: c.type ?? null, label: c.label, key: c.key, hidden: c.hidden, format: c.format })))
-      : api.post<{ columns: { name: string; type: string; label?: string; hidden?: boolean; format?: string }[]; error: string | null }>('/admin/explorer/describe-entity', { app, entity: { ...(onApi ? { query } : { table, schema: initial?.schema }), connector: connector || undefined, screen: screen || undefined } })
+      : api.post<{ columns: { name: string; type: string; label?: string; hidden?: boolean; format?: string }[]; error: string | null }>('/admin/explorer/describe-entity', { app, entity: { ...(onApi ? { query } : { table, schema: tableSchema || undefined }), connector: connector || undefined, screen: screen || undefined } })
         .then((r) => { if (r.error) throw new Error(r.error); return r.columns.map((c) => ({ name: c.name.toUpperCase(), type: c.type, label: c.label, hidden: c.hidden, format: c.format })) })
     fetchCols
       .then((cols) => {
@@ -120,7 +126,7 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
       .finally(() => { if (!cancelled) setDiscovering(false) })
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the key pre-fill reads the state once, on discovery
-  }, [effConnector, query, table, app, connector, screen, onApi])
+  }, [effConnector, query, table, tableSchema, app, connector, screen, onApi])
 
   const colNames = useMemo(() => new Set((columns ?? []).map((c) => c.name)), [columns])
   // Columns referenced by the record but absent from the discovered list (a renamed query) stay
@@ -133,10 +139,10 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
   const toggle = (list: string[], set: (v: string[]) => void, name: string) => set(list.includes(name) ? list.filter((x) => x !== name) : [...list, name])
 
   const idError = !id.trim() ? t('settings.explorer.idRequired') : !/^[A-Za-z0-9_-]+$/.test(id) ? t('settings.explorer.idChars') : takenIds.includes(id) ? t('settings.explorer.idTaken') : null
-  const canSave = !idError && (!!query || !!initial?.table) && dirty
+  const canSave = !idError && (reads === 'table' ? !!table : !!query) && dirty
 
   const save = () => {
-    const body: ExplorerEntityBody = { cardinality, ...(query ? { query } : {}), ...(initial?.table ? { table: initial.table, ...(initial.schema ? { schema: initial.schema } : {}) } : {}) }
+    const body: ExplorerEntityBody = { cardinality, ...(reads === 'table' ? { table, ...(tableSchema ? { schema: tableSchema } : {}) } : { query }) }
     if (label.trim()) body.label = label.trim()
     if (description.trim()) body.description = description.trim()
     if (connector && connector !== app) body.connector = connector
@@ -174,9 +180,27 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
           <Field label={t('settings.explorer.connector')}>
             <SearchSelect sort value={connector} onChange={(v) => { mark(setConnector)(v); setQuery('') }} options={connectorOpts} anyLabel={`${app} (${t('settings.explorer.theApp')})`} />
           </Field>
-          <Field label={table ? t('settings.explorer.tableLabel') : t('settings.explorer.query')}>
-            {table ? <Input value={`${initial?.schema ? `${initial.schema}.` : ''}${table}`} disabled /> : <SearchSelect sort value={query} onChange={mark(setQuery)} options={queryOpts} placeholder={t('settings.access.pickItem')} />}
+          {/* what it reads: a query, or a table as it is — the fields follow the choice (an API source reads a service) */}
+          <Field label={t('settings.explorer.reads')}>
+            <Seg data-entity-reads>
+              <SegBtn type="button" $active={reads === 'query'} onClick={() => mark(setReads)('query')}>{onApi ? t('settings.explorer.readsService') : t('settings.explorer.readsQuery')}</SegBtn>
+              {!onApi && <SegBtn type="button" $active={reads === 'table'} onClick={() => mark(setReads)('table')}>{t('settings.explorer.readsTable')}</SegBtn>}
+            </Seg>
           </Field>
+          {reads === 'query' ? (
+            <Field label={onApi ? t('settings.explorer.readsService') : t('settings.explorer.query')}>
+              <SearchSelect sort value={query} onChange={mark(setQuery)} options={queryOpts} placeholder={t('settings.access.pickItem')} />
+            </Field>
+          ) : (
+            <Field label={t('settings.explorer.tableSchema')}>
+              <div data-entity-schema><SchemaSelect connector={effConnector} value={schemaName} onChange={mark(setSchemaName)} /></div>
+            </Field>
+          )}
+          {reads === 'table' && (
+            <Field label={t('settings.explorer.tableLabel')}>
+              <div data-entity-table><TableSelect connector={effConnector} schema={schemaName} value={tableName} onChange={mark(setTableName)} /></div>
+            </Field>
+          )}
           <Field label={t('settings.explorer.screen')}>
             <SearchSelect sort value={screen} onChange={mark(setScreen)} options={screenOpts} anyLabel={t('settings.explorer.noScreen')} />
           </Field>
@@ -222,7 +246,7 @@ export function ExplorerEntityModal({ initial, app, takenIds, onSave, onClose }:
                       <td style={{ width: 160 }}>
                         <SearchSelect value={measures[c.name] ?? ''} anyLabel={t('settings.explorer.notAMeasure')}
                           onChange={(v) => { setMeasures((m) => { const n = { ...m }; if (v) n[c.name] = v; else delete n[c.name]; return n }); setDirty(true) }}
-                          options={AGGREGATES.map((a) => ({ value: a, label: a }))} />
+                          options={AGGREGATES.map((a) => ({ value: a, label: t(`explorer.agg.${a}`) }))} />
                       </td>
                       <td>{c.hidden
                         ? <span title={t('settings.explorer.hiddenByScreen')}><Checkbox checked disabled /></span>

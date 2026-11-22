@@ -4,12 +4,13 @@
 // the details on its left, its dimensions on its right, what does not reach the hub set apart); a click on a
 // card or on a line picks it and the panel beside edits it — the model's own settings when nothing is picked.
 // Saved whole (PUT /admin/config/explorer/parsed + reload). An entity's columns open ExplorerEntityModal.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { Plus, Trash2, Edit3, Database, Link2, Save, Boxes, Star, ArrowLeft } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Centered, Field, Input, SearchSelect, SpinnerRing, Tag, useModals, type SearchSelectOption, HeaderActions } from '../../common'
+import { Banner, Button, Card, Centered, Checkbox, Field, Input, SaveProblems, SearchSelect, SpinnerRing, Tag, useModals, type SearchSelectOption, HeaderActions } from '../../common'
+import { failureOf, targetOf, type SaveFailure, type SaveProblem } from '../../services/saveProblems'
 import type { ExplorerDoc, ExplorerEntityBody, ExplorerModelBody, ExplorerRelationBody } from '../../types/config'
 import type { QueryResult } from '../../types/connectors'
 import { ExplorerEntityModal, type ExplorerEntityRecord } from './ExplorerEntityModal'
@@ -20,6 +21,7 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 import { BuilderShell as Shell, BuilderToolbar as Toolbar } from '../../common/builderShell'
 import { FlowCanvas } from './flowKit'
 import ExplorerDiagram, { type DiagramPick } from './ExplorerDiagram'
+import { ExplorerShipped } from './ExplorerShipped'
 import { modelDiagram } from '../../services/explorerDiagram'
 import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
@@ -78,6 +80,9 @@ export default function ExplorerBuilder() {
   const [doc, setDoc] = useState<Models | null>(null)
   const [saved, setSaved] = useState<Models | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // a save the server refused: its problems one by one, each opening the model (and entity) it is in
+  const [failure, setFailure] = useState<SaveFailure | null>(null)
+  const pendingOpen = useRef<{ model: string; pick: DiagramPick } | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [addScopeOpen, setAddScopeOpen] = useState(false)
@@ -120,9 +125,17 @@ export default function ExplorerBuilder() {
   }, [doc, connectors])
 
   const modelIds = useMemo(() => Object.keys(doc?.[scope] ?? {}).sort(), [doc, scope])
-  useEffect(() => { setModelId((cur) => (cur && modelIds.includes(cur) ? cur : (modelIds[0] ?? ''))) }, [modelIds])
+  useEffect(() => {
+    const asked = pendingOpen.current?.model
+    setModelId((cur) => (asked && modelIds.includes(asked) ? asked : cur && modelIds.includes(cur) ? cur : (modelIds[0] ?? '')))
+  }, [modelIds])
   const model = modelId ? doc?.[scope]?.[modelId] : undefined
-  useEffect(() => { setPick(null); setCameFrom(null) }, [scope, modelId])      // another model: nothing of it is picked yet
+  useEffect(() => {
+    // another model: nothing of it is picked yet — unless a problem of a refused save asked for one of its entities
+    const asked = pendingOpen.current
+    if (asked && asked.model === modelId) pendingOpen.current = null
+    setPick(asked && asked.model === modelId ? asked.pick : null); setCameFrom(null)
+  }, [scope, modelId])
   const columnsOf = useCallback((entityId: string): string[] => {
     const e = model?.entities[entityId]
     return e ? (entityColumns[`${e.connector || scope}.${e.query}`] ?? []) : []
@@ -147,7 +160,7 @@ export default function ExplorerBuilder() {
 
   const persist = async () => {
     if (!doc) return
-    setError(null); setStatus(null)
+    setError(null); setStatus(null); setFailure(null)
     // A model with no entity used to be left out of the save while the page said "saved". One that names a
     // preset is whole (it is filled from the preset at first use) and is kept; one that names none cannot be
     // read by anybody: the save is refused and says which, so it is completed or deleted knowingly.
@@ -168,8 +181,24 @@ export default function ExplorerBuilder() {
       setSaved(doc)
       setStatus(t('settings.explorer.saved'))
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      setFailure(failureOf(e))
     } finally { setBusy(false) }
+  }
+  // "Open" on a problem of a refused save: the model it is in, and the entity or relation picked.
+  const problemOpener = (p: SaveProblem): (() => void) | null => {
+    const target = targetOf('explorer', p.path)
+    if (!target?.scope || !target.id || !doc?.[target.scope]?.[target.id]) return null
+    const toScope = target.scope
+    const toModel = target.id
+    const [part, key] = target.inner
+    const toPick: DiagramPick = part === 'entities' && typeof key === 'string' ? { kind: 'entity', id: key }
+      : part === 'relations' && typeof key === 'number' ? { kind: 'relation', index: key } : null
+    return () => {
+      if (toScope === scope && toModel === modelId) { setCameFrom(null); setPick(toPick); return }
+      pendingOpen.current = { model: toModel, pick: toPick }
+      if (toScope === scope) setModelId(toModel)
+      else setScope(toScope)
+    }
   }
 
   const onEntitySave = (id: string, body: ExplorerEntityBody) => {
@@ -239,6 +268,7 @@ export default function ExplorerBuilder() {
       </HeaderActions>
       {status && <Banner $tone="ok">{status}</Banner>}
       {error && <Banner $tone="error">{error}</Banner>}
+      <SaveProblems failure={failure} opener={problemOpener} />
       {scope && modelIds.length === 0 && <Empty>{t('settings.explorer.noModels')}</Empty>}
       {model && (() => {
         const diagram = modelDiagram(model)
@@ -392,6 +422,16 @@ export default function ExplorerBuilder() {
                         onChange={(v) => void applyPreset(v)} disabled={busy} />
                     </Field>
                     {model.preset && <PresetNote>{t('settings.explorer.presetNote', { preset: model.preset })}</PresetNote>}
+                    {/* where it is listed, whether an upgrade leaves it alone, what it delivers */}
+                    <Field label={t('settings.explorer.group')}>
+                      <Input data-model-group value={model.group ?? ''} onChange={(e) => update({ group: e.target.value || undefined })} placeholder={t('settings.explorer.groupExample')} />
+                    </Field>
+                    <PresetNote>{t('settings.explorer.groupHint')}</PresetNote>
+                    <div data-model-keep>
+                      <Checkbox checked={model.override === true} onChange={(v: boolean) => update({ override: v || undefined })} label={t('settings.explorer.keepModel')} />
+                    </div>
+                    <ExplorerShipped app={scope} model={modelId} analyses={model.analyses} dashboards={model.dashboards} disabled={busy}
+                      onChange={(patch) => update(patch)} />
                     <PresetNote>{t('settings.explorer.diagram.hint')}</PresetNote>
                   </SideBody>
                 </>

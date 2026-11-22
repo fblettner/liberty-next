@@ -344,7 +344,7 @@ pages/TableView/       the data screen: index (params, streaming run), ResultTab
                        actionRunner.ts (chain / if / loop / return runtime), Summary / Tree / Chart views
 pages/Settings/        one *Builder per config section + the Visual Designer (ScreenEditor = a screen as six stages drawn as
                        a flow: ScreenStages + services/screenStages.ts, tested; its columns as a list with the picked column's
-                       settings beside: ScreenColumnsPane; the record form's builder: ScreenVisualBuilder; ActionListEditor…), ApiConnectorEditor, wizards, ConfigVersions,
+                       settings beside: ScreenColumnsPane; the record form's builder: ScreenVisualBuilder; its actions as a tree: ActionTreeView, their kinds in actionKinds.ts), ApiConnectorEditor, wizards, ConfigVersions,
                        AccessBuilder (+ Access/: RoleEditor panel, MenuTree inherit|allow|deny, OtherAccess,
                        permissions.ts = strings ⇄ tree model + the backend's glob matcher, ScopeRulesEditor +
                        scopeRules.ts = data-scope rules / attributes helpers, both tested),
@@ -371,7 +371,7 @@ pages/Explorer/        the Data Explorer page: index (model, the AnalysisDefinit
                        click-to-add), services/explorerPivot.ts (pivot tree, chart shaping, KPI totals), both tested,
                        services/explorerSaved.ts (the saved routes, dashboard shape); shapes in types/explorer.ts
 pages/AppPage/         a page an application ships (index = fetch + import the module, problems said; sdk.ts = THE CONTRACT
-                       handed to it — add fields, never rename; PageGrid.tsx = `sdk.Grid` (a row opens on `detail`, contract version 3); `useAssistantContext(title, facts)` = what the page tells the chat (version 4: services/aiContext kind `page`, `pageFacts`), the shared grid in a column / row shape of the
+                       handed to it — add fields, never rename; PageGrid.tsx = `sdk.Grid` (a row opens on `detail`, contract version 3); `useAssistantContext(title, facts)` = what the page tells the chat (version 4: services/aiContext kind `page`, `pageFacts`), `sdk.download(path, name, body)` = a file a route answers, given to the user (version 6: a report as PDF), the shared grid in a column / row shape of the
                        contract's own, the DataTable loaded lazily; `tabs/pageTabs.appPageOf` / `callableRef`, tested)
 pages/DashboardView/ Chat/ (AiDrawer) Reports/ Notifications/ (the inbox; components/NotificationBell
                        in the header, live via SioContext.subscribeNotifications) ScreenAssistant/ HttpRunner/ Monitoring/ Login/

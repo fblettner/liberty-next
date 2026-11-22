@@ -44,6 +44,7 @@ from typing import Annotated, Any, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from liberty.config import substitute_env
+from liberty.framework_enums import RULE_SOURCE_TITLE_WHEN, RULE_SOURCE_WHEN
 
 # Connector auth configs must reference secrets, never inline them — an
 # unresolved ``${NAME}`` becomes the empty string (see :func:`substitute_env`)
@@ -334,6 +335,8 @@ class RulesWhen(BaseModel):
     rules_values: str | None = Field(
         default=None,
         json_schema_extra={
+            "x_visible_when": RULE_SOURCE_WHEN,
+            "x_title_when": RULE_SOURCE_TITLE_WHEN,
             "x_enum_ref_when": {
                 "field": "rules",
                 "map": {
@@ -482,6 +485,9 @@ class ColumnHint(BaseModel):
         default=None,
         json_schema_extra={
             "x_group": "Rules",
+            # no ``x_visible_when`` here: a column that leaves its kind blank takes the dictionary's,
+            # and may still name its own list — the designer hides the field by the EFFECTIVE kind
+            "x_title_when": RULE_SOURCE_TITLE_WHEN,
             "x_enum_ref_when": {
                 "field": "rules",
                 "map": {

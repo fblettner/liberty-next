@@ -186,7 +186,7 @@ export function GenerateQueryModal({ kind, connector, record, existingQueryNames
             {isSequence
               ? t('settings.generateQuery.sequenceTitle')
               : t('settings.generateQuery.lookupTitle')} ·{' '}
-            <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>[connectors.{connector}]</span>
+            <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>{connector}</span>
           </span>
         </ModalHeader>
         <ModalBody>

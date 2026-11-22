@@ -20,6 +20,19 @@ from __future__ import annotations
 
 from typing import Any
 
+# A kind of field ("rules") that needs a second choice ("rules_values"), and what that choice is
+# called for each: the form shows the field only for these kinds, under this label.
+RULE_SOURCE_TITLES: dict[str, str] = {
+    "BOOLEAN": "Value that means yes",
+    "ENUM": "List of values",
+    "LOOKUP": "List from a table",
+    "SEQUENCE": "Numbering rule",
+    "NN": "Numbering rule",
+    "POOL": "Only the databases of",
+}
+RULE_SOURCE_WHEN: dict[str, Any] = {"field": "rules", "value": list(RULE_SOURCE_TITLES)}
+RULE_SOURCE_TITLE_WHEN: dict[str, Any] = {"field": "rules", "map": RULE_SOURCE_TITLES}
+
 FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
     "DICTIONARY_TYPE": {
         "label": "Dictionary Type",
@@ -50,18 +63,20 @@ FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
         # *format*, or the ``{{JDEDATE}}`` / ``{{JDETIME}}`` query tokens for write-time stamps),
         # NN (exact alias of SEQUENCE), CURRENT_DATE (exact alias of SYSDATE). The v1 migrator
         # normalises NN → SEQUENCE and CURRENT_DATE → SYSDATE so nothing emits the dead alias.
-        "label": "Dictionary Rules",
+        # The labels are what a consultant picks from ("Kind of field"): what the field IS, in plain
+        # words — the code stays shown beside it. No kind picked = a field typed freely.
+        "label": "Kind of field",
         "values": [
-            {"value": "BOOLEAN", "label": "Boolean (Y/N)"},
-            {"value": "DEFAULT", "label": "Default value"},
-            {"value": "DISABLED", "label": "Disable Dictionary Rule"},
-            {"value": "ENUM", "label": "Enumeration"},
-            {"value": "LOGIN", "label": "User connected"},
-            {"value": "LOOKUP", "label": "Lookup Table"},
-            {"value": "PASSWORD", "label": "Password (mask and encryption)"},
-            {"value": "POOL", "label": "Database pool (of this installation)"},
-            {"value": "SEQUENCE", "label": "Sequence"},
-            {"value": "SYSDATE", "label": "Date Today"},
+            {"value": "BOOLEAN", "label": "A yes / no box"},
+            {"value": "ENUM", "label": "A fixed list of values"},
+            {"value": "LOOKUP", "label": "A list read from a table"},
+            {"value": "SEQUENCE", "label": "A number given automatically"},
+            {"value": "LOGIN", "label": "The signed-in user"},
+            {"value": "SYSDATE", "label": "Today's date"},
+            {"value": "PASSWORD", "label": "A password (hidden, stored encrypted)"},
+            {"value": "POOL", "label": "A database of this installation"},
+            {"value": "DEFAULT", "label": "Free text; left empty, it takes its default value"},
+            {"value": "DISABLED", "label": "Free text, whatever the dictionary says"},
         ],
     },
     # QUERY_TYPE retired — a query's role is implied by which section it sits under in

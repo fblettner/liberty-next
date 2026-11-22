@@ -6,13 +6,14 @@
 // per-app dictionaries map onto these so two migrated apps can't clash on a `dd_id`. Save validates
 // the whole `DictionaryFile` then rewrites the file (via tomlkit), then reloads. No rename yet —
 // delete + re-add. Renders the body only; pages/Liberty wraps the page.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import styled from '@emotion/styled'
 import { Save, Plus, Trash2, Search, Edit3, BookText, Undo2, Copy, GitBranch, FileSpreadsheet } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Button, Banner, Centered, Card, HeaderActions, Row, Stack, SpinnerRing, SchemaNavigator, FrameworkEnumsContext, useModals, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Field, SearchSelect, Tag, type FrameworkEnums, type JsonSchema, type SearchSelectOption } from '../../common'
+import { failureOf, targetOf, type SaveFailure, type SaveProblem } from '../../services/saveProblems'
+import { Button, Banner, Centered, Card, HeaderActions, ObjectTitle, Row, SaveProblems, Stack, SpinnerRing, SchemaNavigator, FrameworkEnumsContext, useModals, Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Field, SearchSelect, Tag, type FrameworkEnums, type JsonSchema, type SearchSelectOption } from '../../common'
 import type { ConfigSchemas, ConnectorsDoc, DictionaryDoc, DictionaryKind, DictionarySection } from '../../types/config'
 import { renameKey } from '../../services/keyRename'
 import { validateId, suggestCloneId } from '../../services/idValidator'
@@ -149,6 +150,9 @@ export default function DictionaryBuilder() {
   const [sel, setSel] = useState<string | null>(null)
   const [q, setQ] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // a save the server refused: its problems one by one, each opening the record it is in
+  const [failure, setFailure] = useState<SaveFailure | null>(null)
+  const pendingOpen = useRef<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [scanOpen, setScanOpen] = useState(false)
@@ -205,7 +209,12 @@ export default function DictionaryBuilder() {
     } catch { /* silent — the operator can reload the page */ }
   }
   // when the user changes section or scope, drop the (now-stale) selection + search
-  useEffect(() => { setSel(null); setQ('') }, [kind, scope])
+  useEffect(() => {
+    // another family or application: nothing picked — unless a problem of a refused save asked for a record
+    const asked = pendingOpen.current
+    pendingOpen.current = null
+    setSel(asked); setQ('')
+  }, [kind, scope])
 
   const dirty = useMemo(() => dict != null && JSON.stringify(dict) !== original, [dict, original])
   useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
@@ -599,15 +608,29 @@ export default function DictionaryBuilder() {
 
   async function save() {
     if (!dict) return
-    setBusy(true); setError(null); setStatus(null)
+    setBusy(true); setError(null); setStatus(null); setFailure(null)
     try {
       await api.put<{ saved: boolean }>('/admin/config/dictionary/parsed', { dictionary: dict })
       await api.post<{ connectors: string[] }>('/admin/reload')
       setStatus(t('settings.dictionary.saved'))
       load()  // re-fetch — the backend strips defaults and may have re-rendered subsections
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      setFailure(failureOf(e))
     } finally { setBusy(false) }
+  }
+  // "Open" on a problem of a refused save: the record it is in, under its family and application.
+  const problemOpener = (p: SaveProblem): (() => void) | null => {
+    const target = targetOf('dictionary', p.path)
+    if (!target?.kind || !target.id || !(KIND_ORDER as readonly string[]).includes(target.kind)) return null
+    const toKind = target.kind as DictionaryKind
+    const toScope = target.scope ?? SCOPE_SHARED
+    const id = target.id
+    if (toKind === kind && toScope === scope && sel === id) return null      // already in front
+    return () => {
+      if (toKind === kind && toScope === scope) { setQ(''); setSel(id); return }
+      pendingOpen.current = id
+      setKind(toKind); setScope(toScope)
+    }
   }
 
   // Export every dictionary ENTRY (shared + per-connector overlays) to an .xlsx — one row per
@@ -677,6 +700,7 @@ export default function DictionaryBuilder() {
       </HeaderActions>
       {status && <Banner $tone="ok">{status}</Banner>}
       {error && <Banner $tone="error">{error}</Banner>}
+      <SaveProblems failure={failure} opener={problemOpener} />
       <SubTabs>
         {KIND_ORDER.map((k) => (
           <SubTab key={k} $active={kind === k} type="button" data-kind={k} onClick={() => { setKind(k); if (SHARED_ONLY.has(k)) setScope(SCOPE_SHARED) }}>
@@ -737,9 +761,8 @@ export default function DictionaryBuilder() {
           {sel && section[sel] && recordSchema ? (
             <Stack gap={12}>
               <Row gap={8} style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                <strong style={{ fontFamily: fonts.mono, color: colors.text.primary }}>
-                  {scope ? `[connectors.${scope}.${kind}.${sel}]` : `[${kind}.${sel}]`}
-                </strong>
+                <ObjectTitle label={typeof section[sel].label === 'string' ? (section[sel].label as string) : typeof section[sel].description === 'string' ? (section[sel].description as string) : null}
+                  id={sel} scope={scope || t('settings.dictionary.sharedScope')} />
                 <Row gap={6}>
                   {/* Find usages: applies to every dictionary kind except framework_enums (those
                       are bundled overrides, not externally referenced from screens / connectors). */}

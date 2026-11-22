@@ -7,16 +7,17 @@ import { useTranslation } from 'react-i18next'
 import { Plus, Trash2, Workflow, List } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
-  Banner, Button, Centered, Field, FrameworkEnumsContext, Input, SearchSelect, useModals,
-  type FrameworkEnums, type JsonSchema,
+  Banner, Button, Centered, Field, FrameworkEnumsContext, Input, ObjectTitle, SaveProblems, SchemaForm, SearchSelect, useModals,
+  type FrameworkEnums, type JsonSchema, type SearchSelectOption,
 } from '../../common'
+import { failureOf, type SaveFailure } from '../../services/saveProblems'
 import { EditorModalShell } from '../../common/EditorModalShell'
 import styled from '@emotion/styled'
 import ActionFlow from './ActionFlow'
 import ActionTreeView from './ActionTreeView'
 import { EditQueryModal } from './EditQueryModal'
 import { builtinSourceOptions } from './actionCandidates'
-import type { ActionPath } from './actionPath'
+import { withCapturedResults, type ActionPath } from './actionPath'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
@@ -44,7 +45,11 @@ const Switch = styled.div`
 `
 const SubHead = styled.div`font-size: ${fontSize.sm}; font-weight: 600; color: ${colors.text.primary}; margin: 4px 0 2px;`
 const Sub = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.micro}; line-height: 1.4; margin-bottom: 6px;`
-const ParamRow = styled.div`display: grid; grid-template-columns: 1fr 1fr 28px; gap: 6px; align-items: center; margin-bottom: 6px;`
+const ParamCard = styled.div`
+  display: flex; align-items: flex-start; gap: 6px; padding: 10px; margin-bottom: 8px;
+  border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.input};
+`
+const ParamGrid = styled.div`flex: 1; min-width: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px;`
 const SmallRemove = styled.button`
   height: 28px; width: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid transparent; background: transparent; color: ${colors.text.muted}; border-radius: ${radius.sm}; cursor: pointer;
@@ -69,6 +74,8 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
   const [original, setOriginal] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // a save the server refused: shown above the designer, which stays as it is
+  const [failure, setFailure] = useState<SaveFailure | null>(null)
   const [fullscreen, setFullscreen] = useState(true)
   // Edit-query raised from a run_query step's pencil — opens EditQueryModal (z-index 600, above this
   // editor's Overlay at 400). Previously a no-op, so the pencil appeared dead.
@@ -109,7 +116,7 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
 
   const save = async () => {
     if (!doc || !value) return
-    setBusy(true); setError(null)
+    setBusy(true); setError(null); setFailure(null)
     try {
       const next = { ...doc, [actionId]: value }
       await api.put<{ saved: boolean }>('/admin/config/actions/parsed', { actions: next })
@@ -118,7 +125,9 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
       onSaved?.()
       onClose()
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      // not ``setError``: that one replaces the designer by the message, and what was built could
+      // no longer be corrected
+      setFailure(failureOf(e))
     } finally { setBusy(false) }
   }
 
@@ -145,6 +154,13 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
   const params = Array.isArray(value?.params) ? (value!.params as Row[]) : []
   const setParams = (nx: Row[]) => patch({ params: nx })
   const steps = Array.isArray(value?.steps) ? (value!.steps as Row[]) : []
+  const serviceInputs: SearchSelectOption[] = [
+    ...params.map((p) => ({ name: typeof p.name === 'string' ? p.name.trim() : '', label: typeof p.label === 'string' ? p.label : '', what: t('settings.actions.sourceInput') })),
+    ...(Array.isArray(value?.prompt_fields) ? (value!.prompt_fields as Row[]) : []).map((p) => ({ name: typeof p.name === 'string' ? p.name.trim() : '', label: typeof p.label === 'string' ? p.label : '', what: t('settings.actions.sourceAnswer') })),
+  ].filter((x) => x.name).map((x) => ({ value: `INPUT.${x.name}`, label: `${x.what} · ${x.label || x.name}`, mono: `INPUT.${x.name}`, group: 'inputs' }))
+  // the form of ``prompt_fields`` alone, drawn from the service's own schema
+  const promptProp = defs.SharedAction?.properties?.prompt_fields
+  const promptSchema: JsonSchema | null = promptProp ? { type: 'object', properties: { prompt_fields: promptProp } } : null
 
   const properties = !value ? null : (
     <>
@@ -162,29 +178,57 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
         <div>
           <SubHead>{t('settings.actions.params')}</SubHead>
           <Sub>{t('settings.actions.paramsHint')}</Sub>
-          {params.map((p, i) => (
-            <ParamRow key={i}>
-              <Input value={typeof p.name === 'string' ? p.name : ''}
-                placeholder={t('settings.actions.paramName')}
-                onChange={(e) => { const nx = params.slice(); nx[i] = { ...nx[i], name: e.target.value }; setParams(nx) }} />
-              <SearchSelect value={typeof p.default === 'string' ? p.default : ''}
-                options={BUILTIN_VALUE_OPTIONS} allowCustom
-                anyLabel={t('common.none')}
-                placeholder={t('settings.actions.paramDefault')}
-                onChange={(v) => { const nx = params.slice(); const cur = { ...nx[i] }; if (v) cur.default = v; else delete cur.default; nx[i] = cur; setParams(nx) }} />
-              <SmallRemove type="button" onClick={() => { const nx = params.slice(); nx.splice(i, 1); setParams(nx) }}><Trash2 size={14} /></SmallRemove>
-            </ParamRow>
-          ))}
+          {/* an input: its name (what the steps read), the label and the purpose shown where the service is
+              called, the value used when the caller gives none — each field under its own heading */}
+          {params.map((p, i) => {
+            const text = (k: string) => (typeof p[k] === 'string' ? (p[k] as string) : '')
+            const setText = (k: string, v: string) => {
+              const nx = params.slice(); const cur = { ...nx[i] }
+              if (v || k === 'name') cur[k] = v; else delete cur[k]
+              nx[i] = cur; setParams(nx)
+            }
+            return (
+              <ParamCard key={i} data-service-input>
+                <ParamGrid>
+                  <Field label={t('settings.actions.paramNameLabel')}>
+                    <Input value={text('name')} placeholder={t('settings.actions.paramNameExample')} onChange={(e) => setText('name', e.target.value)} />
+                  </Field>
+                  <Field label={t('settings.actions.paramLabel')}>
+                    <Input data-input-label value={text('label')} placeholder={t('settings.actions.paramLabelExample')} onChange={(e) => setText('label', e.target.value)} />
+                  </Field>
+                  <Field label={t('settings.actions.paramDefaultLabel')}>
+                    <SearchSelect value={text('default')} options={BUILTIN_VALUE_OPTIONS} allowCustom anyLabel={t('common.none')}
+                      placeholder={t('settings.actions.paramDefaultExample')} onChange={(v) => setText('default', v)} />
+                  </Field>
+                  <Field label={t('settings.actions.paramWhat')}>
+                    <Input data-input-what value={text('description')} placeholder={t('settings.actions.paramWhatExample')} onChange={(e) => setText('description', e.target.value)} />
+                  </Field>
+                </ParamGrid>
+                <SmallRemove type="button" title={t('common.delete')} onClick={() => { const nx = params.slice(); nx.splice(i, 1); setParams(nx) }}><Trash2 size={14} /></SmallRemove>
+              </ParamCard>
+            )
+          })}
           <Button $variant="ghost" $size="sm" onClick={() => setParams([...params, { name: '' }])}>
             <Plus size={13} /> {t('settings.actions.addParam')}
           </Button>
         </div>
+
+        {/* the questions asked before the service runs: the same list of fields a screen's button has */}
+        {promptSchema && (
+          <div data-service-questions>
+            <SchemaForm
+              schema={promptSchema} defs={defs}
+              value={{ prompt_fields: Array.isArray(value.prompt_fields) ? value.prompt_fields : [] }}
+              onChange={(v) => patch({ prompt_fields: v.prompt_fields as Row[] | undefined })}
+            />
+          </div>
+        )}
     </>
   )
   const stepEditor = (
           <ActionTreeView
             actions={steps}
-            onChange={(nx) => patch({ steps: nx })}
+            onChange={(nx) => patch({ steps: withCapturedResults(nx) })}
             path={path}
             onPathChange={setPath}
             defs={defs}
@@ -194,6 +238,8 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
             // Heading rendered by the outer <SubHead> above — don't let ActionTreeView paint a
             // second "Steps". Keep the hint (it has no outer equivalent).
             hint={t('settings.actions.stepsHint')}
+            // what the service receives (its inputs, the answers to its questions) is offered where a step takes a value
+            extraSourceOptions={serviceInputs}
           />
   )
   const viewSwitch = (
@@ -210,7 +256,7 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
         <FlowCol>
           {viewSwitch}
           <ActionFlow
-            actions={steps} onChange={(nx) => patch({ steps: nx })} path={path} onPathChange={setPath}
+            actions={steps} onChange={(nx) => patch({ steps: withCapturedResults(nx) })} path={path} onPathChange={setPath}
             inputs={params.map((p) => (typeof p.name === 'string' ? p.name : '')).filter(Boolean)}
           />
         </FlowCol>
@@ -242,7 +288,7 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
         title={(
           <>
             {t('settings.actions.designerTitle')} ·{' '}
-            <span style={{ fontFamily: fonts.mono, color: colors.text.muted, fontWeight: 400 }}>[actions.{actionId}]</span>
+            <ObjectTitle label={typeof value?.label === 'string' ? value.label : null} id={actionId} />
           </>
         )}
         onClose={() => void cancel()}
@@ -254,6 +300,7 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
         onToggleFullscreen={() => setFullscreen((v) => !v)}
         scrollBody={false}  /* the inner <Body> manages its own scroll */
       >
+        {failure && <div style={{ marginBottom: 12, flex: '0 0 auto' }}><SaveProblems failure={failure} /></div>}
         {inner}
       </EditorModalShell>
       {editQuery && (

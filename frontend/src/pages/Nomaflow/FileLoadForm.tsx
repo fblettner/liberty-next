@@ -5,7 +5,7 @@
 // connector's queries are offered as lists as soon as they can be read.
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Input, SearchSelect, SearchSelectMulti, type SearchSelectOption } from '../../common'
+import { Input, SearchSelect, SearchSelectMulti, TableSelect, type SearchSelectOption } from '../../common'
 import { fileSourceOf, fileSourcePatch, tableColumns, type FileSource } from '../../services/fileLoad'
 import type { ConnectorMeta } from '../../types/connectors'
 import type { StepConfig } from './types'
@@ -130,7 +130,7 @@ export default function FileLoadForm({ step, patch, sqlConnectors }: {
         </Field>
         <Field>
           <FieldLabel>{t('nomaflow.steps.table')}</FieldLabel>
-          <Input value={table} onChange={(e) => setTarget({ table: e.target.value })} placeholder="fact_sales" />
+          <TableSelect connector={connector || null} schema={schema} value={table} onChange={(v) => setTarget({ table: v })} />
         </Field>
         <Field as="div" $span={3} data-load-columns>
           <FieldLabel>{t('nomaflow.load.columns')}</FieldLabel>

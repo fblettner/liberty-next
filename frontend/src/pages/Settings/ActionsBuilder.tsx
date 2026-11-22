@@ -6,10 +6,11 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Plus, Trash2, Copy, GitBranch, GitMerge, Edit3, Link2, Play, Share2 } from 'lucide-react'
-import { Banner, Button, useModals } from '../../common'
+import { Banner, Button, SaveProblems, useModals } from '../../common'
+import { failureOf, targetOf, type SaveFailure, type SaveProblem } from '../../services/saveProblems'
 import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
-import { validateId } from '../../services/idValidator'
+import { newObjectFromLabel, validateId } from '../../services/idValidator'
 import ActionDesignerModal from './ActionDesignerModal'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import { FindDependenciesModal, type DependencySeed } from './FindDependenciesModal'
@@ -41,6 +42,8 @@ export default function ActionsBuilder() {
   const [usagesTarget, setUsagesTarget] = useState<FindUsagesTarget | null>(null)
   const [depsSeeds, setDepsSeeds] = useState<DependencySeed[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // a save the server refused: its problems one by one, each opening the service it is in
+  const [failure, setFailure] = useState<SaveFailure | null>(null)
   const [busy, setBusy] = useState(false)
   // the services as the server runs them: their inputs, the endpoints they serve, where one can be exposed
   const [studio, setStudio] = useState<{ services: StudioService[]; connectors: string[]; default_connector: string } | null>(null)
@@ -60,30 +63,38 @@ export default function ActionsBuilder() {
 
   // List-level ops persist the whole actions.toml + reload (per-action editing is in the modal).
   const persist = async (next: Record<string, Row>) => {
-    setBusy(true); setError(null)
+    setBusy(true); setError(null); setFailure(null)
     try {
       await api.put<{ saved: boolean }>('/admin/config/actions/parsed', { actions: next })
       await api.post('/admin/reload')
       setDoc(next)
       void load()
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      setFailure(failureOf(e))
     } finally { setBusy(false) }
+  }
+  // "Open" on a problem of a refused save: the service it is in, in its designer.
+  const problemOpener = (p: SaveProblem): (() => void) | null => {
+    const id = targetOf('actions', p.path)?.id
+    return id && doc?.[id] ? () => setEditing(id) : null
   }
 
   const addAction = async () => {
     if (!doc) return
     const existing = Object.keys(doc)
-    const id = (await modals.prompt({
+    // the NAME is asked for; the id is made from it (shown while it is typed)
+    const name = (await modals.prompt({
       title: t('settings.actions.add'),
-      message: t('settings.actions.namePrompt'),
-      placeholder: 'snake_case',
+      message: t('settings.newObject.name'),
+      placeholder: t('settings.actions.nameExample'),
       submitLabel: t('common.add'),
-      validate: (v) => validateId({ kind: 'action', proposed: v, existing, mode: 'add' }),
+      validate: (v) => (newObjectFromLabel(v, existing) ? null : t('settings.newObject.noLetters')),
+      note: (v) => t('settings.newObject.idWillBe', { id: newObjectFromLabel(v, existing)?.id ?? '' }),
     }))?.trim()
-    if (!id) return
-    await persist({ ...doc, [id]: { label: '', steps: [] } })
-    setEditing(id)   // jump straight into the designer
+    const made = name ? newObjectFromLabel(name, existing) : null
+    if (!made) return
+    await persist({ ...doc, [made.id]: { label: made.label, steps: [] } })
+    setEditing(made.id)   // jump straight into the designer
   }
 
   const cloneAction = async (id: string) => {
@@ -151,6 +162,7 @@ export default function ActionsBuilder() {
         {error && <Banner $tone="error">{error}</Banner>}
       </Bar>
       {notice && <Banner $tone="ok">{notice}</Banner>}
+      <SaveProblems failure={failure} opener={problemOpener} />
       <Sub>{t('settings.actions.hint')}</Sub>
 
       <List>

@@ -24,6 +24,7 @@ import {
 } from '../../common'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 import { BUILTIN_SOURCE_PATHS } from '../TableView/actionRunner'
+import { applyPick } from './actionPath'
 
 // Predefined runtime values for the source-mode default fallback (resolves the same built-ins a
 // source does) — a picker so operators don't memorise the ``#…#`` syntax.
@@ -272,24 +273,17 @@ function SourcePathInput({
   // `get_token_for_ais.first_row.userInfo.token` instead of asking the operator to type
   // the joining dot. Leaves the value alone when it's empty or already ends with a dot.
   const insertAtCursor = (picked: string) => {
+    // A picked suggestion is a whole place a value comes from: it replaces what was there —
+    // inserting it in the middle of the text made a path that reads nothing. A bare column picked
+    // at the end of a path that waits for one still continues it (actionPath.applyPick).
     const { start, end } = cursorRef.current
-    const before = value.slice(0, start)
-    const after = value.slice(end)
-    let toInsert = picked
-    // Smart-dot: only when we're inserting at the end of a non-empty, non-dot-terminated
-    // prefix AND the picked path doesn't already start with one. Picking a top-level
-    // candidate into an empty field stays clean.
-    if (before && !before.endsWith('.') && !picked.startsWith('.')) {
-      toInsert = '.' + picked
-    }
-    const next = before + toInsert + after
+    const { next, cursor: newCursor } = applyPick(value, start, end, picked)
     onChange(next)
-    // After React commits, restore focus + put the cursor right after the inserted text.
+    // After React commits, restore focus + put the cursor right after the text.
     queueMicrotask(() => {
       const el = inputRef.current
       if (!el) return
       el.focus()
-      const newCursor = start + toInsert.length
       el.setSelectionRange(newCursor, newCursor)
       cursorRef.current = { start: newCursor, end: newCursor }
     })

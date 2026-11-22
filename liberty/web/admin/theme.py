@@ -8,9 +8,10 @@ from typing import Any
 
 from fastapi import HTTPException, Request, status
 from liberty.web.admin._base import Superuser, _snapshot_config, router
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
-from liberty.theme import font_choices, load_theme, parse_theme, preset_choices, resolve_theme
+from liberty.theme import ThemeFile, font_choices, load_theme, parse_theme, preset_choices, resolve_theme
+from liberty.web.save_errors import config_invalid
 
 # ── theme.toml (per-deployment branding — see liberty/theme.py) ───────────────────────────────
 
@@ -43,10 +44,8 @@ async def put_theme_parsed(body: ThemeBody, request: Request, _: Superuser) -> d
     caller can apply them immediately."""
     try:
         validated = parse_theme({"theme": body.theme})
-    except ValidationError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid theme: {exc}") from exc
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid theme: {exc}") from exc
+    except ValueError as exc:                                # a ValidationError is one
+        raise config_invalid("theme", exc, {"theme": body.theme}, ThemeFile) from exc
 
     normalized = validated.model_dump(exclude_none=True)
     import tomli_w

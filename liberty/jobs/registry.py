@@ -108,6 +108,17 @@ def load_jobs(
         return JobRegistry(JobsFile(jobs=list(builtins or [])))
     with path.open("rb") as f:
         data: dict[str, Any] = tomllib.load(f)
+    config = parse_jobs_data(data, env=env)
+    in_file = {j.id for j in config.jobs}
+    config.jobs = [*config.jobs, *(b for b in builtins or [] if b.id not in in_file)]
+    return JobRegistry(config)
+
+
+def parse_jobs_data(data: dict[str, Any], *, env: dict[str, str] | None = None) -> JobsFile:
+    """The content of a ``jobs.toml`` (already read as a dict) as the loader takes it: ``${…}``
+    resolved, each job's ``step_defaults`` merged into its steps, then validated. What checks a
+    file about to be written must read it this way too — validating the raw content refuses the
+    ``step_defaults`` a job legitimately carries on disk."""
     data = substitute_env(data, env=env)
     for job in data.get("jobs", []):
         defaults = job.pop("step_defaults", None)
@@ -115,10 +126,7 @@ def load_jobs(
             job["steps"] = [
                 _merge_step_defaults(defaults, step) for step in job.get("steps", [])
             ]
-    config = JobsFile.model_validate(data)
-    in_file = {j.id for j in config.jobs}
-    config.jobs = [*config.jobs, *(b for b in builtins or [] if b.id not in in_file)]
-    return JobRegistry(config)
+    return JobsFile.model_validate(data)
 
 
 _MERGEABLE_DICTS = ("source", "target", "headers", "mapping", "op_kwargs")

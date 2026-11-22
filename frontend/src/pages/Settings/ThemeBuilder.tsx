@@ -10,7 +10,8 @@ import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Check, ChevronDown, ChevronRight, Palette, Plus, Save, Tag as TagIcon, Type, Undo2, X } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, HeaderActions, Field, Input, SpinnerRing } from '../../common'
+import { Banner, Button, Card, HeaderActions, Field, Input, SaveProblems, SpinnerRing } from '../../common'
+import { failureOf, type SaveFailure } from '../../services/saveProblems'
 import { useBranding, derivePrimaryVars } from '../../branding/BrandingContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import {
@@ -81,6 +82,7 @@ export default function ThemeBuilder() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [failure, setFailure] = useState<SaveFailure | null>(null)     // a save the server refused
   const [status, setStatus] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -118,14 +120,14 @@ export default function ThemeBuilder() {
     setDraft(draftFromDoc(JSON.parse(original) as ThemeDoc)); setStatus(null); setError(null)
   }
   const save = async () => {
-    setBusy(true); setError(null); setStatus(null)
+    setBusy(true); setError(null); setStatus(null); setFailure(null)
     try {
       await api.put('/admin/config/theme/parsed', { theme: doc })
       await refresh()
       setStatus(t('settings.theme.saved'))
       setOriginal(JSON.stringify(doc))
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
+      setFailure(failureOf(e))
     } finally { setBusy(false) }
   }
   const setVar = (i: number, at: 0 | 1, value: string) =>
@@ -148,6 +150,7 @@ export default function ThemeBuilder() {
       <Hint>{t('settings.theme.intro')}</Hint>
       {status && <Banner $tone="ok">{status}</Banner>}
       {error && <Banner $tone="error">{error}</Banner>}
+      <SaveProblems failure={failure} />
 
       <Split>
         <Settings>

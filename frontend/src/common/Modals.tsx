@@ -77,6 +77,9 @@ export interface PromptOptions {
   /** Allow empty values to submit (default ``false`` — the prompt requires non-blank input,
    *  matching window.prompt's behaviour where the caller checks for non-empty anyway). */
   allowEmpty?: boolean
+  /** A line shown under the input while what is typed is accepted — what follows from it (the
+   *  id made from a name). Neither an error nor a warning. */
+  note?: (value: string) => string | null
 }
 
 export interface AlertOptions {
@@ -333,6 +336,9 @@ function PromptModalContent({
           )}
           {!liveResult.error && liveResult.warning && (
             <div style={{ color: 'var(--text-warning, #d97706)', fontSize: 12 }}>⚠ {liveResult.warning}</div>
+          )}
+          {!liveResult.error && value.trim() !== '' && opts.note?.(value.trim()) && (
+            <div data-prompt-note style={{ color: 'var(--text-muted)', fontSize: 12 }}>{opts.note(value.trim())}</div>
           )}
         </ModalBody>
         <ModalFooter>

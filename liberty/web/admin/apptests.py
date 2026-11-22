@@ -165,3 +165,39 @@ async def tests_try(body: TryBody, request: Request, _: Runner) -> dict[str, Any
     first = rows[0] if rows and isinstance(rows[0], dict) else {}
     return {"ok": True, "rows": len(rows),
             "first_row": {str(k): (v.strip() if isinstance(v, str) else v) for k, v in first.items() if not isinstance(v, dict | list) and v not in (None, "")}}
+
+
+class StarterBody(BaseModel):
+    connector: str
+    endpoint: str
+    taken: list[str] = Field(default_factory=list)      # the ids of the suite's cases: the new one takes another
+
+
+@router.post("/tests/starter", summary="Prepare a first case from an endpoint")
+async def tests_starter(body: StarterBody, request: Request, _: Runner) -> dict[str, Any]:
+    """A case to start from, for one endpoint: a step calling it with the example values of its
+    variables, expecting what it answers NOW (rows, or the keys that hold something). Nothing is
+    saved: the page adds the case to the suite being edited. An endpoint that changes data is not
+    called — its case comes marked ``writes``; a call that fails is said in ``note`` and the case is
+    given all the same, to be filled."""
+    connectors = request.app.state.connectors
+    try:
+        api = connectors.api(body.connector)
+    except Exception:  # noqa: BLE001 — an unknown or non-API connector
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no API connector {body.connector!r}") from None
+    known = r.endpoint_of(api, body.endpoint)
+    if known is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"no endpoint {body.endpoint!r} on {body.connector}")
+    if getattr(known, "writable", False):
+        return {"case": r.starter_case(known, taken=body.taken), "played": False,
+                "note": f"{body.endpoint} changes data: it was not called — say what the call must answer, and add a step that puts things back"}
+    step = r.Step(name="call", endpoint=body.endpoint, params=r.starter_params(known))
+    problems, answer = await r.play(api, step, {})
+    if problems:
+        return {"case": r.starter_case(known, taken=body.taken), "played": False,
+                "note": ("the call did not work with the example values — fill the step's variables, then Try: " + "; ".join(problems))[:800]}
+    try:
+        rows = r.rows_of(step, answer, known)
+    except Exception:  # noqa: BLE001 — the rows are not where the endpoint says: the case is given without them
+        rows = None
+    return {"case": r.starter_case(known, answer=answer, rows=rows, taken=body.taken), "played": True, "note": None}

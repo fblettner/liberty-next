@@ -31,6 +31,8 @@ const SqlEditor = lazy(() => import('./SqlEditor').then((m) => ({ default: m.Sql
 import { SpinnerRing } from './Spinner'
 import type { WizardStatementType } from './SqlWizardModal'
 import { colors, fontSize, fonts, radius } from '../theme'
+import { hintParts } from '../services/hintText'
+import { freeMapText, mergeFreeMap } from '../services/freeMap'
 
 export interface JsonSchema {
   type?: string
@@ -61,11 +63,15 @@ export interface JsonSchema {
    *  of just its first string field. */
   x_summary?: string[]
   /** This field's options come from `framework_enums[<ref>]` (renders as a SearchSelect). */
+  /** The model's own, longer description of the field: shown behind the hint's "more" (liberty/field_labels.py). */
+  x_more?: string
   x_enum_ref?: string
   /** Like `x_enum_ref`, but the ref is picked at render-time from a sibling field's value:
    *  `{field: "rules", map: {ENUM: "ENUM_IDS", LOOKUP: "LOOKUP_IDS", BOOLEAN: "BOOLEAN_TRUE_VALUES"}}`.
    *  The form watches the sibling and swaps the dropdown when it changes. */
   x_enum_ref_when?: { field: string; map: Record<string, string> }
+  /** The field's label follows a sibling's value (a kind of field's second choice: "List of values", "Numbering rule"…). */
+  x_title_when?: { field: string; map: Record<string, string> }
   /** Like `x_enum_ref`, but the ref NAME is built from a driver field found on the nearest ENCLOSING
    *  object (this object's siblings first, then up the ancestor chain) — `<prefix><driver value>`.
    *  Lets a deeply-nested field key its options off a parent's value, e.g. a lookup bind's `param`
@@ -206,6 +212,7 @@ function mergePeel(outer: JsonSchema, branch: JsonSchema): JsonSchema {
     x_group: outer.x_group ?? branch.x_group,
     x_enum_ref: outer.x_enum_ref ?? branch.x_enum_ref,
     x_enum_ref_when: outer.x_enum_ref_when ?? branch.x_enum_ref_when,
+    x_title_when: outer.x_title_when ?? branch.x_title_when,
     x_enum_ref_ancestor: outer.x_enum_ref_ancestor ?? branch.x_enum_ref_ancestor,
     x_key_enum_ref: outer.x_key_enum_ref ?? branch.x_key_enum_ref,
     x_value_enum_ref: outer.x_value_enum_ref ?? branch.x_value_enum_ref,
@@ -224,6 +231,8 @@ function effective(s: JsonSchema, defs: Defs): JsonSchema {
 }
 const isObjectModel = (s: JsonSchema) => s.type === 'object' && !!s.properties
 const isStringMap = (s: JsonSchema) => s.type === 'object' && !!s.additionalProperties && typeof s.additionalProperties === 'object'
+// name = value with values of any kind (``dict[str, Any]``): edited as text rows, a value left alone keeps its kind
+const isFreeMap = (s: JsonSchema) => s.type === 'object' && s.additionalProperties === true && !s.properties
 
 /** True iff *s* is a Pydantic discriminated union of object models — `oneOf: [...]` with a
  *  `discriminator: {propertyName: …}`. Used by the array-handling branch to take the object-list
@@ -265,6 +274,34 @@ function resolveUnionBranch(s: JsonSchema, value: Record<string, unknown> | unde
 
 // ── small styled bits ───────────────────────────────────────────────────────
 const Hint = styled.div`font-size: ${fontSize.micro}; color: ${colors.text.muted}; margin-top: 3px; line-height: 1.4;`
+const MoreBtn = styled.button`
+  background: none; border: none; padding: 0; margin-left: 6px; cursor: pointer; font: inherit;
+  color: ${colors.blue.main}; text-decoration: underline;
+`
+const MoreText = styled.div`
+  margin-top: 4px; padding-left: 8px; border-left: 2px solid ${colors.border};
+  & code { font-family: ${fonts.mono}; color: ${colors.text.secondary}; }
+`
+
+/** A field's hint: one short sentence, and the longer explanation behind "more". */
+function FieldHint({ short, more }: { short?: string; more?: string }) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  if (!short && !more) return null
+  return (
+    <Hint>
+      {short}
+      {more && (
+        <MoreBtn type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+          {open ? t('schemaForm.less') : t('schemaForm.more')}
+        </MoreBtn>
+      )}
+      {more && open && (
+        <MoreText>{hintParts(more).map((p, i) => (p.code ? <code key={i}>{p.text}</code> : <span key={i}>{p.text}</span>))}</MoreText>
+      )}
+    </Hint>
+  )
+}
 const Row = styled.div`display: flex; gap: 6px; align-items: center; margin-bottom: 5px;`
 const MiniBtn = styled.button`
   display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 9px; border-radius: ${radius.sm};
@@ -747,11 +784,17 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
         if (vw) {
           const sibling = value[vw.field]
           const allowed = Array.isArray(vw.value) ? vw.value : [vw.value]
-          if (!allowed.some((v) => v === sibling)) return null
+          // a kind typed in another case than the schema's is the same kind
+          const same = (a: unknown, b: unknown) => a === b || (typeof a === 'string' && typeof b === 'string' && a.toUpperCase() === b.toUpperCase())
+          if (!allowed.some((v) => same(v, sibling))) return null
         }
         const isReq = required.has(key)
-        const label = (sub.title ?? raw.title ?? key) + (isReq ? ' *' : '')
+        // the label follows a sibling's value where the schema says so (``x_title_when``)
+        const titleWhen = sub.x_title_when ?? raw.x_title_when
+        const driven = titleWhen ? titleWhen.map[String(value[titleWhen.field] ?? '').toUpperCase()] ?? titleWhen.map[String(value[titleWhen.field] ?? '')] : undefined
+        const label = (driven ?? sub.title ?? raw.title ?? key) + (isReq ? ' *' : '')
         const desc = sub.description ?? raw.description
+        const more = raw.x_more ?? sub.x_more
         const cur = value[key]
         let control: ReactNode
 
@@ -888,6 +931,13 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
             onChange={(v) => set(key, Object.keys(v).length ? v : undefined)}
             keyEnum={keyEnum}
           />
+        } else if (isFreeMap(sub)) {
+          const map = (cur && typeof cur === 'object' && !Array.isArray(cur) ? cur : {}) as Record<string, unknown>
+          control = <StringMapEditor
+            keyEnum={enumFor(sub.x_key_enum_ref ?? null, enums)}
+            value={freeMapText(map)}
+            onChange={(v) => set(key, Object.keys(v).length ? mergeFreeMap(map, v) : undefined)}
+          />
         } else if (isObjectModel(sub)) {
           const subValue = (cur && typeof cur === 'object' && !Array.isArray(cur) ? cur : {}) as Record<string, unknown>
           control = onNavigate ? (
@@ -928,7 +978,7 @@ export function SchemaForm({ schema, value, onChange, defs, onNavigate, onEditQu
           <div key={key} style={{ marginBottom: 14 }}>
             <Field label={label}>{control}</Field>
             {fieldNotes?.[key]}
-            {desc && <Hint>{desc}</Hint>}
+            <FieldHint short={desc} more={more} />
           </div>
         )
       })}
