@@ -631,3 +631,125 @@ async def test_a_delete_sends_the_body_its_endpoint_declares() -> None:
     await conn.call("drop", {"id": "7"})
     await conn.call("read", {})
     assert seen[1][2] == b"" and seen[2][2] == b""
+
+
+# --------------------------------------------------------------------------- #
+# a call made as the signed-in user: a signed token per user (JWT)
+# --------------------------------------------------------------------------- #
+
+
+def _rsa_pem() -> tuple[str, object]:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()
+    return pem, key.public_key()
+
+
+@pytest.mark.asyncio
+async def test_a_call_is_made_as_the_signed_in_user(tmp_path) -> None:
+    import base64
+
+    import jwt as pyjwt
+
+    from liberty.auth.principal import Principal, current_principal
+    pem, public = _rsa_pem()
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("authorization", ""))
+        return httpx.Response(200, json={})
+
+    def cfg(**over) -> ApiConnectorConfig:
+        base = dict(type="api", base_url="https://ais.test", auth_type="user_jwt", auth_jwt_key=encrypt(pem.replace("\n", "\\n"), MK),
+                    auth_jwt_issuer="liberty", endpoints=[EndpointDef(name="e", path="/x")])
+        return ApiConnectorConfig(**{**base, **over})
+
+    def claims(header: str) -> dict:
+        assert header.startswith("Bearer ")
+        return pyjwt.decode(header[7:], public, algorithms=["RS256"], options={"verify_aud": False})
+
+    ann = Principal(id="1", username="ann", attributes={"jde_user": "ab12345"})
+    bob = Principal(id="2", username="bob")                       # no JDE user on his account
+    conn = _connector(cfg(), handler, master_key=MK)
+    token = current_principal.set(ann)
+    try:
+        # the signed-in user's attribute, upper-cased, in the claim the server reads; short-lived; signed by the key
+        assert (await conn.call("e")).success
+        c = claims(seen[-1])
+        assert c["sub"] == "AB12345" and c["iss"] == "liberty" and 0 < c["exp"] - c["iat"] <= 300
+        await conn.call("e")
+        assert seen[-1] == seen[-2]                                # kept until it is about to expire
+        # a user without the attribute: refused, nothing sent
+        current_principal.set(bob)
+        sent = len(seen)
+        out = await conn.call("e")
+        assert not out.success and out.status_code == 0 and "no 'jde_user' attribute" in out.error and len(seen) == sent
+        # nobody signed in (a job): refused too, and said so
+        current_principal.set(None)
+        out = await conn.call("e")
+        assert not out.success and "nobody is signed in" in out.error and len(seen) == sent
+    finally:
+        current_principal.reset(token)
+        await conn.aclose()
+
+    # the service account when no user can be named — and still the user's own token when one can
+    conn = _connector(cfg(auth_jwt_fallback="service", auth_username="svc", auth_password="pw", auth_jwt_claim="prn", auth_jwt_audience="jde",
+                          auth_jwt_uppercase=False, auth_jwt_user_attribute="", auth_jwt_ttl=60), handler, master_key=MK)
+    token = current_principal.set(None)
+    try:
+        await conn.call("e")
+        assert seen[-1] == "Basic " + base64.b64encode(b"svc:pw").decode()
+        current_principal.set(bob)                                 # a blank attribute setting: the Liberty name itself, as written
+        await conn.call("e")
+        c = claims(seen[-1])
+        assert c["prn"] == "bob" and c["aud"] == "jde" and c["exp"] - c["iat"] == 60 and "sub" not in c
+    finally:
+        current_principal.reset(token)
+        await conn.aclose()
+
+    # the key as a file; a missing or unreadable key is said, nothing sent
+    key_file = tmp_path / "liberty-jde.key"
+    key_file.write_text(pem)
+    for key, expected in ((str(key_file), None), ("", "no key to sign"), (str(tmp_path / "absent.key"), "cannot be read"), ("-----BEGIN PRIVATE KEY-----\\nnope", "not a private key")):
+        conn = _connector(cfg(auth_jwt_key=key or None), handler, master_key=MK)
+        token = current_principal.set(ann)
+        try:
+            out = await conn.call("e")
+            assert (out.success, expected is None) in ((True, True), (False, False)) and (expected is None or expected in out.error)
+        finally:
+            current_principal.reset(token)
+            await conn.aclose()
+    assert claims(seen[-1])["sub"] == "AB12345"
+
+    # each token has its own id; a single-use one says so and is never kept; the certificate's fingerprint goes in the header
+    import datetime as dt
+    import hashlib
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.x509.oid import NameOID
+    private = serialization.load_pem_private_key(pem.encode(), password=None)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "liberty")])
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(public).serial_number(1)
+            .not_valid_before(dt.datetime(2026, 1, 1)).not_valid_after(dt.datetime(2036, 1, 1)).sign(private, hashes.SHA256()))
+    cer = tmp_path / "liberty-jde.cer"
+    cer.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    conn = _connector(cfg(auth_jwt_certificate=str(cer)), handler, master_key=MK)
+    try:
+        one, again, once, twice = conn.user_token("AB12345"), conn.user_token("AB12345"), conn.user_token("AB12345", single_use=True), conn.user_token("AB12345", single_use=True)
+        assert one == again and once != twice != one
+        assert claims("Bearer " + once)["at_use_nbr"] == 1 and "at_use_nbr" not in claims("Bearer " + one)
+        assert len({claims("Bearer " + x)["jti"] for x in (one, once, twice)}) == 3
+        expected = base64.urlsafe_b64encode(hashlib.sha1(cert.public_bytes(serialization.Encoding.DER)).digest()).rstrip(b"=").decode()
+        assert pyjwt.get_unverified_header(one)["x5t"] == expected
+    finally:
+        await conn.aclose()
+    bad = _connector(cfg(auth_jwt_certificate=str(tmp_path / "absent.cer")), handler, master_key=MK)
+    token = current_principal.set(ann)
+    try:
+        out = await bad.call("e")
+        assert not out.success and "auth_jwt_certificate cannot be read" in out.error
+    finally:
+        current_principal.reset(token)
+        await bad.aclose()

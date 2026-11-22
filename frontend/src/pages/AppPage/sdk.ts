@@ -27,7 +27,7 @@ import { PageGrid } from './PageGrid'
 import { hasPermission } from '../../services/permissions'
 
 // 2: `Grid` (the shared grid)
-export const PAGE_SDK_VERSION = 2
+export const PAGE_SDK_VERSION = 3
 
 export interface PageSdk {
   /** the contract's version (this file) */

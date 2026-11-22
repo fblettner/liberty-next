@@ -1,6 +1,11 @@
 """``notify`` step — send a message through the notification dispatcher (portal / e-mail /
 action), with the files this run produced attached (C5: the digest's delivery). Placeholders
-in the subject and body: ``{JOB}``, ``{RUN_ID}``, ``{FILES}`` (the attached names), ``{DATE}``.
+in the subject and body: ``{JOB}``, ``{RUN_ID}``, ``{FILES}`` (the attached names), ``{DATE}``,
+``{USER}`` (who started the run).
+
+A recipient may name the person who started the run: ``user:{USER}`` — "send me what I asked
+for". A run nobody started (a schedule, a hook) has no such person: that recipient is left out,
+and a step left with no recipient at all sends nothing and says so, without failing the run.
 """
 
 from __future__ import annotations
@@ -13,6 +18,27 @@ from liberty.jobs.schema import Step, StepType
 from liberty.jobs.steps.base import RunContext, StepFailed, StepResult
 
 _log = logging.getLogger(__name__)
+
+RUNNER = "{USER}"
+
+
+def run_user(ctx: RunContext) -> str:
+    """Who started the run — ``""`` for a run no user started (a schedule, another job, a hook)."""
+    return str(getattr(ctx.trigger, "triggered_by", None) or "").strip()
+
+
+def recipients_for(recipients: list[str], user: str) -> list[str]:
+    """The step's recipients with ``{USER}`` filled in; one that names the runner is left out when
+    nobody started the run."""
+    out: list[str] = []
+    for raw in recipients:
+        if RUNNER in raw:
+            if not user:
+                continue
+            raw = raw.replace(RUNNER, user)
+        if raw not in out:
+            out.append(raw)
+    return out
 
 
 class NotifyStepExecutor:
@@ -43,9 +69,13 @@ class NotifyStepExecutor:
             missing = [a for a in step.attach if a != "*" and a not in {n for n, _ in attachments} and a not in {f"{ctx.run_id}-{n}" for n, _ in attachments}]
             if missing:
                 raise StepFailed(f"notify: file(s) not produced by this run: {', '.join(missing)}")
-        payload = {"JOB": ctx.job_id, "RUN_ID": ctx.run_id, "FILES": ", ".join(n for n, _ in attachments), "DATE": date.today().isoformat()}
+        user = run_user(ctx)
+        recipients = recipients_for(list(step.recipients), user)
+        if step.recipients and not recipients:                  # only "who started the run", and nobody did
+            return StepResult(rows_affected=0, log_excerpt="nobody started this run: nothing sent", extras={"attached": [n for n, _ in attachments]})
+        payload = {"JOB": ctx.job_id, "RUN_ID": ctx.run_id, "FILES": ", ".join(n for n, _ in attachments), "DATE": date.today().isoformat(), "USER": user}
         msg = Message(subject=step.subject or "", body=step.body if isinstance(step.body, str) else None, link=f"/nomaflow/runs/{ctx.run_id}", rule=f"job:{ctx.job_id}:notify", payload=payload)
-        report = await dispatcher.dispatch(msg, channels=list(step.channels), recipients=list(step.recipients), attachments=attachments)
+        report = await dispatcher.dispatch(msg, channels=list(step.channels), recipients=recipients, attachments=attachments)
         if report.errors:
             raise StepFailed("notify: " + "; ".join(f"{k}: {v}" for k, v in report.errors.items()))
         excerpt = f"portal {len(report.portal_users)}, email {len(report.emails)}, {len(attachments)} attachment(s)"

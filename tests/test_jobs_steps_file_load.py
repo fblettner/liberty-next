@@ -345,3 +345,34 @@ def test_driver_message_keeps_the_sentence_only() -> None:
     e = E("(sqlalchemy.dialects.postgresql.asyncpg.Error) invalid input for query argument $1: 2025 (expected str, got int)\n[SQL: SELECT 1] [parameters: (2025,)]")
     assert driver_message(e) == "invalid input for query argument $1: 2025 (expected str, got int)"
     assert driver_message(ValueError("plain")) == "plain"
+
+
+def test_a_number_written_as_text() -> None:
+    """The thousands separator and the decimal comma: named by the step, or read when not ambiguous."""
+    from decimal import Decimal
+
+    from liberty.jobs.steps.file_load import CellError, coerce_cell, parse_number
+    from sqlalchemy import Integer, Numeric
+    # the file's separator is named: nothing to guess
+    assert parse_number("1,234.56", decimal=".") == Decimal("1234.56") and parse_number("1,000", decimal=".") == 1000
+    assert parse_number("1.234,56", decimal=",") == Decimal("1234.56") and parse_number("1.000", decimal=",") == 1000
+    assert parse_number("1 234,5", decimal=",") == Decimal("1234.5") and parse_number("1'234.50", decimal=".") == Decimal("1234.50")
+    # auto: both there → the last one is the decimal separator; several of one → thousands; one alone → a decimal
+    assert parse_number("1.234,56") == parse_number("1,234.56") == Decimal("1234.56")
+    assert parse_number("1,234,567") == 1234567 and parse_number("1.234.567") == 1234567
+    assert parse_number("1,5") == parse_number("1.5") == Decimal("1.5") and parse_number("1,000") == 1          # a decimal column: read as a decimal
+    # a whole number: groups of three digits are thousands (it was read as 1)
+    assert coerce_cell("1,000", Integer()) == 1000 and coerce_cell("1.000", Integer()) == 1000 and coerce_cell("-12 000", Integer()) == -12000
+    assert coerce_cell("1.234,56", Numeric()) == Decimal("1234.56")                                              # it was 1.23456
+    assert coerce_cell("1,000", Numeric(), decimal=".") == 1000 and coerce_cell("1.000", Numeric(), decimal=",") == 1000
+    with pytest.raises(CellError, match="not a whole number"):
+        coerce_cell("1.234,56", Integer())
+    with pytest.raises(CellError, match="not a whole number"):
+        coerce_cell("12,34", Integer())
+    with pytest.raises(CellError, match="not a number"):
+        coerce_cell("12a", Numeric())
+    # a typed cell (a spreadsheet's number) is never re-read
+    assert coerce_cell(1000.5, Numeric(), decimal=",") == 1000.5 and coerce_cell(1000, Integer(), decimal=",") == 1000
+    assert step(path="f.csv", decimal_separator=",").decimal_separator == "," and step(path="f.csv").decimal_separator == "auto"
+    with pytest.raises(ValueError):
+        step(path="f.csv", decimal_separator=";")

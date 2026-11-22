@@ -909,6 +909,11 @@ function FileLoadForm({ step, patch, sqlConnectors }: FormProps) {
           <FieldLabel>{t('nomaflow.steps.encoding')}</FieldLabel>
           <Input value={String(f.encoding ?? 'utf-8-sig')} onChange={(e) => patch({ encoding: e.target.value || 'utf-8-sig' } as Partial<StepConfig>)} />
         </Field>
+        <Field>
+          <FieldLabel>{t('nomaflow.steps.decimalSeparator')}</FieldLabel>
+          <SearchSelect value={String(f.decimal_separator ?? 'auto')} onChange={(v) => patch({ decimal_separator: v || 'auto' } as Partial<StepConfig>)}
+            options={[{ value: 'auto', label: t('nomaflow.steps.decimalAuto') }, { value: '.', label: t('nomaflow.steps.decimalDot') }, { value: ',', label: t('nomaflow.steps.decimalComma') }]} />
+        </Field>
       </Grid>
       <SubHead>{t('nomaflow.steps.target')}</SubHead>
       <Grid>

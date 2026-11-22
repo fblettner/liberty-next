@@ -107,6 +107,7 @@ FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
             {"value": "bearer", "label": "Bearer Token"},
             {"value": "api_key", "label": "API Key"},
             {"value": "oauth2", "label": "OAuth 2.0"},
+            {"value": "user_jwt", "label": "Signed token per user (JWT)"},
         ],
     },
     "QUERY_DEFINITION": {

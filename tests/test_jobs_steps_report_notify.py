@@ -184,3 +184,26 @@ async def test_plugin_report_takes_the_run_params_typed(state, monkeypatch) -> N
     bad = step.model_copy(update={"op_kwargs": {"apps_id": "two"}})
     with pytest.raises(StepFailed, match="must be a number"):
         await ReportStepExecutor(lambda: state).execute(bad, _ctx("run2"))
+
+
+@pytest.mark.asyncio
+async def test_notify_step_to_whoever_started_the_run(state) -> None:
+    """``user:{USER}`` = the person who started the run. A run nobody started leaves that recipient
+    out — and a step with no recipient left sends nothing, without failing."""
+    from datetime import UTC, datetime
+
+    from liberty.jobs.steps.notify_step import recipients_for
+    from liberty.jobs.triggers import ScheduledTrigger
+    ex = NotifyStepExecutor(lambda: state)
+    step = Step(type=StepType.NOTIFY, name="me", recipients=["user:{USER}", "role:cfo", "user:{USER}"], subject="Your export, {USER}", body="{FILES}", attach=[])
+    before = len(state.notify.calls)
+    await ex.execute(step, _ctx("run4"))                               # started by "t"
+    call = state.notify.calls[-1]
+    assert call["recipients"] == ["user:t", "role:cfo"] and call["payload"]["USER"] == "t"
+    scheduled = RunContext(run_id="run5", job_id="digest", trigger=ScheduledTrigger(fired_at=datetime.now(UTC)))
+    await ex.execute(step, scheduled)                                  # a schedule: the role only
+    assert state.notify.calls[-1]["recipients"] == ["role:cfo"] and state.notify.calls[-1]["payload"]["USER"] == ""
+    sent = len(state.notify.calls)
+    res = await ex.execute(Step(type=StepType.NOTIFY, name="me", recipients=["user:{USER}"], subject="s", attach=[]), scheduled)
+    assert len(state.notify.calls) == sent == before + 2 and res.rows_affected == 0 and "nobody started" in res.log_excerpt
+    assert recipients_for(["user:{USER}", "email:a@b.test"], "") == ["email:a@b.test"] and recipients_for(["user:{USER}"], "ann") == ["user:ann"]

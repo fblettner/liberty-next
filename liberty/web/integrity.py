@@ -592,8 +592,8 @@ def _check_unused_connectors(state: Any, idx: _Index, out: list[Issue]) -> None:
 
 
 def _check_orphan_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
-    """A screen reached from no menu and no drill (nested_table / row_click / navigate) — likely
-    dead, or a drill target the operator forgot to wire."""
+    """A screen reached from no menu, no drill (nested_table / row_click / navigate) and no Explorer
+    entity — likely dead, or a drill target the operator forgot to wire."""
     reached: set[tuple[str, str]] = set()   # (app, screen_id)
     menus = getattr(state, "menus", None)
     if menus is not None:
@@ -639,6 +639,15 @@ def _check_orphan_screens(state: Any, idx: _Index, out: list[Issue]) -> None:
                         for sid_t, rq in idx.read_query_by_app.get(aconn, {}).items():
                             if rq == nav_to:
                                 reached.add((aconn, sid_t))
+    # An Explorer entity that names a screen opens a detail row in that screen's dialog (and takes its
+    # column hints from it): the screen is reached, whatever the menus say.
+    explorer = getattr(state, "explorer", None)
+    for app, models in (getattr(explorer, "explorer", None) or {}).items():
+        for model in (models or {}).values():
+            for entity in (getattr(model, "entities", None) or {}).values():
+                if getattr(entity, "screen", None):
+                    reached.add((app, entity.screen))
+    if screens is not None:
         for app, smap in (getattr(screens, "screens", None) or {}).items():
             for sid in smap:
                 if (app, sid) not in reached:

@@ -51,6 +51,9 @@ export interface PageGridProps<R extends PageGridRow = PageGridRow> {
   toolbar?: ReactNode
   /** no toolbar: the rows and the pager only */
   bare?: boolean
+  /** what a row shows when it is opened: every row gets a chevron, and this is drawn under the row
+   *  (its dependencies, a nested list…). Since version 3 of the contract. */
+  detail?: (row: R) => ReactNode
 }
 
 // the grid fills the box the page gives it (a height, or a flex child with min-height: 0)
@@ -65,7 +68,7 @@ const Cell = styled.span<{ $mono?: boolean; $muted?: boolean; $right?: boolean }
   text-align: ${({ $right }) => ($right ? 'right' : 'inherit')};
 `
 
-export function PageGrid<R extends PageGridRow = PageGridRow>({ columns, rows, id, onRowClick, rowClassName, exportName, pageSize, toolbar, bare }: PageGridProps<R>) {
+export function PageGrid<R extends PageGridRow = PageGridRow>({ columns, rows, id, onRowClick, rowClassName, exportName, pageSize, toolbar, bare, detail }: PageGridProps<R>) {
   const { i18n } = useTranslation()
   const nf = useMemo(() => new Intl.NumberFormat(i18n.language || 'en', { maximumFractionDigits: 2 }), [i18n.language])
   const defs = useMemo<ColumnDef<R, unknown>[]>(() => columns.map((c) => {
@@ -94,7 +97,7 @@ export function PageGrid<R extends PageGridRow = PageGridRow>({ columns, rows, i
     <Box>
       <Suspense fallback={<Centered />}>
         <DataTable<R> key={shape} columns={defs} data={rows} tableId={id} onRowClick={onRowClick} rowClassName={rowClassName}
-          exportFilename={exportName ?? 'export'} initialPageSize={pageSize} toolbar={toolbar} chromeless={bare} />
+          exportFilename={exportName ?? 'export'} initialPageSize={pageSize} toolbar={toolbar} chromeless={bare} renderDetail={detail} />
       </Suspense>
     </Box>
   )

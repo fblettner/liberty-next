@@ -29,6 +29,7 @@ import json
 import logging
 import re
 import time
+import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -86,6 +87,11 @@ class ApiResult:
 
 class ApiParamError(ValueError):
     """A parameter value that would take the call somewhere else than its endpoint says."""
+
+
+class ApiAuthError(RuntimeError):
+    """The call cannot be signed: no user to make it as, or no key to sign with. Said to the caller
+    as the call's error — nothing is sent."""
 
 
 _PLACEHOLDER = re.compile(r"\{\{([^{}]+)\}\}")
@@ -311,6 +317,11 @@ class APIConnector:
         self.auth_username = self._maybe_decrypt(config.auth_username or "", master_key, "auth_username")
         self.auth_password = self._maybe_decrypt(config.auth_password or "", master_key, "auth_password")
         self.auth_token = self._maybe_decrypt(config.auth_token or "", master_key, "auth_token")
+        # ``user_jwt``: the key that signs a token per user (read when first needed), the tokens signed
+        self._jwt_key_source = self._maybe_decrypt(config.auth_jwt_key or "", master_key, "auth_jwt_key")
+        self._jwt_key: Any = None
+        self._jwt_x5t: str | None = None
+        self._user_tokens: dict[str, tuple[str, float]] = {}
         # Per-environment servers: one connector each (its own client and token), same endpoints.
         # ``governed_pools`` = the pools a call is refused for when they have no target — the
         # registry widens it to the pools of the SQL connectors running on ``config.pool``.
@@ -448,8 +459,104 @@ class APIConnector:
 
     # -- auth -------------------------------------------------------------- #
 
+    # ``user_jwt`` — the call is made as the signed-in user: a short-lived token that names him on the
+    # server, signed with the connector's key (the server trusts its certificate). No password kept.
+
+    def acting_user(self) -> str | None:
+        """Who the call is made as on the server: the signed-in user's ``auth_jwt_user_attribute``
+        (or his Liberty name when the setting is blank), upper-cased when asked. ``None`` when
+        nobody is signed in (a job) or the user has no such attribute."""
+        from liberty.auth.principal import current_principal
+        principal = current_principal.get()
+        if principal is None:
+            return None
+        attribute = (self.config.auth_jwt_user_attribute or "").strip()
+        raw = (principal.attributes or {}).get(attribute) if attribute else principal.username
+        if isinstance(raw, (list, tuple)):
+            raw = raw[0] if raw else None
+        name = str(raw or "").strip()
+        if not name:
+            return None
+        return name.upper() if self.config.auth_jwt_uppercase else name
+
+    def _signing_key(self) -> Any:
+        """The private key, loaded once: the PEM text of the setting (its ``\\n`` taken as line
+        ends: a one-line field keeps a key that way) or the PEM file it names."""
+        if self._jwt_key is None:
+            source = (self._jwt_key_source or "").strip()
+            if not source:
+                raise ApiAuthError(f"connector {self.name!r}: no key to sign the user's token with (auth_jwt_key)")
+            if "-----BEGIN" in source:
+                pem = source.replace("\\n", "\n")
+            else:
+                try:
+                    pem = Path(source).expanduser().read_text(encoding="utf-8")
+                except OSError as exc:
+                    raise ApiAuthError(f"connector {self.name!r}: the key file of auth_jwt_key cannot be read ({type(exc).__name__})") from exc
+            from cryptography.hazmat.primitives.serialization import load_pem_private_key
+            try:
+                self._jwt_key = load_pem_private_key(pem.encode("utf-8"), password=None)
+            except (ValueError, TypeError) as exc:
+                raise ApiAuthError(f"connector {self.name!r}: auth_jwt_key is not a private key in PEM format") from exc
+        return self._jwt_key
+
+    def _certificate_thumbprint(self) -> str | None:
+        """``x5t`` — the SHA-1 fingerprint of the key's certificate (base64url), when one is given:
+        what a server holding several trusted certificates may pick the right one by."""
+        source = (self.config.auth_jwt_certificate or "").strip()
+        if not source:
+            return None
+        if self._jwt_x5t is None:
+            import hashlib
+
+            from cryptography import x509
+            from cryptography.hazmat.primitives.serialization import Encoding
+            try:
+                raw = source.replace("\\n", "\n").encode("utf-8") if "-----BEGIN" in source else Path(source).expanduser().read_bytes()
+                cert = x509.load_pem_x509_certificate(raw) if b"-----BEGIN" in raw else x509.load_der_x509_certificate(raw)
+            except (OSError, ValueError) as exc:
+                raise ApiAuthError(f"connector {self.name!r}: auth_jwt_certificate cannot be read as a certificate ({type(exc).__name__})") from exc
+            self._jwt_x5t = base64.urlsafe_b64encode(hashlib.sha1(cert.public_bytes(Encoding.DER)).digest()).rstrip(b"=").decode()  # noqa: S324 — x5t IS a SHA-1 thumbprint (RFC 7515)
+        return self._jwt_x5t
+
+    def user_token(self, user: str, *, force: bool = False, single_use: bool = False) -> str:
+        """A signed token that names *user*, kept until shortly before it expires. Each token has
+        its own id (``jti``). *single_use*: a token that may sign in once (``at_use_nbr`` = 1, as
+        JD Edwards reads it for a browser session) — never kept, a new one each time."""
+        import jwt as pyjwt
+        now = time.time()
+        kept = self._user_tokens.get(user)
+        if kept and not force and not single_use and kept[1] - 30 > now:
+            return kept[0]
+        cfg = self.config
+        claims: dict[str, Any] = {"jti": str(uuid.uuid4()), cfg.auth_jwt_claim or "sub": user, "iat": int(now), "exp": int(now) + cfg.auth_jwt_ttl}
+        if single_use:
+            claims["at_use_nbr"] = 1
+        if cfg.auth_jwt_issuer:
+            claims["iss"] = cfg.auth_jwt_issuer
+        if cfg.auth_jwt_audience:
+            claims["aud"] = cfg.auth_jwt_audience
+        thumb = self._certificate_thumbprint()
+        token = pyjwt.encode(claims, self._signing_key(), algorithm=cfg.auth_jwt_algorithm, headers={"x5t": thumb} if thumb else None)
+        if single_use:
+            return token
+        if len(self._user_tokens) > 5000:                       # a long-lived process, many users: start again
+            self._user_tokens.clear()
+        self._user_tokens[user] = (token, float(claims["exp"]))
+        return token
+
     async def _get_token(self, params: dict[str, Any], *, force: bool = False) -> str | None:
         auth = self.config.auth_type
+        if auth == "user_jwt":
+            user = self.acting_user()
+            if user:
+                return self.user_token(user, force=force)
+            if self.config.auth_jwt_fallback == "service" and self.auth_username:
+                return None                                     # the service account: Basic, in _auth_headers
+            raise ApiAuthError(
+                f"connector {self.name!r} makes each call as the signed-in user, and no user can be named: "
+                + ("nobody is signed in (a job, a schedule)" if self._no_principal() else f"your account has no {self.config.auth_jwt_user_attribute!r} attribute")
+                + " — ask an administrator")
         if auth in ("bearer", "api_key"):
             return self.auth_token or None
         if auth != "oauth2":
@@ -502,8 +609,17 @@ class APIConnector:
                     return _stringify(payload[key])
         return None
 
+    @staticmethod
+    def _no_principal() -> bool:
+        from liberty.auth.principal import current_principal
+        return current_principal.get() is None
+
     def _auth_headers(self, token: str | None) -> dict[str, str]:
         auth = self.config.auth_type
+        if auth == "user_jwt":
+            if token:
+                return {"Authorization": "Bearer " + token}
+            auth = "basic"                                      # no user could be named and the fallback is the service account
         if auth == "basic":
             raw = f"{self.auth_username}:{self.auth_password}".encode()
             return {"Authorization": "Basic " + base64.b64encode(raw).decode()}
@@ -544,7 +660,11 @@ class APIConnector:
                 return await self._call_action(endpoint, merged, absent)
             return await self._call_plugin(endpoint, merged, absent)
 
-        token = await self._get_token(merged)
+        try:
+            token = await self._get_token(merged)
+        except ApiAuthError as exc:                             # nobody to make the call as: nothing is sent
+            return ApiResult(connector=self.name, endpoint=endpoint_name, success=False, status_code=0,
+                             url=self._resolve_url(substitute_path(endpoint.path, merged)), error=str(exc))
         if token is not None:
             merged["token"] = token
 
@@ -569,7 +689,7 @@ class APIConnector:
             resp = await self._client.request(
                 endpoint.method.upper(), url, params=query or None, headers=headers, **request_kwargs
             )
-            if resp.status_code == 401 and self.config.auth_type == "oauth2":
+            if resp.status_code == 401 and self.config.auth_type == "oauth2":      # (a signed user token is never the cause of a stale 401)
                 new_token = await self._get_token(merged, force=True)
                 if new_token:
                     merged["token"] = new_token

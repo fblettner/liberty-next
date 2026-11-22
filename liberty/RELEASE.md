@@ -2,6 +2,33 @@
 
 ## 7.0.84 — unreleased
 
+- **Integrity: a screen an Explorer entity opens is not an orphan.** An Explorer entity that names a screen
+  opens a detail row in that screen's dialog: the screen is reached even when no menu leads to it.
+- **A page an application ships: a row of its grid can be opened** — the page contract (version 3) gives `Grid`
+  a `detail` function: every row gets a chevron, and what the function returns is drawn under the row (an
+  object's dependencies, a nested list).
+- **An API connector can make each call as the signed-in user** — a new kind of authentication, *Each user as
+  himself (a signed token)* (`auth_type = "user_jwt"`), beside the service account. Liberty signs a short-lived
+  JSON Web Token that names the user on the server and sends it as `Authorization: Bearer`; the server trusts
+  the certificate of Liberty's key, so **no password of the user is kept anywhere**. Made for JD Edwards AIS
+  (the HTML server's external JWT trust), usable with any server that accepts a signed token. Who the user is on
+  the server comes from a user attribute (`jde_user` by default, set by an administrator; blank = the Liberty
+  name). Settings, all in the connector editor: the signing key (a PEM file's path or the PEM text, `ENC:`
+  allowed), the attribute, the field of the token that carries the user (`sub`), the signature (RS256), issuer,
+  audience, validity (300 s), the optional certificate whose fingerprint goes in the token (`x5t`), and what to
+  do when no user can be named — a job, a user without the attribute:
+  refuse the call (the default), or use the service account. It is a choice per connector: nothing changes for
+  a connector left on its service account.
+- nomaflow — **a job sends its result to whoever started it; a file's numbers are read as the file writes them.**
+  - A **notify** step's recipient can be `user:{USER}`: the person who started the run ("send me the export I
+    asked for"). A run nobody started (a schedule) leaves that recipient out, and a step left with no recipient
+    sends nothing and says so, without failing. `{USER}` also fills the subject and the body.
+  - A **file load** step has a new setting, *Numbers written as text* (`decimal_separator`): `.` (1,234.56) or
+    `,` (1.234,56) names the file's decimal separator, the other one being a thousands separator. The default,
+    *detect*, now reads what is not ambiguous — `1.234,56` and `1,234.56` both give 1234.56 (the first gave
+    1.23456), and `1,000` in a WHOLE-number column gives 1000 (it gave 1) — and still reads a lone `1,000` in a
+    decimal column as 1: name the separator when a file writes thousands that way. Typed spreadsheet cells are
+    unchanged.
 - **Liberty Next has a license: the Business Source License 1.1** (`LICENSE`, `NOTICE`). Source-available,
   not Open Source: free to read, copy, modify and fork, and to run in production for your own organisation and
   your own applications — the applications, configuration and plugins you build on it are yours to sell.

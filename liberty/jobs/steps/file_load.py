@@ -28,7 +28,10 @@ The step (``jobs.toml``)::
 * Target columns not in ``columns`` match a header of the same name (case, spaces and
   underscores ignored); ``constants`` fill the rest; whatever is left stays NULL.
 * Values are coerced to the target column's type (introspected): integers, decimals, dates
-  (ISO, ``dd/mm/yyyy``, Excel dates), booleans, text. A bad cell fails the step, or skips the
+  (ISO, ``dd/mm/yyyy``, Excel dates), booleans, text. A number written as text follows
+  ``decimal_separator`` (:func:`parse_number`): ``.`` or ``,`` says which one the file uses — the
+  other one, spaces and apostrophes are then thousands separators — and ``auto`` (the default)
+  reads what is not ambiguous. A bad cell fails the step, or skips the
   row with ``on_error = "skip"``; the first ten rejects are quoted in the run log and the whole
   list lands in ``<files_dir>/<job>/<run>-<step>-rejects.csv`` (downloadable from the run).
 * Guards: ``refuse_query`` runs on the target connector (or ``refuse_connector``) with the run
@@ -204,9 +207,41 @@ def _blank(v: Any) -> bool:
     return v is None or (isinstance(v, str) and v.strip() == "")
 
 
-def coerce_cell(value: Any, col_type: TypeEngine) -> Any:
+_GROUPED = re.compile(r"^[+-]?\d{1,3}(?:[.,]\d{3})+$")
+_SPACES = str.maketrans("", "", " \u00a0\u202f'\u2019")
+
+
+def parse_number(text_: str, *, decimal: str = "auto", whole: bool = False) -> Decimal:
+    """A number written as text. Spaces and apostrophes between digits are always thousands
+    separators. *decimal* = ``"."`` or ``","``: that character is the decimal separator and the
+    other one a thousands separator (``1,234.56`` / ``1.234,56``). ``"auto"``: when both are
+    there, the LAST one is the decimal separator; several of the same one are thousands
+    separators (``1,234,567``); a single one is the decimal separator (``1,5`` and ``1.5`` are
+    both one and a half) — EXCEPT for a whole number (*whole*: an integer column), where groups
+    of three digits are thousands (``1,000`` and ``1.000`` are one thousand). What ``auto`` cannot
+    know — ``1,000`` in a decimal column: one thousand, or one — it reads as a decimal: name the
+    file's separator to settle it. Raises :class:`~decimal.InvalidOperation` for what is no number."""
+    s = text_.strip().translate(_SPACES)
+    if decimal == ",":
+        s = s.replace(".", "").replace(",", ".")
+    elif decimal == ".":
+        s = s.replace(",", "")
+    else:
+        dots, commas = s.count("."), s.count(",")
+        if dots and commas:
+            last = "," if s.rfind(",") > s.rfind(".") else "."
+            s = s.replace("." if last == "," else ",", "").replace(last, ".")
+        elif commas > 1 or dots > 1 or (whole and _GROUPED.match(s)):
+            s = s.replace(",", "").replace(".", "")
+        else:
+            s = s.replace(",", ".")
+    return Decimal(s)
+
+
+def coerce_cell(value: Any, col_type: TypeEngine, *, decimal: str = "auto") -> Any:
     """A file cell as the target column takes it. Spreadsheets hand typed cells (numbers, dates),
-    CSV hands text — both end up the same. Empty → NULL."""
+    CSV hands text — both end up the same. Empty → NULL. *decimal*: the file's decimal separator
+    for a number written as text (:func:`parse_number`)."""
     if _blank(value):
         return None
     if isinstance(col_type, Boolean):
@@ -227,9 +262,8 @@ def coerce_cell(value: Any, col_type: TypeEngine) -> Any:
             if value != int(value):
                 raise CellError(f"not a whole number: {value!r}")
             return int(value)
-        s = str(value).strip().replace(" ", "").replace(" ", "")
         try:
-            d = Decimal(s.replace(",", "."))
+            d = parse_number(str(value), decimal=decimal, whole=True)
         except InvalidOperation as exc:
             raise CellError(f"not a whole number: {value!r}") from exc
         if d != d.to_integral_value():
@@ -240,13 +274,8 @@ def coerce_cell(value: Any, col_type: TypeEngine) -> Any:
             raise CellError(f"not a number: {value!r}")
         if isinstance(value, (int, float, Decimal)):
             return value
-        s = str(value).strip().replace(" ", "").replace(" ", "")
-        if s.count(",") == 1 and "." not in s:
-            s = s.replace(",", ".")
-        else:
-            s = s.replace(",", "")
         try:
-            return Decimal(s)
+            return parse_number(str(value), decimal=decimal)
         except InvalidOperation as exc:
             raise CellError(f"not a number: {value!r}") from exc
     if isinstance(col_type, DateTime):
@@ -300,6 +329,8 @@ class LoadPlan:
     """target column → index in the file row"""
     constants: dict[str, Any]
     """target column → coerced constant"""
+    decimal: str = "auto"
+    """the file's decimal separator (``decimal_separator`` of the step)"""
 
     @property
     def loaded(self) -> list[str]:
@@ -308,6 +339,7 @@ class LoadPlan:
 
 def build_plan(
     header: list[Any], columns: list[ColumnInfo], *, mapping: dict[str, str], constants: dict[str, Any], path_name: str,
+    decimal: str = "auto",
 ) -> LoadPlan:
     by_target = {c.name.lower(): c for c in columns}
     by_header: dict[str, int] = {}
@@ -337,7 +369,7 @@ def build_plan(
         if col is None:
             raise StepFailed(f"file_load: constant {target!r} is not a column of the target table")
         try:
-            consts[col.name] = coerce_cell(value, col.type)
+            consts[col.name] = coerce_cell(value, col.type, decimal=decimal)
         except CellError as exc:
             raise StepFailed(f"file_load: constant {target!r}: {exc}") from exc
     for c in columns:   # same-name match for the rest
@@ -348,7 +380,7 @@ def build_plan(
             from_file[c.name] = idx
     if not from_file:
         raise StepFailed(f"file_load: {path_name}: no file column matches the target table (map them with `columns`)")
-    return LoadPlan(columns=columns, from_file=from_file, constants=consts)
+    return LoadPlan(columns=columns, from_file=from_file, constants=consts, decimal=decimal)
 
 
 def _row_values(plan: LoadPlan, cells: list[Any]) -> dict[str, Any]:
@@ -357,7 +389,7 @@ def _row_values(plan: LoadPlan, cells: list[Any]) -> dict[str, Any]:
     for name, idx in plan.from_file.items():
         v = cells[idx] if idx < len(cells) else None
         try:
-            out[name] = coerce_cell(v, types[name])
+            out[name] = coerce_cell(v, types[name], decimal=plan.decimal)
         except CellError as exc:
             raise CellError(f"{name}: {exc}") from exc
     return out
@@ -498,7 +530,7 @@ class FileLoadExecutor:
         # pass 1 — header + plan (+ the partitions present, when a key isn't a constant)
         reader = open_reader(path, sheet=step.sheet, delimiter=step.delimiter, encoding=step.encoding)
         header = self._header(reader, step.header_row, path.name)
-        plan = build_plan(header, columns, mapping=step.columns, constants=constants, path_name=path.name)
+        plan = build_plan(header, columns, mapping=step.columns, constants=constants, path_name=path.name, decimal=step.decimal_separator)
         missing_keys = [p for p in partition_by if p not in plan.loaded]
         if missing_keys:
             raise StepFailed(f"file_load: partition column(s) {', '.join(missing_keys)} come neither from the file nor from `constants`")
@@ -615,7 +647,7 @@ class FileLoadExecutor:
         raw = step.control_total.strip()
         value: Any = read_cell(path, raw, sheet=step.sheet, delimiter=step.delimiter, encoding=step.encoding) if raw.startswith("@") else render(raw)
         try:
-            return Decimal(str(coerce_cell(value, Numeric())))
+            return Decimal(str(coerce_cell(value, Numeric(), decimal=step.decimal_separator)))
         except (CellError, InvalidOperation, TypeError) as exc:
             raise StepFailed(f"file_load: {path.name}: control total {raw!r} is not a number ({value!r})") from exc
 

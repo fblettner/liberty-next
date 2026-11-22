@@ -950,7 +950,7 @@ class SqlConnectorConfig(BaseModel):
 # API connector
 # --------------------------------------------------------------------------- #
 
-AuthType = Literal["none", "basic", "bearer", "api_key", "oauth2"]
+AuthType = Literal["none", "basic", "bearer", "api_key", "oauth2", "user_jwt"]
 
 
 class EndpointSource(BaseModel):
@@ -1065,13 +1065,13 @@ class ApiConnectorConfig(BaseModel):
     # they stay in the model so flipping back to a previous mode restores them.
     auth_username: str | None = Field(
         default=None,
-        description="Username for the request. Also available as the ``{{username}}`` placeholder.",
-        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": ["basic", "oauth2"]}},
+        description="Username for the request. Also available as the ``{{username}}`` placeholder. With ``user_jwt``: the service account used when no user can be named (see ``auth_jwt_fallback``).",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": ["basic", "oauth2", "user_jwt"]}},
     )
     auth_password: str | None = Field(
         default=None,
         description="Password for the request. Also available as ``{{password}}``. May be an ``ENC:`` value (decrypted at runtime).",
-        json_schema_extra={"x_group": "Auth", "format": "password", "x_visible_when": {"field": "auth_type", "value": ["basic", "oauth2"]}},
+        json_schema_extra={"x_group": "Auth", "format": "password", "x_visible_when": {"field": "auth_type", "value": ["basic", "oauth2", "user_jwt"]}},
     )
     auth_token: str | None = Field(
         default=None,
@@ -1112,6 +1112,54 @@ class ApiConnectorConfig(BaseModel):
         default=3300,
         description="How long (seconds) to cache a fetched token before refreshing. Default 3300 = 55 min.",
         json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": "oauth2"}},
+    )
+    # ``user_jwt``: each call is made AS THE SIGNED-IN USER. The connector signs a short-lived JSON Web
+    # Token that names the user on the server and sends it as ``Authorization: Bearer`` — the server
+    # trusts the certificate of this key (JD Edwards: the HTML server's external JWT trust), so no
+    # password of the user is kept anywhere. Who the user is on the server comes from a user attribute.
+    auth_jwt_key: str | None = Field(
+        default=None,
+        description="The private key that signs the tokens: the PEM text, or the path of a PEM file on the server. May be an ``ENC:`` value. Whoever holds it can act as any user of the server: protect it like the master key.",
+        json_schema_extra={"x_group": "Auth", "format": "password", "x_visible_when": {"field": "auth_type", "value": "user_jwt"}},
+    )
+    auth_jwt_certificate: str | None = Field(
+        default=None,
+        description="Optional. The certificate of the key (the PEM text or the path of the .cer / .pem file given to the server): its fingerprint is then written in the token's header (``x5t``), which some servers use to pick the certificate.",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": "user_jwt"}},
+    )
+    auth_jwt_algorithm: Literal["RS256", "RS384", "RS512"] = Field(
+        default="RS256", description="How the token is signed.",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": "user_jwt"}},
+    )
+    auth_jwt_user_attribute: str = Field(
+        default="jde_user",
+        description="The attribute of the Liberty user that holds his name on the server (set by an administrator, never by the user). Blank = the Liberty user name itself.",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": "user_jwt"}},
+    )
+    auth_jwt_uppercase: bool = Field(
+        default=True, description="Write the user's name in upper case in the token (JD Edwards user IDs are).",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": "user_jwt"}},
+    )
+    auth_jwt_claim: str = Field(
+        default="sub", description="The claim of the token that carries the user's name.",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": "user_jwt"}},
+    )
+    auth_jwt_issuer: str | None = Field(
+        default=None, description="The token's issuer (``iss``), when the server checks it.",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": "user_jwt"}},
+    )
+    auth_jwt_audience: str | None = Field(
+        default=None, description="The token's audience (``aud``), when the server checks it.",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": "user_jwt"}},
+    )
+    auth_jwt_ttl: int = Field(
+        default=300, ge=30, le=3600, description="How long (seconds) a signed token is valid. Short on purpose: a new one is signed when needed.",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": "user_jwt"}},
+    )
+    auth_jwt_fallback: Literal["refuse", "service"] = Field(
+        default="refuse",
+        description="When no user can be named — a job, or a user without the attribute: ``refuse`` the call, or make it with the ``service`` account (the username / password above).",
+        json_schema_extra={"x_group": "Auth", "x_visible_when": {"field": "auth_type", "value": "user_jwt"}},
     )
     default_headers: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Transport"}, description="Headers sent on every request from this connector.")
     timeout: float = Field(default=30.0, json_schema_extra={"x_group": "Transport"}, description="Per-request timeout in seconds.")

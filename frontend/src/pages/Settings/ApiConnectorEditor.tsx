@@ -88,7 +88,7 @@ export type ApiConnector = {
   /** A boolean, or an environment reference (``${JDE_AIS_VERIFY_SSL:-true}``) resolved by the server. */
   verify_ssl?: boolean | string
   default_headers?: Record<string, string>
-  auth_type?: 'none' | 'basic' | 'bearer' | 'api_key' | 'oauth2'
+  auth_type?: 'none' | 'basic' | 'bearer' | 'api_key' | 'oauth2' | 'user_jwt'
   auth_username?: string | null
   auth_password?: string | null
   auth_token?: string | null
@@ -99,6 +99,17 @@ export type ApiConnector = {
   auth_token_content_type?: string
   auth_token_headers?: Record<string, string>
   auth_token_ttl?: number                                   // seconds (Pydantic side)
+  // user_jwt: each call made as the signed-in user, with a token the connector signs
+  auth_jwt_key?: string | null
+  auth_jwt_certificate?: string | null
+  auth_jwt_algorithm?: 'RS256' | 'RS384' | 'RS512'
+  auth_jwt_user_attribute?: string
+  auth_jwt_uppercase?: boolean
+  auth_jwt_claim?: string
+  auth_jwt_issuer?: string | null
+  auth_jwt_audience?: string | null
+  auth_jwt_ttl?: number                                     // seconds
+  auth_jwt_fallback?: 'refuse' | 'service'
   endpoints?: Endpoint[]
   /** Ways to create an endpoint from what the server describes — the Endpoints tab's "Create from…". */
   generators?: EndpointGeneratorDef[]
@@ -362,7 +373,9 @@ function AuthTab({
   const ttlMin = value.auth_token_ttl != null ? Math.round((value.auth_token_ttl as number) / 60) : 55
   const [tokenHeadersText, setTokenHeadersText] = useState(headersToString(value.auth_token_headers))
   useEffect(() => { setTokenHeadersText(headersToString(value.auth_token_headers)) }, [value.auth_token_headers])
-  const showCredentials = authType === 'basic' || authType === 'oauth2'
+  const showUserJwt = authType === 'user_jwt'
+  // with a token per user, the account is the one used when no user can be named — shown when that is the choice
+  const showCredentials = authType === 'basic' || authType === 'oauth2' || (showUserJwt && value.auth_jwt_fallback === 'service')
   const showToken = authType === 'bearer' || authType === 'api_key'
   const showApiKeyHeader = authType === 'api_key'
   const showTokenEndpoint = authType === 'oauth2'
@@ -379,10 +392,75 @@ function AuthTab({
             { value: 'bearer', label: t('settings.api.auth.methodBearer') },
             { value: 'api_key', label: t('settings.api.auth.methodApiKey') },
             { value: 'oauth2', label: t('settings.api.auth.methodOauth2') },
+            { value: 'user_jwt', label: t('settings.api.auth.methodUserJwt') },
           ]}
           onChange={(v) => patch({ auth_type: (v as ApiConnector['auth_type']) ?? 'none' })}
         />
       </FieldRow>
+
+      {showUserJwt && (
+        <>
+          <SectionHead>{t('settings.api.auth.userJwtSection')}</SectionHead>
+          <Hint>{t('settings.api.auth.userJwtHint')}</Hint>
+          <FieldRowTop>
+            <label>{t('settings.api.auth.jwtKey')}</label>
+            <div>
+              <Input type="password" value={value.auth_jwt_key ?? ''} onChange={(e) => patch({ auth_jwt_key: e.target.value || undefined })} placeholder="/etc/liberty/liberty-jde.key" />
+              <Hint>{t('settings.api.auth.jwtKeyHint')}</Hint>
+            </div>
+          </FieldRowTop>
+          <FieldRowTop>
+            <label>{t('settings.api.auth.jwtCertificate')}</label>
+            <div>
+              <Input value={value.auth_jwt_certificate ?? ''} onChange={(e) => patch({ auth_jwt_certificate: e.target.value || undefined })} placeholder="/etc/liberty/liberty-jde.cer" />
+              <Hint>{t('settings.api.auth.jwtCertificateHint')}</Hint>
+            </div>
+          </FieldRowTop>
+          <FieldRowTop>
+            <label>{t('settings.api.auth.jwtUserAttribute')}</label>
+            <div>
+              <Input value={value.auth_jwt_user_attribute ?? 'jde_user'} onChange={(e) => patch({ auth_jwt_user_attribute: e.target.value })} placeholder="jde_user" />
+              <Hint>{t('settings.api.auth.jwtUserAttributeHint')}</Hint>
+            </div>
+          </FieldRowTop>
+          <FieldRow>
+            <label>{t('settings.api.auth.jwtUppercase')}</label>
+            <SearchSelect value={value.auth_jwt_uppercase === false ? 'no' : 'yes'} onChange={(v) => patch({ auth_jwt_uppercase: v !== 'no' })}
+              options={[{ value: 'yes', label: t('settings.api.auth.jwtUpper') }, { value: 'no', label: t('settings.api.auth.jwtAsWritten') }]} />
+          </FieldRow>
+          <FieldRowTop>
+            <label>{t('settings.api.auth.jwtFallback')}</label>
+            <div>
+              <SearchSelect value={value.auth_jwt_fallback ?? 'refuse'} onChange={(v) => patch({ auth_jwt_fallback: (v as 'refuse' | 'service') || 'refuse' })}
+                options={[{ value: 'refuse', label: t('settings.api.auth.jwtFallbackRefuse') }, { value: 'service', label: t('settings.api.auth.jwtFallbackService') }]} />
+              <Hint>{t('settings.api.auth.jwtFallbackHint')}</Hint>
+            </div>
+          </FieldRowTop>
+          <SectionHead>{t('settings.api.auth.jwtTokenSection')}</SectionHead>
+          <FieldRow>
+            <label>{t('settings.api.auth.jwtClaim')}</label>
+            <Input value={value.auth_jwt_claim ?? 'sub'} onChange={(e) => patch({ auth_jwt_claim: e.target.value || 'sub' })} placeholder="sub" />
+          </FieldRow>
+          <FieldRow>
+            <label>{t('settings.api.auth.jwtAlgorithm')}</label>
+            <SearchSelect value={value.auth_jwt_algorithm ?? 'RS256'} onChange={(v) => patch({ auth_jwt_algorithm: (v as 'RS256' | 'RS384' | 'RS512') || 'RS256' })}
+              options={['RS256', 'RS384', 'RS512'].map((a) => ({ value: a, label: a }))} />
+          </FieldRow>
+          <FieldRow>
+            <label>{t('settings.api.auth.jwtIssuer')}</label>
+            <Input value={value.auth_jwt_issuer ?? ''} onChange={(e) => patch({ auth_jwt_issuer: e.target.value || undefined })} />
+          </FieldRow>
+          <FieldRow>
+            <label>{t('settings.api.auth.jwtAudience')}</label>
+            <Input value={value.auth_jwt_audience ?? ''} onChange={(e) => patch({ auth_jwt_audience: e.target.value || undefined })} />
+          </FieldRow>
+          <FieldRow>
+            <label>{t('settings.api.auth.jwtTtl')}</label>
+            <Input type="number" min={30} max={3600} value={String(value.auth_jwt_ttl ?? 300)}
+              onChange={(e) => { const n = Number(e.target.value); patch({ auth_jwt_ttl: Number.isFinite(n) && n >= 30 ? Math.min(n, 3600) : undefined }) }} />
+          </FieldRow>
+        </>
+      )}
 
       {showCredentials && (
         <>

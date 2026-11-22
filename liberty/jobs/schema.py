@@ -238,6 +238,9 @@ class Step(BaseModel):
     header_row: int = Field(1, ge=1)
     delimiter: str | None = None
     encoding: str = "utf-8-sig"
+    # how the file writes a decimal number: "." (1,234.56) or "," (1.234,56) — the other one is then a
+    # thousands separator. "auto" reads what is not ambiguous (see file_load.parse_number).
+    decimal_separator: Literal["auto", ".", ","] = "auto"
     columns: dict[str, str] = Field(default_factory=dict)
     constants: dict[str, Any] = Field(default_factory=dict)
     load_mode: LoadMode | None = None

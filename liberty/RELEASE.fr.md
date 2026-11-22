@@ -2,6 +2,38 @@
 
 ## 7.0.84 — non publiée
 
+- **Intégrité : un écran qu'une entité de l'Explorateur ouvre n'est pas orphelin.** Une entité de
+  l'Explorateur qui nomme un écran ouvre une ligne de détail dans la fenêtre de cet écran : l'écran est atteint
+  même quand aucun menu n'y mène.
+- **Une page livrée par une application : une ligne de sa grille peut être ouverte** — le contrat de page
+  (version 3) donne à `Grid` une fonction `detail` : chaque ligne reçoit un chevron, et ce que la fonction
+  renvoie est dessiné sous la ligne (les dépendances d'un objet, une liste imbriquée).
+- **Un connecteur API peut faire chaque appel au nom de l'utilisateur connecté** — un nouveau mode
+  d'authentification, *Chaque utilisateur sous son nom (jeton signé)* (`auth_type = "user_jwt"`), à côté du
+  compte de service. Liberty signe un JSON Web Token de courte durée qui nomme l'utilisateur sur le serveur et
+  l'envoie en `Authorization: Bearer` ; le serveur fait confiance au certificat de la clé de Liberty, donc
+  **aucun mot de passe de l'utilisateur n'est conservé nulle part**. Fait pour JD Edwards AIS (la confiance JWT
+  externe du serveur HTML), utilisable avec tout serveur qui accepte un jeton signé. Le nom de l'utilisateur
+  sur le serveur vient d'un attribut de l'utilisateur (`jde_user` par défaut, renseigné par un administrateur ;
+  vide = le nom Liberty). Réglages, tous dans l'éditeur du connecteur : la clé de signature (le chemin d'un
+  fichier PEM ou le texte PEM, `ENC:` accepté), l'attribut, le champ du jeton qui porte l'utilisateur (`sub`),
+  la signature (RS256), l'émetteur, l'audience, la validité (300 s), le certificat facultatif dont l'empreinte
+  va dans le jeton (`x5t`), et que faire quand aucun utilisateur ne
+  peut être nommé — un traitement, un utilisateur sans l'attribut : refuser l'appel (le défaut), ou utiliser le
+  compte de service. C'est un choix par connecteur : rien ne change pour un connecteur laissé sur son compte de
+  service.
+- nomaflow — **un traitement envoie son résultat à celui qui l'a lancé ; les nombres d'un fichier sont lus comme
+  le fichier les écrit.**
+  - Le destinataire d'une étape **notify** peut être `user:{USER}` : la personne qui a lancé l'exécution
+    (« envoyez-moi l'export que j'ai demandé »). Une exécution que personne n'a lancée (une planification)
+    laisse ce destinataire de côté, et une étape sans plus aucun destinataire n'envoie rien et le dit, sans
+    échouer. `{USER}` remplit aussi l'objet et le corps.
+  - Une étape **file load** a un nouveau réglage, *Nombres écrits en texte* (`decimal_separator`) : `.`
+    (1,234.56) ou `,` (1.234,56) nomme le séparateur décimal du fichier, l'autre étant un séparateur de
+    milliers. Le défaut, *détecter*, lit maintenant ce qui n'est pas ambigu — `1.234,56` et `1,234.56` donnent
+    tous deux 1234.56 (le premier donnait 1.23456), et `1,000` dans une colonne de nombres ENTIERS donne 1000
+    (il donnait 1) — et lit toujours un `1,000` isolé dans une colonne décimale comme 1 : nommez le séparateur
+    quand un fichier écrit les milliers ainsi. Les cellules typées d'un tableur ne changent pas.
 - **Liberty Next a une licence : la Business Source License 1.1** (`LICENSE`, `NOTICE`). Code source
   disponible, pas Open Source : libre de lire, copier, modifier et forker, et d'utiliser en production pour
   votre organisation et vos propres applications — les applications, la configuration et les plugins que vous

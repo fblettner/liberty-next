@@ -99,6 +99,10 @@ def test_unused_connector_and_orphan_screen_warn() -> None:
     cats = _cats(issues)
     assert any(c[0] == "warning" and c[1] == "Unused connector" and "ais_backup" in c[2] for c in cats)
     assert any(c[0] == "warning" and c[1] == "Orphan screen" and "lonely" in c[2] for c in cats)
+    # the same screen named by an Explorer entity is reached: a detail row opens in its dialog
+    from types import SimpleNamespace as NS
+    state.explorer = NS(explorer={"jde": {"sales": NS(entities={"orders": NS(screen="lonely", query="f0004_get", connector=None), "lines": NS(screen=None, query="f0004_get", connector=None)})}})
+    assert not any(c[1] == "Orphan screen" for c in _cats(check_integrity(state)))
 
 
 def test_unused_query_warns_and_referenced_query_does_not() -> None:

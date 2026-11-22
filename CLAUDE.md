@@ -88,7 +88,7 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           dispose), sql.py (SQLConnector: text() binds, filter / summary wraps,
                           form rules, SEQUENCE, audit mirror, Oracle quirks, NDJSON streaming,
                           multi-pool; the pure SQL-text helpers — ORDER BY split, aggregate / filter wraps,
-                          #SCHEMA# / #DBLINK# placeholders — in sqltext.py), api.py (APIConnector: httpx, 5 auth kinds, templating — a value stays where its placeholder is: `substitute_path` / `_json` / `_form`, `file_part_path` for a user's values, `call(..., untrusted=True)`; a parameter's help / example / choices; `generators` = the editor's "Create from…", a plugin function run by `web/admin/api_test.py` `POST /admin/config/api/generate`),
+                          #SCHEMA# / #DBLINK# placeholders — in sqltext.py), api.py (APIConnector: httpx, 6 auth kinds — `user_jwt` makes each call AS THE SIGNED-IN USER: a short-lived token signed with the connector's key names him on the server (`acting_user` from a user attribute, `user_token`, `ApiAuthError`; made for JD Edwards AIS) —, templating — a value stays where its placeholder is: `substitute_path` / `_json` / `_form`, `file_part_path` for a user's values, `call(..., untrusted=True)`; a parameter's help / example / choices; `generators` = the editor's "Create from…", a plugin function run by `web/admin/api_test.py` `POST /admin/config/api/generate`),
                           an endpoint SERVED by a plugin function: `callable` + the body as its arguments, `_call_plugin`),
                           or by a SHARED ACTION: `action` → `_call_action` (screens/actions.run_chain on `registry.state`, the caller's
                           permissions replaced by `*` — the endpoint's permission is the gate —, a cycle guard; a `call_api` step binds a
@@ -147,8 +147,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           missed.py (missed-schedule check: expected cron instants vs the run
                           history → MISSED runs + the `missed` job event), runlog, wiring, steps/{sql_query,sql_copy,http,python,ldap_sync,call_job,report (a saved
                           explorer analysis / dashboard or a plugin report → xlsx / pdf in the run's work area, under
-                          a user's or role's scope), notify (the dispatcher, the run's files attached),
-                          file_load (xlsx / csv → table, replace_partition in one transaction; the file
+                          a user's or role's scope), notify (the dispatcher, the run's files attached; `user:{USER}` = who started the run),
+                          file_load (xlsx / csv → table, replace_partition in one transaction; numbers written as text read by `parse_number` / `decimal_separator`; the file
                           from `path`, a per-fire upload or a watched folder)}, files.py (the work area:
                           `[jobs] files_dir`, uploads, rejects reports)
   etl/                    streaming copy + snapshot / truncate / audit primitives for the steps
@@ -353,7 +353,7 @@ pages/Explorer/        the Data Explorer page: index (model, the AnalysisDefinit
                        click-to-add), services/explorerPivot.ts (pivot tree, chart shaping, KPI totals), both tested,
                        services/explorerSaved.ts (the saved routes, dashboard shape); shapes in types/explorer.ts
 pages/AppPage/         a page an application ships (index = fetch + import the module, problems said; sdk.ts = THE CONTRACT
-                       handed to it — add fields, never rename; PageGrid.tsx = `sdk.Grid`, the shared grid in a column / row shape of the
+                       handed to it — add fields, never rename; PageGrid.tsx = `sdk.Grid` (a row opens on `detail`, contract version 3), the shared grid in a column / row shape of the
                        contract's own, the DataTable loaded lazily; `tabs/pageTabs.appPageOf` / `callableRef`, tested)
 pages/DashboardView/ Chat/ (AiDrawer) Reports/ Notifications/ (the inbox; components/NotificationBell
                        in the header, live via SioContext.subscribeNotifications) ScreenAssistant/ HttpRunner/ Monitoring/ Login/
