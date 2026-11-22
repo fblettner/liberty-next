@@ -20,7 +20,7 @@ import type { ConfigSchemas, PoolsDoc } from '../../types/config'
 import { renameKey } from '../../services/keyRename'
 import { validateId } from '../../services/idValidator'
 import {
-  DIALECTS, DIALECT_LABELS, accountInUrl, accountShown, composeUrl, driversFor, kindOf, optionOf, plainPassword, poolFigures, targetField, urlParts, withDialect, withOption, type UrlParts,
+  DIALECTS, DIALECT_LABELS, NOT_A_DATABASE, accountInUrl, accountShown, composeUrl, driversFor, kindOf, optionOf, plainPassword, poolFigures, targetField, urlParts, withDialect, withOption, type UrlParts,
 } from '../../services/poolUrl'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import StageStrip, { type StageView } from './StageStrip'
@@ -319,7 +319,10 @@ export default function PoolsBuilder() {
       <StageBody>
         {parts && kind !== 'sqlite' && (
           <Fields>
-            {kind === 'ldap'
+            {kind === 'http'
+              // a server's account, typed as it is; none when the server takes a token (the password field holds it)
+              ? <Part label={t('settings.pools.serverUser')} help={t('settings.pools.serverUserHelp')} wide><Input value={accountShown(parts.user)} data-part="user" onChange={(e) => setParts({ user: accountInUrl(e.target.value) })} /></Part>
+              : kind === 'ldap'
               // a directory's account is a bind DN or `user@domain`: typed as it is, escaped in the URL
               ? <Part label={t('settings.pools.bindUser')} wide><Input value={accountShown(parts.user)} data-part="user" placeholder="cn=liberty,ou=services,dc=example,dc=com" onChange={(e) => setParts({ user: accountInUrl(e.target.value) })} /></Part>
               : <Part label={t('settings.pools.user')}><Input value={parts.user} data-part="user" onChange={(e) => setParts({ user: e.target.value })} /></Part>}
@@ -335,6 +338,8 @@ export default function PoolsBuilder() {
           </Banner>
         )}
         {formOf(name, 'General', ['password'])}
+        {/* an HTTP server: what else belongs to the installation — the key that signs a token per user, its certificate, the TLS check */}
+        {kind === 'http' && formOf(name, 'Server', ['signing_key', 'certificate', 'verify_ssl'])}
       </StageBody>
     )
     return <StageBody>{formOf(name, GROUP_OF[stage])}</StageBody>
@@ -349,7 +354,7 @@ export default function PoolsBuilder() {
         what: f.user || (f.dialect === 'sqlite' ? t('settings.pools.noAccount') : t('settings.pools.noUser')),
         more: f.passwordInUrl ? t('settings.pools.passwordInUrlShort') : f.passwordSet ? t('settings.pools.passwordSet') : t('settings.pools.noPassword'), warn: f.passwordInUrl },
       // a directory runs no SQL: it has no schema, no database link and no connections to tune
-      ...(f.dialect === 'ldap' ? [] : [
+      ...(NOT_A_DATABASE.includes(f.dialect) ? [] : [
       { id: 'schemas', tone: 'green' as const, icon: <Layers size={15} />, title: t('settings.pools.stage.schemas'),
         what: t('settings.pools.schemasCount', { n: f.schemas.length }), more: f.schemas.slice(0, 6).join(' · ') },
       { id: 'dblinks', tone: 'green' as const, icon: <Link2 size={15} />, title: t('settings.pools.stage.dblinks'),
@@ -424,6 +429,8 @@ export default function PoolsBuilder() {
                     {test.ok
                       ? t('settings.pools.testOk', { ms: Math.round(test.duration_ms), what: [test.dialect, test.version].filter(Boolean).join(' ') })
                       : t('settings.pools.testFailed', { error: test.error ?? '' })}
+                    {/* an HTTP server: the test says it answers — any status is an answer; the account is checked where the scheme is known */}
+                    {test.ok && test.dialect === 'http' ? ` ${t('settings.pools.testServerNote')}` : ''}
                   </Banner>
                 )}
                 <StageStrip stages={stagesOf(pool)} current={stage} onPick={(id) => setStage(id as PoolStage)} />

@@ -10,6 +10,7 @@ import { Banner, FrameworkEnumsContext, Input, SearchSelect, Stack, useModals } 
 import { colors, fonts } from '../../theme'
 import { type ApiTarget, cleanTarget, missingTargets, type SqlPools } from '../../services/apiTargets'
 import { EndpointBody, EndpointCard, EndpointHead, FieldRow, Hint, SectionHead } from './apiEditorAtoms'
+import { useServerPools } from './serverPools'
 
 type Value = { pool?: string | null; targets?: Record<string, ApiTarget> }
 
@@ -21,6 +22,7 @@ export default function ApiEnvironmentsTab({ value, patch, sqlConnectors }: {
 }) {
   const { t } = useTranslation()
   const modals = useModals()
+  const servers = useServerPools()
   const enums = useContext(FrameworkEnumsContext)
   const poolOpts = (enums?.POOL_NAMES?.values ?? []) as Array<{ value: string; label: string; mono?: string }>
   const targets = value.targets ?? {}
@@ -70,13 +72,22 @@ export default function ApiEnvironmentsTab({ value, patch, sqlConnectors }: {
             <EndpointHead $open={isOpen} type="button" onClick={() => setOpen(isOpen ? null : pool)}>
               {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
               <span className="name">{pool}</span>
-              {tgt.base_url && <span style={{ color: colors.text.muted, fontFamily: fonts.sans }}>· {tgt.base_url}</span>}
+              {tgt.server
+                ? <span style={{ color: colors.text.muted, fontFamily: fonts.sans }}>→ {tgt.server}</span>
+                : tgt.base_url && <span style={{ color: colors.text.muted, fontFamily: fonts.sans }}>· {tgt.base_url}</span>}
               <span className="grow" />
               <Trash2 size={13} style={{ color: colors.text.muted }} aria-label={t('settings.api.env.remove')}
                 onClick={(e) => { e.stopPropagation(); void remove(pool) }} />
             </EndpointHead>
             {isOpen && (
               <EndpointBody>
+                {/* this environment's server: a pool, or what differs from the connector's own written below */}
+                <FieldRow>
+                  <label>{t('settings.api.connection.server')}</label>
+                  <SearchSelect sort allowCustom value={tgt.server ?? ''} options={servers} anyLabel={t('settings.api.connection.serverNone')} placeholder={t('settings.api.connection.serverNone')}
+                    onChange={(v) => setTarget(pool, { ...tgt, server: v || undefined })} />
+                </FieldRow>
+                {!tgt.server && (<>
                 <FieldRow>
                   <label>{t('settings.api.connection.baseUrl')}</label>
                   <Input value={tgt.base_url ?? ''} placeholder={t('settings.api.env.inherited')}
@@ -108,6 +119,7 @@ export default function ApiEnvironmentsTab({ value, patch, sqlConnectors }: {
                     ]}
                     onChange={(v) => setTarget(pool, { ...tgt, verify_ssl: v === 'true' ? true : v === 'false' ? false : undefined })} />
                 </FieldRow>
+                </>)}
               </EndpointBody>
             )}
           </EndpointCard>

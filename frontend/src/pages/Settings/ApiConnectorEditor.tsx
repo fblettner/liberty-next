@@ -37,6 +37,7 @@ import { mergeGenerated, type GeneratedEndpoint, mergeModified, rowKeys } from '
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { EndpointBody, EndpointCard, EndpointHead, FieldRow, Hint, SectionHead } from './apiEditorAtoms'
 import ApiEnvironmentsTab from './ApiEnvironmentsTab'
+import { useServerPools } from './serverPools'
 import type { ApiTarget, SqlPools } from '../../services/apiTargets'
 
 // ── shape of a parsed [connectors.<name>] dict for type=api ────────────────────────────────
@@ -85,6 +86,8 @@ export type ApiConnector = {
   licensed?: boolean
   show_in_switcher?: boolean
   home?: string | null
+  /** The HTTP server pool the connector names: its address, account and secrets are then the pool's. */
+  server?: string | null
   base_url?: string
   timeout?: number                                          // seconds (Pydantic side)
   /** A boolean, or an environment reference (``${JDE_AIS_VERIFY_SSL:-true}``) resolved by the server. */
@@ -274,6 +277,7 @@ function ConnectionTab({
   // Timeout displayed in milliseconds (nomaubl convention) — Pydantic stores seconds. Round
   // on display so a fractional second doesn't surprise the operator.
   const timeoutMs = value.timeout != null ? Math.round((value.timeout as number) * 1000) : 30000
+  const servers = useServerPools()
   const [headersText, setHeadersText] = useState(headersToString(value.default_headers))
   // Re-sync the display string when the parent value changes (e.g. switching connectors).
   useEffect(() => { setHeadersText(headersToString(value.default_headers)) }, [value.default_headers])
@@ -311,6 +315,17 @@ function ConnectionTab({
         />
       </FieldRow>
       <SectionHead>{t('settings.api.connection.section')}</SectionHead>
+      {/* the server: a pool (Liberty → Pools, kind HTTP server) that holds the address, the account and the
+          secrets — or, for a connector that names none, the address written here */}
+      <FieldRow>
+        <label>{t('settings.api.connection.server')}</label>
+        <div data-api-server>
+          <SearchSelect sort allowCustom value={value.server ?? ''} options={servers} anyLabel={t('settings.api.connection.serverNone')} placeholder={t('settings.api.connection.serverNone')}
+            onChange={(v) => patch({ server: v || undefined })} />
+          <Hint>{value.server ? t('settings.api.connection.serverSetHint') : t('settings.api.connection.serverHint')}</Hint>
+        </div>
+      </FieldRow>
+      {!value.server && (
       <FieldRow>
         <label>{t('settings.api.connection.baseUrl')}</label>
         <Input
@@ -319,6 +334,7 @@ function ConnectionTab({
           placeholder="https://api.example.com"
         />
       </FieldRow>
+      )}
       <FieldRow>
         <label>{t('settings.api.connection.timeout')}</label>
         <Input
@@ -330,6 +346,7 @@ function ConnectionTab({
           }}
         />
       </FieldRow>
+      {!value.server && (
       <FieldRow>
         <label>{t('settings.api.connection.sslVerify')}</label>
         {/* On / off, or an environment reference typed in (``${VAR:-true}``) — a per-install
@@ -345,6 +362,7 @@ function ConnectionTab({
           onChange={(v) => patch({ verify_ssl: v === 'false' ? false : v === 'true' || v === '' ? undefined : v })}
         />
       </FieldRow>
+      )}
       <SectionHead>{t('settings.api.connection.defaultHeaders')}</SectionHead>
       <FieldRowTop>
         <label>{t('settings.api.connection.headers')}</label>
@@ -376,14 +394,18 @@ function AuthTab({
   const [tokenHeadersText, setTokenHeadersText] = useState(headersToString(value.auth_token_headers))
   useEffect(() => { setTokenHeadersText(headersToString(value.auth_token_headers)) }, [value.auth_token_headers])
   const showUserJwt = authType === 'user_jwt'
+  // the account, the password or token, the signing key and its certificate belong to the installation: when the
+  // connector names a server pool they are the pool's, and only HOW it authenticates is set here
+  const pooled = !!value.server
   // with a token per user, the account is the one used when no user can be named — shown when that is the choice
-  const showCredentials = authType === 'basic' || authType === 'oauth2' || (showUserJwt && value.auth_jwt_fallback === 'service')
-  const showToken = authType === 'bearer' || authType === 'api_key'
+  const showCredentials = !pooled && (authType === 'basic' || authType === 'oauth2' || (showUserJwt && value.auth_jwt_fallback === 'service'))
+  const showToken = !pooled && (authType === 'bearer' || authType === 'api_key')
   const showApiKeyHeader = authType === 'api_key'
   const showTokenEndpoint = authType === 'oauth2'
   return (
     <Stack gap={4}>
       <SectionHead>{t('settings.api.auth.section')}</SectionHead>
+      {pooled && authType !== 'none' && <Hint data-api-pooled>{t('settings.api.auth.pooledHint', { pool: value.server })}</Hint>}
       <FieldRow>
         <label>{t('settings.api.auth.method')}</label>
         <SearchSelect
@@ -404,6 +426,7 @@ function AuthTab({
         <>
           <SectionHead>{t('settings.api.auth.userJwtSection')}</SectionHead>
           <Hint>{t('settings.api.auth.userJwtHint')}</Hint>
+          {!pooled && (<>
           <FieldRowTop>
             <label>{t('settings.api.auth.jwtKey')}</label>
             <div>
@@ -418,6 +441,7 @@ function AuthTab({
               <Hint>{t('settings.api.auth.jwtCertificateHint')}</Hint>
             </div>
           </FieldRowTop>
+          </>)}
           <FieldRowTop>
             <label>{t('settings.api.auth.jwtUserAttribute')}</label>
             <div>

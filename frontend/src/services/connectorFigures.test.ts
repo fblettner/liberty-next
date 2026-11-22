@@ -58,3 +58,13 @@ describe('what an API connector says', () => {
     expect(apiFigures({}).host).toBe('')
   })
 })
+
+describe('an API connector that names a server pool', () => {
+  it('shows the pool in place of a host and lacks nothing of its own', () => {
+    const f = apiFigures({ type: 'api', server: 'jde_ais', auth_type: 'basic', endpoints: [] })
+    expect(f.host).toBe('→ jde_ais')
+    expect(f.authMissing).toBe('')
+    // without a pool the account is still asked for
+    expect(apiFigures({ type: 'api', base_url: 'https://api.example.com', auth_type: 'basic' }).authMissing).toBe('username')
+  })
+})

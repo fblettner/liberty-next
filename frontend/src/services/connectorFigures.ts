@@ -99,10 +99,13 @@ export interface ApiFigures {
 export function apiFigures(conn: Row | undefined): ApiFigures {
   const c = conn ?? {}
   const url = text(c.base_url)
-  const host = url.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/[/?#].*$/, '')
+  // the server pool it names holds its address, its account and its secrets: said in place of a host
+  const server = text(c.server).trim()
+  const host = server ? `→ ${server}` : url.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/[/?#].*$/, '')
   const auth = text(c.auth_type) || 'none'
   const has = (k: string) => text(c[k]).trim() !== ''
-  const authMissing = auth === 'basic' && !has('auth_username') ? 'username'
+  const authMissing = server ? ''
+    : auth === 'basic' && !has('auth_username') ? 'username'
     : auth === 'oauth2' && !has('auth_token_endpoint') ? 'tokenEndpoint'
       : (auth === 'bearer' || auth === 'api_key') && !has('auth_token') && !has('auth_token_endpoint') ? 'token'
         : auth === 'user_jwt' && !has('auth_jwt_key') ? 'key' : ''                 // each call as the signed-in user: the key that signs

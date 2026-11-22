@@ -294,4 +294,8 @@ def _pool_signature(cfg: Any) -> tuple[Any, ...] | None:
         _get("max_rows"),
         _get("trim_strings"),
         _get("coalesce_nulls"),
+        # an HTTP server pool: what the API connectors that name it read
+        _get("signing_key"),
+        _get("certificate"),
+        _get("verify_ssl", True),
     )

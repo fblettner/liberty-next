@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DIALECTS, DRIVERS, accountInUrl, accountShown, composeUrl, driversFor, isDirectory, kindOf, optionOf, plainPassword, poolFigures, poolSummary, targetField, urlParts, withDialect, withOption } from './poolUrl'
+import { DIALECTS, DRIVERS, NOT_A_DATABASE, accountInUrl, accountShown, composeUrl, driversFor, isDirectory, isServer, kindOf, optionOf, poolsOfKind, plainPassword, poolFigures, poolSummary, targetField, urlParts, withDialect, withOption } from './poolUrl'
 
 describe("a pool's URL as parts", () => {
   it('reads the usual URLs and puts them back unchanged', () => {
@@ -135,5 +135,33 @@ describe('an LDAP directory is a kind of pool', () => {
     expect(accountShown(accountInUrl('a:b/c?d%e@f'))).toBe('a:b/c?d%e@f')
     // and the URL built with it is still one the page shows field by field
     expect(urlParts(`ldaps://${accountInUrl('svc@corp.local')}@ad.example.com:636`)?.user).toBe('svc%40corp.local')
+  })
+})
+
+describe('an HTTP server is a kind of pool', () => {
+  it('is read like the others: host, port, account, base path', () => {
+    const p = urlParts('https://JDE@ais.example.com:7077/jderest/v2')
+    expect(p).toMatchObject({ scheme: 'https', user: 'JDE', host: 'ais.example.com', port: '7077', database: 'jderest/v2' })
+    expect(targetField(p!)).toBe('path')
+    expect(kindOf('https')).toBe('http')
+    expect(kindOf('http')).toBe('http')
+    expect(isServer('https')).toBe(true)
+    expect(isServer('ldaps')).toBe(false)
+    expect(poolSummary('https://JDE@ais.example.com:7077/jderest/v2')).toEqual({ dialect: 'http', where: 'ais.example.com:7077/jderest/v2' })
+    expect(driversFor('https')).toEqual(['https', 'http'])
+    expect(NOT_A_DATABASE).toEqual(['ldap', 'http'])
+  })
+
+  it('moves a pool to or from a server keeping the host and the account only', () => {
+    expect(withDialect('postgresql+asyncpg://app@db.example.com:5432/app', 'http')).toBe('https://app@db.example.com')
+    expect(withDialect('https://JDE@ais.example.com:7077/jderest/v2', 'ldap')).toBe('ldaps://JDE@ais.example.com:7077')
+  })
+
+  it('lists the pools of one kind for a picker', () => {
+    const pools = { jde: { url: 'oracle+oracledb://jde@ora:1521/?service_name=JDEPD' }, jde_ais: { url: 'https://JDE@ais.example.com:7077/jderest/v2' },
+      corp: { url: 'ldaps://cn=x@ad.example.com:636/dc=y' }, odd: { url: 'not a url' }, none: {} }
+    expect(poolsOfKind(pools, 'http')).toEqual([{ value: 'jde_ais', label: 'ais.example.com:7077/jderest/v2', mono: 'jde_ais' }])
+    expect(poolsOfKind(pools, 'ldap').map((o) => o.value)).toEqual(['corp'])
+    expect(poolsOfKind(null, 'http')).toEqual([])
   })
 })

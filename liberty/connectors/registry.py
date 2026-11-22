@@ -23,6 +23,7 @@ from liberty.connectors.config import (
 )
 from liberty.connectors.db import PoolRegistry
 from liberty.connectors.dictionary import DictionaryFile, load_dictionary
+from liberty.connectors.server import with_servers
 from liberty.connectors.sql import SQLConnector
 from liberty.licensing import ALWAYS_LICENSED_CONNECTORS, LicenseResult
 
@@ -65,7 +66,11 @@ class ConnectorRegistry:
                     default_language=default_language,
                 )
             elif isinstance(conn_cfg, ApiConnectorConfig):
-                api = APIConnector(name, conn_cfg, client=http_client, master_key=master_key)
+                # where the connector (or one of its environments) names a server pool, its address,
+                # account and secrets are the pool's — a pool that cannot be read is said on each call
+                effective, problem = with_servers(conn_cfg, config.pools)
+                api = APIConnector(name, effective, client=http_client, master_key=master_key)
+                api.server_problem = problem
                 api.registry = self
                 for target in api._targets.values():
                     target.registry = self

@@ -68,7 +68,7 @@ export function withOption(options: string | null, name: string, value: string):
 }
 
 /** What each kind of database starts from: its driver, its usual port, what its `/…` part is called. */
-export const DIALECTS: Record<string, { scheme: string; port: string; database: 'database' | 'sid' | 'file' | 'base'; template: string }> = {
+export const DIALECTS: Record<string, { scheme: string; port: string; database: 'database' | 'sid' | 'file' | 'base' | 'path'; template: string }> = {
   postgresql: { scheme: 'postgresql+asyncpg', port: '5432', database: 'database', template: 'postgresql+asyncpg://user@host:5432/dbname' },
   oracle: { scheme: 'oracle+oracledb', port: '1521', database: 'sid', template: 'oracle+oracledb://user@host:1521/?service_name=ORCL' },
   mysql: { scheme: 'mysql+aiomysql', port: '3306', database: 'database', template: 'mysql+aiomysql://user@host:3306/dbname' },
@@ -77,12 +77,26 @@ export const DIALECTS: Record<string, { scheme: string; port: string; database: 
   sqlite: { scheme: 'sqlite+aiosqlite', port: '', database: 'file', template: 'sqlite+aiosqlite:///./database.db' },
   // not a database: an LDAP directory, set up here like one (its account, its password) and named by what reads it
   ldap: { scheme: 'ldaps', port: '636', database: 'base', template: 'ldaps://user@host:636' },
+  // nor this one: the server an API connector calls — its address, its account, its secrets
+  http: { scheme: 'https', port: '', database: 'path', template: 'https://user@host/path' },
 }
 
 /** The kinds that are a directory, not a database (`ldap://` and `ldaps://` are the same kind). */
 export const isDirectory = (scheme: string): boolean => ['ldap', 'ldaps'].includes(dialectOf(scheme))
-/** The kind a scheme belongs to, as the form lists it: `ldaps` is the LDAP kind, over TLS. */
-export const kindOf = (scheme: string): string => (isDirectory(scheme) ? 'ldap' : dialectOf(scheme))
+/** The kinds that are an HTTP server, what an API connector names as its server (`http://` and `https://`). */
+export const isServer = (scheme: string): boolean => ['http', 'https'].includes(dialectOf(scheme))
+/** The kind a scheme belongs to, as the form lists it: `ldaps` is the LDAP kind over TLS, `https` the HTTP one. */
+export const kindOf = (scheme: string): string => (isDirectory(scheme) ? 'ldap' : isServer(scheme) ? 'http' : dialectOf(scheme))
+/** The kinds that are not a database: no schema, no database link, no connections to tune. */
+export const NOT_A_DATABASE = ['ldap', 'http']
+
+/** The pools of one kind as a picker's options: what a step or a connector names (`ldap` a directory, `http` a server). */
+export function poolsOfKind(pools: Record<string, { url?: unknown }> | null | undefined, kind: string): { value: string; label: string; mono: string }[] {
+  return Object.entries(pools ?? {})
+    .filter(([, p]) => { const parts = urlParts(typeof p?.url === 'string' ? p.url : ''); return parts != null && kindOf(parts.scheme) === kind })
+    .map(([name, p]) => ({ value: name, label: poolSummary(typeof p.url === 'string' ? p.url : '').where || name, mono: name }))
+    .sort((a, b) => a.value.localeCompare(b.value))
+}
 
 /** A pool's line in the list: what it connects to, without the account's secret. */
 export function poolSummary(url: string): { dialect: string; where: string } {
@@ -90,6 +104,7 @@ export function poolSummary(url: string): { dialect: string; where: string } {
   if (!p) return { dialect: '', where: url ? '…' : '' }
   const dialect = kindOf(p.scheme)
   if (dialect === 'sqlite') return { dialect, where: p.database ?? '' }
+  if (dialect === 'http') return { dialect, where: `${p.host}${p.port ? `:${p.port}` : ''}${p.database ? `/${p.database}` : ''}` }
   const service = optionOf(p.options, 'service_name')
   const target = p.database || service
   return { dialect, where: `${p.host}${p.port ? `:${p.port}` : ''}${target ? ` / ${target}` : ''}` }
@@ -130,6 +145,7 @@ export const DRIVERS: Record<string, string[]> = {
   mssql: ['mssql+aioodbc'],
   sqlite: ['sqlite+aiosqlite'],
   ldap: ['ldaps', 'ldap'],          // over TLS, or plain
+  http: ['https', 'http'],
 }
 
 /** The drivers to list for a URL's driver: those of its kind of database, and the one it has when it is another. */
@@ -151,8 +167,8 @@ export function withDialect(url: string, dialect: string): string {
   const from = kindOf(parts.scheme)
   if (from === dialect) return url
   if (from === 'sqlite' || dialect === 'sqlite') return target.template
-  // to or from a directory: the host and the account stay, what named a database does not name a base
-  if (from === 'ldap' || dialect === 'ldap') {
+  // to or from a directory or an HTTP server: the host and the account stay, what named a database names nothing there
+  if (NOT_A_DATABASE.includes(from) || NOT_A_DATABASE.includes(dialect)) {
     const usual = [DIALECTS[from]?.port ?? '', '', ...(from === 'ldap' ? ['389'] : [])]
     const port = usual.includes(parts.port) ? (parts.host ? target.port : '') : parts.port
     return composeUrl({ ...parts, scheme: target.scheme, port, database: null, options: null })
@@ -167,11 +183,12 @@ export function withDialect(url: string, dialect: string): string {
 
 /** What names the database in the form, for a kind of database and a URL: Oracle's service name — or its SID
  *  when the URL is written with one —, a file for SQLite, a database for the others. One field, never two. */
-export type TargetField = 'database' | 'service' | 'sid' | 'file' | 'base'
+export type TargetField = 'database' | 'service' | 'sid' | 'file' | 'base' | 'path'
 export function targetField(parts: UrlParts): TargetField {
   const kind = kindOf(parts.scheme)
   if (kind === 'sqlite') return 'file'
   if (kind === 'ldap') return 'base'
+  if (kind === 'http') return 'path'
   if (kind !== 'oracle') return 'database'
   return parts.database && !optionOf(parts.options, 'service_name') ? 'sid' : 'service'
 }
@@ -179,7 +196,7 @@ export function targetField(parts: UrlParts): TargetField {
 /** The kinds of database, as the form names them. */
 export const DIALECT_LABELS: Record<string, string> = {
   postgresql: 'PostgreSQL', oracle: 'Oracle', mysql: 'MySQL', mariadb: 'MariaDB', mssql: 'SQL Server', sqlite: 'SQLite',
-  ldap: 'LDAP directory',
+  ldap: 'LDAP directory', http: 'HTTP server (an API)',
 }
 
 /** A directory's account as the operator types it (a bind DN, `DOMAIN\user`, `user@domain`) ⇄ as the URL

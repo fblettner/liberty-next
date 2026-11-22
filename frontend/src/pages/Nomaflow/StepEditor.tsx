@@ -674,7 +674,7 @@ function PythonForm({ step, patch }: FormProps) {
 // instead of carrying a server and an account. Who may not read the pools still types the name.
 let _directoryPools: Promise<SearchSelectOption[]> | null = null
 const directoryPools = (): Promise<SearchSelectOption[]> => {
-  _directoryPools ??= api.get<{ pools: Record<string, { url?: string }> }>('/admin/config/pools/parsed')
+  _directoryPools ??= api.get<{ pools: Record<string, { url?: string }> }>('/admin/config/pools')
     .then((d) => Object.entries(d.pools ?? {})
       .filter(([, p]) => { const parts = urlParts(p.url ?? ''); return parts != null && isDirectory(parts.scheme) })
       .map(([name, p]) => ({ value: name, label: poolSummary(p.url ?? '').where || name, mono: name })))

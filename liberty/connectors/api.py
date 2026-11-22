@@ -329,6 +329,9 @@ class APIConnector:
         # the registry this connector belongs to (set by it): what an endpoint served by a plugin
         # function receives as ``connectors``
         self.registry: Any = None
+        # why the server pool this connector names could not be read (set by the registry): said as
+        # the error of every call that would go to the server
+        self.server_problem: str | None = None
         self._targets: dict[str, APIConnector] = {
             pool: APIConnector._for_target(name, config, pool, target, client=client, master_key=master_key)
             for pool, target in config.targets.items()
@@ -660,6 +663,9 @@ class APIConnector:
                 return await self._call_action(endpoint, merged, absent)
             return await self._call_plugin(endpoint, merged, absent)
 
+        if self.server_problem:                                 # no server to call: nothing is sent
+            return ApiResult(connector=self.name, endpoint=endpoint_name, success=False, status_code=0,
+                             url=self.config.base_url, error=f"API connector {self.name!r}: {self.server_problem}")
         try:
             token = await self._get_token(merged)
         except ApiAuthError as exc:                             # nobody to make the call as: nothing is sent

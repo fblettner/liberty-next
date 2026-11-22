@@ -102,7 +102,10 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           (dictionary.toml: labels, enums, lookups, sequences, rules),
                           introspect.py (schema walk), thick.py / thick_engine.py (Oracle OCI),
                           directory.py (an LDAP directory as a pool: a `ldap://` / `ldaps://` URL — `PoolRegistry.directory(name)`,
-                          no SQL engine; the POOL field rule = a dropdown of the pools, `DictionaryFile.know_pools`)
+                          no SQL engine; the POOL field rule = a dropdown of the pools, `DictionaryFile.know_pools`),
+                          server.py (an HTTP server as a pool: what an API connector — and each of its `targets` — names as
+                          `server`; `with_servers` gives the registry the effective config, address / account / secrets from
+                          the pool; a pool that cannot be read = `APIConnector.server_problem`, said on the call)
   auth/                   scope.py (row-level data scope: role rules → resolved per user → JWT
                           `scope` claim → SQLConnector wrap / write check), authstore.py (AuthBackend: toml | db), tokens.py (PyJWT access /
                           refresh with rotation), throttle.py (login throttle), principal.py

@@ -63,6 +63,17 @@
   l'application, ses écrans — et ses **rubriques**, les questions groupées que le chat montre en premier, qui
   n'avaient aucun éditeur. Le bloc est un composant partagé (`common/LocalizedTexts`, logique dans
   `services/localized.ts`), la logique du sélecteur est `services/aiStarters.ts` ; les deux testés.
+- **Le serveur d'un connecteur API est un pool lui aussi.** Un pool dont l'URL commence par `http://` ou
+  `https://` est un serveur HTTP (type *HTTP server* dans Liberty → Pools) : son adresse avec son compte, son
+  mot de passe — ou son jeton quand le serveur en prend un —, la clé qui signe un jeton par utilisateur et son
+  certificat, le contrôle TLS. Un connecteur API le nomme avec **Serveur** (`server`), et chacun de ses
+  environnements aussi ; l'URL de base et les champs d'identification quittent alors le connecteur, qui garde
+  COMMENT il s'authentifie et ses endpoints. Ce qui appartient à l'installation est en un seul endroit, et un
+  connecteur livré par une application n'en porte rien : une mise à jour le rafraîchit quelle que soit
+  l'adresse (une adresse littérale modifiée sur le connecteur le rendait « modifié », conservé tel quel). Un
+  connecteur qui ne nomme aucun serveur fonctionne comme avant. Un pool absent, ou livré sans son adresse,
+  n'arrête pas l'installation : l'appel dit quoi régler. *Tester la connexion* sur un tel pool dit que le
+  serveur répond ; le Test du connecteur vérifie le compte.
 - **Un annuaire LDAP est un pool — un seul endroit pour toutes les connexions.** Un pool dont l'URL commence par
   `ldap://` ou `ldaps://` est un annuaire : créé dans Liberty → Pools comme une base (type *LDAP directory* :
   serveur, port, DN de base ; son compte saisi tel quel — un DN de liaison, `DOMAINE\utilisateur`,

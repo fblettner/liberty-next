@@ -53,6 +53,16 @@
   **headings**, the grouped questions the chat shows first, which had no editor at all. The block is one shared
   component (`common/LocalizedTexts`, logic in `services/localized.ts`), the picker's logic is
   `services/aiStarters.ts`; both tested.
+- **The server of an API connector is a pool too.** A pool whose URL starts with `http://` or `https://` is an
+  HTTP server (kind *HTTP server* in Liberty → Pools): its address with its account, its password — or its
+  token when the server takes one —, the key that signs a token per user and its certificate, the TLS check.
+  An API connector names it with **Server** (`server`), and so does each of its environments; the base URL
+  and the credential fields then leave the connector, which keeps HOW it authenticates and its endpoints. What
+  belongs to the installation is in one place, and a connector an application ships holds none of it: an
+  upgrade refreshes it whatever the address (a literal address changed on the connector made it "modified",
+  kept as it was). A connector that names no server works as before. A pool that is missing, or shipped
+  without its address, does not stop the installation: the call says what to set. *Test connection* on such
+  a pool says the server answers; the connector's own Test checks the account.
 - **An LDAP directory is a pool — one place for every connection.** A pool whose URL starts with `ldap://` or
   `ldaps://` is a directory: created under Liberty → Pools like a database (kind *LDAP directory*: host, port,
   base DN; its account typed as it is — a bind DN, `DOMAIN\user`, `user@domain`; its password kept like any

@@ -209,6 +209,13 @@ class PoolRegistry:
             service = service[0] if service else None
         return {"dialect": self.dialect(name), "host": url.host or None, "port": url.port, "database": service or url.database or None}
 
+    def is_server(self, name: str) -> bool:
+        """Whether pool *name* is an HTTP server (``http://`` / ``https://``): what an API connector names as its ``server``."""
+        from liberty.connectors.server import is_server_url
+
+        cfg = self._configs.get(name)
+        return cfg is not None and is_server_url(cfg.url)
+
     def is_directory(self, name: str) -> bool:
         """Whether pool *name* is an LDAP directory (``ldap://`` / ``ldaps://``), not a database."""
         cfg = self._configs.get(name)
@@ -239,6 +246,8 @@ class PoolRegistry:
         cfg = self._config(name)
         if is_directory_url(cfg.url):
             raise ConnectorError(f"pool {name!r} is an LDAP directory: it runs no SQL (a query, a screen or a copy needs a database pool)")
+        if self.is_server(name):
+            raise ConnectorError(f"pool {name!r} is an HTTP server: it runs no SQL (a query, a screen or a copy needs a database pool)")
         url = self._resolved_url(name, cfg)
         kwargs: dict[str, object] = {
             "echo": cfg.echo,
@@ -308,6 +317,14 @@ async def try_pool(cfg: PoolConfig, *, master_key: str = "", oracle_thick: bool 
     the registry builds it (the password decrypted, thick mode followed), on a registry of its own, disposed."""
     probe = cfg.model_copy(update={"pool_size": 1, "max_overflow": 0, "pool_pre_ping": False, "echo": False})
     registry = PoolRegistry({"probe": probe}, master_key=master_key, oracle_thick=oracle_thick)
+    from liberty.connectors.server import is_server_url, server_target, try_server
+
+    if is_server_url(cfg.url):
+        # an HTTP server: one request to its address
+        try:
+            return await try_server(server_target(cfg), master_key=master_key, timeout=timeout)
+        except ValueError as exc:
+            return {"ok": False, "dialect": "http", "duration_ms": 0.0, "error": str(exc)}
     if is_directory_url(cfg.url):
         # a directory: one bind with the pool's account, nothing else
         try:

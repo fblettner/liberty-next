@@ -5,6 +5,8 @@
 
 /** One environment's server: what differs from the connector's own (blank = inherited). */
 export type ApiTarget = {
+  /** the HTTP server pool of this environment: its address, account and secrets are then the pool's */
+  server?: string
   base_url?: string
   auth_username?: string
   auth_password?: string

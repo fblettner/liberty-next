@@ -237,9 +237,9 @@ def restore_blanked(node: Any, live: Any) -> int:
 
 
 # An API connector's environment binding — the pool its own server serves and one server per other
-# pool (AIS per JDE environment) — belongs to the install, like the pools: the live one is kept
-# whatever the wheel ships, and it never makes a vendor connector look changed.
-_API_INSTALL_KEYS = ("pool", "targets")
+# pool (AIS per JDE environment) — and the server pool it names belong to the install, like the
+# pools: the live one is kept whatever the wheel ships, and it never makes a vendor connector look changed.
+_API_INSTALL_KEYS = ("pool", "targets", "server")
 
 
 def _with_live_secrets(value: Any, live: Any) -> tuple[Any, int]:

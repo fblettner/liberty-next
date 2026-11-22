@@ -81,6 +81,30 @@ class PoolConfig(BaseModel):
         ),
         json_schema_extra={"x_enum_ref": "DATASOURCE_TYPE"},
     )
+    # An HTTP server pool (a URL in http:// or https://, the server an API connector names as its
+    # ``server``): what belongs to the installation besides the address, the account and the password.
+    signing_key: str | None = Field(
+        default=None,
+        description=(
+            "HTTP server pool, for a connector that makes each call as the signed-in user: the private key "
+            "that signs the tokens — the PEM text, or the path of a PEM file on the server. May be an ENC: "
+            "value. Whoever holds it can act as any user of that server: protect it like the master key."
+        ),
+        json_schema_extra={"x_group": "Server", "format": "password"},
+    )
+    certificate: str | None = Field(
+        default=None,
+        description=(
+            "HTTP server pool: optional — the certificate of the signing key (the PEM text or the path of the "
+            ".cer / .pem file given to the server); its fingerprint is then written in the token's header."
+        ),
+        json_schema_extra={"x_group": "Server"},
+    )
+    verify_ssl: bool = Field(
+        default=True,
+        description="HTTP server pool: verify the server's TLS certificate (turn off only for a test server with a self-signed one).",
+        json_schema_extra={"x_group": "Server"},
+    )
     schemas: dict[str, str] = Field(default_factory=dict, json_schema_extra={"x_group": "Schemas"}, description=(
         "Map ``#SCHEMA.<NAME>#`` placeholders in this pool's queries to real schema names. Lets the "
         "same query target dev vs prod (or several schemas under one DB user) without editing SQL."
@@ -1014,6 +1038,11 @@ class ApiTargetConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    server: str | None = Field(
+        default=None,
+        description="The HTTP server pool of this environment (Liberty → Pools): its address, its account, its password or token and its TLS check are read from it, and the fields below are not.",
+        json_schema_extra={"x_enum_ref": "POOL_NAMES"},
+    )
     base_url: str | None = Field(default=None, description="This environment's base URL. Blank = the connector's. Supports ${ENV} refs.")
     auth_username: str | None = Field(default=None, description="Username on this environment's server. Blank = the connector's.")
     auth_password: str | None = Field(default=None, description="Password on this environment's server. Blank = the connector's. May be an ``ENC:`` value.", json_schema_extra={"format": "password"})
@@ -1055,7 +1084,17 @@ class ApiConnectorConfig(BaseModel):
         description="A landing menu item per role ({role: menu item id}): a user lands on the item of their first role listed here, else on `home`.",
         json_schema_extra={"x_key_enum_ref": "ROLE_NAMES", "x_value_enum_ref": "MENU_HOME_ITEMS"},
     )
-    base_url: str = Field(description="Base URL endpoints are relative to, e.g. https://api.example.com. Supports ${ENV} refs. (Leave blank only if every endpoint uses an absolute path.)")
+    server: str | None = Field(
+        default=None,
+        description=(
+            "The HTTP server pool this connector calls (Liberty → Pools, kind HTTP server): its address, its account, "
+            "its password or token, its signing key and certificate, its TLS check are read from it — the base URL "
+            "and the credential fields here are then not read. One place for what belongs to the installation; "
+            "how the connector authenticates (the scheme below) and its endpoints stay here."
+        ),
+        json_schema_extra={"x_enum_ref": "POOL_NAMES"},
+    )
+    base_url: str = Field(default="", description="Base URL endpoints are relative to, e.g. https://api.example.com. Supports ${ENV} refs. Not read when the connector names a `server`. (Leave blank only then, or if every endpoint uses an absolute path.)")
     auth_type: AuthType = Field(
         default="none",
         description="Authentication scheme. Pick the right one and only the fields it needs will appear.",

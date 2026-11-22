@@ -53,6 +53,13 @@ async def test_api_connector(body: ApiTestBody, request: Request, _: Superuser) 
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"invalid api connector config: {exc}") from exc
 
     settings = request.app.state.settings
+    # a connector that names a server pool is tested as it runs: with the pool's address, account and secrets
+    from liberty.connectors.server import with_servers
+
+    live = getattr(request.app.state, "connectors", None)
+    cfg, problem = with_servers(cfg, getattr(getattr(live, "pools", None), "_configs", {}) or {})  # noqa: SLF001 — the framework's own registry
+    if problem:
+        return {"kind": "server", "success": False, "error": problem}
     conn = APIConnector(
         "__test__", cfg,
         master_key=settings.crypto.master_key,

@@ -123,3 +123,106 @@ async def test_where_a_pool_points_is_said_without_its_account() -> None:
         assert "secret" not in str(reg.pools.where("jde"))
     finally:
         await reg.aclose()
+
+
+# ── an HTTP server as a pool: what an API connector names as its server ──────────────────────────
+def _with_server() -> ConnectorsFile:
+    from liberty.connectors.config import ApiConnectorConfig, ApiTargetConfig, EndpointDef
+
+    f = _file()
+    f.pools["jde_ais"] = PoolConfig(url="https://JDE@ais.example.com:7077/jderest/v2", password="ENC:not-a-real-secret",
+                                    signing_key="/etc/liberty/ais.pem", certificate="/etc/liberty/ais.cer", verify_ssl=False)
+    f.pools["jde_ais_test"] = PoolConfig(url="http://TESTER:in-url@ais-test.example.com/jderest/v2")
+    f.connectors["ais"] = ApiConnectorConfig(
+        type="api", server="jde_ais", auth_type="basic", pool="jde_prod",
+        targets={"jde_test": ApiTargetConfig(server="jde_ais_test")},
+        endpoints=[EndpointDef(name="ping", path="/defaultconfig")],
+    )
+    return f
+
+
+@pytest.mark.asyncio
+async def test_an_api_connector_reads_its_server_from_the_pool() -> None:
+    reg = ConnectorRegistry(_with_server())
+    try:
+        api = reg.api("ais")
+        assert api.server_problem is None
+        assert api.config.base_url == "https://ais.example.com:7077/jderest/v2"      # the address without the account
+        assert (api.config.auth_username, api.config.verify_ssl) == ("JDE", False)
+        # the pool's one secret serves the scheme the connector uses: a password, or a token
+        assert api.config.auth_password == api.config.auth_token == "ENC:not-a-real-secret"
+        assert (api.config.auth_jwt_key, api.config.auth_jwt_certificate) == ("/etc/liberty/ais.pem", "/etc/liberty/ais.cer")
+        # each environment names its own server pool
+        test = api.for_pool("jde_test")
+        assert test.config.base_url == "http://ais-test.example.com/jderest/v2"
+        assert (test.config.auth_username, test.config.auth_password, test.config.verify_ssl) == ("TESTER", "in-url", True)
+        # a server pool is a pool like another: listed, located, and it runs no SQL
+        assert reg.pools.is_server("jde_ais") and not reg.pools.is_server("default")
+        assert reg.pools.where("jde_ais") == {"dialect": "https", "host": "ais.example.com", "port": 7077, "database": "jderest/v2"}
+        from liberty.connectors.base import ConnectorError
+        with pytest.raises(ConnectorError, match="is an HTTP server: it runs no SQL"):
+            reg.pools.engine("jde_ais")
+    finally:
+        await reg.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_server_pool_that_is_missing_is_said_on_the_call_not_at_startup() -> None:
+    f = _with_server()
+    del f.pools["jde_ais"]
+    f.connectors["ais"].targets["jde_test"].server = "default"          # a database, not a server
+    reg = ConnectorRegistry(f)                                           # the installation still loads
+    try:
+        api = reg.api("ais")
+        assert "names the server pool 'jde_ais': there is no such pool" in api.server_problem
+        out = await api.call("ping")
+        assert out.success is False and out.status_code == 0 and "Liberty → Pools" in out.error
+    finally:
+        await reg.aclose()
+
+
+@pytest.mark.asyncio
+async def test_a_connector_without_a_server_is_as_before() -> None:
+    from liberty.connectors.config import ApiConnectorConfig
+    from liberty.connectors.server import with_servers
+
+    own = ApiConnectorConfig(type="api", base_url="https://api.example.com", auth_type="bearer", auth_token="t")
+    effective, problem = with_servers(own, {})
+    assert effective is own and problem is None
+
+
+@pytest.mark.asyncio
+async def test_testing_a_server_pool_never_raises() -> None:
+    from liberty.connectors.db import try_pool
+
+    out = await try_pool(PoolConfig(url="http://user@127.0.0.1:9/api", password="x"), timeout=2)
+    assert out["ok"] is False and out["dialect"] == "http" and out["error"]
+
+
+def test_an_upgrade_keeps_the_server_an_installation_named() -> None:
+    from liberty import config_merge
+
+    shipped = {"type": "api", "server": "jde_ais", "auth_type": "basic", "endpoints": []}
+    live = {"type": "api", "server": "ais_production", "auth_type": "basic", "endpoints": []}
+    merged, _ = config_merge._with_live_secrets(shipped, live)
+    assert merged["server"] == "ais_production"          # the installation's choice, and it does not make the connector look changed
+    assert config_merge._same(merged, live)
+
+
+@pytest.mark.asyncio
+async def test_a_server_pool_shipped_without_its_address_does_not_stop_the_installation() -> None:
+    # what an application ships: the pool named, its URL a reference the installation has not set yet
+    f = _with_server()
+    f.pools["jde_ais"] = PoolConfig(url="")
+    reg = ConnectorRegistry(f)
+    try:
+        api = reg.api("ais")
+        assert "names the server pool 'jde_ais': it has no URL yet" in api.server_problem
+        assert (await api.call("ping")).success is False
+        # a database named as a server is said for what it is
+        f.connectors["ais"].server = "default"
+        other = ConnectorRegistry(f)
+        assert "it is not an HTTP server" in other.api("ais").server_problem
+        await other.aclose()
+    finally:
+        await reg.aclose()
