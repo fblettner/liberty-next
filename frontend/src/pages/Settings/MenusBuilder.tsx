@@ -27,6 +27,7 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 import { BuilderShell as Shell } from '../../common/builderShell'
 import { dropInTree, dropZone, itemKind, type DropWhere } from '../../services/menuTree'
 import { Tag } from '../../common/Tag'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 type AppsMap = Record<string, AppMenu>
 
@@ -268,6 +269,7 @@ export default function MenusBuilder() {
   useEffect(() => { setSelItem(null); setTreeQ(''); setExpanded(new Set()) }, [selApp])
 
   const dirty = useMemo(() => apps != null && JSON.stringify(apps) !== original, [apps, original])
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
 
   // Tree filter: matched rows + their ancestors. Hook MUST stay above the early returns below so
   // it runs on every render (otherwise React #310 — the hook count changes between the loading

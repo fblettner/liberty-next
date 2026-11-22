@@ -8,6 +8,7 @@ import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts } from '../../theme'
 import { type Endpoint, EndpointEditor } from './ApiConnectorEditor'
 import { flattenConnectorSections } from './connectorTables'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 type Doc = Record<string, Record<string, unknown>>
 
@@ -37,6 +38,7 @@ export function EditEndpointModal({ connector, endpointName, onClose, onSaved }:
   const list = (conns && Array.isArray(conns[connector]?.endpoints) ? conns[connector].endpoints : []) as Endpoint[]
   const endpoint = index >= 0 ? list[index] : null
   const dirty = conns != null && JSON.stringify(conns) !== original
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
   const update = (next: Endpoint) => {
     if (!conns || index < 0) return
     const copy = list.slice(); copy[index] = next

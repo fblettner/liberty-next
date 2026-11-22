@@ -18,6 +18,7 @@ import { PairsField } from '../TableView/PairsField'
 import {
   type CaseRun, type TestCase, type TestExpect, type TestStep, type TestSuite, expectSummary, freshStepName, linesList, linesText, pairsObject, pairsText, tidyStep,
 } from '../../services/appTests'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 interface SuiteLine { name: string; label?: string | null; connector?: string | null; error?: string; cases: { id: string; label: string | null; writes: boolean; steps: number; last: { status: string; at: string } | null }[] }
 interface Loaded { name: string; suite: TestSuite; results: Record<string, CaseRun[]>; has_reference: boolean }
@@ -127,6 +128,7 @@ export default function TestsBuilder() {
   }, [suites, loaded, open])
 
   const dirty = !!loaded && !!doc && JSON.stringify(doc) !== JSON.stringify(loaded.suite)
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
   const current = doc?.case.find((c) => c.id === caseId) ?? null
   const step = current && stepAt != null ? current.steps[stepAt] ?? null : null
   const lastRun = (loaded && caseId ? loaded.results[caseId]?.[0] : undefined) ?? null

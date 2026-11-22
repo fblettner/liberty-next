@@ -7,6 +7,7 @@ import { Field, Input, SearchSelect, Textarea, type SearchSelectOption } from '.
 import { EditorModalShell } from '../../common/EditorModalShell'
 import type { AiToolBody } from '../../types/config'
 import { colors, fontSize } from '../../theme'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 interface PluginCallable { callable: string; docstring: string | null }
 
@@ -34,6 +35,7 @@ export function AiToolModal({ app, initial, takenIds, onSave, onClose }: {
   const dirty = initial
     ? callable !== initial.callable || description !== initial.description || (permission || '') !== (initial.permission || '')
     : !!(id || callable || description)
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
   return (
     <EditorModalShell title={initial ? `${t('settings.ai.tool')} · ${app}_${initial.id}` : t('settings.ai.addTool')} onClose={onClose}
       dirty={dirty} saveDisabled={!idOk || !callableOk || !description.trim()}

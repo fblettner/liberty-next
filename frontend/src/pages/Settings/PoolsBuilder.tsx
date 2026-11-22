@@ -26,6 +26,7 @@ import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import StageStrip, { type StageView } from './StageStrip'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { BuilderShell as Shell } from '../../common/builderShell'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 type Pools = Record<string, Record<string, unknown>>
 type PoolStage = 'database' | 'account' | 'schemas' | 'dblinks' | 'tuning'
@@ -116,6 +117,7 @@ export default function PoolsBuilder() {
   useEffect(load, [t])
 
   const dirty = useMemo(() => pools != null && JSON.stringify(pools) !== original, [pools, original])
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
 
   const update = (name: string, v: Record<string, unknown>) => {
     setPools((p) => ({ ...(p ?? {}), [name]: v }))

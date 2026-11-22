@@ -2,6 +2,22 @@
 
 ## 7.0.84 — unreleased
 
+- **Unsaved changes are no longer lost without a word.** A page that holds edits not yet saved — every Settings
+  builder and editor window, a job being edited, a data grid in bulk edit, an open record form — now tells the
+  shell, which asks before what would lose them: **closing the tab**, **closing every tab**, **switching the
+  language** (every open page is drawn again), and the **browser** itself asks before a reload or a closed
+  window. Nothing is asked when nothing is unsaved. **Moving to another page asks nothing either, because
+  nothing is lost: the page keeps its tab** — also in single-tab mode (`[ui] tabs_multi = false`, where the
+  page opened used to replace it) and when the tab cap is reached (the oldest tab with nothing unsaved closes
+  instead); an application switch that closes tabs leaves it open too. **A tab that holds unsaved changes
+  carries an orange dot**, so the page to come back to is visible. One limit: a job being edited is not a tab —
+  leaving its editor through the menu still drops its edits (a reload asks).
+- **A page an application ships tells the assistant what the user is looking at** — the page contract
+  (version 4) gains `useAssistantContext(title, facts)`: a title and a few facts in a few words (the object
+  open, the tab, a filter — never rows; blank facts are left out, long ones cut, 20 at most). The chat shows
+  it as its usual chip, sends it with each question while that page is on screen, and picks the starters the
+  application declares for the page (`[ai.<app>.screens.<page>]` in `ai.toml`). So "where is this used?" needs
+  no name on a page any more than on a screen.
 - **Integrity: a screen an Explorer entity opens is not an orphan.** An Explorer entity that names a screen
   opens a detail row in that screen's dialog: the screen is reached even when no menu leads to it.
 - **A page an application ships: a row of its grid can be opened** — the page contract (version 3) gives `Grid`

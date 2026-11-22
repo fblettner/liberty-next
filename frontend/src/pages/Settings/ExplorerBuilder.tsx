@@ -21,6 +21,7 @@ import { BuilderShell as Shell, BuilderToolbar as Toolbar } from '../../common/b
 import { FlowCanvas } from './flowKit'
 import ExplorerDiagram, { type DiagramPick } from './ExplorerDiagram'
 import { modelDiagram } from '../../services/explorerDiagram'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 type Models = Record<string, Record<string, ExplorerModelBody>>   // app → model id → body
 
@@ -132,6 +133,7 @@ export default function ExplorerBuilder() {
     }
   }, [model, scope, entityColumns])
   const dirty = JSON.stringify(doc) !== JSON.stringify(saved)
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
   const update = (patch: Partial<ExplorerModelBody>) => setDoc((p) => (p && p[scope]?.[modelId] ? { ...p, [scope]: { ...p[scope], [modelId]: { ...p[scope][modelId], ...patch } } } : p))
   const entityIds = Object.keys(model?.entities ?? {})
   const presetTables = useMemo(() => (model?.preset ? (presets.find((p) => p.id === model.preset)?.tables ?? []).map((x) => x.name.toLowerCase()) : []), [model?.preset, presets])

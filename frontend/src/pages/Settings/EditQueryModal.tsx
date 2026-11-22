@@ -23,6 +23,7 @@ import { EditorModalShell } from '../../common/EditorModalShell'
 import type { ConfigSchemas, ConnectorsDoc } from '../../types/config'
 import { flattenConnectorSections } from './connectorTables'
 import { colors, fontSize } from '../../theme'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 export interface EditQueryModalProps {
   connector: string
@@ -111,6 +112,7 @@ export function EditQueryModal({ connector, queryName, onClose, onSaved, seed, s
   const query = queryIdx >= 0 ? queries[queryIdx] : null
 
   const dirty = conns != null && JSON.stringify(conns) !== originalJson
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
 
   // SQL-only mode reduces the QueryDef schema to just its ``sql`` property, so the SchemaForm renders
   // only the editor (+ wizard). ``set('sql', …)`` spreads ``{...value}`` so the query's other fields

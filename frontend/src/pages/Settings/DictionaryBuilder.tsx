@@ -28,6 +28,7 @@ import { colors, fontSize, fonts, radius } from '../../theme'
 import { flattenConnectorSections, groupQueriesByTable } from './connectorTables'
 import { BuilderShell as Shell } from '../../common/builderShell'
 import { recordLine, recordMatches } from '../../services/dictionaryMarks'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 type DictionaryData = DictionaryDoc['dictionary']
 
@@ -207,6 +208,7 @@ export default function DictionaryBuilder() {
   useEffect(() => { setSel(null); setQ('') }, [kind, scope])
 
   const dirty = useMemo(() => dict != null && JSON.stringify(dict) !== original, [dict, original])
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
 
   // Augment the bundled framework enums with the *dynamic* sources this builder owns — so a
   // dictionary entry's `rules_values` field (whose `x_enum_ref_when` swaps between ENUM_IDS and

@@ -22,6 +22,7 @@ import {
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { AiStartersEditor, ModelsPicker } from './AiStartersEditor'
 import { groupedSections, pickedSection, splitLabel, type AppSectionKey } from '../../services/appSections'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 interface AppSection {
   name: string
@@ -320,6 +321,7 @@ export default function AppBuilder() {
     () => JSON.stringify({ app, ai, license, oidc, notify, branding, auth, jobs, changesets }) !== original,
     [app, ai, license, oidc, notify, branding, auth, jobs, changesets, original],
   )
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
 
   const discard = () => {
     if (!original) return

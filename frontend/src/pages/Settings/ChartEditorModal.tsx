@@ -20,6 +20,7 @@ import type { ChartSpec, SavedChartSpec } from '../../types/charts'
 import { defaultChartSpec, fromSavedSpec, toSavedSpec } from '../../types/charts'
 import { EditQueryButton, CloneQueryButton, AddQueryButton } from './EditQueryButton'
 import { colors, fontSize, fonts } from '../../theme'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 const PREVIEW_LIMIT = 1000
 
@@ -81,6 +82,7 @@ export function ChartEditorModal({
   const initialKey = useRef<string | null>(null)
   if (initialKey.current === null) initialKey.current = draftKey
   const dirty = draftKey !== initialKey.current
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
 
   // Sample for the builder + preview — refetched when connector/query change.
   const [sample, setSample] = useState<QueryResult | null>(null)

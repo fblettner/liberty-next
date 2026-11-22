@@ -29,6 +29,7 @@ import { NestedFormView, NestedTableView } from './NestedTab'
 import { useActionPrompt } from './useActionPrompt'
 import { useRecordLock } from './useRecordLock'
 import { resolveAutoFill, runChain } from './actionRunner'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 /** Narrow a ScreenTab to FormTab — the original "grid of fields" kind. A tab without a
  *  ``type`` discriminator is treated as a form (matches `parse_screens` backward compat).
@@ -507,6 +508,7 @@ export function ScreenDialog({
     }
     return false
   }, [formValues, savedRow, colByName])
+  useDirtyGuard(isDirty)          // an open record with edits not saved: the shell asks before a closed tab or a reload loses them
 
   // ``dialog.on_cancel`` — fires before the dialog actually closes. A failing action *blocks*
   // the close (the operator sees the error and can retry or fix); when stop_on_error = false

@@ -15,7 +15,7 @@
 // could tell the difference. A page that needs a newer contract checks `sdk.version` and says so.
 import React from 'react'
 import styled from '@emotion/styled'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import * as ui from '../../common'
 import { api } from '../../api/client'
@@ -25,9 +25,10 @@ import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 import { callableRef } from '../../tabs/pageTabs'
 import { PageGrid } from './PageGrid'
 import { hasPermission } from '../../services/permissions'
+import { pageFacts, setPageContext } from '../../services/aiContext'
 
-// 2: `Grid` (the shared grid)
-export const PAGE_SDK_VERSION = 3
+// 2: `Grid` (the shared grid) · 3: a row of the grid opens (`detail`) · 4: `useAssistantContext`
+export const PAGE_SDK_VERSION = 4
 
 export interface PageSdk {
   /** the contract's version (this file) */
@@ -64,6 +65,12 @@ export interface PageSdk {
   /** hook: a function that says whether the caller holds a permission ('job:<id>', 'plugin:…'; a superuser
    *  holds them all) — to show a button only to who may use it. The server decides in the end. */
   useCan: () => (permission: string) => boolean
+  /** hook: tell the assistant what the user is looking at, so a question about "this" needs no name:
+   *  `useAssistantContext('Cross Reference', { object: 'P4210', kind: 'application', form: 'W4210A' })`.
+   *  A few facts in a few words (blank ones are left out, long ones cut, 20 at most) — never rows. Sent with
+   *  each question while this page is the one on screen; the chat shows it as a chip the user can drop. The
+   *  application's starters for the page are `[ai.<app>.screens.<page>]` in ai.toml. Since version 4. */
+  useAssistantContext: (title: string, facts?: Record<string, string | number | boolean | null | undefined>) => void
 }
 
 export function buildSdk(app: string, page: string): PageSdk {
@@ -89,6 +96,16 @@ export function buildSdk(app: string, page: string): PageSdk {
     useCan: () => {
       const { user } = useAuth()
       return (permission: string) => !!user && (!!user.is_superuser || hasPermission(user.permissions ?? [], permission))
+    },
+    useAssistantContext: (title, facts) => {
+      const { pathname } = useLocation()
+      // every open tab stays mounted: only the page on screen speaks, and it speaks again when the user comes back
+      const onScreen = pathname === `/app/${app}/${page}`
+      const said = JSON.stringify(pageFacts(facts))
+      React.useEffect(() => {
+        if (!onScreen) return
+        setPageContext({ path: pathname, app, kind: 'page', title, connector: app, query: page, screen: page, facts: JSON.parse(said) as [string, string][] })
+      }, [onScreen, pathname, title, said])
     },
   }
 }

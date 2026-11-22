@@ -14,6 +14,7 @@ import { EditorModalShell } from '../../common/EditorModalShell'
 import type { ConfigSchemas, ScreensDoc, Screen } from '../../types/config'
 import ScreenEditor from './ScreenEditor'
 import { colors, fonts } from '../../theme'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 type AppScreens = Record<string, Record<string, Screen>>
 
@@ -62,6 +63,7 @@ export function ScreenDesignerModal({ app, screenId, onClose, onSaved }: Props) 
   }, [app, screenId, t])
 
   const dirty = !!value && JSON.stringify(value) !== original
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
 
   // Track id renames inside the editor — the dict key + sibling refs follow on Save.
   const onChange = (v: Record<string, unknown>) => {

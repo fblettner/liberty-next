@@ -307,7 +307,8 @@ api/client.ts          fetch wrapper: X-Liberty-Lang / X-Liberty-Pool headers, s
                        refresh, streamSSE (AI) and streamNDJSON (SQL rows); apiFetch / apiDownload /
                        apiUpload for files; every path through resolveApiPath (the <base href> the
                        server writes from [app] base_path — never a raw fetch to an absolute path)
-auth/ workspace/ tabs/ sio/ branding/   the contexts (AuthContext, WorkspaceContext = connectors +
+auth/ workspace/ tabs/ sio/ branding/   the contexts (tabs/dirtyGuard.ts = unsaved changes known to the shell: a page says `useDirtyGuard(dirty)`,
+                       closing a tab / all tabs, the language switch and the browser's reload ask first; a dirty tab is never closed by single-tab mode or the cap — `tabs/openTab.ts`, tested — and the tab strip marks it; AuthContext, WorkspaceContext = connectors +
                        menus + screens + license + current app / pool, TabsContext, SioContext)
 common/                shared primitives: Button Card Input SearchSelect Checkbox FileInput Tag Banner Spinner
                        PageLayout HeaderActions (a page's Save / Discard placed in the page header) Modal Modals(useModals) ErrorDetails ErrorBoundary SchemaForm
@@ -353,7 +354,7 @@ pages/Explorer/        the Data Explorer page: index (model, the AnalysisDefinit
                        click-to-add), services/explorerPivot.ts (pivot tree, chart shaping, KPI totals), both tested,
                        services/explorerSaved.ts (the saved routes, dashboard shape); shapes in types/explorer.ts
 pages/AppPage/         a page an application ships (index = fetch + import the module, problems said; sdk.ts = THE CONTRACT
-                       handed to it — add fields, never rename; PageGrid.tsx = `sdk.Grid` (a row opens on `detail`, contract version 3), the shared grid in a column / row shape of the
+                       handed to it — add fields, never rename; PageGrid.tsx = `sdk.Grid` (a row opens on `detail`, contract version 3); `useAssistantContext(title, facts)` = what the page tells the chat (version 4: services/aiContext kind `page`, `pageFacts`), the shared grid in a column / row shape of the
                        contract's own, the DataTable loaded lazily; `tabs/pageTabs.appPageOf` / `callableRef`, tested)
 pages/DashboardView/ Chat/ (AiDrawer) Reports/ Notifications/ (the inbox; components/NotificationBell
                        in the header, live via SioContext.subscribeNotifications) ScreenAssistant/ HttpRunner/ Monitoring/ Login/

@@ -6,6 +6,7 @@ import { Field, Input, Textarea } from '../../common'
 import { EditorModalShell } from '../../common/EditorModalShell'
 import type { PlaybookBody } from '../../types/config'
 import { colors, fontSize } from '../../theme'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 export function AiPlaybookModal({ initial, takenIds, onSave, onClose }: {
   /** null = a new playbook. */
@@ -21,6 +22,7 @@ export function AiPlaybookModal({ initial, takenIds, onSave, onClose }: {
   const [body, setBody] = useState(initial?.body ?? '')
   const idOk = !!initial || (/^[A-Za-z][A-Za-z0-9_-]{0,60}$/.test(id) && !takenIds.includes(id))
   const dirty = initial ? title !== initial.title || (description || '') !== (initial.description || '') || body !== initial.body : !!(id || title || body)
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
   return (
     <EditorModalShell title={initial ? `${t('settings.ai.playbook')} · ${initial.id}` : t('settings.ai.addPlaybook')} onClose={onClose}
       dirty={dirty} saveDisabled={!idOk || !title.trim() || !body.trim()}

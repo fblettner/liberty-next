@@ -11,6 +11,7 @@ import { entityKeyOf, forcedDefault } from './dialogHelpers'
 import { saveScreenRow, deleteScreenRow } from './saveScreenRow'
 import { runChain, type ActionRunnerDeps } from './actionRunner'
 import type { DataRow } from './resultColumns'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 export function useBatchEdit({
   result, screen, connector, updateQuery, insertQuery, deleteQuery, addSeed, saveContext, requestPrompt, confirmStep, sharedActions, onSaved,
@@ -67,6 +68,7 @@ export function useBatchEdit({
   useEffect(() => { resetEdit() }, [result, resetEdit])
 
   const dirtyCount = dirtyRows.size + newRows.length + [...deleted].filter((r) => !newRows.includes(r)).length
+  useDirtyGuard(dirtyCount > 0)   // rows edited, added or marked for deletion and not saved: the shell asks before they are lost
 
   // current values of a row (its original fields overlaid with any pending edits)
   const valuesOf = useCallback((row: DataRow): Record<string, unknown> => ({ ...row, ...editsRef.current.get(row) }), [])

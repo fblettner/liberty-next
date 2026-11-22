@@ -21,6 +21,7 @@ import { useWorkspace } from '../../workspace/WorkspaceContext'
 import StepEditor, { KeyValueEditor, JOB_PARAM_CATALOG } from './StepEditor'
 import ScheduleField from './ScheduleField'
 import type { JobConfig, JobPreset, JobsParsedResponse } from './types'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 const Section = styled(Card)`display: flex; flex-direction: column; gap: 12px;`
 const PresetCard = styled.div`
@@ -332,6 +333,7 @@ export default function JobEditor() {
   }, [id, isNew, t])
 
   const dirty = useMemo(() => job != null && JSON.stringify(job) !== original, [job, original])
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
   const patch = useCallback((p: Partial<JobConfig>) => setJob((j) => (j ? { ...j, ...p } : j)), [])
   // Patch one preset in place (schedule / timezone editing). Presets themselves are
   // created from the Run-with-parameters modal (Save preset); here we only attach a cron.

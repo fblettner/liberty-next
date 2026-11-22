@@ -1,5 +1,5 @@
 // The AI assistant's page context — what the user is looking at right now, published by the
-// page (a TableView tab today) and read by the Chat drawer, which sends its rendering as a
+// page (a data screen, the Explorer, a page an application ships) and read by the Chat drawer, which sends its rendering as a
 // second, uncached system block with each turn. A plain module store (no React): the page calls
 // ``setPageContext`` from an effect, the chat subscribes. ``path`` is the route that published
 // it, so the chat shows the chip only while the user is still on that page.
@@ -8,7 +8,7 @@ export interface PageContext {
   /** The route that published this context (``location.pathname``). */
   path: string
   app?: string | null
-  kind: 'screen' | 'sql' | 'explorer'
+  kind: 'screen' | 'sql' | 'explorer' | 'page'
   /** The page's friendly title (the screen's label / the query's description). */
   title: string
   connector: string
@@ -26,6 +26,9 @@ export interface PageContext {
   /** The row the user last clicked (or opened the row menu on). */
   row?: Record<string, unknown> | null
   /** An Explorer page: the model and the analysis on the canvas (its entity, rows, measures, period). */
+  /** A page an application ships: what it says the user is looking at, as `[label, value]` lines
+   *  (the object open, the tab, a filter) — see :func:`pageFacts`. */
+  facts?: [string, string][]
   explorer?: { app: string; model: string; entity?: string; rows?: string[]; measures?: string[]; period?: string | null; analysis?: string | null }
 }
 
@@ -33,6 +36,8 @@ export interface PageContext {
 export const CONTEXT_MAX_CHARS = 4000
 const MAX_COLUMNS = 80
 const MAX_CELL = 120
+const MAX_FACTS = 20
+const MAX_FACT = 240
 
 let current: PageContext | null = null
 const listeners = new Set<(c: PageContext | null) => void>()
@@ -59,6 +64,21 @@ export function filterLines(filters: Record<string, string> | undefined): string
     if (k.endsWith('_op') || v === '') continue
     const op = filters[`${k}_op`]
     out.push(`${k} ${op && op !== 'eq' ? op : '='} ${v}`)
+  }
+  return out
+}
+
+/** What a page says of itself, made safe to send: the facts that have a value, each on one line and
+ *  clipped, the first MAX_FACTS of them. A page states what is on screen in a few words — never rows. */
+export function pageFacts(facts: Record<string, unknown> | undefined | null): [string, string][] {
+  const out: [string, string][] = []
+  for (const [label, raw] of Object.entries(facts ?? {})) {
+    if (raw == null || raw === '' || raw === false) continue
+    const name = label.replace(/\s+/g, ' ').trim().slice(0, 60)
+    const text = (typeof raw === 'string' ? raw : typeof raw === 'object' ? JSON.stringify(raw) : String(raw)).replace(/\s+/g, ' ').trim()
+    if (!name || !text) continue
+    out.push([name, text.length > MAX_FACT ? text.slice(0, MAX_FACT - 1) + '…' : text])
+    if (out.length >= MAX_FACTS) break
   }
   return out
 }
@@ -96,6 +116,12 @@ export function renderPageContext(page: PageContext, hideSensitive = false): str
     if (x.analysis) lines.push(`saved analysis open: ${x.analysis}`)
     if (x.entity) lines.push(`analysis on the canvas: entity ${x.entity}; rows ${x.rows?.length ? x.rows.join(', ') : 'none'}; measures ${x.measures?.length ? x.measures.join(', ') : 'none'}; period ${x.period ?? 'none'}`)
     return lines.join('\n')
+  }
+  if (c.kind === 'page') {
+    lines.push(`page: ${c.title} — a page of the application (${c.query}), not a screen: it has no query to read; use the application's own tools for its subject`)
+    for (const [label, value] of c.facts ?? []) lines.push(`${label}: ${value}`)
+    const said = lines.join('\n')
+    return said.length <= CONTEXT_MAX_CHARS ? said : said.slice(0, CONTEXT_MAX_CHARS - 1) + '…'
   }
   if (c.screen) lines.push(`screen: ${c.screen} — ${c.title} (connector ${c.connector}, read query ${c.query})`)
   else lines.push(`query: ${c.connector}.${c.query} — ${c.title}`)

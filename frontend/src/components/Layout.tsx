@@ -15,7 +15,8 @@ import { useAuth } from '../auth/AuthContext'
 import { installAuthBuiltins } from '../pages/TableView/actionRunner'
 import { useWorkspace } from '../workspace/WorkspaceContext'
 import { isLibertyApp, LIBERTY_APP } from '../services/libertyMenu'
-import { Banner, Centered, ErrorBoundary, useViewport } from '../common'
+import { Banner, Centered, ErrorBoundary, useModals, useViewport } from '../common'
+import { anyDirty, dirtyTabs } from '../tabs/dirtyGuard'
 import Sidebar from './Sidebar'
 import ProfileModal from './ProfileModal'
 import { NotificationBell } from './NotificationBell'
@@ -170,6 +171,7 @@ export default function Layout() {
   const backApp = lastApp && apps?.some((a) => a.name === lastApp) ? lastApp : (apps?.[0]?.name ?? null)
   const switchLiberty = () => { if (!inLiberty) setCurrentApp(LIBERTY_APP); else if (backApp) setCurrentApp(backApp) }
   const { tabs, closeAll } = useTabs()
+  const modals = useModals()
   const navigate = useNavigate()
   // a configured-but-broken key (expired / bad signature) is worth flagging; "no key" isn't (the open framework)
   const licenseBanner = license.mode === 'restricted' && license.error && !/no license key/i.test(license.error)
@@ -237,7 +239,16 @@ export default function Layout() {
     })
   }
 
-  const switchLang = (l: Language) => {
+  // what would end the open pages asks first when one of them holds unsaved edits
+  const leaveUnsaved = (message: string) => modals.confirm({ title: t('tabs.unsavedTitle'), message, variant: 'danger', confirmLabel: t('tabs.unsavedDiscard'), cancelLabel: t('tabs.unsavedStay') })
+  const closeEvery = async () => {
+    const n = dirtyTabs(tabs.map((x) => x.id)).length
+    if (n > 0 && !(await leaveUnsaved(t('tabs.unsavedCloseAll', { count: n })))) return
+    closeAll(); navigate('/')
+  }
+  const switchLang = async (l: Language) => {
+    // a language switch draws every open page again: unsaved edits would be gone
+    if (l !== i18n.language && anyDirty() && !(await leaveUnsaved(t('tabs.unsavedLanguage')))) return
     void i18n.changeLanguage(l)
     try {
       localStorage.setItem(LANGUAGE_KEY, l)
@@ -282,7 +293,7 @@ export default function Layout() {
           the toolbar's look & feel. Only shown when there's more than one tab to close. */}
       {tabs.length >= 2 && (
         <>
-          <UtilBtn $danger onClick={() => { closeAll(); navigate('/') }} title={t('tabs.closeAll')} aria-label={t('tabs.closeAll')}>
+          <UtilBtn $danger onClick={() => { void closeEvery() }} title={t('tabs.closeAll')} aria-label={t('tabs.closeAll')}>
             <X size={15} />
           </UtilBtn>
           <Sep />

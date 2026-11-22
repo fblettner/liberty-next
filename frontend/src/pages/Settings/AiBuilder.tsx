@@ -17,6 +17,7 @@ import { AddScopeModal } from './AddScopeModal'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts } from '../../theme'
 import { BuilderShell as Shell } from '../../common/builderShell'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 const Body = styled.div`flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px;`
 const Section = styled(Card)`padding: 10px 14px; display: flex; flex-direction: column; gap: 8px;`
@@ -78,6 +79,7 @@ export default function AiBuilder() {
 
   const block: AppAiBody = doc?.[scope] ?? {}
   const dirty = JSON.stringify(doc) !== JSON.stringify(saved)
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
   const update = (patch: Partial<AppAiBody>) => setDoc((p) => (p && scope ? { ...p, [scope]: { ...(p[scope] ?? {}), ...patch } } : p))
   const screenIds = Object.keys(block.screens ?? {})
   const appScreens = screens[scope] ?? {}

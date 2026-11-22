@@ -20,6 +20,8 @@ const PAGE_ICONS: Record<string, typeof TableIcon> = {
 }
 import { colors, fontSize, fonts, radius, media } from '../theme'
 import { useTabs, tabPath, type Tab } from '../tabs/TabsContext'
+import { isTabDirty, useDirtyTabs } from '../tabs/dirtyGuard'
+import { useModals } from '../common'
 import { useWorkspace } from '../workspace/WorkspaceContext'
 import { useBranding } from '../branding/BrandingContext'
 import { findMenuLabelWithApp } from '../services/menuLabels'
@@ -98,6 +100,10 @@ const TabBtn = styled.button<{ $active?: boolean }>`
   & .label { line-height: 1.15; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
   & svg.tic { flex-shrink: 0; opacity: 0.65; }
 `
+// a page that holds changes not saved yet: it keeps them while its tab stays open
+const Unsaved = styled.span`
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: ${colors.orange.main};
+`
 const CloseX = styled.span`
   display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;
   border-radius: 3px; flex-shrink: 0; color: ${colors.text.muted};
@@ -106,10 +112,12 @@ const CloseX = styled.span`
 
 export default function TabStrip() {
   const { t } = useTranslation()
+  const modals = useModals()
   const { tabs, activeId, setActive, close } = useTabs()
   const { menus, libertyMenu, connectors, findScreenById } = useWorkspace()
   const { appName } = useBranding()
   const navigate = useNavigate()
+  const unsaved = useDirtyTabs()
 
   const scrollerRef = useRef<HTMLDivElement>(null)
   const [scroll, setScroll] = useState({ overflow: false, atStart: true, atEnd: false })
@@ -156,8 +164,10 @@ export default function TabStrip() {
   }
 
   const goTo = (tab: Tab) => { setActive(tab.id); navigate(tabPath(tab)) }
-  const onClose = (e: MouseEvent, tab: Tab) => {
+  const onClose = async (e: MouseEvent, tab: Tab) => {
     e.stopPropagation()
+    // a page that holds unsaved edits is not closed without a word
+    if (isTabDirty(tab.id) && !(await modals.confirm({ title: t('tabs.unsavedTitle'), message: t('tabs.unsavedClose'), variant: 'danger', confirmLabel: t('tabs.unsavedDiscard'), cancelLabel: t('tabs.unsavedStay') }))) return
     if (tab.id === activeId) {
       const remaining = tabs.filter((x) => x.id !== tab.id)
       const i = tabs.findIndex((x) => x.id === tab.id)
@@ -231,6 +241,7 @@ export default function TabStrip() {
                 {appLabel && <span className="app">{appLabel}</span>}
                 <span className="label">{label}</span>
               </span>
+              {unsaved.has(tab.id) && <Unsaved data-unsaved title={t('tabs.unsavedMark')} aria-label={t('tabs.unsavedMark')} />}
               <CloseX onClick={(e) => onClose(e, tab)} title={t('tabs.close')}><X size={12} /></CloseX>
             </TabBtn>
           )

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  CONTEXT_MAX_CHARS, filterLines, getPageContext, renderPageContext, setPageContext, subscribePageContext, summarizePageContext,
+  CONTEXT_MAX_CHARS, filterLines, getPageContext, pageFacts, renderPageContext, setPageContext, subscribePageContext, summarizePageContext,
   type PageContext,
 } from './aiContext'
 
@@ -61,6 +61,29 @@ describe('aiContext', () => {
   it('summarizes for the chip', () => {
     expect(summarizePageContext(base)).toEqual({ name: 'f0092', filters: 1, hasRow: true })
     expect(summarizePageContext({ ...base, screen: null, row: null, filters: {} })).toEqual({ name: 'f0092_get', filters: 0, hasRow: false })
+  })
+
+  it('keeps what a shipped page says of itself short: no blank fact, one line each, clipped, 20 at most', () => {
+    expect(pageFacts({ object: 'P4210', kind: 'application', form: '', tab: null, custom: false, count: 0, title: 'Sales\r\n  Order Entry', filter: { status: 'To do' } }))
+      .toEqual([['object', 'P4210'], ['kind', 'application'], ['count', '0'], ['title', 'Sales Order Entry'], ['filter', '{"status":"To do"}']])
+    expect(pageFacts({ long: 'x'.repeat(500) })[0][1]).toHaveLength(240)
+    expect(pageFacts(Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`f${i}`, i + 1])))).toHaveLength(20)
+    expect(pageFacts(undefined)).toEqual([])
+  })
+
+  it('renders a page an application ships: its title, its facts, and that it is no screen', () => {
+    const page: PageContext = { path: '/app/nomajde/crossref', app: 'nomajde', kind: 'page', title: 'Cross Reference', connector: 'nomajde', query: 'crossref', screen: 'crossref',
+      facts: [['object', 'P4210'], ['kind', 'application']] }
+    const text = renderPageContext(page)
+    expect(text.split('\n')).toEqual([
+      'app: nomajde',
+      "page: Cross Reference — a page of the application (crossref), not a screen: it has no query to read; use the application's own tools for its subject",
+      'object: P4210', 'kind: application',
+    ])
+    expect(text).not.toContain('filters:')
+    expect(summarizePageContext(page)).toEqual({ name: 'crossref', filters: 0, hasRow: false })
+    const huge = renderPageContext({ ...page, facts: Array.from({ length: 20 }, (_, i) => [`fact ${i}`, 'y'.repeat(240)] as [string, string]) })
+    expect(huge.length).toBeLessThanOrEqual(CONTEXT_MAX_CHARS)
   })
 
   it('is a store: set notifies subscribers, unsubscribe stops them', () => {

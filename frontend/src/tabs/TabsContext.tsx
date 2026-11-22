@@ -6,6 +6,8 @@
 // Assistant / Settings) are NOT tabs (separate phase / a drawer for AI). The set + the active
 // tab persist to sessionStorage, so a page refresh restores them.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode, useRef } from 'react'
+import { isTabDirty } from './dirtyGuard'
+import { withOpened } from './openTab'
 import { useBranding } from '../branding/BrandingContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
 
@@ -106,9 +108,8 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     setS((s) => {
       if (s.activeId === id) return s
       if (s.tabs.some((x) => x.id === id)) return { ...s, activeId: id }
-      if (!multi) return { tabs: [{ ...t, id }], activeId: id }
-      const kept = s.tabs.length >= max ? s.tabs.slice(s.tabs.length - max + 1) : s.tabs
-      return { tabs: [...kept, { ...t, id }], activeId: id }
+      // single-tab mode and the cap close tabs by themselves — never one that holds unsaved edits (tabs/openTab.ts)
+      return { tabs: withOpened(s.tabs, { ...t, id }, { multi, max }, isTabDirty), activeId: id }
     })
   }, [multi, max])
   const switchesSeen = useRef(appSwitches)
@@ -119,7 +120,8 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     // every tab of another application closes; the framework tabs (monitoring, the Liberty Next pages) and the
     // tabs of the picked app (its home, opened by the switch itself) stay
     setS((s) => {
-      const kept = s.tabs.filter((x) => tabApp(x) === null || tabApp(x) === currentApp)
+      // a tab that holds unsaved edits is never closed by the switch: it stays, for its owner to save or close
+      const kept = s.tabs.filter((x) => tabApp(x) === null || tabApp(x) === currentApp || isTabDirty(x.id))
       if (kept.length === s.tabs.length) return s
       const activeId = kept.some((x) => x.id === s.activeId) ? s.activeId : (kept[kept.length - 1]?.id ?? null)
       return { tabs: kept, activeId }

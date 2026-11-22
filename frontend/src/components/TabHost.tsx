@@ -9,6 +9,7 @@ import { appPageOf, explorerModelOf } from '../tabs/pageTabs'
 import { libertyPageOf } from '../services/libertyMenu'
 import i18n from 'i18next'
 import { Centered, ErrorBoundary } from '../common'
+import { TabIdContext } from '../tabs/dirtyGuard'
 import { useTabs } from '../tabs/TabsContext'
 import { useWorkspace } from '../workspace/WorkspaceContext'
 
@@ -70,6 +71,7 @@ export default function TabHost({ hidden }: { hidden: boolean }) {
         >
           <ErrorBoundary label={`tab ${tab.id}`}>
             <Suspense fallback={<Centered />}>
+              <TabIdContext.Provider value={tab.id}>
               {tab.kind === 'http' ? (
                 <HttpRunner connector={tab.connector} endpoint={tab.target} />
               ) : tab.kind === 'dashboard' ? (
@@ -95,6 +97,7 @@ export default function TabHost({ hidden }: { hidden: boolean }) {
               ) : (
                 <TableView connector={tab.connector} query={tab.target} />
               )}
+              </TabIdContext.Provider>
             </Suspense>
           </ErrorBoundary>
         </div>

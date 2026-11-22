@@ -27,6 +27,7 @@ import type { ChartSpec, SavedChartSpec } from '../../types/charts'
 import { AGGREGATIONS, defaultChartSpec, fromSavedSpec, toSavedSpec } from '../../types/charts'
 import type { BarsWidgetWire, KpiWidgetWire, ListWidgetWire, StatWidgetWire, TableWidgetWire, ValueFormat, TextWidgetWire, LinksWidgetWire, LinkWire, JobsWidgetWire } from '../../types/dashboards'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 const PREVIEW_LIMIT = 1000
 export type WidgetKind = 'chart' | 'kpi' | 'table' | 'stat' | 'list' | 'bars' | 'text' | 'links' | 'jobs'
@@ -219,6 +220,7 @@ export function WidgetEditorModal({
   const initialKey = useRef<string | null>(null)
   if (initialKey.current === null) initialKey.current = draftKey
   const dirty = draftKey !== initialKey.current
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
   const requestClose = async () => {
     if (!dirty) { onClose(); return }
     const choice = await modals.choose<'discard' | 'save' | 'keep'>({

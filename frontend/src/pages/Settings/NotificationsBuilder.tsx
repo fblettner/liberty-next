@@ -15,6 +15,7 @@ import { validateId } from '../../services/idValidator'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { DispatchReportWire, JobEvent, NotificationChannel, NotificationRule, RuleTrigger, RuleWhen, ScreenEvent } from '../../types/notifications'
 import { PermChip } from './Access/OtherAccess'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 const Split = styled.div`display: flex; gap: 12px; flex: 1; min-height: 0;`
 const Side = styled.div`width: 300px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; min-height: 0;`
@@ -79,6 +80,7 @@ function RuleEditor({ id, initial, isNew, takenIds, jobIds, onSaved, onCancel, o
   }, [])
 
   const dirty = isNew || JSON.stringify(rule) !== JSON.stringify(initial)
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
   const patch = (p: Partial<NotificationRule>) => setRule((r) => ({ ...r, ...p }))
   const setTrigger = (tr: RuleTrigger) => patch({ trigger: tr })
   const tr = rule.trigger

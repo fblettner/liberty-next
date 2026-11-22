@@ -34,6 +34,7 @@ import { MoveQueryModal } from './MoveQueryModal'
 import { validateId, suggestCloneId } from '../../services/idValidator'
 import { DictionaryScan } from './DictionaryScan'
 import { BuilderShell as Shell } from '../../common/builderShell'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 type Connectors = Record<string, Record<string, unknown>>
 
@@ -227,6 +228,7 @@ export default function ConnectorsBuilder() {
     const dictDirty = dictionary != null && JSON.stringify(dictionary) !== dictOriginal
     return connsDirty || dictDirty
   }, [conns, original, dictionary, dictOriginal])
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
   const schemaFor = (c: Record<string, unknown>): JsonSchema | null => (!schemas ? null : c.type === 'api' ? schemas.api : schemas.sql)
 
   // Per-connector dynamic enum: `DD_ENTRIES` for the current connector — shared entries plus the

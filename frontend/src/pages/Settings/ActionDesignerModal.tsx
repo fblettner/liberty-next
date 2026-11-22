@@ -18,6 +18,7 @@ import { EditQueryModal } from './EditQueryModal'
 import { builtinSourceOptions } from './actionCandidates'
 import type { ActionPath } from './actionPath'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 type Row = Record<string, unknown>
 
@@ -94,6 +95,7 @@ export function ActionDesignerModal({ actionId, onClose, onSaved }: Props) {
   }, [actionId, t])
 
   const dirty = !!value && JSON.stringify(value) !== original
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
 
   const patch = (p: Row) => {
     if (!value) return

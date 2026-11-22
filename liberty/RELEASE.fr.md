@@ -2,6 +2,26 @@
 
 ## 7.0.84 — non publiée
 
+- **Les modifications non enregistrées ne se perdent plus sans prévenir.** Une page qui contient des
+  modifications non enregistrées — chaque éditeur des Paramètres et chaque fenêtre d'édition, un traitement en
+  cours de modification, une grille en édition en masse, une fiche ouverte — le signale maintenant à
+  l'application, qui demande avant ce qui les ferait perdre : **fermer l'onglet**, **fermer tous les onglets**,
+  **changer de langue** (toutes les pages ouvertes sont redessinées), et le **navigateur** lui-même demande
+  avant un rechargement ou une fenêtre fermée. Un changement d'application qui ferme des onglets laisse ouverts
+  ceux qui ont des modifications non enregistrées. **Passer à une autre page ne demande rien non plus, parce
+  que rien n'est perdu : la page garde son onglet** — y compris en mode onglet unique (`[ui] tabs_multi =
+  false`, où la page ouverte la remplaçait) et quand le nombre maximum d'onglets est atteint (c'est le plus
+  ancien onglet sans modification en attente qui se ferme). **Un onglet qui contient des modifications non
+  enregistrées porte un point orange** : on voit où revenir. Une limite : un traitement en cours d'édition
+  n'est pas un onglet — quitter son éditeur par le menu perd encore ses modifications (un rechargement
+  demande). Rien n'est demandé quand rien n'est en attente.
+- **Une page fournie par une application dit à l'assistant ce que l'utilisateur regarde** — le contrat des
+  pages (version 4) gagne `useAssistantContext(title, facts)` : un titre et quelques faits en quelques mots
+  (l'objet ouvert, l'onglet, un filtre — jamais de lignes ; les faits vides sont omis, les longs coupés, 20 au
+  plus). La conversation l'affiche comme sa pastille habituelle, l'envoie avec chaque question tant que cette
+  page est à l'écran, et propose les questions de départ que l'application déclare pour la page
+  (`[ai.<app>.screens.<page>]` dans `ai.toml`). « Où est-ce utilisé ? » n'a donc plus besoin de nom sur une
+  page, pas plus que sur un écran.
 - **Intégrité : un écran qu'une entité de l'Explorateur ouvre n'est pas orphelin.** Une entité de
   l'Explorateur qui nomme un écran ouvre une ligne de détail dans la fenêtre de cet écran : l'écran est atteint
   même quand aucun menu n'y mène.

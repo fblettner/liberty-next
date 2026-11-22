@@ -28,6 +28,7 @@ import type { SavedChartSpec } from '../../types/charts'
 import { WidgetEditorModal } from './WidgetEditorModal'
 import { dropSide, dropped, resized, stepped } from '../../services/dashLayout'
 import { colors, fontSize, fonts, radius } from '../../theme'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 type Raw = Record<string, unknown>
 const ROW_PX = 150
@@ -313,6 +314,7 @@ export function DashboardEditorModal({
   const initialKey = useRef<string | null>(null)
   if (initialKey.current === null) initialKey.current = draftKey
   const dirty = draftKey !== initialKey.current
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
   const requestClose = async () => {
     if (!dirty) { onClose(); return }
     const choice = await modals.choose<'discard' | 'save' | 'keep'>({

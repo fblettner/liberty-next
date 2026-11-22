@@ -18,6 +18,7 @@ import {
   type ThemeDoc, type ThemeDraft, type ThemeFont, type ThemePreset,
 } from '../../services/themeDraft'
 import ThemePreview from './ThemePreview'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 interface ThemeParsed { path: string; theme: ThemeDoc; presets: ThemePreset[]; fonts: ThemeFont[] }
 
@@ -103,6 +104,7 @@ export default function ThemeBuilder() {
   const set = (patch: Partial<ThemeDraft>) => { setDraft((d) => ({ ...d, ...patch })); setStatus(null) }
   const doc = useMemo(() => docFromDraft(draft), [draft])
   const dirty = JSON.stringify(doc) !== original
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
   const primary = effectivePrimary(draft, presets)
   const font = effectiveFont(draft, fontList)
   // the variables the draft resolves to: applied to the whole page while editing (put back on leaving), and

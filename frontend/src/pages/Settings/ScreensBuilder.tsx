@@ -43,6 +43,7 @@ import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import ScreenEditor from './ScreenEditor'
 import { BuilderEmpty as Empty, BuilderShell as Shell } from '../../common/builderShell'
+import { useDirtyGuard } from '../../tabs/dirtyGuard'
 
 type AppScreens = Record<string, Record<string, Screen>>
 
@@ -283,6 +284,7 @@ export default function ScreensBuilder({ embedded, onDone }: { embedded?: { app:
   }, [selApp, doc])
 
   const dirty = useMemo(() => doc != null && JSON.stringify(doc) !== original, [doc, original])
+  useDirtyGuard(dirty)          // the shell asks before a closed tab or a reload loses these edits
 
   // ── mutators ────────────────────────────────────────────────────────────────────
   const updateScreen = (app: string, id: string, v: Record<string, unknown>) =>
