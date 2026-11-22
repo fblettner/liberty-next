@@ -21,7 +21,7 @@
 // External data fetched on mount: dictionary.toml entries (for the connector scope) + the
 // read_query's column names (via /api/sql with _limit=0). Both cached in component state; the
 // dictionary feeds both the palette and the field-widget preview.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import {
@@ -31,7 +31,8 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Field, Input, Row, SchemaForm, SearchSelect, Stack, useModals, type JsonSchema, type SearchSelectOption } from '../../common'
+import { Banner, Button, Checkbox, Field, Input, Row, SchemaForm, SearchSelect, Stack, useModals, type JsonSchema, type SearchSelectOption } from '../../common'
+import { FrameworkEnumsContext, StringMapEditor } from '../../common/SchemaForm'
 import type { ConnectorsDoc, DictionaryDoc } from '../../types/config'
 import type { Column, QueryResult } from '../../types/connectors'
 import type { ScreenDetail } from '../../types/screens'
@@ -387,6 +388,7 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
   const [editQuery, setEditQuery] = useState<{ connector: string; queryName: string } | null>(null)
   useEffect(() => { if (tabIdx >= tabs.length) setTabIdx(Math.max(0, tabs.length - 1)) }, [tabs, tabIdx])
   const selTab = tabs[tabIdx]
+  const languages = useContext(FrameworkEnumsContext)?.SUPPORTED_LANGUAGES ?? null      // a tab's title per language
   const fields: Row[] = useMemo(() => (Array.isArray(selTab?.fields) ? (selTab!.fields as Row[]) : []), [selTab])
   const tabActions: Row[] = useMemo(() => (Array.isArray(selTab?.actions) ? (selTab!.actions as Row[]) : []), [selTab])
   const cols = Math.max(1, Number(selTab?.cols ?? 2))
@@ -1003,6 +1005,22 @@ export default function ScreenVisualBuilder({ app, value, schema, onChange }: Sc
                 </Field>
               </div>
             )}
+          </Row>
+          {/* the tab's title in the other languages, and when the tab is left out of the form */}
+          <Row gap={10}>
+            <div style={{ flex: 2 }}>
+              <Field label={t('settings.screens.visual.tabSettings.translations')}>
+                <StringMapEditor
+                  value={(selTab.l && typeof selTab.l === 'object' ? selTab.l : {}) as Record<string, string>}
+                  onChange={(l) => patchTab({ l: Object.keys(l).length ? l : null })}
+                  keyEnum={languages}
+                />
+              </Field>
+            </div>
+            <div style={{ flex: 3, display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 18 }}>
+              <Checkbox checked={!!selTab.hide_on_add} onChange={(v) => patchTab({ hide_on_add: v ? true : null })} label={t('settings.screens.visual.tabSettings.hideOnAdd')} />
+              <Checkbox checked={!!selTab.hide_on_edit} onChange={(v) => patchTab({ hide_on_edit: v ? true : null })} label={t('settings.screens.visual.tabSettings.hideOnEdit')} />
+            </div>
           </Row>
           {/* nested_form (reference-only): reuse another screen's form. Pick the screen + bind the
               parent's values into it — exactly like nested_table, but it renders a form. The reused

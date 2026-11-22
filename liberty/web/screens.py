@@ -276,17 +276,22 @@ def _resolve_dialog_prompts(
     out = dict(dialog)
     for hook in ("on_load", "on_save", "on_cancel"):
         if hook in out:
-            out[hook] = _resolve_prompts_in_actions(
+            out[hook] = localize_actions(_resolve_prompts_in_actions(
                 out.get(hook), connector=connector, language=language, dictionary=dictionary,
-            )
+            ), language)
     tabs = out.get("tabs")
     if isinstance(tabs, list):
         new_tabs = []
         for tab in tabs:
             if isinstance(tab, dict) and "actions" in tab:
-                tab = {**tab, "actions": _resolve_prompts_in_actions(
+                tab = {**tab, "actions": localize_actions(_resolve_prompts_in_actions(
                     tab.get("actions"), connector=connector, language=language, dictionary=dictionary,
-                )}
+                ), language)}
+            if isinstance(tab, dict):                   # the tab's own title, in the user's language
+                tab = dict(tab)
+                said = in_language(tab.pop("l", None), language)
+                if said:
+                    tab["label"] = said
             new_tabs.append(tab)
         out["tabs"] = new_tabs
     return out
@@ -307,11 +312,48 @@ def _can_read(principal: Principal, screen: Screen, *, app: str, connectors: Any
     return principal.has_permission(read_permission(connectors, _screen_connector(screen, app=app), screen.read_query))
 
 
+def in_language(overrides: Any, language: str | None) -> str | None:
+    """What *overrides* (a ``l`` table: language → text) says for *language* — ``fr-FR`` falls back
+    on ``fr``; ``None`` when it says nothing: the default text stands."""
+    if not isinstance(overrides, dict) or not language:
+        return None
+    return overrides.get(language) or overrides.get(language.split("-")[0]) or None
+
+
+# where an action carries the actions it runs: their labels are said too (a confirm inside a chain)
+_NESTED_ACTIONS = ("steps", "then_steps", "else_steps", "actions")
+
+
+def localize_actions(actions: Any, language: str | None) -> Any:
+    """Each action's ``label`` in *language* when its ``l`` names it (a row-menu entry, a toolbar
+    or tab button, a step of a chain); the ``l`` table itself stays out of what the browser gets."""
+    if not isinstance(actions, list):
+        return actions
+    out: list[Any] = []
+    for a in actions:
+        if not isinstance(a, dict):
+            out.append(a)
+            continue
+        a = dict(a)
+        said = in_language(a.pop("l", None), language)
+        if said:
+            a["label"] = said
+        for key in _NESTED_ACTIONS:
+            if isinstance(a.get(key), list):
+                a[key] = localize_actions(a[key], language)
+        out.append(a)
+    return out
+
+
 def _label_for(screen: Screen, *, language: str | None) -> str:
-    """Display label for the list view — currently just ``label`` then ``description`` then
-    the screen ``id``. (Per-language overrides on the screen itself land later — for now the
-    *dictionary* drives translation when fields are rendered.)"""
-    return screen.label or screen.description or screen.id
+    """Display label for the list view: the screen's label in *language* (its ``l``), else its
+    ``label``, its ``description``, its ``id``."""
+    return in_language(screen.l, language) or screen.label or screen.description or screen.id
+
+
+def _description_for(screen: Screen, *, language: str | None) -> str | None:
+    """The page's heading in *language* (``description_l``), else the description."""
+    return in_language(screen.description_l, language) or screen.description
 
 
 def _build_dd_map(screen: Screen) -> dict[str, str]:
@@ -336,7 +378,7 @@ def _list_view(screen: Screen, *, app: str, language: str | None) -> dict[str, A
         "id": screen.id,
         "app": app,
         "label": _label_for(screen, language=language),
-        "description": screen.description,
+        "description": _description_for(screen, language=language),
         "connector": _screen_connector(screen, app=app),
         "read_query": screen.read_query,
         "update_query": screen.update_query,
@@ -447,9 +489,11 @@ def _full_view(
     # row_menu / on_insert / on_update / on_delete, and the dialog's hooks + per-tab buttons.
     for hook in ("actions", "row_menu", "on_insert", "on_update", "on_delete", "on_duplicate"):
         if hook in body:
-            body[hook] = _resolve_prompts_in_actions(
+            body[hook] = localize_actions(_resolve_prompts_in_actions(
                 body.get(hook), connector=dict_scope, language=language, dictionary=dictionary,
-            )
+            ), language)
+    for own in ("l", "description_l"):                  # the browser gets the label and the heading already said
+        body.pop(own, None)
     if "dialog" in body:
         # Phase 2 — build a case-insensitive lookup of the screen's column hints once; the
         # dialog field resolver uses it to merge per-column display metadata onto each field

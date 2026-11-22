@@ -110,7 +110,7 @@ class _ScreenTabBase(BaseModel):
 
     id: str = Field(description="Stable id within the dialog (used as the tab's key in builders).")
     label: str | None = Field(default=None, description="Default-language tab title.")
-    l: dict[str, str] = Field(default_factory=dict, description="Per-language label overrides.")
+    l: dict[str, str] = Field(default_factory=dict, title="Translations", description="The tab's title per language.", json_schema_extra={"x_group": "Translations", "x_key_enum_ref": "SUPPORTED_LANGUAGES"})
     hide_on_add: bool = Field(default=False, description="Hide this tab when adding a new row.")
     hide_on_edit: bool = Field(default=False, description="Hide this tab when editing an existing row.")
     actions: list["Action"] = Field(
@@ -276,6 +276,7 @@ class _ActionBase(BaseModel):
 
     id: str = Field(description="Stable id within the screen.")
     label: str | None = Field(default=None, description="Display label (button caption / log line).")
+    l: dict[str, str] = Field(default_factory=dict, title="Translations", description="The label per language (a row-menu entry, a button).", json_schema_extra={"x_group": "Translations", "x_key_enum_ref": "SUPPORTED_LANGUAGES"})
     stop_on_error: bool = Field(
         default=True,
         description="When this action raises, abort the rest of the action list. Set false to make this action best-effort.",
@@ -1133,6 +1134,8 @@ class Screen(BaseModel):
     id: str = Field(description="Stable screen id within the app (e.g. ``security_users``, ``F0005``).")
     label: str | None = Field(default=None, description="Short label shown in the menu / list.")
     description: str | None = Field(default=None, description="Longer description shown as the page title.")
+    l: dict[str, str] = Field(default_factory=dict, title="Translations", description="The label per language (the tab, the list of screens).", json_schema_extra={"x_group": "Translations", "x_key_enum_ref": "SUPPORTED_LANGUAGES"})
+    description_l: dict[str, str] = Field(default_factory=dict, title="Description translations", description="The description per language (the page's heading).", json_schema_extra={"x_group": "Translations", "x_key_enum_ref": "SUPPORTED_LANGUAGES"})
     connector: str | None = Field(
         default=None,
         description="Connector the read / write queries live on. Blank → the app's own connector.",

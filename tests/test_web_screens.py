@@ -560,3 +560,56 @@ def test_screen_write_fires_notification_rules(app) -> None:
         assert r.status_code == 200 and r.json()["portal_users"] == ["admin"]
         assert client.post("/api/notify/fire", json={"rule": "period_closed", "payload": {}}, headers=h).status_code == 404
         assert client.get("/api/notifications", headers=h).json()["notifications"][0]["subject"] == "Look at 3"
+
+
+_TRANSLATED = """
+[screens.app1.users]
+label = "Users"
+description = "User accounts"
+read_query = "users_get"
+l = { fr = "Utilisateurs" }
+description_l = { fr = "Comptes des utilisateurs" }
+row_menu = [
+  { id = "roles", type = "navigate", label = "Display Roles", l = { fr = "Afficher les rôles" }, screen = "things" },
+  { id = "check", type = "chain", label = "Check", steps = [ { id = "ask", type = "confirm", label = "Sure?", l = { fr = "Sûr ?" }, message = "Go on?" } ] },
+]
+[screens.app1.users.dialog]
+title = "User"
+tabs = [
+  { id = "general", label = "General", l = { fr = "Général" }, fields = [ { name = "USR_ID" } ], actions = [ { id = "tell", type = "notify", label = "Tell", l = { fr = "Prévenir" }, message = "x" } ] },
+  { id = "other", label = "Other", fields = [] },
+]
+
+[screens.app1.things]
+label = "Things"
+connector = "external"
+read_query = "things_get"
+"""
+
+
+def test_a_screen_its_tabs_and_its_actions_are_said_in_the_users_language(app, tmp_path) -> None:
+    with TestClient(app) as client:
+        h = _h(client, "admin")
+        (tmp_path / "screens.toml").write_text(_TRANSLATED)
+        assert client.post("/admin/reload", headers=h).status_code == 200
+
+        def screen(lang: str | None) -> tuple[dict, dict]:
+            heads = {**h, **({"X-Liberty-Lang": lang} if lang else {})}
+            listed = {s["id"]: s for s in client.get("/api/screens/app1", headers=heads).json()["screens"]}
+            return listed["users"], client.get("/api/screens/app1/users", headers=heads).json()
+
+        listed, full = screen("fr")
+        assert (listed["label"], listed["description"]) == ("Utilisateurs", "Comptes des utilisateurs")
+        assert (full["label"], full["description"]) == ("Utilisateurs", "Comptes des utilisateurs")
+        assert [a["label"] for a in full["row_menu"]] == ["Afficher les rôles", "Check"]          # no translation: the label stands
+        assert full["row_menu"][1]["steps"][0]["label"] == "Sûr ?"                               # a step inside a chain too
+        assert [t["label"] for t in full["dialog"]["tabs"]] == ["Général", "Other"]
+        assert full["dialog"]["tabs"][0]["actions"][0]["label"] == "Prévenir"
+        # the tables of translations are not sent: the browser gets the words
+        assert "l" not in full and "description_l" not in full and "l" not in full["row_menu"][0] and "l" not in full["dialog"]["tabs"][0]
+
+        for lang in ("en", None, "de"):                                                          # the default, and a language nothing names
+            listed, full = screen(lang)
+            assert (listed["label"], full["description"]) == ("Users", "User accounts")
+            assert [a["label"] for a in full["row_menu"]] == ["Display Roles", "Check"] and full["dialog"]["tabs"][0]["label"] == "General"
+        assert screen("fr-FR")[0]["label"] == "Utilisateurs"                                     # a regional form falls back on its language

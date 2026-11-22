@@ -29,6 +29,14 @@
   « rien ne l'ouvre » d'un écran qu'une entité de l'Explorateur ouvre. La carte Authentification d'un
   connecteur API nomme *Chaque utilisateur sous son nom* et signale l'absence de clé de signature ; `{USER}`
   figure dans la liste des marqueurs de l'étape de notification.
+- **Un écran, ses onglets et ses actions dans la langue de l'utilisateur.** Un écran gagne `l` (son libellé par
+  langue : l'onglet, la liste des écrans) et `description_l` (son titre de page) ; une action gagne `l` (une
+  entrée de menu de ligne, un bouton de barre d'outils ou d'onglet, une étape d'une chaîne) — saisis dans le
+  concepteur sous *Traductions*, comme pour une entrée de menu. Le serveur les envoie déjà dans la langue de la
+  requête (`fr-FR` se rabat sur `fr`). **Les traductions des onglets d'un dialogue, présentes dans la
+  configuration mais jamais appliquées, le sont maintenant** — et elles se saisissent dans les *Réglages de
+  l'onglet* du concepteur de formulaire, avec les deux indicateurs qui retirent un onglet à l'ajout ou à la
+  modification d'un enregistrement.
 - **Studio et éditeurs, corrigés.** Le Studio dit d'un écran « rien ne l'ouvre » selon la règle même de
   l'Intégrité (une navigation depuis un menu de ligne, un onglet d'un autre formulaire et une entité de
   l'Explorateur comptent, comme là-bas) ; un tableau de bord qu'une entrée ouvre n'est plus marqué « hors du

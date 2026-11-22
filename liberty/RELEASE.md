@@ -24,6 +24,13 @@
   The Studio no longer says "nothing opens" of a screen an Explorer entity opens. The Authentication card of an
   API connector names *Each user as himself* and says when its signing key is missing; `{USER}` is in the
   notify step's list of placeholders.
+- **A screen, its tabs and its actions in the user's language.** A screen gains `l` (its label per language:
+  the tab, the list of screens) and `description_l` (its heading); an action gains `l` (a row-menu entry, a
+  toolbar or tab button, a step of a chain) — edited in the designer under *Translations*, like a menu entry's.
+  The server sends each of them already in the language of the request (`fr-FR` falls back on `fr`). **A
+  dialog tab's translations, which existed in the configuration but were never applied, now are** — and they
+  are edited in the form builder's *Tab settings*, with the two flags that leave a tab out when a record is
+  added or edited.
 - **Studio and builders, corrected.** The Studio says of a screen "nothing opens it" by Integrity's own rule (a
   row-menu drill, a tab of another form and an Explorer entity count, as there); a dashboard an entry opens is
   no longer tagged "not in the menu"; *Edit the menu* opens on the application shown; the Menu column counts

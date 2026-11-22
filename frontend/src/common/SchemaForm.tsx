@@ -306,7 +306,7 @@ const DialectLabel = styled.div`font-size: ${fontSize.micro}; color: ${colors.te
 // picks "fr / Français" from a dropdown instead of typing `fr` blindly. Picks that already exist in
 // the map are filtered out of the per-row option list so the user can't duplicate a language. The
 // VALUE editor stays a free-text Input either way.
-function StringMapEditor({ value, onChange, keyEnum, valueEnum }: {
+export function StringMapEditor({ value, onChange, keyEnum, valueEnum }: {
   value: Record<string, string>
   onChange: (v: Record<string, string>) => void
   keyEnum?: FrameworkEnum | null

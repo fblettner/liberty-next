@@ -284,7 +284,7 @@ secret in a committed file.
 ### Screens are the source of truth for display
 
 A connector holds **queries only** (`sql` as a string or a per-dialect map, `params`,
-`writable`). A `Screen` owns everything else: `columns` (ColumnHint: dd / label / format /
+`writable`). A `Screen` owns everything else: its label and heading per language (`l`, `description_l`; a tab's and an action's `l` — said by the server in the request's language, `web/screens.py` `in_language` / `localize_actions`), `columns` (ColumnHint: dd / label / format /
 rule / hidden / filter / filter_from / visible_when / key / default…), `read_query` +
 `update_query` / `insert_query` / `delete_query`, `auto_load`, `audit_table`, `max_rows`, `editable_when`
 (row-level read-only rule, enforced by the grid, the dialog and the write route), the
