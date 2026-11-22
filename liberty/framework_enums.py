@@ -59,6 +59,7 @@ FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
             {"value": "LOGIN", "label": "User connected"},
             {"value": "LOOKUP", "label": "Lookup Table"},
             {"value": "PASSWORD", "label": "Password (mask and encryption)"},
+            {"value": "POOL", "label": "Database pool (of this installation)"},
             {"value": "SEQUENCE", "label": "Sequence"},
             {"value": "SYSDATE", "label": "Date Today"},
         ],

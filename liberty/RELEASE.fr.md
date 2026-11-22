@@ -44,12 +44,47 @@
   connecteur API ont le bouton afficher / masquer qu'a le mot de passe d'un pool.
 - **Un écran, ses onglets et ses actions dans la langue de l'utilisateur.** Un écran gagne `l` (son libellé par
   langue : l'onglet, la liste des écrans) et `description_l` (son titre de page) ; une action gagne `l` (une
-  entrée de menu de ligne, un bouton de barre d'outils ou d'onglet, une étape d'une chaîne) — saisis dans le
-  concepteur sous *Traductions*, comme pour une entrée de menu. Le serveur les envoie déjà dans la langue de la
-  requête (`fr-FR` se rabat sur `fr`). **Les traductions des onglets d'un dialogue, présentes dans la
-  configuration mais jamais appliquées, le sont maintenant** — et elles se saisissent dans les *Réglages de
-  l'onglet* du concepteur de formulaire, avec les deux indicateurs qui retirent un onglet à l'ajout ou à la
-  modification d'un enregistrement.
+  entrée de menu de ligne, un bouton de barre d'outils ou d'onglet, une étape d'une chaîne). Le serveur les
+  envoie déjà dans la langue de la requête (`fr-FR` se rabat sur `fr`). Les trois se saisissent dans le
+  concepteur : ceux de l'écran sur sa première étape (*Ce qu'il est*, sous le libellé et sous la description),
+  ceux d'une action dans son onglet *Traductions*, ceux d'un onglet dans les *Réglages de l'onglet* du
+  concepteur de formulaire — avec les deux indicateurs qui retirent un onglet à l'ajout ou à la modification
+  d'un enregistrement. **Les traductions des onglets d'un dialogue, présentes dans la configuration mais
+  jamais appliquées, le sont maintenant.**
+- **Tout texte donné dans une autre langue se saisit dans son éditeur — aucun n'est laissé au fichier.** Trois
+  ne l'étaient pas. **Tableaux de bord** : le titre et la description d'un tableau de bord, les textes d'une
+  carte (libellé, sous-titre, ligne secondaire, unité, libellé du nombre, note, le Markdown d'une carte texte,
+  et la colonne à lire quand une requête en retourne une par langue), le libellé et la description d'un lien
+  et le libellé d'un filtre montrent chacun un bloc *Dans les autres langues* sous le champ — laissé vide, le
+  texte tel qu'écrit est affiché. **Enregistrer un tableau de bord depuis l'éditeur perdait son titre et sa
+  description dans les autres langues, et une carte de liens ceux de ses liens : ils sont conservés.** **Les
+  questions de démarrage de l'assistant** (Liberty → IA) : un sélecteur *Langue* montre les questions telles
+  qu'écrites ou dites dans une langue (une liste laissée vide y reprend celle telle qu'écrite), pour
+  l'application, ses écrans — et ses **rubriques**, les questions groupées que le chat montre en premier, qui
+  n'avaient aucun éditeur. Le bloc est un composant partagé (`common/LocalizedTexts`, logique dans
+  `services/localized.ts`), la logique du sélecteur est `services/aiStarters.ts` ; les deux testés.
+- **Un annuaire LDAP est un pool — un seul endroit pour toutes les connexions.** Un pool dont l'URL commence par
+  `ldap://` ou `ldaps://` est un annuaire : créé dans Liberty → Pools comme une base (type *LDAP directory* :
+  serveur, port, DN de base ; son compte saisi tel quel — un DN de liaison, `DOMAINE\utilisateur`,
+  `utilisateur@domaine` ; son mot de passe conservé comme celui de tout pool, `ENC:` ou `${ENV}`), et *Tester
+  la connexion* fait une liaison. Ce qui lit un annuaire nomme le pool au lieu de porter un serveur et un
+  compte : l'étape `ldap_sync` gagne **Pool d'annuaire** (son propre serveur / DN / mot de passe restent pour
+  les tâches qui les ont), et le code d'une application demande `connectors.pools.directory(nom)`. Un pool
+  d'annuaire n'exécute pas de SQL et le dit par son nom ; un pool de base à qui l'on demande un annuaire aussi
+  (`liberty/connectors/directory.py`). `connectors.pools.where(nom)` dit où pointe un pool — serveur, port,
+  base — sans son compte : ce qu'un rapport imprime d'un système.
+- **Un champ peut proposer les pools de l'installation.** Nouvelle règle de champ **POOL** (entrée de
+  dictionnaire ou colonne d'écran) : le champ est une liste déroulante des pools — tous, ou ceux qu'un
+  connecteur peut utiliser quand la règle en nomme un — partout où une énumération est dessinée (grille,
+  formulaire, filtre). Un réglage qui nomme un pool n'a plus à être tapé.
+- **Les paramètres de lancement d'une tâche se saisissent dans l'éditeur de tâche.** Ce qu'un utilisateur peut
+  régler en lançant une tâche depuis sa page de menu (`user_params`) s'écrivait à la main dans `jobs.toml` ;
+  l'éditeur a maintenant *Ce que l'utilisateur peut régler au lancement* : par paramètre son nom, son libellé
+  et le libellé dans les autres langues, l'étape destinataire, ses choix (saisie libre, liste fixe, lignes
+  d'une requête, modèles Explorer d'une application, suites de tests), une valeur par défaut, obligatoire,
+  plusieurs valeurs — et **Une exécution par valeur de** (`for_each`). Le **délai maximal** de la tâche y est
+  aussi. L'enregistrement écrit exactement ce qui a été chargé, plus la modification (`services/jobParams.ts`,
+  testé).
 - **Studio et éditeurs, corrigés.** Le Studio dit d'un écran « rien ne l'ouvre » selon la règle même de
   l'Intégrité (une navigation depuis un menu de ligne, un onglet d'un autre formulaire et une entité de
   l'Explorateur comptent, comme là-bas) ; un tableau de bord qu'une entrée ouvre n'est plus marqué « hors du

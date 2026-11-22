@@ -9,7 +9,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Plus, Pencil, Trash2, GripVertical, BarChart3, Hash, Table as TableIcon, LayoutDashboard, List as ListIcon, BarChartHorizontal, FileText, Link2, Workflow } from 'lucide-react'
-import { Button, Input, Field, Banner, SearchSelect, useModals, type SearchSelectOption } from '../../common'
+import { Button, Input, Field, Banner, SearchSelect, LocalizedTexts, useModals, type SearchSelectOption } from '../../common'
+import { prunedLocalized, type Localized } from '../../services/localized'
 import { api } from '../../api/client'
 import type { QueryResult } from '../../types/connectors'
 import { EditorModalShell } from '../../common/EditorModalShell'
@@ -173,6 +174,8 @@ export function DashboardEditorModal({
   const [id] = useState(sstr(initial.id))
   const [label, setLabel] = useState(sstr(initial.label))
   const [description, setDescription] = useState(sstr(initial.description))
+  // the title and the description said in the other languages (`l.fr = { label, description }`)
+  const [texts, setTexts] = useState<Localized | undefined>(prunedLocalized(initial.l as Localized | undefined))
   // Normalise on load: restore the `type` the parsed-config endpoint dropped (see widgetType), so
   // the canvas renders live previews and saved widgets keep their discriminator.
   const [widgets, setWidgets] = useState<Raw[]>(Array.isArray(initial.widgets) ? (initial.widgets as Raw[]).map((w) => ({ ...w, type: widgetType(w) })) : [])
@@ -275,7 +278,9 @@ export function DashboardEditorModal({
     setWidgets((ws) => { const next = [...ws, w]; setNewIdx(next.length - 1); setEditIdx(next.length - 1); return next })
   }
 
-  const onWidgetSave = (w: Raw) => { if (editIdx != null) patchWidget(editIdx, { ...w }); setEditIdx(null); setNewIdx(null) }
+  // the card editor answers with the card's texts in the other languages too: `l: undefined` when the
+  // last one was cleared, so the merge takes it out instead of keeping the old table
+  const onWidgetSave = (w: Raw) => { if (editIdx != null) patchWidget(editIdx, { l: undefined, ...w }); setEditIdx(null); setNewIdx(null) }
   const onWidgetCancel = () => { if (newIdx != null) del(newIdx); setEditIdx(null); setNewIdx(null) }
 
   const addFilter = () => setFilters((fs) => [...fs, { id: '', label: '', dictionary_key: '', options: { connector: '', query: '', value_column: '', label_column: '' } }])
@@ -287,9 +292,10 @@ export function DashboardEditorModal({
     if (!id) return setError(t('settings.dash.errId'))
     const rec: Raw = { id, label: label.trim() || id, widgets }
     if (description.trim()) rec.description = description.trim()
+    if (texts) rec.l = texts
     // `connector` (the owning scope) is the dict path key — the builder places the record under
     // it, so we don't write it into the body.
-    const cleanFilters = filters.filter((f) => sstr(f.id) && sstr(f.label))
+    const cleanFilters = filters.filter((f) => sstr(f.id) && sstr(f.label)).map((f) => { const { l, ...rest } = f; const said = prunedLocalized(l as Localized | undefined); return said ? { ...rest, l: said } : rest })
     if (cleanFilters.length) rec.filters = cleanFilters
     if (period) {
       const p: Raw = {}
@@ -310,7 +316,7 @@ export function DashboardEditorModal({
 
   // Unsaved-changes guard (Save / Discard / Keep editing) — snapshot the editable state on first
   // render, compare on close. Same dialog the screen visual builder uses.
-  const draftKey = JSON.stringify({ label, description, widgets, filters, period })
+  const draftKey = JSON.stringify({ label, description, texts, widgets, filters, period })
   const initialKey = useRef<string | null>(null)
   if (initialKey.current === null) initialKey.current = draftKey
   const dirty = draftKey !== initialKey.current
@@ -357,6 +363,10 @@ export function DashboardEditorModal({
               <Input value={description} onChange={(e) => setDescription(e.target.value)} />
             </Field>
           </MetaRow>
+          <LocalizedTexts value={texts} onChange={setTexts} fields={[
+            { key: 'label', label: t('settings.dash.dLabel'), base: label },
+            { key: 'description', label: t('settings.dash.description'), base: description },
+          ]} />
 
           <AddBar>
             <span style={{ fontSize: fontSize.sm, color: colors.text.muted, fontWeight: 600 }}>{t('settings.dash.addWidget')}:</span>
@@ -508,6 +518,8 @@ export function DashboardEditorModal({
                   </Field>
                   <CloseBtn onClick={() => setFilters((fs) => fs.filter((_, j) => j !== i))} title={t('common.delete')}><Trash2 size={14} /></CloseBtn>
                 </FilterRow>
+                <LocalizedTexts value={f.l as Localized | undefined} onChange={(l) => patchFilter(i, { l })}
+                  fields={[{ key: 'label', label: t('settings.dash.filter.label'), base: sstr(f.label) }]} />
                 {(() => {
                   if (!sstr(f.dictionary_key) || widgets.length === 0) return null
                   const { reached, missed } = reachOf(sstr(f.dictionary_key))

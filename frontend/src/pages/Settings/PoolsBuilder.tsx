@@ -20,7 +20,7 @@ import type { ConfigSchemas, PoolsDoc } from '../../types/config'
 import { renameKey } from '../../services/keyRename'
 import { validateId } from '../../services/idValidator'
 import {
-  DIALECTS, DIALECT_LABELS, composeUrl, dialectOf, driversFor, optionOf, plainPassword, poolFigures, targetField, urlParts, withDialect, withOption, type UrlParts,
+  DIALECTS, DIALECT_LABELS, accountInUrl, accountShown, composeUrl, driversFor, kindOf, optionOf, plainPassword, poolFigures, targetField, urlParts, withDialect, withOption, type UrlParts,
 } from '../../services/poolUrl'
 import { FindUsagesModal, type FindUsagesTarget } from './FindUsagesModal'
 import StageStrip, { type StageView } from './StageStrip'
@@ -248,7 +248,7 @@ export default function PoolsBuilder() {
   const body = (name: string, value: Record<string, unknown>): ReactNode => {
     const url = typeof value.url === 'string' ? value.url : ''
     const parts = urlParts(url)
-    const kind = parts ? dialectOf(parts.scheme) : ''
+    const kind = parts ? kindOf(parts.scheme) : ''
     const look = DIALECTS[kind]
     const setParts = (patch: Partial<UrlParts>) => { if (parts) update(name, { ...value, url: composeUrl({ ...parts, ...patch }) }) }
     if (stage === 'database') {
@@ -319,7 +319,10 @@ export default function PoolsBuilder() {
       <StageBody>
         {parts && kind !== 'sqlite' && (
           <Fields>
-            <Part label={t('settings.pools.user')}><Input value={parts.user} data-part="user" onChange={(e) => setParts({ user: e.target.value })} /></Part>
+            {kind === 'ldap'
+              // a directory's account is a bind DN or `user@domain`: typed as it is, escaped in the URL
+              ? <Part label={t('settings.pools.bindUser')} wide><Input value={accountShown(parts.user)} data-part="user" placeholder="cn=liberty,ou=services,dc=example,dc=com" onChange={(e) => setParts({ user: accountInUrl(e.target.value) })} /></Part>
+              : <Part label={t('settings.pools.user')}><Input value={parts.user} data-part="user" onChange={(e) => setParts({ user: e.target.value })} /></Part>}
           </Fields>
         )}
         {parts?.password != null && (
@@ -345,12 +348,15 @@ export default function PoolsBuilder() {
       { id: 'account', tone: 'blue', icon: <KeyRound size={15} />, title: t('settings.pools.stage.account'),
         what: f.user || (f.dialect === 'sqlite' ? t('settings.pools.noAccount') : t('settings.pools.noUser')),
         more: f.passwordInUrl ? t('settings.pools.passwordInUrlShort') : f.passwordSet ? t('settings.pools.passwordSet') : t('settings.pools.noPassword'), warn: f.passwordInUrl },
-      { id: 'schemas', tone: 'green', icon: <Layers size={15} />, title: t('settings.pools.stage.schemas'),
+      // a directory runs no SQL: it has no schema, no database link and no connections to tune
+      ...(f.dialect === 'ldap' ? [] : [
+      { id: 'schemas', tone: 'green' as const, icon: <Layers size={15} />, title: t('settings.pools.stage.schemas'),
         what: t('settings.pools.schemasCount', { n: f.schemas.length }), more: f.schemas.slice(0, 6).join(' · ') },
-      { id: 'dblinks', tone: 'green', icon: <Link2 size={15} />, title: t('settings.pools.stage.dblinks'),
+      { id: 'dblinks', tone: 'green' as const, icon: <Link2 size={15} />, title: t('settings.pools.stage.dblinks'),
         what: t('settings.pools.dblinksCount', { n: f.dblinks.length }), more: f.dblinks.slice(0, 6).join(' · ') },
-      { id: 'tuning', tone: 'purple', icon: <SlidersHorizontal size={15} />, title: t('settings.pools.stage.tuning'),
+      { id: 'tuning', tone: 'purple' as const, icon: <SlidersHorizontal size={15} />, title: t('settings.pools.stage.tuning'),
         what: t('settings.pools.connections', { size: f.size, overflow: f.overflow }), more: f.flags.join(' · ') },
+      ]),
     ]
   }
   const test = sel ? tests[sel] : undefined

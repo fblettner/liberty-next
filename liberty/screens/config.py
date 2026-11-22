@@ -1134,7 +1134,7 @@ class Screen(BaseModel):
     id: str = Field(description="Stable screen id within the app (e.g. ``security_users``, ``F0005``).")
     label: str | None = Field(default=None, description="Short label shown in the menu / list.")
     description: str | None = Field(default=None, description="Longer description shown as the page title.")
-    l: dict[str, str] = Field(default_factory=dict, title="Translations", description="The label per language (the tab, the list of screens).", json_schema_extra={"x_group": "Translations", "x_key_enum_ref": "SUPPORTED_LANGUAGES"})
+    l: dict[str, str] = Field(default_factory=dict, title="Label translations", description="The label per language (the tab, the list of screens).", json_schema_extra={"x_group": "Translations", "x_key_enum_ref": "SUPPORTED_LANGUAGES"})
     description_l: dict[str, str] = Field(default_factory=dict, title="Description translations", description="The description per language (the page's heading).", json_schema_extra={"x_group": "Translations", "x_key_enum_ref": "SUPPORTED_LANGUAGES"})
     connector: str | None = Field(
         default=None,

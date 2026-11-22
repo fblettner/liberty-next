@@ -174,6 +174,8 @@ class Step(BaseModel):
     # instance in the connector's allowed set). None ⇒ the connector's default pool.
     # Every step type: the environment an API connector with per-pool ``targets`` calls from
     # this step (AIS per JDE environment) — that pool's server; None ⇒ the connector's own.
+    # ldap_sync: the DIRECTORY pool to read (an ``ldap://`` / ``ldaps://`` pool: its server, its
+    # account, its base) — in place of ``server`` / ``bind_dn`` / ``bind_password`` below.
     pool: str | None = None
     # sql_query: bound parameters passed through to SQLConnector.execute(params=...)
     params: dict[str, Any] = Field(default_factory=dict)
@@ -198,7 +200,9 @@ class Step(BaseModel):
 
     # ldap_sync — paged search on the bind/base/filter, every entry pushed through
     # ``target_query`` on ``target_connector`` with params built from ``mapping``
-    # (LDAP attr → param name). See :class:`LdapSyncExecutor`.
+    # (LDAP attr → param name). See :class:`LdapSyncExecutor`. The directory is named by ``pool``
+    # (set up under Pools, like a database) or, as before, written here: ``server`` + ``bind_dn`` +
+    # ``bind_password``. ``search_base`` may be left out when the pool's URL carries a base.
     server: str | None = None
     bind_dn: str | None = None
     bind_password: str | None = None
@@ -310,7 +314,10 @@ class Step(BaseModel):
         elif self.type is StepType.PYTHON:
             self._require("callable")
         elif self.type is StepType.LDAP_SYNC:
-            self._require("server", "bind_dn", "search_base", "target_connector", "target_query")
+            if self.pool:
+                self._require("target_connector", "target_query")
+            else:
+                self._require("server", "bind_dn", "search_base", "target_connector", "target_query")
         elif self.type is StepType.HTTP:
             self._require("url")
         elif self.type is StepType.CALL_JOB:

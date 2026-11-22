@@ -4,11 +4,12 @@
 // + reload). The operator's own questions live in App → AI Assistant and win over these.
 import { useEffect, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
-import { Save, Sparkles, LayoutList, Trash2, BookOpen, Plus, Edit3, Wrench, Undo2 } from 'lucide-react'
+import { Save, Sparkles, LayoutList, Trash2, BookOpen, Plus, Edit3, Wrench, Undo2, Languages, ListTree } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Card, Centered, SearchSelect, SpinnerRing, useModals, type SearchSelectOption, HeaderActions } from '../../common'
-import type { AiDoc, AiToolBody, AppAiBody, PlaybookBody, ScreensDoc } from '../../types/config'
+import { Banner, Button, Card, Centered, Input, SearchSelect, SpinnerRing, languageName, useModals, useOtherLanguages, type SearchSelectOption, HeaderActions } from '../../common'
+import type { AiDoc, AiLocaleBody, AiToolBody, AppAiBody, PlaybookBody, ScreensDoc, StarterGroupBody } from '../../types/config'
+import { starterView, withStarters } from '../../services/aiStarters'
 import { QuestionsList } from './AiStartersEditor'
 import { AiPlaybookModal } from './AiPlaybookModal'
 import { AiToolModal } from './AiToolModal'
@@ -41,10 +42,12 @@ const Item = styled.div`
 `
 
 export default function AiBuilder() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const modals = useModals()
   const { focusApp: currentApp, connectors } = useWorkspace()
   const [scope, setScope] = useState('')
+  // the language whose questions are shown: '' = as written, else the lists under `l.<language>`
+  const [lang, setLang] = useState('')
   const [editing, setEditing] = useState<(PlaybookBody & { id: string }) | null | undefined>(undefined)
   const [editingTool, setEditingTool] = useState<(AiToolBody & { id: string }) | null | undefined>(undefined)
   const [doc, setDoc] = useState<Record<string, AppAiBody> | null>(null)
@@ -87,8 +90,26 @@ export default function AiBuilder() {
     .filter(([id]) => !screenIds.includes(id))
     .map(([id, s]) => ({ value: id, label: (typeof s?.label === 'string' && s.label) || id, mono: id }))
     .sort((a, b) => a.value.localeCompare(b.value))
-  const setScreen = (id: string, starters: string[]) => update({ screens: { ...(block.screens ?? {}), [id]: { ...(block.screens?.[id] ?? {}), starters } } })
-  const dropScreen = (id: string) => { const next = { ...(block.screens ?? {}) }; delete next[id]; update({ screens: next }) }
+  // The questions shown are those of the picked language: as written, or what `l.<language>` says
+  // (a list left empty there falls back on the list as written).
+  const languages = useOtherLanguages(Object.keys(block.l ?? {}))
+  const shown = lang && languages.includes(lang) ? lang : ''
+  const view: AiLocaleBody = starterView(block, shown)
+  const updateView = (patch: Partial<AiLocaleBody>) => setDoc((p) => (p && scope ? { ...p, [scope]: withStarters(p[scope] ?? {}, shown, patch) } : p))
+  const groups: StarterGroupBody[] = view.groups ?? []
+  const setGroup = (i: number, patch: Partial<StarterGroupBody>) => updateView({ groups: groups.map((g, j) => (j === i ? { ...g, ...patch } : g)) })
+  const setScreen = (id: string, starters: string[]) => updateView({ screens: { ...(view.screens ?? {}), [id]: { ...(view.screens?.[id] ?? {}), starters } } })
+  // a screen taken out leaves every language with it
+  const dropScreen = (id: string) => setDoc((p) => {
+    if (!p || !scope) return p
+    let next: AppAiBody = { ...(p[scope] ?? {}) }
+    const own = { ...(next.screens ?? {}) }; delete own[id]; next.screens = own
+    for (const l of Object.keys(next.l ?? {})) {
+      const said = { ...(next.l?.[l]?.screens ?? {}) }
+      if (id in said) { delete said[id]; next = withStarters(next, l, { screens: said }) }
+    }
+    return { ...p, [scope]: next }
+  })
   const playbookIds = Object.keys(block.playbooks ?? {})
   const savePlaybook = (id: string, body: PlaybookBody) => { update({ playbooks: { ...(block.playbooks ?? {}), [id]: body } }); setEditing(undefined) }
   const dropPlaybook = async (id: string) => {
@@ -136,15 +157,43 @@ export default function AiBuilder() {
       {error && <Banner $tone="error">{error}</Banner>}
       {scope && (
         <Body>
+          {languages.length > 0 && (
+            <Section>
+              <SectionHead><Languages size={14} /> {t('settings.ai.language')} <span className="spacer" />
+                <div style={{ minWidth: 260 }}>
+                  <SearchSelect value={shown} onChange={setLang} anyLabel={t('settings.ai.languageWritten')} placeholder={t('settings.ai.languageWritten')}
+                    options={languages.map((l) => ({ value: l, label: languageName(l, i18n.language), mono: l }))} />
+                </div>
+              </SectionHead>
+              <Hint>{shown ? t('settings.ai.languageHint', { language: languageName(shown, i18n.language) }) : t('settings.ai.languageWrittenHint')}</Hint>
+            </Section>
+          )}
           <Section>
             <SectionHead><Sparkles size={14} /> {t('settings.ai.appStarters', { app: scope })}</SectionHead>
-            <QuestionsList value={block.starters ?? []} onChange={(starters) => update({ starters })} />
+            <QuestionsList value={view.starters ?? []} onChange={(starters) => updateView({ starters })} />
+          </Section>
+          <Section>
+            <SectionHead><ListTree size={14} /> {t('settings.ai.groups')} <span className="spacer" />
+              <Button $variant="ghost" $size="sm" onClick={() => updateView({ groups: [...groups, { label: t('settings.ai.groupNew'), starters: [] }] })}><Plus size={13} /> {t('settings.ai.addGroup')}</Button>
+            </SectionHead>
+            <Hint>{t('settings.ai.groupsHint')}</Hint>
+            {groups.length === 0 && <Empty>{t('settings.ai.noGroups')}</Empty>}
+            {groups.map((g, i) => (
+              <Section key={i}>
+                <ScreenHead>
+                  <Input value={g.label} onChange={(e) => setGroup(i, { label: e.target.value })} placeholder={t('settings.ai.groupLabel')} style={{ maxWidth: 320 }} />
+                  <span className="spacer" />
+                  <Button $variant="ghost" $size="sm" onClick={() => updateView({ groups: groups.filter((_, j) => j !== i) })} style={{ color: colors.red.main }} title={t('common.remove')}><Trash2 size={12} /></Button>
+                </ScreenHead>
+                <QuestionsList value={g.starters ?? []} onChange={(starters) => setGroup(i, { starters })} />
+              </Section>
+            ))}
           </Section>
           <Section>
             <SectionHead><LayoutList size={14} /> {t('settings.ai.screenStarters')} <span className="spacer" />
               <div style={{ minWidth: 260 }}>
                 <SearchSelect sort value="" options={screenOpts} allowCustom placeholder={t('settings.ai.addScreen')}
-                  onChange={(v) => { const id = v.trim(); if (id && !screenIds.includes(id)) setScreen(id, []) }} />
+                  onChange={(v) => { const id = v.trim(); if (id && !screenIds.includes(id)) update({ screens: { ...(block.screens ?? {}), [id]: { starters: [] } } }) }} />
               </div>
             </SectionHead>
             {screenIds.length === 0 && <Empty>{t('settings.ai.noScreens')}</Empty>}
@@ -156,7 +205,7 @@ export default function AiBuilder() {
                   <span className="spacer" />
                   <Button $variant="ghost" $size="sm" onClick={() => dropScreen(id)} style={{ color: colors.red.main }} title={t('common.remove')}><Trash2 size={12} /></Button>
                 </ScreenHead>
-                <QuestionsList value={block.screens?.[id]?.starters ?? []} onChange={(starters) => setScreen(id, starters)} />
+                <QuestionsList value={view.screens?.[id]?.starters ?? []} onChange={(starters) => setScreen(id, starters)} />
               </Section>
             ))}
           </Section>

@@ -100,7 +100,9 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           filters = the endpoint's params, scope on the rows, `read_permission` = api: or sql:),
                           registry.py (ConnectorRegistry + the shared dictionary), dictionary.py
                           (dictionary.toml: labels, enums, lookups, sequences, rules),
-                          introspect.py (schema walk), thick.py / thick_engine.py (Oracle OCI)
+                          introspect.py (schema walk), thick.py / thick_engine.py (Oracle OCI),
+                          directory.py (an LDAP directory as a pool: a `ldap://` / `ldaps://` URL — `PoolRegistry.directory(name)`,
+                          no SQL engine; the POOL field rule = a dropdown of the pools, `DictionaryFile.know_pools`)
   auth/                   scope.py (row-level data scope: role rules → resolved per user → JWT
                           `scope` claim → SQLConnector wrap / write check), authstore.py (AuthBackend: toml | db), tokens.py (PyJWT access /
                           refresh with rotation), throttle.py (login throttle), principal.py
@@ -312,7 +314,8 @@ auth/ workspace/ tabs/ sio/ branding/   the contexts (tabs/dirtyGuard.ts = unsav
                        menus + screens + license + current app / pool, TabsContext, SioContext)
 common/                shared primitives: Button Card Input SearchSelect Checkbox FileInput Tag Banner Spinner
                        PageLayout HeaderActions (a page's Save / Discard placed in the page header) Modal Modals(useModals) ErrorDetails ErrorBoundary SchemaForm
-                       SchemaNavigator SubNav EditorModalShell DateRangeFilter (presets + two-month
+                       SchemaNavigator SubNav EditorModalShell LocalizedTexts (a record's texts in the other languages — its `l` table —
+                       under the field itself; logic in services/localized.ts, tested) DateRangeFilter (presets + two-month
                        calendar + date basis; logic in services/period.ts) DatePicker (one date, typed or picked;
                        both on the shared MonthGrid) PortalPanel (fixed popover); NOT barrelled (heavy): DataTable
                        (TanStack grid: virtualized, grouping, filters, edit mode, context menu,
@@ -345,7 +348,8 @@ pages/Settings/        one *Builder per config section + the Visual Designer (Sc
                        ReportsBuilder, ThemeBuilder (+ ThemePreview: a piece of the app in dark and light;
                        services/themeDraft.ts, tested), TechnicalDashboard,
                        Package / ChangePackages / IntegrityBuilder (reached from nomaflow pages)
-pages/Nomaflow/        JobsList, JobEditor, StepEditor, RunDetail, Schedule, RetentionPanel
+pages/Nomaflow/        JobsList, JobEditor (+ UserParamsEditor: what a user may set when starting the job — services/jobParams.ts, tested),
+                       StepEditor, RunDetail, Schedule, RetentionPanel
 pages/Explorer/        the Data Explorer page: index (model, the AnalysisDefinition, runs, drill, views), FieldsPane
                        (+ calculated fields), Shelves (rows / measures / filters chips), PeriodBar, ResultTable, PivotView,
                        ChartView (bar / line / pie via TableView/ChartCanvas, KPI), CalcModal (Test before Save),

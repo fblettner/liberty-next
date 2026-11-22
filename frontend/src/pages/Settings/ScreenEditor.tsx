@@ -61,7 +61,9 @@ type Row = Record<string, unknown>
 // with no hint that some are mutually exclusive). The picker turns it into one decision per
 // screen — "what happens when a row is clicked" — then reveals only the relevant fields.
 const GENERAL_FORM_KEYS = [
-  'label', 'description', 'audit_table',
+  // The label and the heading, each followed by what it reads in the other languages (``l`` /
+  // ``description_l``: the server answers with the request's language, the default otherwise).
+  'label', 'l', 'description', 'description_l', 'audit_table',
   // Change-package capture (Liberty Next → Deploy → Changes): toggle on to record every write on this
   // screen into the app's active change package, with ``change_entity`` as its grouping label
   // and ``post_apply`` selecting the run-once steps this screen's changes need on promotion.
@@ -611,7 +613,8 @@ export default function ScreenEditor({ app, id, value, schema, siblingScreenIds 
             const next: Row = { ...value }
             for (const k of GENERAL_FORM_KEYS) {
               const val = v[k]
-              if (val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0)) delete next[k]
+              const emptyMap = typeof val === 'object' && val !== null && !Array.isArray(val) && Object.keys(val).length === 0
+              if (val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0) || emptyMap) delete next[k]
               else next[k] = val
             }
             onChange(next)

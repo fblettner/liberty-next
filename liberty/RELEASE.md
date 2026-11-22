@@ -37,11 +37,42 @@
   connector's password, token and signing key have the show / hide button the pool's password has.
 - **A screen, its tabs and its actions in the user's language.** A screen gains `l` (its label per language:
   the tab, the list of screens) and `description_l` (its heading); an action gains `l` (a row-menu entry, a
-  toolbar or tab button, a step of a chain) — edited in the designer under *Translations*, like a menu entry's.
-  The server sends each of them already in the language of the request (`fr-FR` falls back on `fr`). **A
-  dialog tab's translations, which existed in the configuration but were never applied, now are** — and they
-  are edited in the form builder's *Tab settings*, with the two flags that leave a tab out when a record is
-  added or edited.
+  toolbar or tab button, a step of a chain). The server sends each of them already in the language of the
+  request (`fr-FR` falls back on `fr`). All three are entered in the designer: the screen's on its first stage
+  (*What it is*, under the label and under the description), an action's on its *Translations* tab, a tab's in
+  the form builder's *Tab settings* — with the two flags that leave a tab out when a record is added or edited.
+  **A dialog tab's translations, which existed in the configuration but were never applied, now are.**
+- **Every text given in another language is entered in its builder — none is left to the file.** Three were
+  not. **Dashboards**: a dashboard's title and description, a card's texts (label, subtitle, sub line, unit,
+  count label, note, a text card's Markdown, and the column to read where a query returns one per language),
+  a link's label and description and a filter's label each show an *In the other languages* block under the
+  field — a blank there shows the text as written. **Saving a dashboard from the builder dropped its title and
+  description in the other languages, and a links card its links': they are kept.** **The assistant's starter
+  questions** (Liberty → AI): a *Language* picker shows the questions as written or as said in a language (a
+  list left empty there falls back on the one as written), for the application, its screens — and its
+  **headings**, the grouped questions the chat shows first, which had no editor at all. The block is one shared
+  component (`common/LocalizedTexts`, logic in `services/localized.ts`), the picker's logic is
+  `services/aiStarters.ts`; both tested.
+- **An LDAP directory is a pool — one place for every connection.** A pool whose URL starts with `ldap://` or
+  `ldaps://` is a directory: created under Liberty → Pools like a database (kind *LDAP directory*: host, port,
+  base DN; its account typed as it is — a bind DN, `DOMAIN\user`, `user@domain`; its password kept like any
+  pool's, `ENC:` or `${ENV}`), and *Test connection* binds once. Whatever reads a directory names the pool
+  instead of carrying a server and an account: the `ldap_sync` step gains **Directory pool** (its own server /
+  bind DN / password stay for the jobs that have them), and an application's code asks
+  `connectors.pools.directory(name)`. A directory pool runs no SQL and says so by name; a database pool asked
+  for a directory does too (`liberty/connectors/directory.py`). `connectors.pools.where(name)` says where any
+  pool points — host, port, database or base — without its account: what a report prints of a system.
+- **A field can offer the installation's pools.** New field rule **POOL** (dictionary entry or screen column):
+  the field is a dropdown of the pools — every pool, or those a connector may run on when the rule names one —
+  wherever an enumeration is drawn (grid, record form, filter). A setting that names a pool no longer has to
+  be typed.
+- **A job's run parameters are edited in the job editor.** What a user may set when starting a job from its
+  menu page (`user_params`) was written by hand in `jobs.toml`; the editor now has *What the user may set when
+  starting it*: per parameter its name, its label and the label in the other languages, the step it goes to,
+  its choices (typed freely, a fixed list, the rows of a query, an application's Explorer models, the test
+  suites), a default, required, several values — and **One run per value of** (`for_each`). The job's
+  **timeout** is there too. Saving writes exactly what was loaded plus the change (`services/jobParams.ts`,
+  tested).
 - **Studio and builders, corrected.** The Studio says of a screen "nothing opens it" by Integrity's own rule (a
   row-menu drill, a tab of another form and an Explorer entity count, as there); a dashboard an entry opens is
   no longer tagged "not in the menu"; *Edit the menu* opens on the application shown; the Menu column counts

@@ -7,7 +7,8 @@ import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { X, BarChart3, Hash, Table as TableIcon, List as ListIcon, BarChartHorizontal, FileText, Link2, Plus, Trash2, Workflow } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import { Banner, Button, Checkbox, Field, Input, SearchSelect, SpinnerRing, Tag, Textarea, useModals, type SearchSelectOption } from '../../common'
+import { Banner, Button, Checkbox, Field, Input, LocalizedTexts, SearchSelect, SpinnerRing, Tag, Textarea, useModals, type LocalizedField, type SearchSelectOption } from '../../common'
+import { prunedLocalized, type Localized } from '../../services/localized'
 import { EditorModalShell } from '../../common/EditorModalShell'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { ChartSpecEditor } from '../TableView/ChartSpecEditor'
@@ -76,6 +77,8 @@ export function WidgetEditorModal({
   const [kind, setKind] = useState<WidgetKind>((initial.type as WidgetKind) || 'chart')
   const [label, setLabel] = useState(str(initial.label))
   const [description, setDescription] = useState(str(initial.description))
+  // the card's texts said in the other languages (`l.fr = { label, description, sub… }`)
+  const [texts, setTexts] = useState<Localized | undefined>(prunedLocalized(initial.l as Localized | undefined))
   const [colSpan, setColSpan] = useState(num(initial.col_span, 6))
   const [rowSpan, setRowSpan] = useState(num(initial.row_span, kind === 'kpi' || kind === 'stat' ? 1 : 2))
   // chart
@@ -154,6 +157,7 @@ export function WidgetEditorModal({
     const base: Record<string, unknown> = { type: kind, col_span: colSpan, row_span: rowSpan }
     if (label.trim()) base.label = label.trim()
     if (description.trim()) base.description = description.trim()
+    if (texts) base.l = texts
     const put = (keys: string[]) => { for (const k of keys) if (plain[k]) base[k] = plain[k] }
     if (kind === 'chart') {
       if (chartMode === 'saved') {
@@ -176,6 +180,7 @@ export function WidgetEditorModal({
       const clean = links.map((l) => ({
         ...(l.label?.trim() ? { label: l.label.trim() } : {}), ...(l.description?.trim() ? { description: l.description.trim() } : {}),
         ...(l.icon ? { icon: l.icon } : {}), ...(l.menu ? { menu: l.menu } : {}), ...(l.url?.trim() ? { url: l.url.trim() } : {}),
+        ...(prunedLocalized(l.l) ? { l: prunedLocalized(l.l) } : {}),
       }))
       if (!clean.length || clean.some((l) => !!l.menu === !!l.url || (l.url && !l.label))) return setError(t('settings.dash.errLinks'))
       base.links = clean; base.columns = linkColumns
@@ -216,7 +221,7 @@ export function WidgetEditorModal({
   }
 
   // Unsaved-changes guard (Save / Discard / Keep editing) — matches the chart + dashboard editors.
-  const draftKey = JSON.stringify({ kind, label, description, colSpan, rowSpan, chartMode, savedChartId, spec, connector, query, column, aggregation, comparePrevious, columns, maxRows, plain, markdown, links, linkColumns })
+  const draftKey = JSON.stringify({ texts, kind, label, description, colSpan, rowSpan, chartMode, savedChartId, spec, connector, query, column, aggregation, comparePrevious, columns, maxRows, plain, markdown, links, linkColumns })
   const initialKey = useRef<string | null>(null)
   if (initialKey.current === null) initialKey.current = draftKey
   const dirty = draftKey !== initialKey.current
@@ -237,6 +242,23 @@ export function WidgetEditorModal({
     else if (choice === 'discard') onClose()
   }
 
+  // What a card says in words, by kind: each can be given in the other languages. A column is
+  // among them where a query returns one column per language (TITLE / TITLE_FR).
+  const localizedFields: LocalizedField[] = [
+    { key: 'label', label: t('settings.dash.wLabel'), base: label },
+    { key: 'description', label: t('settings.dash.wDescription'), base: description },
+    ...(kind === 'text' ? [{ key: 'markdown', label: t('settings.dash.markdown'), base: markdown, multiline: true }] : []),
+    ...(kind === 'stat' ? [{ key: 'sub', label: t('settings.dash.sub'), base: plain.sub }, { key: 'unit', label: t('settings.dash.unit'), base: plain.unit }] : []),
+    ...(kind === 'list' ? [
+      { key: 'count_label', label: t('settings.dash.countLabel'), base: plain.count_label }, { key: 'unit', label: t('settings.dash.unit'), base: plain.unit },
+      { key: 'title_column', label: t('settings.dash.titleColumn'), base: plain.title_column }, { key: 'subtitle_column', label: t('settings.dash.subtitleColumn'), base: plain.subtitle_column },
+      { key: 'tag_column', label: t('settings.dash.tagColumn'), base: plain.tag_column },
+    ] : []),
+    ...(kind === 'bars' ? [
+      { key: 'note', label: t('settings.dash.note'), base: plain.note }, { key: 'unit', label: t('settings.dash.unit'), base: plain.unit },
+      { key: 'label_column', label: t('settings.dash.labelColumn'), base: plain.label_column }, { key: 'sub_label_column', label: t('settings.dash.subLabelColumn'), base: plain.sub_label_column },
+    ] : []),
+  ]
   const kpiPreview: KpiWidgetWire | null = kind === 'kpi' && connector && query && column
     ? { type: 'kpi', label: label || null, col_span: colSpan, row_span: rowSpan, connector, query, column, aggregation: aggregation as KpiWidgetWire['aggregation'] }
     : null
@@ -314,6 +336,7 @@ export function WidgetEditorModal({
           <Field label={t('settings.dash.wDescription')}>
             <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('settings.dash.wDescriptionHint')} />
           </Field>
+          <LocalizedTexts value={texts} onChange={setTexts} fields={localizedFields} />
 
           {kind === 'text' && (
             <>
@@ -371,6 +394,12 @@ export function WidgetEditorModal({
                     <Input value={l.description ?? ''} onChange={(e) => setLink(i, { description: e.target.value })} />
                   </Field>
                   <div><Button $size="sm" $variant="ghost" onClick={() => setLinks((cur) => cur.filter((_, j) => j !== i))}><Trash2 size={13} /> {t('common.delete')}</Button></div>
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <LocalizedTexts value={l.l} onChange={(said) => setLink(i, { l: said })} fields={[
+                      { key: 'label', label: t('settings.dash.linkLabel'), base: l.label ?? '' },
+                      { key: 'description', label: t('settings.dash.linkDescription'), base: l.description ?? '' },
+                    ]} />
+                  </div>
                 </Grid3>
               ))}
               <div><Button $size="sm" $variant="ghost" onClick={() => setLinks((cur) => [...cur, {}])}><Plus size={13} /> {t('settings.dash.addLink')}</Button></div>

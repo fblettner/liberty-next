@@ -14,8 +14,10 @@ import { ArrowLeft, Save, Workflow, Layers, X, Plus, Check } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
   PageLayout, Button, Banner, Centered, Card, Input, Select, Checkbox,
-  SpinnerRing, Stack, useModals,
+  SearchSelect, SpinnerRing, Stack, useModals,
 } from '../../common'
+import { UserParamsEditor } from './UserParamsEditor'
+import { cleanUserParams, forEachCandidates } from '../../services/jobParams'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import StepEditor, { KeyValueEditor, JOB_PARAM_CATALOG } from './StepEditor'
@@ -380,7 +382,8 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
         else next.strip_both_columns = kept
         return next as typeof s
       })
-      const cleanedJob = { ...job, steps: cleaned }
+      // the user's parameters as the file holds them: what is blank left out, none → no key at all
+      const cleanedJob = { ...job, steps: cleaned, user_params: cleanUserParams(job.user_params), for_each: job.for_each?.trim() || undefined }
       // Merge the working copy into the full list: replace in place when editing,
       // append when new. `id` is immutable in edit mode (the field is read-only).
       const merged = isNew
@@ -474,6 +477,12 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
                   onChange={(next) => patch({ tags: next })}
                   placeholder={t('nomaflow.editor.tagsPlaceholder')}
                 />
+              </FieldWrap>
+              <FieldWrap>
+                <FieldLabel>{t('nomaflow.editor.fieldTimeout')}</FieldLabel>
+                <Input type="number" min={1} value={job.timeout_seconds ?? ''} placeholder="14400"
+                  onChange={(e) => patch({ timeout_seconds: e.target.value ? Math.max(1, Number(e.target.value) || 1) : undefined })} />
+                <FieldHint>{t('nomaflow.editor.fieldTimeoutHint')}</FieldHint>
               </FieldWrap>
               <FieldWrap>
                 <Checkbox
@@ -655,6 +664,29 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
               schema={JOB_PARAM_CATALOG}
               sqlConnectors={(connectors ?? []).filter((c) => c.type === 'sql')}
             />
+          </Section>
+
+          {/* ── what a user may set when starting the job ───────────────────
+              `user_params`: the parameters the job's menu page asks for (its label per language,
+              its choices), and `for_each`: one run per picked value. */}
+          <Section>
+            <SectionTitle>{t('nomaflow.editor.userParamsSection')}</SectionTitle>
+            <div style={{ color: colors.text.muted, fontSize: fontSize.sm, marginBottom: 4 }}>{t('nomaflow.editor.userParamsHint')}</div>
+            <UserParamsEditor
+              value={job.user_params ?? []}
+              onChange={(user_params) => patch({ user_params })}
+              steps={job.steps.map((s) => s.name).filter(Boolean)}
+              connectors={connectors ?? []}
+            />
+            <Grid>
+              <FieldWrap as="div">
+                <FieldLabel>{t('nomaflow.editor.forEach')}</FieldLabel>
+                <SearchSelect value={job.for_each ?? ''} onChange={(v) => patch({ for_each: v || null })}
+                  anyLabel={t('nomaflow.editor.forEachNone')} placeholder={t('nomaflow.editor.forEachNone')}
+                  options={forEachCandidates(job.params, job.user_params).map((n) => ({ value: n, label: n, mono: n }))} />
+                <FieldHint>{t('nomaflow.editor.forEachHint')}</FieldHint>
+              </FieldWrap>
+            </Grid>
           </Section>
 
         </Stack>

@@ -14,6 +14,8 @@ into Python.
 
 Schema (see :class:`~liberty.jobs.schema.Step`):
 
+* ``pool`` — a directory pool (``ldap://`` / ``ldaps://``, set up under Pools): its server, its
+  account and its base are used, and the three fields below are not needed.
 * ``server`` — full URL, e.g. ``ldaps://ad.example.com:636`` or ``ldap://...``
 * ``bind_dn`` / ``bind_password`` — credentials; ``${ENV}`` substitution happens at
   jobs.toml load time so secrets stay out of source control.
@@ -60,6 +62,7 @@ from liberty.connectors import (
     UnknownConnectorError,
     WriteNotAllowedError,
 )
+from liberty.connectors.base import ConnectorError
 from liberty.connectors.sql import SQLConnector
 from liberty.jobs.schema import Step, StepType
 from liberty.jobs.steps.base import RunContext, StepFailed, StepResult
@@ -82,10 +85,22 @@ class LdapSyncExecutor:
             )
         # Defensive — the schema validator caught these at parse time, but a
         # hand-built Step from a test could slip through.
+        # The directory: a pool (its server, its account, its base — set up under Pools) or, as
+        # before, the step's own ``server`` / ``bind_dn`` / ``bind_password``.
+        if step.pool:
+            try:
+                directory = self._connectors.pools.directory(step.pool)
+            except ConnectorError as exc:
+                raise StepFailed(f"ldap_sync step {step.name!r}: {exc}") from exc
+            step = step.model_copy(update={
+                "server": directory.url, "bind_dn": directory.user, "bind_password": directory.password,
+                "search_base": step.search_base or directory.base,
+            })
         for field in ("server", "bind_dn", "search_base", "target_connector", "target_query"):
             if not getattr(step, field):
                 raise StepFailed(
                     f"ldap_sync step {step.name!r}: missing required field {field!r}"
+                    + (f" (the pool {step.pool!r} gives no base: set the step's search base)" if step.pool and field == "search_base" else "")
                 )
 
         target = self._resolve_target(step)

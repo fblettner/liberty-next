@@ -40,7 +40,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 
 class DictionaryEntry(BaseModel):
@@ -69,12 +69,12 @@ class DictionaryEntry(BaseModel):
     )
     rules: str | None = Field(
         default=None,
-        description="Display rule. BOOLEAN renders ✓/✗, ENUM shows a label per code, LOOKUP resolves a code to a label via a query, SEQUENCE / NN auto-fill on insert, PASSWORD masks input.",
+        description="Display rule. BOOLEAN renders ✓/✗, ENUM shows a label per code, LOOKUP resolves a code to a label via a query, SEQUENCE / NN auto-fill on insert, PASSWORD masks input, POOL offers the installation's database pools.",
         json_schema_extra={"x_group": "Rule", "x_enum_ref": "DICTIONARY_RULES"},
     )
     rules_values: str | None = Field(
         default=None,
-        description="The rule's argument — true-value for BOOLEAN, enum id for ENUM, lookup id for LOOKUP, sequence id for SEQUENCE / NN. The dropdown changes based on the chosen rule.",
+        description="The rule's argument — true-value for BOOLEAN, enum id for ENUM, lookup id for LOOKUP, sequence id for SEQUENCE / NN, for POOL a connector (only the pools it may run on; blank = every pool). The dropdown changes based on the chosen rule.",
         json_schema_extra={
             "x_group": "Rule",
             "x_enum_ref_when": {
@@ -83,6 +83,7 @@ class DictionaryEntry(BaseModel):
                     "BOOLEAN": "BOOLEAN_TRUE_VALUES",
                     "ENUM": "ENUM_IDS",
                     "LOOKUP": "LOOKUP_IDS",
+                    "POOL": "CONNECTOR_NAMES",
                     "SEQUENCE": "SEQUENCE_IDS",
                     "NN": "SEQUENCE_IDS",
                 },
@@ -410,6 +411,18 @@ class DictionaryFile(BaseModel):
     # without a code change. The merge happens at /admin/config/schema time.
     framework_enums: dict[str, EnumDef] = Field(default_factory=dict)
 
+    # The installation's pools, for the POOL rule (a field that names one): every pool, and per
+    # SQL connector the pools it may run on. Not part of the file — the registry that loads the
+    # dictionary says them (:meth:`know_pools`), so a reload brings the list up to date.
+    _pools: list[str] = PrivateAttr(default_factory=list)
+    _connector_pools: dict[str, list[str]] = PrivateAttr(default_factory=dict)
+
+    def know_pools(self, pools: list[str], by_connector: dict[str, list[str]] | None = None) -> None:
+        """What the POOL rule offers: *pools* (every pool defined), and *by_connector* — the
+        pools each SQL connector may run on (its own first, then its ``pools``)."""
+        self._pools = list(pools)
+        self._connector_pools = {k: list(v) for k, v in (by_connector or {}).items()}
+
     def find_entry(self, key: str, *, connector: str | None = None) -> DictionaryEntry | None:
         """The :class:`DictionaryEntry` for *key* — *connector*'s section first, then the shared pool."""
         if connector and connector in self.connectors:
@@ -478,6 +491,7 @@ class DictionaryFile(BaseModel):
           frontend then sends SQL NULL on uncheck, the v1 default).
         * ``{"kind": "enum", "values": [{"value": "JDE", "label": "JD Edwards"}, …]}`` — the enum's
           members, with each label resolved in *language*; the frontend renders the matching label.
+          The POOL rule answers in this shape too: its members are the installation's pools.
         * ``{"kind": "lookup", "connector": "nomasx1", "query": "security_roles_get",
           "value": "ROL_ID", "label": "ROL_NAME"}`` — a *reference* (the frontend fetches the query
           once and uses the named columns as a ``{value: label}`` map).
@@ -510,6 +524,13 @@ class DictionaryFile(BaseModel):
             if getattr(ed, "label", None):
                 enum_wire["title"] = ed.label
             return enum_wire
+        if rule == "POOL":
+            # A field that names a database pool of this installation: an enum whose members are
+            # the pools — those a connector may run on when the rule names one, every pool otherwise.
+            # Same wire shape as ENUM, so every screen, form and filter already draws it.
+            named = (entry.rules_values or "").strip()
+            pools = self._connector_pools.get(named, []) if named else self._pools
+            return {"kind": "enum", "values": [{"value": p, "label": p} for p in pools]}
         if rule == "LOOKUP":
             lk = self._find_lookup(entry.rules_values or "", connector=connector)
             if lk is None:

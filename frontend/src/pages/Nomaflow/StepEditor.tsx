@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, ArrowUp, ArrowDown, Trash2, Copy, Plus } from 'lucide-react'
 import { Input, Select, Button, Checkbox, Tag, StringListEditor, SearchSelect, type SearchSelectOption, PlaceholderPicker } from '../../common'
 import { NOTIFY_STEP_TOKENS } from '../../services/placeholders'
+import { isDirectory, poolSummary, urlParts } from '../../services/poolUrl'
 import { api } from '../../api/client'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { ConnectorMeta } from '../../types/connectors'
@@ -669,9 +670,24 @@ function PythonForm({ step, patch }: FormProps) {
   )
 }
 
+// The installation's directory pools (an `ldap://` / `ldaps://` pool), asked once: the LDAP step names one
+// instead of carrying a server and an account. Who may not read the pools still types the name.
+let _directoryPools: Promise<SearchSelectOption[]> | null = null
+const directoryPools = (): Promise<SearchSelectOption[]> => {
+  _directoryPools ??= api.get<{ pools: Record<string, { url?: string }> }>('/admin/config/pools/parsed')
+    .then((d) => Object.entries(d.pools ?? {})
+      .filter(([, p]) => { const parts = urlParts(p.url ?? ''); return parts != null && isDirectory(parts.scheme) })
+      .map(([name, p]) => ({ value: name, label: poolSummary(p.url ?? '').where || name, mono: name })))
+    .catch(() => [])
+  return _directoryPools
+}
+
 function LdapSyncForm({ step, patch, sqlConnectors }: FormProps) {
   const { t } = useTranslation()
   const f = step as Record<string, unknown>
+  const [pools, setPools] = useState<SearchSelectOption[]>([])
+  useEffect(() => { let on = true; void directoryPools().then((o) => { if (on) setPools(o) }); return () => { on = false } }, [])
+  const pooled = !!String(f.pool ?? '').trim()
   const text = (key: string, label: string, span?: number, placeholder?: string) => (
     <Field $span={span}>
       <FieldLabel>{label}</FieldLabel>
@@ -685,9 +701,16 @@ function LdapSyncForm({ step, patch, sqlConnectors }: FormProps) {
   return (
     <>
       <Grid>
-        {text('server', t('nomaflow.steps.server'), 3, 'ldaps://ad.example.com')}
-        {text('bind_dn', t('nomaflow.steps.bindDn'), 3)}
-        {text('bind_password', t('nomaflow.steps.bindPassword'), 3)}
+        <Field $span={3}>
+          <FieldLabel title={t('nomaflow.steps.directoryPoolHint')}>{t('nomaflow.steps.directoryPool')}</FieldLabel>
+          <SearchSelect sort value={String(f.pool ?? '')} options={pools} allowCustom anyLabel={t('common.none')}
+            onChange={(v) => patch({ pool: v || undefined } as Partial<StepConfig>)} />
+          <div style={{ color: colors.text.muted, fontSize: fontSize.sm, marginTop: 4 }}>{t('nomaflow.steps.directoryPoolHint')}</div>
+        </Field>
+        {/* the step's own server and account: only while it names no pool */}
+        {!pooled && text('server', t('nomaflow.steps.server'), 3, 'ldaps://ad.example.com')}
+        {!pooled && text('bind_dn', t('nomaflow.steps.bindDn'), 3)}
+        {!pooled && text('bind_password', t('nomaflow.steps.bindPassword'), 3)}
         {text('search_base', t('nomaflow.steps.searchBase'), 3)}
         {text('search_filter', t('nomaflow.steps.searchFilter'), 3)}
         <Field $span={3}>

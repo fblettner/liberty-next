@@ -68,20 +68,27 @@ export function withOption(options: string | null, name: string, value: string):
 }
 
 /** What each kind of database starts from: its driver, its usual port, what its `/…` part is called. */
-export const DIALECTS: Record<string, { scheme: string; port: string; database: 'database' | 'sid' | 'file'; template: string }> = {
+export const DIALECTS: Record<string, { scheme: string; port: string; database: 'database' | 'sid' | 'file' | 'base'; template: string }> = {
   postgresql: { scheme: 'postgresql+asyncpg', port: '5432', database: 'database', template: 'postgresql+asyncpg://user@host:5432/dbname' },
   oracle: { scheme: 'oracle+oracledb', port: '1521', database: 'sid', template: 'oracle+oracledb://user@host:1521/?service_name=ORCL' },
   mysql: { scheme: 'mysql+aiomysql', port: '3306', database: 'database', template: 'mysql+aiomysql://user@host:3306/dbname' },
   mariadb: { scheme: 'mariadb+asyncmy', port: '3306', database: 'database', template: 'mariadb+asyncmy://user@host:3306/dbname' },
   mssql: { scheme: 'mssql+aioodbc', port: '1433', database: 'database', template: 'mssql+aioodbc://user@host:1433/dbname?driver=ODBC+Driver+18+for+SQL+Server' },
   sqlite: { scheme: 'sqlite+aiosqlite', port: '', database: 'file', template: 'sqlite+aiosqlite:///./database.db' },
+  // not a database: an LDAP directory, set up here like one (its account, its password) and named by what reads it
+  ldap: { scheme: 'ldaps', port: '636', database: 'base', template: 'ldaps://user@host:636' },
 }
+
+/** The kinds that are a directory, not a database (`ldap://` and `ldaps://` are the same kind). */
+export const isDirectory = (scheme: string): boolean => ['ldap', 'ldaps'].includes(dialectOf(scheme))
+/** The kind a scheme belongs to, as the form lists it: `ldaps` is the LDAP kind, over TLS. */
+export const kindOf = (scheme: string): string => (isDirectory(scheme) ? 'ldap' : dialectOf(scheme))
 
 /** A pool's line in the list: what it connects to, without the account's secret. */
 export function poolSummary(url: string): { dialect: string; where: string } {
   const p = urlParts(url)
   if (!p) return { dialect: '', where: url ? '…' : '' }
-  const dialect = dialectOf(p.scheme)
+  const dialect = kindOf(p.scheme)
   if (dialect === 'sqlite') return { dialect, where: p.database ?? '' }
   const service = optionOf(p.options, 'service_name')
   const target = p.database || service
@@ -122,11 +129,12 @@ export const DRIVERS: Record<string, string[]> = {
   mariadb: ['mariadb+asyncmy', 'mariadb+aiomysql'],
   mssql: ['mssql+aioodbc'],
   sqlite: ['sqlite+aiosqlite'],
+  ldap: ['ldaps', 'ldap'],          // over TLS, or plain
 }
 
 /** The drivers to list for a URL's driver: those of its kind of database, and the one it has when it is another. */
 export function driversFor(scheme: string): string[] {
-  const known = DRIVERS[dialectOf(scheme)] ?? []
+  const known = DRIVERS[kindOf(scheme)] ?? []
   return scheme && !known.includes(scheme) ? [scheme, ...known] : known
 }
 
@@ -140,9 +148,15 @@ export function withDialect(url: string, dialect: string): string {
   const parts = urlParts(url)
   const target = DIALECTS[dialect]
   if (!parts || !target) return url
-  const from = dialectOf(parts.scheme)
+  const from = kindOf(parts.scheme)
   if (from === dialect) return url
   if (from === 'sqlite' || dialect === 'sqlite') return target.template
+  // to or from a directory: the host and the account stay, what named a database does not name a base
+  if (from === 'ldap' || dialect === 'ldap') {
+    const usual = [DIALECTS[from]?.port ?? '', '', ...(from === 'ldap' ? ['389'] : [])]
+    const port = usual.includes(parts.port) ? (parts.host ? target.port : '') : parts.port
+    return composeUrl({ ...parts, scheme: target.scheme, port, database: null, options: null })
+  }
   const port = parts.port === (DIALECTS[from]?.port ?? '') || parts.port === '' ? (parts.host ? target.port : '') : parts.port
   let { database, options } = parts
   const service = optionOf(options, 'service_name')
@@ -153,10 +167,11 @@ export function withDialect(url: string, dialect: string): string {
 
 /** What names the database in the form, for a kind of database and a URL: Oracle's service name — or its SID
  *  when the URL is written with one —, a file for SQLite, a database for the others. One field, never two. */
-export type TargetField = 'database' | 'service' | 'sid' | 'file'
+export type TargetField = 'database' | 'service' | 'sid' | 'file' | 'base'
 export function targetField(parts: UrlParts): TargetField {
-  const kind = dialectOf(parts.scheme)
+  const kind = kindOf(parts.scheme)
   if (kind === 'sqlite') return 'file'
+  if (kind === 'ldap') return 'base'
   if (kind !== 'oracle') return 'database'
   return parts.database && !optionOf(parts.options, 'service_name') ? 'sid' : 'service'
 }
@@ -164,4 +179,14 @@ export function targetField(parts: UrlParts): TargetField {
 /** The kinds of database, as the form names them. */
 export const DIALECT_LABELS: Record<string, string> = {
   postgresql: 'PostgreSQL', oracle: 'Oracle', mysql: 'MySQL', mariadb: 'MariaDB', mssql: 'SQL Server', sqlite: 'SQLite',
+  ldap: 'LDAP directory',
+}
+
+/** A directory's account as the operator types it (a bind DN, `DOMAIN\user`, `user@domain`) ⇄ as the URL
+ *  holds it: the characters that would end the account part are percent-escaped, nothing else is touched. */
+export function accountInUrl(typed: string): string {
+  return typed.replace(/[%@:/?]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+}
+export function accountShown(inUrl: string): string {
+  try { return decodeURIComponent(inUrl) } catch { return inUrl }
 }

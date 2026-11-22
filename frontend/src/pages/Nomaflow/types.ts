@@ -1,3 +1,4 @@
+import type { UserParamConfig } from '../../services/jobParams'
 // nomaflow API shapes — see liberty/web/jobs.py (GET /admin/jobs) and
 // liberty/web/admin.py (GET/PUT /admin/config/jobs/parsed). The UI design is
 // docs/NOMAFLOW-UI.md.
@@ -105,6 +106,11 @@ export interface JobConfig {
    *  on every step. Defaults to `{}` — irrelevant for jobs whose steps are all
    *  sql_copy / sql_query (those executors don't consume op_kwargs). */
   params?: Record<string, unknown>
+  /** What a USER may set when starting the job from its menu page — and the dropdown the
+   *  Run-with-parameters window shows for it (services/jobParams.ts). */
+  user_params?: UserParamConfig[]
+  /** A parameter whose several values make one run per value, one after another. */
+  for_each?: string | null
   /** Per-run logging verbosity. INFO (default) gives row counts + business
    *  progress markers. DEBUG also emits the full SQL of every run_query.
    *  The Run-with-parameters modal can override this per-fire without editing

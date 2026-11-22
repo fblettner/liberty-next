@@ -263,11 +263,19 @@ export interface ExplorerDoc {
 }
 
 /** `GET /admin/config/ai/parsed` — the apps' assistant material (ai.toml). */
-export interface ScreenAiBody { starters?: string[] }
+export interface ScreenAiBody { starters?: string[]; groups?: { label: string; starters?: string[] }[] }
 export interface PlaybookBody { title: string; description?: string | null; body: string }
 /** A tool the app ships for the assistant: a plugin function, offered to the model as `<app>_<id>`. */
 export interface AiToolBody { callable: string; description: string; permission?: string | null }
-export interface AppAiBody { starters?: string[]; screens?: Record<string, ScreenAiBody>; playbooks?: Record<string, PlaybookBody>; tools?: Record<string, AiToolBody> }
+/** Starter questions under a heading: the chat shows the headings, then the picked heading's questions. */
+export interface StarterGroupBody { label: string; starters?: string[] }
+/** The questions of one application in one language (`l.<language>`): each list given replaces its counterpart. */
+export interface AiLocaleBody { starters?: string[]; groups?: StarterGroupBody[]; screens?: Record<string, ScreenAiBody> }
+export interface AppAiBody {
+  starters?: string[]; groups?: StarterGroupBody[]; screens?: Record<string, ScreenAiBody>
+  playbooks?: Record<string, PlaybookBody>; tools?: Record<string, AiToolBody>
+  l?: Record<string, AiLocaleBody>
+}
 export interface AiDoc { path: string; ai: Record<string, AppAiBody> }
 
 export interface DashboardsDoc {

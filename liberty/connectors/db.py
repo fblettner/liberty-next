@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from liberty.connectors.base import ConnectorError, UnknownPoolError
 from liberty.connectors.config import PoolConfig
+from liberty.connectors.directory import DirectoryTarget, directory_target, is_directory_url, try_directory
 from liberty.connectors.thick_engine import ThickAsyncEngine
 from liberty.crypto import decrypt_or_keep, is_encrypted
 
@@ -197,6 +198,34 @@ class PoolRegistry:
         """True once :meth:`dispose` ran — the registry is terminal from then on."""
         return self._closed
 
+    def where(self, name: str) -> dict[str, Any]:
+        """Where pool *name* points, without its account: ``{dialect, host, port, database}`` — the
+        database being the service name for Oracle when the URL gives one, the base for a
+        directory. For what names a system to a reader (a report's cover, a list of pools):
+        nothing here is a secret. A :class:`UnknownPoolError` when there is no such pool."""
+        url = make_url(self._config(name).url)
+        service = url.query.get("service_name")
+        if isinstance(service, (list, tuple)):
+            service = service[0] if service else None
+        return {"dialect": self.dialect(name), "host": url.host or None, "port": url.port, "database": service or url.database or None}
+
+    def is_directory(self, name: str) -> bool:
+        """Whether pool *name* is an LDAP directory (``ldap://`` / ``ldaps://``), not a database."""
+        cfg = self._configs.get(name)
+        return cfg is not None and is_directory_url(cfg.url)
+
+    def directory(self, name: str) -> DirectoryTarget:
+        """What it takes to bind to the directory pool *name*: host, port, TLS, the account and
+        its password (decrypted like a database's), the base. A :class:`ConnectorError` when the
+        pool is a database — the caller named the wrong pool."""
+        cfg = self._config(name)
+        if not is_directory_url(cfg.url):
+            raise ConnectorError(f"pool {name!r} is a database, not an LDAP directory (its URL does not start with ldap:// or ldaps://)")
+        try:
+            return directory_target(self._resolved_url(name, cfg))
+        except ValueError as exc:
+            raise ConnectorError(f"pool {name!r}: {exc}") from exc
+
     def engine(self, name: str) -> AsyncEngine:
         """Return (creating on first call) the engine for pool *name*."""
         if self._closed:
@@ -208,6 +237,8 @@ class PoolRegistry:
         if engine is not None:
             return engine
         cfg = self._config(name)
+        if is_directory_url(cfg.url):
+            raise ConnectorError(f"pool {name!r} is an LDAP directory: it runs no SQL (a query, a screen or a copy needs a database pool)")
         url = self._resolved_url(name, cfg)
         kwargs: dict[str, object] = {
             "echo": cfg.echo,
@@ -277,6 +308,12 @@ async def try_pool(cfg: PoolConfig, *, master_key: str = "", oracle_thick: bool 
     the registry builds it (the password decrypted, thick mode followed), on a registry of its own, disposed."""
     probe = cfg.model_copy(update={"pool_size": 1, "max_overflow": 0, "pool_pre_ping": False, "echo": False})
     registry = PoolRegistry({"probe": probe}, master_key=master_key, oracle_thick=oracle_thick)
+    if is_directory_url(cfg.url):
+        # a directory: one bind with the pool's account, nothing else
+        try:
+            return await try_directory(registry.directory("probe"), timeout=timeout)
+        except ConnectorError as exc:
+            return {"ok": False, "dialect": "ldap", "duration_ms": 0.0, "error": str(exc)}
     started = time.perf_counter()
     backend = ""
 

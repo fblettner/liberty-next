@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DIALECTS, DRIVERS, composeUrl, driversFor, optionOf, plainPassword, poolFigures, poolSummary, targetField, urlParts, withDialect, withOption } from './poolUrl'
+import { DIALECTS, DRIVERS, accountInUrl, accountShown, composeUrl, driversFor, isDirectory, kindOf, optionOf, plainPassword, poolFigures, poolSummary, targetField, urlParts, withDialect, withOption } from './poolUrl'
 
 describe("a pool's URL as parts", () => {
   it('reads the usual URLs and puts them back unchanged', () => {
@@ -100,5 +100,40 @@ describe('the one field that names the database', () => {
     expect(targetField(urlParts('oracle+oracledb://u@h:1521/')!)).toBe('service')     // a new Oracle pool: a service name
     expect(targetField(urlParts('oracle+oracledb://u@h:1521/ORCL')!)).toBe('sid')     // written with a SID: kept as one
     expect(targetField(urlParts('sqlite+aiosqlite:///./database.db')!)).toBe('file')
+  })
+})
+
+describe('an LDAP directory is a kind of pool', () => {
+  it('is read like a database URL: host, port, account, base', () => {
+    const p = urlParts('ldaps://cn=liberty,ou=services,dc=example,dc=com@ad.example.com:636/dc=example,dc=com')
+    expect(p).toMatchObject({ scheme: 'ldaps', user: 'cn=liberty,ou=services,dc=example,dc=com', host: 'ad.example.com', port: '636', database: 'dc=example,dc=com' })
+    expect(targetField(p!)).toBe('base')
+    expect(poolSummary('ldap://svc%40corp.local@10.0.0.5:3268')).toEqual({ dialect: 'ldap', where: '10.0.0.5:3268' })
+    expect(poolFigures({ url: 'ldaps://cn=x@ad:636/dc=y', password: 'ENC:…' })).toMatchObject({ dialect: 'ldap', where: 'ad:636 / dc=y', user: 'cn=x', passwordSet: true })
+  })
+
+  it('both schemes are the one kind, over TLS or plain', () => {
+    expect(kindOf('ldaps')).toBe('ldap')
+    expect(kindOf('ldap')).toBe('ldap')
+    expect(kindOf('postgresql+asyncpg')).toBe('postgresql')
+    expect(isDirectory('ldaps')).toBe(true)
+    expect(isDirectory('oracle+oracledb')).toBe(false)
+    expect(driversFor('ldap')).toEqual(['ldaps', 'ldap'])
+  })
+
+  it('moves a pool to or from a directory keeping the host and the account, not what named the database', () => {
+    expect(withDialect('postgresql+asyncpg://app@db.example.com:5432/app', 'ldap')).toBe('ldaps://app@db.example.com:636')
+    expect(withDialect('ldap://cn=x@ad.example.com:389/dc=y', 'postgresql')).toBe('postgresql+asyncpg://cn=x@ad.example.com:5432')
+    expect(withDialect('ldaps://cn=x@ad.example.com:3269/dc=y', 'oracle')).toBe('oracle+oracledb://cn=x@ad.example.com:3269')    // a port of its own stays
+    expect(withDialect('ldap://cn=x@ad:389', 'ldap')).toBe('ldap://cn=x@ad:389')                                                // already a directory: plain stays plain
+  })
+
+  it("writes the account as typed, escaping only what would end it in the URL", () => {
+    expect(accountInUrl('cn=liberty,ou=services,dc=example,dc=com')).toBe('cn=liberty,ou=services,dc=example,dc=com')
+    expect(accountInUrl('svc@corp.local')).toBe('svc%40corp.local')
+    expect(accountInUrl('CORP\\svc')).toBe('CORP\\svc')
+    expect(accountShown(accountInUrl('a:b/c?d%e@f'))).toBe('a:b/c?d%e@f')
+    // and the URL built with it is still one the page shows field by field
+    expect(urlParts(`ldaps://${accountInUrl('svc@corp.local')}@ad.example.com:636`)?.user).toBe('svc%40corp.local')
   })
 })

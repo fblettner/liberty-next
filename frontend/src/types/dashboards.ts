@@ -120,7 +120,11 @@ export interface TextWidgetWire {
   markdown: string
 }
 
-export interface LinkWire { label?: string | null; description?: string | null; icon?: string | null; menu?: string | null; url?: string | null }
+export interface LinkWire {
+  label?: string | null; description?: string | null; icon?: string | null; menu?: string | null; url?: string | null
+  /** The label and the description per language (the builder's draft only: the server answers with the request's language). */
+  l?: Record<string, Record<string, unknown>>
+}
 
 /** A card of links: menu items of the dashboard's app (resolved in the user's menu tree) or URLs. */
 export interface LinksWidgetWire {

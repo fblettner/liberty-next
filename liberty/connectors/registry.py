@@ -48,6 +48,11 @@ class ConnectorRegistry:
     ) -> None:
         self.pools = PoolRegistry(config.pools, master_key=master_key, oracle_thick=oracle_thick)
         self.dictionary = dictionary or DictionaryFile()
+        # what a field ruled POOL offers: every pool, and per SQL connector those it may run on
+        self.dictionary.know_pools(
+            list(config.pools),
+            {n: list(dict.fromkeys([c.pool, *c.pools])) for n, c in config.connectors.items() if isinstance(c, SqlConnectorConfig)},
+        )
         self._http_client = http_client
         self._connectors: dict[str, Connector] = {}
         for name, conn_cfg in config.connectors.items():
