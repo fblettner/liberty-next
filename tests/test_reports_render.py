@@ -122,6 +122,58 @@ def test_build_pdf_with_svg_produces_landscape_page() -> None:
     assert len(with_svg) > len(without)
 
 
+def _pages(md: str, svg: str | None) -> list[tuple[str, list[str]]]:
+    """Each page of the rendered report: its orientation and the headings on it."""
+    from weasyprint import CSS, HTML
+    from weasyprint.text.fonts import FontConfiguration
+
+    from liberty.reports.render import _build_css, _build_full_html
+
+    opts = BuildOptions(landscape_svg_title="Architecture")
+    body, toc = md_to_html_body(md, svg, opts)
+    fonts = FontConfiguration()
+    doc = HTML(string=_build_full_html(body, toc, opts)).render(stylesheets=[CSS(string=_build_css(opts), font_config=fonts)], font_config=fonts)
+    def headings(box, seen: list[str]) -> list[str]:  # noqa: ANN001 — WeasyPrint's layout boxes
+        text = getattr(box, "text", None)
+        if text and box.element_tag in ("h2", "h3") and text.strip() not in seen:
+            seen.append(text.strip())
+        for child in getattr(box, "children", None) or []:
+            headings(child, seen)
+        return seen
+
+    out = [("landscape" if page.width > page.height else "portrait", headings(page._page_box, [])) for page in doc.pages]
+    return [p for p in out if p[1]]            # the cover and the table of contents carry no heading of the body
+
+
+_PICTURE = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1328 208"><rect x="0" y="0" width="1328" height="208" fill="#eef"/>'
+            '<text x="20" y="40">DIAGRAM</text></svg>')
+
+
+def test_the_picture_has_its_landscape_page_to_itself() -> None:
+    """The heading written just above the picture goes onto the landscape page (with its number and its anchor);
+    what comes before stays on the page before, and the next chapter starts on a new portrait page — it used to
+    go on under the picture, and the picture's own heading stayed alone at the foot of the page before."""
+    md = ("## 2. Scope\n\nSome text.\n\n### 2.1 Application\n\n| key | value |\n|---|---|\n| pool | `jde` |\n\n"
+          "### 2.2 Architecture diagram\n\n![architecture.svg](architecture.svg)\n\n---\n\n## 3. Method\n\n### 3.1 Tools\n\n- one\n")
+    assert _pages(md, _PICTURE) == [
+        ("portrait", ["2. Scope", "2.1 Application"]),
+        ("landscape", ["2.2 Architecture diagram"]),
+        ("portrait", ["3. Method", "3.1 Tools"]),
+    ]
+    html, toc = md_to_html_body(md, _PICTURE, BuildOptions(landscape_svg_title="Architecture"))
+    assert html.count("2.2 Architecture diagram") == 1 and 'class="landscape-title">2.2 Architecture diagram</h3>' in html
+    anchor = html.split('class="landscape-title"')[0].rsplit('id="', 1)[1].split('"')[0]
+    assert f'href="#{anchor}"' in toc                    # the table of contents still points at it
+
+
+def test_a_picture_without_a_heading_above_keeps_the_given_title_and_text_after_it_moves_on() -> None:
+    md = "## A\n\nbody.\n\n![architecture.svg](architecture.svg)\n\nA sentence after the picture.\n\n### A.1 Next\n\nmore.\n"
+    assert _pages(md, _PICTURE) == [("portrait", ["A"]), ("landscape", ["Architecture"]), ("portrait", ["A.1 Next"])]
+    # the picture last: no empty page after it
+    assert _pages("## A\n\nbody.\n\n### A.1 Picture\n\n![architecture.svg](architecture.svg)\n", _PICTURE) == [
+        ("portrait", ["A"]), ("landscape", ["A.1 Picture"])]
+
+
 # --------------------------------------------------------------------------- #
 # render_content — the framework's format dispatcher
 # --------------------------------------------------------------------------- #

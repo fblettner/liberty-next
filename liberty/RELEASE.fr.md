@@ -845,6 +845,10 @@
   et peint deux fois à partir des mêmes coordonnées : dans la page, et en SVG pour un rapport PDF
   (`render_svg` : couleurs d'impression, l'état en marque et en mot, texte coupé à la largeur). Le canevas des
   flux rejoint les composants partagés (`common/flowKit`).
+- **Rapports : une image sur une page en paysage a cette page pour elle seule.** Le chapitre qui suit commence
+  maintenant sur une nouvelle page en portrait (il continuait sous l'image), et le titre écrit juste au-dessus
+  de l'image passe sur la page en paysage avec son numéro — il restait seul au pied de la page précédente,
+  tandis que la page en paysage le répétait sans son numéro. La table des matières pointe toujours dessus.
 
 ## 7.0.83 — 2026-11-19
 

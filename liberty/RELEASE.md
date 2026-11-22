@@ -727,6 +727,10 @@
   server** (`liberty.diagram`: the model, the layout) and painted twice from the same coordinates: in the page,
   and as an SVG for a PDF report (`render_svg`: print colours, the state as a mark and a word, text cut to
   fit). The flows' canvas moved to the shared components (`common/flowKit`).
+- **Reports: a picture on a landscape page has that page to itself.** The chapter that follows now starts on a
+  new portrait page (it went on under the picture), and the heading written just above the picture goes onto
+  the landscape page with its number — it used to stay alone at the foot of the page before, while the
+  landscape page repeated it without its number. The table of contents still points at it.
 
 ## 7.0.83 — 2026-11-19
 

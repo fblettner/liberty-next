@@ -299,19 +299,21 @@ def md_to_html_body(
     # Insert the landscape SVG page
     if svg_text and "<!-- ARCHITECTURE_SVG_PLACEHOLDER -->" in html_body:
         svg_text = _normalize_svg(svg_text, options.svg_width_mm, options.svg_height_mm)
+        # The heading written just above the picture is the page's title: it goes ONTO the landscape page with
+        # its number and its anchor (the table of contents points at it). Left where it was, it stayed alone at
+        # the foot of the page before, and the landscape page repeated it without its number.
+        own = re.search(r'<h3 id="([^"]+)">((?:(?!</?h3).)*)</h3>\s*(?:<p>\s*)?<!-- ARCHITECTURE_SVG_PLACEHOLDER -->(?:\s*</p>)?', html_body, re.S)
+        title = f'<h3 id="{own.group(1)}" class="landscape-title">{own.group(2)}</h3>' if own else f'<h3 class="landscape-title">{options.landscape_svg_title}</h3>'
         landscape_block = f"""
 <div class="landscape-page">
-  <h3 class="landscape-title">{options.landscape_svg_title}</h3>
+  {title}
   <div class="svg-container">
 {svg_text}
   </div>
 </div>
 <!-- end-landscape -->
 """
-        html_body = html_body.replace(
-            "<!-- ARCHITECTURE_SVG_PLACEHOLDER -->",
-            landscape_block,
-        )
+        html_body = html_body.replace(own.group(0) if own else "<!-- ARCHITECTURE_SVG_PLACEHOLDER -->", landscape_block, 1)
     else:
         # No SVG provided: just clean up the placeholder
         html_body = html_body.replace("<!-- ARCHITECTURE_SVG_PLACEHOLDER -->", "")
@@ -684,9 +686,12 @@ html, body {{
 .pill-warn {{ background: #b45309; }}
 
 /* ============ LANDSCAPE PAGE ============ */
+/* The picture has its page to itself: what follows starts on a new one (the change of page orientation alone
+   did not end it — the next chapter went on under the picture). */
 .landscape-page {{
   page: landscape;
   page-break-before: always;
+  page-break-after: always;
   page-break-inside: avoid;
 }}
 .landscape-title {{
