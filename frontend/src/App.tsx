@@ -1,4 +1,4 @@
-import { lazy, useEffect } from "react";
+import { useEffect } from "react";
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useAuth } from "./auth/AuthContext";
@@ -18,7 +18,6 @@ import { settingsRedirect } from "./services/libertyMenu";
 // The configuration editors are pages of the Liberty Next workspace (`/liberty/<page>`), page tabs
 // like the others; /settings only redirects there. AI assistant is no longer a routed page — it lives in a
 // right-side drawer toggled from the utility bar (see components/AiDrawer). The /chat URL is gone.
-const NomaflowEditor = lazy(() => import("./pages/Nomaflow/JobEditor"));
 // nomaflow Jobs / Schedule / Runs, the Liberty Next pages and the Reports list are hosted as
 // `page` workspace TABS (TabHost's path → component registry, src/tabs/pageTabs.ts), so clicking a
 // page menu item opens a tab instead of replacing the active tab's content. Their routes below are
@@ -113,10 +112,9 @@ export default function App() {
         {/* the Liberty Next workspace's pages (superuser): the configuration editors, deployment, documentation */}
         <Route path="liberty/:page" element={<TabRoute kind="page" />} />
         {/* nomaflow feature area — Jobs / Schedule / Runs open as `page` tabs (TabHost renders them);
-            only the Job editor is a direct Outlet page. Package / Changes / Integrity moved to Liberty Next. */}
+            the Job editor too (one tab per job edited). Package / Changes / Integrity moved to Liberty Next. */}
         <Route path="nomaflow" element={<TabRoute kind="page" />} />
-        <Route path="nomaflow/jobs/new" element={<NomaflowEditor />} />
-        <Route path="nomaflow/jobs/:id" element={<NomaflowEditor />} />
+        <Route path="nomaflow/jobs/:id" element={<TabRoute kind="page" />} />
         <Route path="nomaflow/schedule" element={<TabRoute kind="page" />} />
         <Route path="nomaflow/runs" element={<TabRoute kind="page" />} />
         <Route path="nomaflow/package" element={<Navigate to="/liberty/package" replace />} />

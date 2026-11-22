@@ -20,6 +20,7 @@ const PAGE_ICONS: Record<string, typeof TableIcon> = {
 }
 import { colors, fontSize, fonts, radius, media } from '../theme'
 import { useTabs, tabPath, type Tab } from '../tabs/TabsContext'
+import { jobEditorOf } from '../tabs/pageTabs'
 import { isTabDirty, useDirtyTabs } from '../tabs/dirtyGuard'
 import { useModals } from '../common'
 import { useWorkspace } from '../workspace/WorkspaceContext'
@@ -211,7 +212,8 @@ export default function TabStrip() {
             // Page tabs are menu-driven (type="page"); resolve the leaf's localized label by its
             // route path. Falls back to the last path segment when not found in any menu.
             const hit = findMenuLabelWithApp(menus, { kind: 'page', connector: '', target: tab.target })
-            label = hit?.label ?? libertyLabel(libertyMenu, tab.target) ?? (tab.target === '/notifications' ? t('notifications.title') : tab.target === '/explorer' ? t('explorer.title') : tab.target === '/developer' ? t('developer.title') : null) ?? tab.target.split('/').filter(Boolean).pop() ?? tab.target
+            const editedJob = jobEditorOf(tab.target)
+            label = hit?.label ?? (editedJob === null ? null : editedJob ? t('nomaflow.editor.editTitle', { id: editedJob }) : t('nomaflow.editor.newTitle')) ?? libertyLabel(libertyMenu, tab.target) ?? (tab.target === '/notifications' ? t('notifications.title') : tab.target === '/explorer' ? t('explorer.title') : tab.target === '/developer' ? t('developer.title') : null) ?? tab.target.split('/').filter(Boolean).pop() ?? tab.target
             appLabel = hit?.appLabel
           } else if (tab.kind === 'screen') {
             // A screen tab IS identified by its screen, so always show the SCREEN's own label —

@@ -12,9 +12,10 @@
   que rien n'est perdu : la page garde son onglet** — y compris en mode onglet unique (`[ui] tabs_multi =
   false`, où la page ouverte la remplaçait) et quand le nombre maximum d'onglets est atteint (c'est le plus
   ancien onglet sans modification en attente qui se ferme). **Un onglet qui contient des modifications non
-  enregistrées porte un point orange** : on voit où revenir. Une limite : un traitement en cours d'édition
-  n'est pas un onglet — quitter son éditeur par le menu perd encore ses modifications (un rechargement
-  demande). Rien n'est demandé quand rien n'est en attente.
+  enregistrées porte un point orange** : on voit où revenir. **L'éditeur de traitement est lui aussi un
+  onglet** (un par traitement modifié, *Traitement · <id>*) : aller à la liste et revenir conserve ce qui a été
+  saisi, et son bouton *Retour* demande avant d'abandonner des modifications non enregistrées (il les perdait
+  sans prévenir). Rien n'est demandé quand rien n'est en attente.
 - **Une page fournie par une application dit à l'assistant ce que l'utilisateur regarde** — le contrat des
   pages (version 4) gagne `useAssistantContext(title, facts)` : un titre et quelques faits en quelques mots
   (l'objet ouvert, l'onglet, un filtre — jamais de lignes ; les faits vides sont omis, les longs coupés, 20 au

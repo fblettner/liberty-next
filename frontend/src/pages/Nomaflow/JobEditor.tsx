@@ -5,7 +5,7 @@
 // The whole jobs.toml is rewritten on save (PUT /admin/config/jobs/parsed replaces the
 // [[jobs]] array), so the editor loads the full job list, edits one entry, and writes
 // the merged list back — then POST /admin/jobs/reload to apply.
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
 import styled from '@emotion/styled'
@@ -14,14 +14,15 @@ import { ArrowLeft, Save, Workflow, Layers, X, Plus, Check } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
   PageLayout, Button, Banner, Centered, Card, Input, Select, Checkbox,
-  SpinnerRing, Stack,
+  SpinnerRing, Stack, useModals,
 } from '../../common'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import StepEditor, { KeyValueEditor, JOB_PARAM_CATALOG } from './StepEditor'
 import ScheduleField from './ScheduleField'
 import type { JobConfig, JobPreset, JobsParsedResponse } from './types'
-import { useDirtyGuard } from '../../tabs/dirtyGuard'
+import { TabIdContext, useDirtyGuard } from '../../tabs/dirtyGuard'
+import { useTabs } from '../../tabs/TabsContext'
 
 const Section = styled(Card)`display: flex; flex-direction: column; gap: 12px;`
 const PresetCard = styled.div`
@@ -302,12 +303,20 @@ function presetOverrideSummary(p: JobPreset): string {
   return bits.length ? bits.join(' · ') : 'no overrides'
 }
 
-export default function JobEditor() {
+/** The job editor — a tab of its own (one per job edited): *jobId* is the job, ``''`` a new one. Outside the
+ *  tab host (a direct route) the id comes from the address, as before. */
+export default function JobEditor({ jobId }: { jobId?: string } = {}) {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const modals = useModals()
   const { connectors } = useWorkspace()      // for the step forms' connector dropdowns
-  const { id } = useParams()                 // undefined on /nomaflow/jobs/new
+  const routed = useParams().id              // undefined on /nomaflow/jobs/new
+  const id = jobId === undefined ? routed : (jobId || undefined)
   const isNew = id === undefined
+  // leaving the editor (saved, or Back) closes its tab and returns to the list
+  const tabId = useContext(TabIdContext)
+  const { close } = useTabs()
+  const leave = useCallback(() => { if (tabId) close(tabId); navigate('/nomaflow') }, [tabId, close, navigate])
 
   const [allJobs, setAllJobs] = useState<JobConfig[] | null>(null)
   const [job, setJob] = useState<JobConfig | null>(null)
@@ -379,12 +388,17 @@ export default function JobEditor() {
         : allJobs.map((j) => (j.id === id ? cleanedJob : j))
       await api.put('/admin/config/jobs/parsed', { jobs: merged })
       await api.post('/admin/jobs/reload')   // the jobs part of the reload — open to nomaflow:edit
-      navigate('/nomaflow')
+      leave()
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e))
       setBusy(false)
     }
-  }, [job, allJobs, id, isNew, navigate, t])
+  }, [job, allJobs, id, isNew, leave, t])
+
+  const back = async () => {
+    if (dirty && !(await modals.confirm({ title: t('tabs.unsavedTitle'), message: t('tabs.unsavedClose'), variant: 'danger', confirmLabel: t('tabs.unsavedDiscard'), cancelLabel: t('tabs.unsavedStay') }))) return
+    leave()
+  }
 
   return (
     <PageLayout
@@ -393,7 +407,7 @@ export default function JobEditor() {
       description={t('nomaflow.editor.subtitle')}
     >
       <Toolbar>
-        <Button $variant="ghost" $size="sm" onClick={() => navigate('/nomaflow')} disabled={busy}>
+        <Button $variant="ghost" $size="sm" onClick={() => void back()} disabled={busy}>
           <ArrowLeft size={14} /> {t('nomaflow.editor.backToJobs')}
         </Button>
         <Spacer />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { explorerModelOf, isPageTabPath, appPageOf, callableRef } from './pageTabs'
+import { explorerModelOf, isPageTabPath, appPageOf, callableRef, jobEditorOf } from './pageTabs'
 
 describe('pageTabs', () => {
   it('recognises the fixed page paths and an Explorer model link', () => {
@@ -27,6 +27,19 @@ describe("a page an application ships", () => {
   it("names a function of the application, or one given in full", () => {
     expect(callableRef('nomajde', 'xref:j_xref_search')).toBe('nomajde.xref:j_xref_search')
     expect(callableRef('nomajde', 'nomasx1.xref:j_x')).toBe('nomasx1.xref:j_x')
+  })
+})
+
+describe('the job editor as a tab', () => {
+  it('reads the job a path edits', () => {
+    expect(jobEditorOf('/nomaflow/jobs/nomasx1-collect-all')).toBe('nomasx1-collect-all')
+    expect(jobEditorOf('/nomaflow/jobs/new')).toBe('')                       // a job being created
+    expect(jobEditorOf('/nomaflow/jobs/a%20b')).toBe('a b')
+    expect(jobEditorOf('/nomaflow')).toBeNull()
+    expect(jobEditorOf('/nomaflow/runs/abc')).toBeNull()
+    expect(jobEditorOf('/nomaflow/jobs/x/y')).toBeNull()
+    expect(isPageTabPath('/nomaflow/jobs/new')).toBe(true)
+    expect(isPageTabPath('/nomaflow/jobs/nomasx1-collect-all')).toBe(true)
   })
 })
 

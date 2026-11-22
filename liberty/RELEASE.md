@@ -10,8 +10,9 @@
   nothing is lost: the page keeps its tab** — also in single-tab mode (`[ui] tabs_multi = false`, where the
   page opened used to replace it) and when the tab cap is reached (the oldest tab with nothing unsaved closes
   instead); an application switch that closes tabs leaves it open too. **A tab that holds unsaved changes
-  carries an orange dot**, so the page to come back to is visible. One limit: a job being edited is not a tab —
-  leaving its editor through the menu still drops its edits (a reload asks).
+  carries an orange dot**, so the page to come back to is visible. **The job editor is a tab too** (one per job
+  edited, *Job · <id>*): going to the list and coming back keeps what was typed, and its *Back* button asks
+  before it drops unsaved changes (it used to drop them without a word).
 - **A page an application ships tells the assistant what the user is looking at** — the page contract
   (version 4) gains `useAssistantContext(title, facts)`: a title and a few facts in a few words (the object
   open, the tab, a filter — never rows; blank facts are left out, long ones cut, 20 at most). The chat shows
