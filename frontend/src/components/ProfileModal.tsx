@@ -13,7 +13,7 @@ import styled from '@emotion/styled'
 import { User, Shield, KeyRound, Copy, Download, X } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { api, apiDownload, ApiError, resolveApiPath } from '../api/client'
-import { hasPermission } from '../pages/Settings/Access/permissions'
+import { can } from '../services/permissions'
 import { Overlay, Modal, ModalBody, ModalFooter, Button, Tag, FieldLabel, Input, PasswordInput, Banner } from '../common'
 import { colors, fontSize, fonts, radius } from '../theme'
 import { attributeToText, describeScope, type ScopeRule, type RuleWords } from '../pages/Settings/Access/scopeRules'
@@ -122,7 +122,7 @@ export function ProfileModal({ onClose }: { onClose: () => void }) {
 
   const switchTab = (next: 'profile' | 'security' | 'tokens') => { setTab(next); setError(null); setStatus(null) }
   // a personal access token is for who may use the MCP endpoint (the server checks it again)
-  const mayToken = !!user && (user.is_superuser || hasPermission(user.permissions ?? [], 'mcp:use'))
+  const mayToken = can(user, 'mcp:use')
   const mcpUrl = new URL(resolveApiPath('/mcp'), window.location.origin).href
 
   // The clients connected through the sign-in (Claude by OAuth): listed so one can be ended

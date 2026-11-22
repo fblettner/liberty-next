@@ -152,6 +152,8 @@ export default function AccessBuilder() {
   const [userEdit, setUserEdit] = useState<AppUser | null | undefined>(undefined)
   // undefined = nothing open; null = a new role; a name = that role (keyed so the editor remounts on switch)
   const [roleEdit, setRoleEdit] = useState<string | null | undefined>(undefined)
+  // a new role that starts as a copy of this one (Duplicate), else null
+  const [roleSeed, setRoleSeed] = useState<AppRole | null>(null)
 
   const load = useCallback(() => {
     setError(null)
@@ -214,7 +216,7 @@ export default function AccessBuilder() {
       ) : (
         <Split>
           <Side>
-            <Bar><div style={{ flex: 1 }} /><Button $size="sm" $variant="primary" onClick={() => setRoleEdit(null)}><Plus size={13} /> {t('settings.access.addRole')}</Button></Bar>
+            <Bar><div style={{ flex: 1 }} /><Button $size="sm" $variant="primary" onClick={() => { setRoleSeed(null); setRoleEdit(null) }}><Plus size={13} /> {t('settings.access.addRole')}</Button></Bar>
             <List>
               {roles.map((r) => (
                 <Item key={r.name} $selected={roleEdit === r.name} onClick={() => setRoleEdit(r.name)}>
@@ -232,7 +234,8 @@ export default function AccessBuilder() {
             </List>
           </Side>
           {editing !== undefined ? (
-            <RoleEditor key={roleEdit ?? '__new__'} initial={editing} takenNames={roleNames} forest={forest} dashboardIds={dashboardIds} dictionary={dictionary} attributeNames={attributeNames} columnNames={columnNames}
+            <RoleEditor key={roleEdit ?? `__new__${roleSeed?.name ?? ''}`} initial={editing} seed={roleEdit === null ? roleSeed : null}
+              onDuplicate={editing ? () => { setRoleSeed(editing); setRoleEdit(null) } : undefined} takenNames={roleNames} forest={forest} dashboardIds={dashboardIds} dictionary={dictionary} attributeNames={attributeNames} columnNames={columnNames}
               onCancel={() => setRoleEdit(undefined)} onSaved={(name) => { setRoleEdit(name); load() }} />
           ) : (
             <Placeholder>{t('settings.access.pickRole')}</Placeholder>

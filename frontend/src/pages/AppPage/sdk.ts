@@ -24,7 +24,7 @@ import { iconFor } from '../../components/SidebarMenu'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 import { callableRef } from '../../tabs/pageTabs'
 import { PageGrid } from './PageGrid'
-import { hasPermission } from '../../services/permissions'
+import { can } from '../../services/permissions'
 import { pageFacts, setPageContext } from '../../services/aiContext'
 
 // 2: `Grid` (the shared grid) · 3: a row of the grid opens (`detail`) · 4: `useAssistantContext`
@@ -95,7 +95,7 @@ export function buildSdk(app: string, page: string): PageSdk {
     },
     useCan: () => {
       const { user } = useAuth()
-      return (permission: string) => !!user && (!!user.is_superuser || hasPermission(user.permissions ?? [], permission))
+      return (permission: string) => can(user, permission)
     },
     useAssistantContext: (title, facts) => {
       const { pathname } = useLocation()

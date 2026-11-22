@@ -99,13 +99,20 @@ class Principal:
     def has_permission(self, permission: str) -> bool:
         """RBAC check with allow/deny semantics. Superuser bypasses everything. Otherwise an
         explicit deny (``"!sql:nomasx1:*"``) wins; else any allow pattern (``"*"`` = everything,
-        or a colon-segment glob) grants it; else default-deny. The allow-only model is the special
+        or a colon-segment glob) grants it; else what a menu grant implies (``menu:<app>:<id>``,
+        ``edit:<app>:<id>``); else default-deny. The allow-only model is the special
         case where there are no ``"!"`` rules — so existing roles behave exactly as before."""
         if self.is_superuser:
             return True
         if self.is_denied(permission):
             return False
-        return any(_segment_match(p, permission) for p in self.permissions if not p.startswith("!"))
+        if any(_segment_match(p, permission) for p in self.permissions if not p.startswith("!")):
+            return True
+        # Not held by name: given by a menu grant? A role allows a folder or an entry (read, or read
+        # and change) and the server works out what the screens under it need — liberty.auth.implied.
+        from liberty.auth import implied
+
+        return implied.grants(self.permissions, permission)
 
     def require_permission(self, permission: str) -> None:
         if not self.has_permission(permission):

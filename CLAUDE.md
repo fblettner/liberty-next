@@ -106,7 +106,10 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           server.py (an HTTP server as a pool: what an API connector — and each of its `targets` — names as
                           `server`; `with_servers` gives the registry the effective config, address / account / secrets from
                           the pool; a pool that cannot be read = `APIConnector.server_problem`, said on the call)
-  auth/                   scope.py (row-level data scope: role rules → resolved per user → JWT
+  auth/                   implied.py (what a MENU GRANT gives: a role stores `menu:<app>:<id>` = read, `edit:<app>:<id>` = change, on a folder or an entry;
+                          `Principal.has_permission` asks it after the rules held by name; the answer is built from the loaded
+                          configuration by web/menu_access.py — the dependency walker's references, read / change by `writable`),
+                          scope.py (row-level data scope: role rules → resolved per user → JWT
                           `scope` claim → SQLConnector wrap / write check), authstore.py (AuthBackend: toml | db), tokens.py (PyJWT access /
                           refresh with rotation), throttle.py (login throttle), principal.py
                           (colon-glob permissions), oidc.py, dependencies.py, routes.py; oauth.py (the OAuth sign-in of the MCP
@@ -250,6 +253,7 @@ permissions through `liberty.ai.tools.may` / `require`, and `AiAssistant.chat(pr
 Access API or `[oidc] attribute_claims`. Menus (`web/menus.py`): a dashboard entry needs a readable data widget (or `dashboard:<id>` / the menu allow), the
 Explorer page a model of the app, and permission-less links never list an application by themselves — the role editor
 mirrors it from `GET /admin/access/menu-rules`. Permission strings: `sql:{connector}:{query}`, `api:{connector}:{endpoint}`, `plugin:{ref}`,
+`menu:{app}:{id}` / `edit:{app}:{id}` (a menu folder or entry, read / change: the server gives what its screens need — `auth/implied.py`; what the role editor writes),
 `ai:chat` (opens the chat only: each tool then needs the `sql:` / `api:` / `explorer:` / `job:` permission of what it touches; ops and scaffold tools are superuser-only), with colon-segment globs (`sql:nomasx1:*`, `*`); superusers bypass. The permission
 is checked **before** the connector lookup (no name enumeration). A mutating query needs both
 `writable = true` in TOML and the caller's permission. DB errors: non-superusers get the

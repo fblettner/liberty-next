@@ -1,5 +1,5 @@
 // The role editor's model: menu forest, the backend's glob matcher, and the round trip between
-// permission strings and the tree's inherit / allow / deny states.
+// permission strings and the tree's states (follows its folder / read / read and change / hidden).
 import { describe, expect, it } from 'vitest'
 import { buildMenuForest, buildPermissions, hasPermission, isDenied, leafVisible, nodeEffects, parsePermissions, segmentMatch } from './permissions'
 
@@ -49,24 +49,57 @@ describe('parsePermissions / buildPermissions', () => {
     expect(m.full).toBe(false)
     expect(m.states).toEqual({ 'menu:nomasx1:users': 'allow' })
     expect(m.other).toEqual(['ai:chat'])
-    expect(buildPermissions(m, forest)).toEqual(['menu:nomasx1:users', 'sql:nomasx1:security_users_get', 'ai:chat'])
+    // saved again: the entry alone — the server works out what it runs
+    expect(buildPermissions(m, forest)).toEqual(['menu:nomasx1:users', 'ai:chat'])
   })
 
-  it('a folder state expands to its leaves and is stable through a round trip', () => {
+  it('a folder is ONE line, whatever it holds, and is stable through a round trip', () => {
     const m = { full: false, states: { 'menu:nomasx1:security': 'allow' as const }, other: [] }
     const perms = buildPermissions(m, forest)
-    expect(perms).toEqual([
-      'menu:nomasx1:security',
-      'menu:nomasx1:users', 'sql:nomasx1:security_users_get',
-      'menu:nomasx1:roles', 'sql:nomasx1:security_roles_get',
-    ])
-    expect(parsePermissions(perms, forest)).toEqual(m)   // the leaves' entries are inherited, not explicit
+    expect(perms).toEqual(['menu:nomasx1:security'])
+    expect(parsePermissions(perms, forest)).toEqual(m)
+    // the entries under it are shown: the server gives them what they run
+    const eff = nodeEffects(m, forest)
+    expect(eff['menu:nomasx1:users']).toEqual({ own: null, inherited: 'allow', visible: true })
+    expect(eff['menu:nomajde:ais'].visible).toBe(false)          // another application: not given
+  })
+
+  it('a role written before (the folder, then one line and one target per entry) reads as the folder', () => {
+    const old = ['menu:nomasx1:security', 'menu:nomasx1:users', 'sql:nomasx1:security_users_get', 'menu:nomasx1:roles', 'sql:nomasx1:security_roles_get', 'ai:chat']
+    const m = parsePermissions(old, forest)
+    expect(m).toEqual({ full: false, states: { 'menu:nomasx1:security': 'allow' }, other: ['ai:chat'] })
+    expect(buildPermissions(m, forest)).toEqual(['menu:nomasx1:security', 'ai:chat'])
+  })
+
+  it('read and change: the node, plus its edit line', () => {
+    const m = { full: false, states: { 'menu:nomasx1:security': 'change' as const }, other: [] }
+    const perms = buildPermissions(m, forest)
+    expect(perms).toEqual(['menu:nomasx1:security', 'edit:nomasx1:security'])
+    expect(parsePermissions(perms, forest)).toEqual(m)
+  })
+
+  it('read only on one entry of a folder given in change, and change on one entry of a folder that is read', () => {
+    const m = { full: false, states: { 'menu:nomasx1:security': 'change' as const, 'menu:nomasx1:roles': 'allow' as const }, other: [] }
+    const perms = buildPermissions(m, forest)
+    expect(perms).toEqual(['menu:nomasx1:security', 'edit:nomasx1:security', 'menu:nomasx1:roles', '!edit:nomasx1:roles'])
+    expect(parsePermissions(perms, forest)).toEqual(m)
+    const n = { full: false, states: { 'menu:nomasx1:security': 'allow' as const, 'menu:nomasx1:users': 'change' as const }, other: [] }
+    const back = buildPermissions(n, forest)
+    expect(back).toEqual(['menu:nomasx1:security', 'menu:nomasx1:users', 'edit:nomasx1:users'])
+    expect(parsePermissions(back, forest)).toEqual(n)
+  })
+
+  it('a change line that names no allowed node is kept as written, never dropped', () => {
+    const m = parsePermissions(['edit:nomasx1:security', '!edit:nomasx1:roles'], forest)
+    expect(m.states).toEqual({})
+    expect(m.other).toEqual(['edit:nomasx1:security', '!edit:nomasx1:roles'])
+    expect(buildPermissions(m, forest)).toEqual(['edit:nomasx1:security', '!edit:nomasx1:roles'])
   })
 
   it('full access minus a folder, with one leaf allowed back', () => {
     const m = { full: true, states: { 'menu:nomasx1:security': 'deny' as const, 'menu:nomasx1:roles': 'allow' as const }, other: [] }
     const perms = buildPermissions(m, forest)
-    expect(perms).toEqual(['*', '!menu:nomasx1:security', '!menu:nomasx1:users', '!sql:nomasx1:security_users_get', 'menu:nomasx1:roles', 'sql:nomasx1:security_roles_get'])
+    expect(perms).toEqual(['*', '!menu:nomasx1:security', '!menu:nomasx1:users', '!sql:nomasx1:security_users_get', 'menu:nomasx1:roles'])
     expect(parsePermissions(perms, forest)).toEqual(m)
     const eff = nodeEffects(m, forest)
     expect(eff['menu:nomasx1:users']).toEqual({ own: null, inherited: 'deny', visible: false })

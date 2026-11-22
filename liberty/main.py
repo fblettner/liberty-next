@@ -370,11 +370,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         app.state.notify_retention_task = asyncio.create_task(_notify_retention_loop())
         from liberty.ai.mcp_server import running as mcp_running
+        # What a menu grant gives (a role allows a folder, the server works out what its screens need):
+        # the permission check asks this application's configuration, as it is at the time of the check.
+        from liberty.auth import implied as _implied
+        from liberty.web.menu_access import access_of as _menu_access_of
+
+        def _menu_access():
+            return _menu_access_of(app.state)
+
+        _implied.set_source(_menu_access)
         try:
             # the MCP session manager lives as long as the application ([ai] mcp_enabled is read per request)
             async with mcp_running(app):
                 yield
         finally:
+            if _implied._source is _menu_access:      # another application started since: its source stays
+                _implied.set_source(None)
             app.state.notify_retention_task.cancel()
             try:
                 await app.state.notify_retention_task

@@ -682,6 +682,31 @@
     by name.
   - **Dashboards and charts carry "keep on upgrade"** as a tick box (it could only be set in the file), and a
     dashboard filter left unfinished is refused instead of being dropped.
+- **Roles follow the menus: read, or read and change.** In the role editor a menu folder or entry is set to
+  *Follows its folder*, **Read**, **Read and change** or *Hidden*, and that is all the role stores
+  (`menu:<app>:<id>`, and `edit:<app>:<id>` for change). **The server works out what the screens under it
+  need**: their read query, the lists behind their dropdowns, the tabs of their record form, their dashboards'
+  queries — and, for *Read and change*, what writes: the screen's update / insert / delete, the queries and
+  endpoints marked as changing data that its actions run, and the functions they call. Before, allowing an
+  entry gave only its read query; the writes, the lists and the action targets had to be added one by one as
+  permission strings.
+  - **A role is a few lines** whatever the size of the application (a "master data, read and change" role on
+    the demo JD Edwards menus: 7 lines), and **it follows its folder**: a screen an upgrade adds to a folder
+    the role allows is covered without touching the role.
+  - Each entry says what a tick gives ("4 to read · 22 to change", the names on hover).
+  - The nearest choice decides: an entry set to *Read* inside a folder in *Read and change* stays read-only,
+    a *Hidden* entry is taken out of an allowed folder. A deny of a permission by name still wins over
+    everything.
+  - Following a row click to another screen gives that screen's read only: changing it needs its own entry.
+  - **Existing roles keep working** and read as the same choices; saved again from the editor they are
+    written in the short form. **What changes for them**: a role that allows a menu folder or entry now also
+    receives the lists and tabs of those screens (they were refused unless added by hand) and the screens
+    later added to an allowed folder.
+  - Not covered: a page shipped by an application gives the page, not the functions it calls (they are not
+    declared anywhere) — add `plugin:<module>:*` under *Beyond the menus*.
+  - **A role can be duplicated**: *Duplicate* opens a new role with the same rights and the same data scope.
+  - `GET /auth/me` tells the browser what the menu grants give (`implied`), so a button a page shows or hides
+    agrees with the server.
 
 ## 7.0.83 — 2026-11-19
 

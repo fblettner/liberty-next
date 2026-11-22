@@ -141,8 +141,11 @@ async def menu_rules(request: Request, _: Superuser) -> dict[str, Any]:
     own target — the rule of :mod:`liberty.web.menus`: ``dashboards`` gives, per dashboard id,
     the permissions of its data widgets (any one shows the entry) and ``open`` when it has none
     (texts and links: shown to all); ``explorer`` the models of each application (any one shows
-    its Data Explorer page)."""
+    its Data Explorer page); ``needs`` what a grant on each entry gives, per application — the
+    queries, endpoints and functions the server works out for "read" and, on top, for "change"
+    (:mod:`liberty.web.menu_access`), so the editor can say what a tick means."""
     from liberty.web.dashboards import widget_permissions
+    from liberty.web.menu_access import access_of
 
     st = request.app.state
     charts = getattr(st, "charts", None)
@@ -155,7 +158,10 @@ async def menu_rules(request: Request, _: Superuser) -> dict[str, Any]:
     models = getattr(st, "explorer", None)
     for app, mid, _m in (models.items() if models is not None and hasattr(models, "items") else []):
         explorer.setdefault(app, []).append(mid)
-    return {"dashboards": dashboards, "explorer": explorer}
+    needs: dict[str, dict[str, dict[str, list[str]]]] = {}
+    for (app, entry), need in access_of(st).needs.items():
+        needs.setdefault(app, {})[entry] = {level: list(perms) for level, perms in need.items()}
+    return {"dashboards": dashboards, "explorer": explorer, "needs": needs}
 
 
 @router.get("/roles", summary="List roles")

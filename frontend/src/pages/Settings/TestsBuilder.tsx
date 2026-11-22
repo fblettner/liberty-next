@@ -11,7 +11,7 @@ import { Banner, Button, Centered, Checkbox, Field, Input, SearchSelect, Textare
 import { api, ApiError } from '../../api/client'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { useAuth } from '../../auth/AuthContext'
-import { hasPermission } from '../../services/permissions'
+import { can } from '../../services/permissions'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 import { FlowCanvas, FlowRows } from './flowKit'
 import { PairsField } from '../TableView/PairsField'
@@ -96,7 +96,7 @@ export default function TestsBuilder() {
   // what the routes allow: reading needs tests:view, playing tests:run, writing tests:edit (which also plays).
   // A button the caller may not use is not shown — the server would refuse it anyway.
   const { user } = useAuth()
-  const may = (...perms: string[]) => !!user && (user.is_superuser || perms.some((p) => hasPermission(user.permissions ?? [], p)))
+  const may = (...perms: string[]) => perms.some((p) => can(user, p))
   const mayEdit = may('tests:edit'), mayRun = may('tests:run', 'tests:edit')
   const modals = useModals()
   const { connectors } = useWorkspace()

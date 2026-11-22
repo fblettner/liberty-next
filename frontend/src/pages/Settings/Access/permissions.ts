@@ -1,9 +1,15 @@
 // Pure helpers behind the role editor (no React): the menu forest the tree renders, the
 // backend's colon-segment glob matcher, and the two-way mapping between a role's permission
-// strings and the tree's three-state model (inherit / allow / deny per menu node + the "other"
-// rules menus don't cover). The strings written are exactly what the old chip editor wrote —
-// `menu:<app>:<id>` for the node, `menu:` + the target permission for every leaf under an
-// allowed / denied node — so existing roles and the backend's `_keeper` are untouched.
+// strings and the tree's model: per menu node, nothing of its own (it follows its folder), READ,
+// READ AND CHANGE, or hidden — plus the "other" rules menus don't cover.
+//
+// A role stores the INTENT: `menu:<app>:<id>` for read, `edit:<app>:<id>` on top for change, on
+// the node the person ticked. The server works out what the entries under it need — their read
+// query, the lists behind their dropdowns, their record form's tabs, and for "change" what
+// writes (liberty/auth/implied.py). So a role is a few lines, and follows its folder when an
+// upgrade adds a screen to it. A hidden node still names each entry under it and its target
+// (`!menu:…`, `!sql:…`): that is what takes it away from a role that has everything.
+// Roles written before (one `menu:` + one target per entry) are read as the same states.
 
 import { hasPermission, isDenied } from '../../../services/permissions'
 import { appPageOf, explorerModelOf } from '../../../tabs/pageTabs'
@@ -13,13 +19,18 @@ export { hasPermission, isDenied, segmentMatch } from '../../../services/permiss
 export interface MenuItemRaw { id: string; parent?: string | null; label?: string; type?: string | null; connector?: string | null; target?: string | null }
 export type MenusCatalog = Record<string, { items: MenuItemRaw[] }>
 export interface ScreenRef { id: string; connector: string; read_query: string }
-export type NodeState = 'allow' | 'deny'
+/** `allow` = read; `change` = read and change; `deny` = hidden. */
+export type NodeState = 'allow' | 'change' | 'deny'
 
 export interface MenuNode {
   app: string
   id: string
   /** The node's own permission: `menu:<app>:<id>`. */
   key: string
+  /** The node's "change" permission: `edit:<app>:<id>`. */
+  editKey: string
+  /** What the entry gives at each level, as the server works it out (GET /admin/access/menu-rules). */
+  needs?: { read: string[]; change: string[] }
   label: string
   type: string | null
   target: string | null
@@ -36,11 +47,14 @@ export interface MenuNode {
 export interface MenuRules {
   dashboards: Record<string, { permissions: string[]; open: boolean }>
   explorer: Record<string, string[]>
+  /** application → entry id → what a grant on it gives (absent from an older server). */
+  needs?: Record<string, Record<string, { read: string[]; change: string[] }>>
 }
 export const EXPLORER_PAGE = '/explorer'
 export type MenuForest = Record<string, MenuNode[]>
 
 export const nodeKey = (app: string, id: string): string => `menu:${app}:${id}`
+export const editKey = (app: string, id: string): string => `edit:${app}:${id}`
 export const isLeaf = (n: MenuNode): boolean => !!n.type && !!n.target
 
 /** The permission a `page` leaf's route needs — the nomaflow pages ask `nomaflow:view` (which
@@ -93,8 +107,9 @@ export function buildMenuForest(menus: MenusCatalog, screens: Record<string, Scr
     const nodes = new Map<string, MenuNode>()
     for (const it of items) {
       nodes.set(it.id, {
-        app, id: it.id, key: nodeKey(app, it.id), label: it.label || it.id, type: it.type ?? null, target: it.target ?? null,
-        targetPerm: targetPermission(app, it, screens), ...leafRule(app, it, rules), children: [],
+        app, id: it.id, key: nodeKey(app, it.id), editKey: editKey(app, it.id), label: it.label || it.id, type: it.type ?? null, target: it.target ?? null,
+        targetPerm: targetPermission(app, it, screens), ...leafRule(app, it, rules),
+        ...(rules?.needs?.[app]?.[it.id] ? { needs: rules.needs[app][it.id] } : {}), children: [],
       })
     }
     const roots: MenuNode[] = []
@@ -146,8 +161,8 @@ export interface RoleModel {
   other: string[]
 }
 
-const prefixed = (state: NodeState, perm: string): string => (state === 'deny' ? '!' : '') + perm
 const strip = (p: string): string => (p.startsWith('!') ? p.slice(1) : p)
+const allowed = (s: NodeState | null): boolean => s === 'allow' || s === 'change'
 
 function generate(model: Pick<RoleModel, 'full' | 'states'>, forest: MenuForest): string[] {
   const out: string[] = []
@@ -155,11 +170,17 @@ function generate(model: Pick<RoleModel, 'full' | 'states'>, forest: MenuForest)
   if (model.full) push('*')
   const walk = (n: MenuNode, inherited: NodeState | null) => {
     const own = model.states[n.key] ?? null
-    if (own) push(prefixed(own, n.key))
+    if (own === 'deny') push(`!${n.key}`)
+    else if (own === 'change') { push(n.key); push(n.editKey) }
+    else if (own === 'allow') {
+      push(n.key)
+      if (inherited === 'change') push(`!${n.editKey}`)     // read only, inside a folder given in change
+    }
     const eff = own ?? inherited
-    if (eff && isLeaf(n)) {
-      if (!own) push(prefixed(eff, n.key))
-      if (n.targetPerm) push(prefixed(eff, n.targetPerm))
+    // hidden: each entry under it and its target by name — what takes it away from a role that has everything
+    if (eff === 'deny' && isLeaf(n)) {
+      push(`!${n.key}`)
+      if (n.targetPerm) push(`!${n.targetPerm}`)
     }
     n.children.forEach((c) => walk(c, eff))
   }
@@ -185,6 +206,9 @@ export function parsePermissions(perms: string[], forest: MenuForest): RoleModel
   const full = perms.includes('*')
   const nodes = flattenForest(forest)
   const byKey = new Map(nodes.map((n) => [n.key, n]))
+  const byEdit = new Map(nodes.map((n) => [n.editKey, n]))
+  const parentOf = new Map<string, MenuNode>()
+  for (const n of nodes) for (const c of n.children) parentOf.set(c.key, n)
   const byTarget = new Map<string, MenuNode[]>()
   for (const n of nodes) if (n.targetPerm) byTarget.set(n.targetPerm, [...(byTarget.get(n.targetPerm) ?? []), n])
   let states: Record<string, NodeState> = {}
@@ -200,9 +224,32 @@ export function parsePermissions(perms: string[], forest: MenuForest): RoleModel
       if (!states[n.key]) states[n.key] = p.startsWith('!') ? 'deny' : 'allow'
     }
   }
+  // "change" on a node that is allowed
+  for (const p of perms) {
+    const n = p.startsWith('!') ? undefined : byEdit.get(p)
+    if (n && states[n.key] === 'allow') states[n.key] = 'change'
+  }
+  // "read only" inside a folder given in change: the node carries its own allow (written with it)
+  const above = (n: MenuNode): NodeState | null => {
+    for (let a = parentOf.get(n.key); a; a = parentOf.get(a.key)) if (states[a.key]) return states[a.key]
+    return null
+  }
+  for (const p of perms) {
+    const n = p.startsWith('!') ? byEdit.get(p.slice(1)) : undefined
+    if (n && !states[n.key] && above(n) === 'change') states[n.key] = 'allow'
+  }
   states = normalize(states, full, forest)
   const generated = new Set(generate({ full, states }, forest))
-  const other = perms.filter((p) => p !== '*' && p !== '!*' && !generated.has(p) && !byKey.has(strip(p)))
+  // What the server now works out by itself: the target of an entry the menus allow. Older versions
+  // wrote one per entry; kept as "other" rules they would only repeat what the entry already gives.
+  const given = new Set<string>()
+  const walk = (n: MenuNode, inherited: NodeState | null) => {
+    const eff = states[n.key] ?? inherited
+    if (allowed(eff) && isLeaf(n) && n.targetPerm) given.add(n.targetPerm)
+    n.children.forEach((c) => walk(c, eff))
+  }
+  for (const roots of Object.values(forest)) roots.forEach((r) => walk(r, null))
+  const other = perms.filter((p) => p !== '*' && p !== '!*' && !generated.has(p) && !byKey.has(strip(p)) && !given.has(p))
   return { full, states, other: [...new Set(other)] }
 }
 
@@ -225,7 +272,12 @@ export function nodeEffects(model: RoleModel, forest: MenuForest): Record<string
   const out: Record<string, NodeEffect> = {}
   const walk = (n: MenuNode, inherited: NodeState | null) => {
     const own = model.states[n.key] ?? null
-    out[n.key] = { own, inherited, visible: isLeaf(n) ? leafVisible(perms, n) : null }
+    const eff = own ?? inherited
+    // an entry the menus allow is shown: the server gives it what it runs (unless a rule denies the target by name)
+    const shown = eff === 'deny' ? false
+      : allowed(eff) && !model.full ? !isDenied(perms, n.key) && !(n.targetPerm && isDenied(perms, n.targetPerm))
+        : leafVisible(perms, n)
+    out[n.key] = { own, inherited, visible: isLeaf(n) ? shown : null }
     n.children.forEach((c) => walk(c, own ?? inherited))
   }
   for (const roots of Object.values(forest)) roots.forEach((r) => walk(r, model.full ? 'allow' : null))

@@ -102,6 +102,9 @@ def _seed(db_url: str) -> None:
             await svc.create_user("loader", password="loaderpw", roles=["loader"])
             await svc.create_user("denied", password="deniedpw", roles=["denied"])
             await svc.create_user("nobody", password="nobodypw")
+            # a role that names a FOLDER, one entry taken out: the server works out the queries
+            await svc.get_or_create_role("folder", permissions=["menu:app1:security", "!menu:app1:security.secret"])
+            await svc.create_user("folder", password="folderpw", roles=["folder"])
         await pools.dispose()
 
     asyncio.run(go())
@@ -503,3 +506,21 @@ def test_open_links_do_not_list_an_application() -> None:
     kept, listed = _seen("*")
     assert listed is True and len(kept) == 6
     assert _seen(superuser=True) == (kept, True)
+
+
+def test_a_role_that_allows_a_folder_is_given_what_its_entries_run(app) -> None:
+    """``menu:app1:security`` alone: the entries under it are shown and their queries run, the one
+    taken out is neither shown nor runnable, and the browser is told what the grant gives."""
+    with TestClient(app) as client:
+        h = _h(client, "folder")
+        app1 = client.get("/api/menus", headers=h).json()["menus"]["app1"]
+        assert [n["id"] for n in app1["items"]] == ["security"]
+        assert [c["id"] for c in app1["items"][0]["items"]] == ["security.users", "security.roles"]
+        assert client.get("/api/sql/app1/users_get", headers=h).status_code == 200
+        assert client.get("/api/sql/app1/roles_get", headers=h).status_code == 200
+        assert client.get("/api/sql/app1/secret_get", headers=h).status_code == 403
+        me = client.get("/auth/me", headers=h).json()
+        assert sorted(me["permissions"]) == ["!menu:app1:security.secret", "menu:app1:security"]
+        assert me["implied"] == ["sql:app1:roles_get", "sql:app1:users_get"]
+        # a role that names its queries is told nothing more
+        assert client.get("/auth/me", headers=_h(client, "user")).json()["implied"] == []

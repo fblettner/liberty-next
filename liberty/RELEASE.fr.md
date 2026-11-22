@@ -795,6 +795,34 @@
   - **Tableaux de bord et graphiques portent « conserver à la mise à niveau »** en case à cocher (cela ne se
     réglait que dans le fichier), et un filtre de tableau de bord laissé incomplet est refusé au lieu d'être
     perdu.
+- **Les rôles suivent les menus : lecture, ou lecture et modification.** Dans l'éditeur de rôle, un dossier
+  ou une entrée de menu se règle sur *Suit son dossier*, **Lecture**, **Lecture et modification** ou *Masqué*,
+  et c'est tout ce que le rôle enregistre (`menu:<app>:<id>`, et `edit:<app>:<id>` pour la modification). **Le
+  serveur détermine ce dont les écrans concernés ont besoin** : leur requête de lecture, les listes de leurs
+  listes déroulantes, les onglets de leur fiche, les requêtes de leurs tableaux de bord — et, pour *Lecture et
+  modification*, ce qui écrit : la mise à jour / l'ajout / la suppression de l'écran, les requêtes et points
+  d'accès marqués comme modifiant des données que ses actions lancent, et les fonctions qu'elles appellent.
+  Auparavant, autoriser une entrée ne donnait que sa requête de lecture ; les écritures, les listes et les
+  cibles des actions devaient être ajoutées une à une sous forme de permissions.
+  - **Un rôle tient en quelques lignes** quelle que soit la taille de l'application (un rôle « données de
+    base, lecture et modification » sur les menus JD Edwards de démonstration : 7 lignes), et **il suit son
+    dossier** : un écran qu'une mise à niveau ajoute à un dossier autorisé est couvert sans toucher au rôle.
+  - Chaque entrée indique ce qu'une coche donne (« 4 en lecture · 22 en modification », les noms au survol).
+  - Le choix le plus proche décide : une entrée en *Lecture* dans un dossier en *Lecture et modification*
+    reste en lecture seule, une entrée *Masquée* est retirée d'un dossier autorisé. Le refus d'une permission
+    par son nom l'emporte toujours.
+  - Suivre un clic sur une ligne vers un autre écran ne donne que la lecture de cet écran : le modifier
+    demande sa propre entrée.
+  - **Les rôles existants continuent de fonctionner** et se lisent comme les mêmes choix ; réenregistrés
+    depuis l'éditeur, ils sont écrits sous la forme courte. **Ce qui change pour eux** : un rôle qui autorise
+    un dossier ou une entrée de menu reçoit aussi les listes et les onglets de ces écrans (ils étaient refusés
+    sauf ajout à la main) et les écrans ajoutés plus tard à un dossier autorisé.
+  - Non couvert : une page livrée par une application donne la page, pas les fonctions qu'elle appelle (elles
+    ne sont déclarées nulle part) — ajoutez `plugin:<module>:*` dans *Au-delà des menus*.
+  - **Un rôle se duplique** : *Dupliquer* ouvre un nouveau rôle avec les mêmes droits et le même périmètre de
+    données.
+  - `GET /auth/me` indique au navigateur ce que les menus donnent (`implied`), pour qu'un bouton qu'une page
+    affiche ou masque soit d'accord avec le serveur.
 
 ## 7.0.83 — 2026-11-19
 

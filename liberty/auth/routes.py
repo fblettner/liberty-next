@@ -219,8 +219,14 @@ async def me(principal: CurrentPrincipal) -> dict:
     """Decoded JWT claims for the request's access token — username, roles, provider
     (``local`` / ``oidc``), and a few derived fields. Useful for the SPA to populate the
     top-right user pill without parsing the JWT client-side. For the LIVE auth-store
-    record (name / email / etc. as the operator last edited them), use ``GET /auth/profile``."""
-    return principal.to_dict()
+    record (name / email / etc. as the operator last edited them), use ``GET /auth/profile``.
+
+    ``implied`` lists what the caller's menu grants give on top of ``permissions`` (a role allows a
+    menu folder, the server works out what its screens need — :mod:`liberty.auth.implied`), so a
+    check made in the browser agrees with the server's."""
+    from liberty.auth import implied
+
+    return {**principal.to_dict(), "implied": [] if principal.is_superuser else implied.implied(principal.permissions)}
 
 
 @router.get(
