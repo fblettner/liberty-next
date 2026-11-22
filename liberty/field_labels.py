@@ -52,6 +52,7 @@ LABELS: dict[str, dict[str, Label]] = {
         "pool_pre_ping": ("Test before use", "Check that a connection still answers before using it."),
         "pool_recycle": ("Renew after (seconds)", "A connection older than this is replaced; -1 keeps it for ever."),
         "echo": ("Log every statement", "Write every statement to the server log. For a diagnosis only."),
+        "jit": ("Let PostgreSQL compile queries", "PostgreSQL only. Off is faster for screens and searches; on leaves the database's own setting."),
         "max_rows": ("Rows read at most", "How many rows a screen reads from this database unless it says otherwise."),
         "arraysize": ("Rows per round trip", "Oracle only: how many rows are fetched at a time. Raise it for large tables."),
         "trim_strings": ("Trim trailing spaces", "Remove the spaces a fixed-width text column adds at the end of its values."),

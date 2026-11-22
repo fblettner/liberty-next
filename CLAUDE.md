@@ -88,7 +88,7 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
   cli.py / admin_cli.py / migrate_cli.py / license_cli.py   the console scripts (below)
   connectors/             config.py (Pydantic for connectors.toml + ParamBind + ColumnHint),
                           db.py (PoolRegistry: lazy engines, ENC: passwords, terminal
-                          dispose), sql.py (SQLConnector: text() binds, filter / summary wraps,
+                          dispose; a PostgreSQL pool's sessions run with `jit` off unless the pool says `jit = true`), sql.py (SQLConnector: text() binds, filter / summary wraps,
                           form rules, SEQUENCE, audit mirror, Oracle quirks, NDJSON streaming,
                           multi-pool; the pure SQL-text helpers — ORDER BY split, aggregate / filter wraps,
                           #SCHEMA# / #DBLINK# placeholders — in sqltext.py), api.py (APIConnector: httpx, 6 auth kinds — `user_jwt` makes each call AS THE SIGNED-IN USER: a short-lived token signed with the connector's key names him on the server (`acting_user` from a user attribute, `user_token`, `ApiAuthError`; made for JD Edwards AIS) —, templating — a value stays where its placeholder is: `substitute_path` / `_json` / `_form`, `file_part_path` for a user's values, `call(..., untrusted=True)`; a parameter's help / example / choices; `generators` = the editor's "Create from…", a plugin function run by `web/admin/api_test.py` `POST /admin/config/api/generate`),
@@ -206,7 +206,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
   plugins/invoke.py       module:function resolution for the apps' Python (allow-listed)
   config_merge.py         per-entity additive merge of a shipped config into the live one (the apps
                           installer + Package & Deploy): override / untouched-vs-.bundled snapshot /
-                          custom / withdrawn rules, secrets always from the live connectors.toml
+                          custom / withdrawn rules, secrets always from the live connectors.toml; a menu takes the
+                          shipment's order when nobody moved an entry, else keeps the operator's (`menu_order`)
   schema_sync.py          create_all + forward-add model columns on the framework's own tables
   observability.py        X-Request-ID middleware (ASGI), request-id log filter, JSON formatter
   logfile.py              the server log on disk (rotating JSON lines, repeats collapsed, `[app] log_levels`),

@@ -1,5 +1,27 @@
 # Liberty Next — Release notes
 
+## 7.0.85 — 2026-11-22
+
+- **PostgreSQL: Liberty's own connections no longer compile their queries (JIT).** PostgreSQL compiles a query it
+  believes heavy before running it, at every run. On the short queries of screens, searches and dashboards the
+  estimate is often wrong and the compilation then costs far more than the query: measured on a search, 145 ms of
+  compilation for 4 ms of work — and seconds on a server with one processor. Each PostgreSQL pool now turns it off for
+  its own sessions; nothing changes for the database's other users. A pool that wants the database's own setting says
+  so (Pools → *Tuning* → *Let PostgreSQL compile queries*). The collections and the jobs run on the same pools: the
+  heavy reads measured ran as fast or faster without it.
+
+- **Upgrade of the applications: a menu keeps the shipped order.** A new menu entry was put at the end of its menu,
+  and an order that was shipped again was ignored. When nobody moved an entry on the platform, the menu now takes the
+  shipment's order: a new entry lands where it was put, the customer's own entries stay after the entry they followed.
+  When the operator moved entries, his order is kept as before, and a new entry goes in its folder, after the entry
+  it follows in the shipment. `--force-config` takes the shipped order as it takes the rest. The merge report says
+  which menus were put in order.
+
+- **Monitoring → Live: no table is cut any more.** The four panels (database pools, connected users, record locks,
+  runtime) shared the width in equal parts, and the pools table — five columns — was wider than its quarter: its last
+  column was cut. Each panel now takes the room its content needs and they wrap when there is not enough; a pool not
+  opened yet says so on one line; a table that is still too wide for a narrow window scrolls inside its panel.
+
 ## 7.0.84 — 2026-11-22
 
 - **Configuring without knowing the file behind it** — what a consultant met when building an application:

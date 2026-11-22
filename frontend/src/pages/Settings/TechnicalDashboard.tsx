@@ -18,12 +18,21 @@ import type { LogEntry, PoolStats, HeldLock, ConnectedUser } from '../../sio/typ
 
 // ── styled ──────────────────────────────────────────────────────────────────────────────
 
+// The four panels wrap by the room there is: each takes what its content needs (the pools table has
+// five columns, so its panel asks for more), and the last row stretches — no panel is ever narrower
+// than its table, whatever the screen and whether the menu is open.
 const CardGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  display: flex; flex-wrap: wrap;
   gap: 14px;
   margin-bottom: 14px;
 `
+const Panel = styled(Card)<{ $wide?: boolean }>`
+  padding: 14px;
+  min-width: 0;
+  flex: ${({ $wide }) => ($wide ? '1.5 1 500px' : '1 1 340px')};
+`
+// a table wider than its panel (a narrow window) scrolls inside it instead of being cut
+const TableScroll = styled.div` overflow-x: auto; `
 const KpiRow = styled.div`
   display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 14px;
 `
@@ -64,7 +73,9 @@ const ListTable = styled.table`
     font-size: ${fontSize.micro}; text-transform: uppercase; letter-spacing: 0.06em;
     color: ${colors.text.muted}; font-weight: 600;
   }
+  th { white-space: nowrap; }
   td.mono { font-family: ${fonts.mono}; color: ${colors.text.primary}; }
+  td.key { white-space: nowrap; width: 1%; padding-right: 18px; }
   tr:last-child td { border-bottom: none; }
 `
 const EmptyHint = styled.div`
@@ -133,6 +144,7 @@ function PoolsCard({ pools }: { pools: PoolStats[] }) {
   const { t } = useTranslation()
   if (pools.length === 0) return <EmptyHint>{t('dashboard.tech.pools.empty')}</EmptyHint>
   return (
+    <TableScroll>
     <ListTable>
       <thead>
         <tr>
@@ -148,17 +160,23 @@ function PoolsCard({ pools }: { pools: PoolStats[] }) {
           <tr key={p.name}>
             <td className="mono">{p.name}</td>
             <td><Tag $tone="blue">{p.dialect}</Tag></td>
-            <td className="mono" style={{ textAlign: 'right' }}>
-              {p.materialised ? (p.checked_out ?? 'n/a') : <Mono>{t('dashboard.tech.pools.lazy')}</Mono>}
-            </td>
-            <td className="mono" style={{ textAlign: 'right' }}>{p.materialised ? (p.checked_in ?? 'n/a') : ''}</td>
-            <td className="mono" style={{ textAlign: 'right' }}>
-              {p.materialised ? `${p.overflow ?? 0}${p.max_overflow != null ? `/${p.max_overflow}` : ''}` : ''}
-            </td>
+            {p.materialised ? (
+              <>
+                <td className="mono" style={{ textAlign: 'right' }}>{p.checked_out ?? 'n/a'}</td>
+                <td className="mono" style={{ textAlign: 'right' }}>{p.checked_in ?? 'n/a'}</td>
+                <td className="mono" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  {`${p.overflow ?? 0}${p.max_overflow != null ? `/${p.max_overflow}` : ''}`}
+                </td>
+              </>
+            ) : (
+              // a pool not opened yet has no figure: one cell says so, on one line
+              <td className="mono" colSpan={3} style={{ textAlign: 'right', whiteSpace: 'nowrap' }}><Mono>{t('dashboard.tech.pools.lazy')}</Mono></td>
+            )}
           </tr>
         ))}
       </tbody>
     </ListTable>
+    </TableScroll>
   )
 }
 
@@ -166,6 +184,7 @@ function UsersCard({ users }: { users: ConnectedUser[] }) {
   const { t } = useTranslation()
   if (users.length === 0) return <EmptyHint>{t('dashboard.tech.users.empty')}</EmptyHint>
   return (
+    <TableScroll>
     <ListTable>
       <thead>
         <tr>
@@ -184,6 +203,7 @@ function UsersCard({ users }: { users: ConnectedUser[] }) {
         ))}
       </tbody>
     </ListTable>
+    </TableScroll>
   )
 }
 
@@ -191,6 +211,7 @@ function LocksCard({ locks }: { locks: HeldLock[] }) {
   const { t } = useTranslation()
   if (locks.length === 0) return <EmptyHint>{t('dashboard.tech.locks.empty')}</EmptyHint>
   return (
+    <TableScroll>
     <ListTable>
       <thead>
         <tr>
@@ -212,6 +233,7 @@ function LocksCard({ locks }: { locks: HeldLock[] }) {
         })}
       </tbody>
     </ListTable>
+    </TableScroll>
   )
 }
 
@@ -345,40 +367,40 @@ export default function TechnicalDashboard(): ReactNode {
       </KpiRow>
 
       <CardGrid>
-        <Card style={{ padding: 14 }}>
+        <Panel $wide>
           <SectionTitle><Database size={12} /> {t('dashboard.tech.pools.heading')}</SectionTitle>
           <PoolsCard pools={pools} />
-        </Card>
-        <Card style={{ padding: 14 }}>
+        </Panel>
+        <Panel>
           <SectionTitle><Users size={12} /> {t('dashboard.tech.users.heading')}</SectionTitle>
           <UsersCard users={users} />
-        </Card>
-        <Card style={{ padding: 14 }}>
+        </Panel>
+        <Panel>
           <SectionTitle><LockIcon size={12} /> {t('dashboard.tech.locks.heading')}</SectionTitle>
           <LocksCard locks={locks} />
-        </Card>
-        <Card style={{ padding: 14 }}>
+        </Panel>
+        <Panel>
           <SectionTitle><Cpu size={12} /> {t('dashboard.tech.runtime.heading')}</SectionTitle>
           <ListTable>
             <tbody>
-              <tr><td>{t('dashboard.tech.runtime.connectors')}</td><td className="mono">{snap.runtime.connector_count}</td></tr>
-              <tr><td>{t('dashboard.tech.runtime.screens')}</td><td className="mono">{snap.runtime.screen_count}</td></tr>
-              <tr><td>{t('dashboard.tech.runtime.platform')}</td><td className="mono"><Mono>{snap.runtime.platform}</Mono></td></tr>
-              <tr><td>{t('dashboard.tech.runtime.ai')}</td><td>{snap.ai.enabled ? <><Tag $tone="green">{t('dashboard.tech.runtime.on')}</Tag> <Mono>{snap.ai.model ?? ''}</Mono></> : <Tag>{t('dashboard.tech.runtime.off')}</Tag>}</td></tr>
+              <tr><td className="key">{t('dashboard.tech.runtime.connectors')}</td><td className="mono">{snap.runtime.connector_count}</td></tr>
+              <tr><td className="key">{t('dashboard.tech.runtime.screens')}</td><td className="mono">{snap.runtime.screen_count}</td></tr>
+              <tr><td className="key">{t('dashboard.tech.runtime.platform')}</td><td className="mono"><Mono>{snap.runtime.platform}</Mono></td></tr>
+              <tr><td className="key">{t('dashboard.tech.runtime.ai')}</td><td>{snap.ai.enabled ? <><Tag $tone="green">{t('dashboard.tech.runtime.on')}</Tag> <Mono>{snap.ai.model ?? ''}</Mono></> : <Tag>{t('dashboard.tech.runtime.off')}</Tag>}</td></tr>
               <tr>
-                <td><KeyRound size={11} style={{ verticalAlign: 'middle' }} /> {t('dashboard.tech.runtime.license')}</td>
+                <td className="key"><KeyRound size={11} style={{ verticalAlign: 'middle' }} /> {t('dashboard.tech.runtime.license')}</td>
                 <td>
                   {license.mode === 'full' ? <Tag $tone="green">{t('dashboard.tech.runtime.full')}</Tag> : <Tag $tone="orange">{t('dashboard.tech.runtime.restricted')}</Tag>}
                   {license.customer ? <> <Mono>{license.customer}</Mono></> : null}
                 </td>
               </tr>
               <tr>
-                <td><Server size={11} style={{ verticalAlign: 'middle' }} /> {t('dashboard.tech.runtime.sio')}</td>
+                <td className="key"><Server size={11} style={{ verticalAlign: 'middle' }} /> {t('dashboard.tech.runtime.sio')}</td>
                 <td><Tag $tone={status === 'open' ? 'green' : status === 'connecting' ? 'orange' : 'red'}>{status}</Tag></td>
               </tr>
             </tbody>
           </ListTable>
-        </Card>
+        </Panel>
       </CardGrid>
 
       <Card style={{ padding: 14 }}>

@@ -301,12 +301,65 @@ type = "folder"
 def test_menus_merge_keeps_order_home_and_custom_items() -> None:
     merged, rep = merge_file("menus.toml", M_WHEEL, M_LIVE, M_PREV)
     app = merged["menus"]["app"]
-    assert [it["id"] for it in app["items"]] == ["b", "a", "custom", "c"]   # live order, new appended
+    # the operator moved an entry (b before a): his order is kept, and the new entry goes after the one it follows in the shipment
+    assert [it["id"] for it in app["items"]] == ["b", "c", "a", "custom"] and rep.reordered == []
     assert app["items"][0]["label"] == "B v2"                                # untouched → refreshed
-    assert app["items"][1]["label"] == "A renamed"                            # modified → kept
+    assert app["items"][2]["label"] == "A renamed"                            # modified → kept
     assert "menu_item/app: a" in rep.kept_modified and "menu_item/app: custom" in rep.kept_custom
     assert "menu_app: app" in rep.kept_modified and app["home"] == "dash1"  # header changed (home) → kept
     assert merged["menus"]["other"]["items"][0]["id"] == "o1" and "menu_app: other" in rep.added
+
+
+
+def _menu(*ids: str | tuple[str, str]) -> dict:
+    """A menu `app` whose entries are *ids* — an id, or (id, parent)."""
+    return {"menus": {"app": {"label": "App", "items": [
+        {"id": i, "label": i.upper(), "type": "folder"} if isinstance(i, str) else {"id": i[0], "label": i[0].upper(), "type": "screen", "target": i[0], "parent": i[1]}
+        for i in ids]}}}
+
+
+def _order(wheel: dict, live: dict, prev: dict | None) -> tuple[list[str], list[str]]:
+    merged, rep = merge_file("menus.toml", wheel, live, prev)
+    return [it["id"] for it in merged["menus"]["app"]["items"]], rep.reordered
+
+
+def test_a_menu_nobody_moved_takes_the_shipments_order() -> None:
+    prev = _menu("a", "b", "c")
+    # a new entry lands where it was put, and a reorder that is shipped is applied
+    assert _order(_menu("c", "a", "new", "b"), _menu("a", "b", "c"), prev) == (["c", "a", "new", "b"], ["menu_app: app"])
+    # the customer's own entry stays after the one it followed; an entry he removed... is added back like any new one
+    assert _order(_menu("a", "new", "b", "c"), _menu("a", "b", "mine", "c"), prev) == (["a", "new", "b", "mine", "c"], ["menu_app: app"])
+    assert _order(_menu("a", "b", "c"), _menu("first", "a", "b", "c"), prev) == (["first", "a", "b", "c"], [])      # nothing to move
+    # an entry the shipment withdrew goes; the order of the rest is the shipment's
+    assert _order(_menu("c", "a"), _menu("a", "b", "c"), prev) == (["c", "a"], ["menu_app: app"])
+
+
+def test_a_menu_the_operator_reordered_keeps_his_order() -> None:
+    prev = _menu("a", "b", "c")
+    live = _menu("c", "b", "a")                                                           # he moved entries
+    assert _order(_menu("a", "b", "c"), live, prev) == (["c", "b", "a"], [])               # a shipped order does not undo his
+    # a new entry: after the one it follows in the shipment, among those of its own folder
+    wheel = _menu("a", ("a1", "a"), ("a2", "a"), "b", ("b1", "b"), "c")
+    live = _menu("c", "b", ("b1", "b"), "a", ("a1", "a"))
+    prev = _menu("a", ("a1", "a"), "b", ("b1", "b"), "c")
+    assert _order(wheel, live, prev) == (["c", "b", "b1", "a", "a1", "a2"], [])
+    # the first entry of a folder goes right after its folder; a new folder with nothing before it, at the end
+    wheel = _menu("z", ("z1", "z"), "a", ("a0", "a"), ("a1", "a"), "b", "c")
+    assert _order(wheel, _menu("c", "b", "a", ("a1", "a")), _menu("a", ("a1", "a"), "b", "c")) == (["c", "b", "a", "a0", "a1", "z", "z1"], [])
+
+
+def test_forcing_the_shipment_takes_its_order_too() -> None:
+    merged, rep = merge_file("menus.toml", _menu("a", "b", "c"), _menu("c", "b", "a"), _menu("a", "b", "c"), force_vendor=True)
+    assert [it["id"] for it in merged["menus"]["app"]["items"]] == ["a", "b", "c"] and rep.reordered == ["menu_app: app"]
+
+
+def test_without_a_previous_shipment_the_installed_order_is_kept() -> None:
+    assert _order(_menu("a", "new", "b"), _menu("b", "a"), None) == (["b", "a", "new"], [])
+
+
+def test_an_order_only_change_is_written() -> None:
+    _merged, rep = merge_file("menus.toml", _menu("b", "a"), _menu("a", "b"), _menu("a", "b"))
+    assert rep.changed and not (rep.added or rep.refreshed or rep.removed)
 
 
 # ── dictionary: scopes + top-level settings ──────────────────────────────────────────────────

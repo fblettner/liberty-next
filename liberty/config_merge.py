@@ -279,11 +279,12 @@ class FileMergeReport:
     secrets_restored: int = 0
     pools_kept: int = 0
     had_snapshot: bool = False
+    reordered: list[str] = field(default_factory=list)          # menus whose entries took the shipment's order
     notes: list[str] = field(default_factory=list)
 
     @property
     def changed(self) -> bool:
-        return bool(self.added or self.refreshed or self.refreshed_forced or self.removed)
+        return bool(self.added or self.refreshed or self.refreshed_forced or self.removed or self.reordered)
 
     def to_dict(self) -> dict[str, Any]:
         d = {k: (list(v) if isinstance(v, list) else v) for k, v in self.__dict__.items()}
@@ -385,6 +386,9 @@ def merge_file(
                 rep.kept_withdrawn.append(label)
         else:
             rep.kept_custom.append(label)
+
+    if filename == "menus.toml":
+        _order_menus(merged, wheel, live, bundled_prev, rep, force_vendor=force_vendor)
 
     # top-level scalars / sections that aren't entities (dictionary's default_language,
     # framework_enums, …): the live value wins, the wheel fills what's missing
@@ -541,9 +545,80 @@ def merge_jobs_file(wheel_path: Path, live_doc: dict[str, Any] | None, dst: Path
     return rep
 
 
+def _ids(doc: dict[str, Any] | None, app: str) -> list[str]:
+    items = (((doc or {}).get("menus") or {}).get(app) or {}).get("items") or []
+    return [str(it["id"]) for it in items if isinstance(it, dict) and it.get("id") is not None]
+
+
+def menu_order(wheel: list[dict[str, Any]], live: list[str], prev: list[str] | None, present: list[str]) -> tuple[list[str], bool]:
+    """The order of a menu's entries after a merge: ``(ids, took the shipment's order)``.
+
+    An order is the operator's as soon as he moved an entry: then it is kept, and only the NEW
+    entries are placed — each right after the entry it follows in the shipment, among those of its
+    own folder (else right after its folder, else at the end). When the operator moved nothing —
+    the entries the previous shipment had are still in its order — the menu takes the shipment's
+    order, so a new entry lands where it was put and a reorder that is shipped is applied; his own
+    entries stay after the entry they followed. Without a previous shipment on record nothing says
+    whether he moved anything: his order is kept.
+
+    *wheel* = the shipment's entries (their ``id`` and ``parent``), *live* / *prev* = the ids of
+    the installed menu and of the previous shipment, *present* = the ids the merge kept."""
+    kept = set(present)
+    shipped = [str(w["id"]) for w in wheel if w.get("id") is not None]
+    parent = {str(w["id"]): str(w.get("parent") or "") for w in wheel if w.get("id") is not None}
+    untouched = prev is not None and [i for i in live if i in set(prev)] == [i for i in prev if i in set(live)]
+    if untouched:
+        out = [i for i in shipped if i in kept]
+        placed = set(out)
+        for at, i in enumerate(live):                           # his own entries, after the one they followed
+            if i in placed or i not in kept:
+                continue
+            before = next((b for b in reversed(live[:at]) if b in placed), None)
+            out.insert(out.index(before) + 1 if before is not None else 0, i)
+            placed.add(i)
+        return out, out != [i for i in live if i in kept]
+    out = [i for i in live if i in kept]
+    placed = set(out)
+    for at, i in enumerate(shipped):                            # the new entries only, at their place in their folder
+        if i in placed or i not in kept:
+            continue
+        before = next((b for b in reversed(shipped[:at]) if b in placed and parent.get(b) == parent.get(i)), None)
+        if before is None and parent.get(i) in placed:
+            before = parent[i]
+        if before is None:
+            out.append(i)
+        else:
+            out.insert(out.index(before) + 1, i)
+        placed.add(i)
+    return out, False
+
+
+def _order_menus(merged: dict[str, Any], wheel: dict[str, Any], live: dict[str, Any], prev: dict[str, Any] | None, rep: FileMergeReport,
+                 *, force_vendor: bool = False) -> None:
+    """Put each merged menu's entries in the order :func:`menu_order` gives (*force_vendor*: the
+    shipment's order even where the operator moved entries, as for any entity he changed)."""
+    for app, app_menu in (merged.get("menus") or {}).items():
+        items = app_menu.get("items") if isinstance(app_menu, dict) else None
+        shipped = (((wheel.get("menus") or {}).get(app) or {}).get("items") or []) if isinstance(wheel.get("menus"), dict) else []
+        if not isinstance(items, list) or not shipped or app not in (live.get("menus") or {}):
+            continue                                            # a menu of the customer's own, or one that just came whole
+        by_id = {str(it["id"]): it for it in items if isinstance(it, dict) and it.get("id") is not None}
+        if len(by_id) != len(items):
+            continue                                            # an entry without an id: nothing is moved
+        before = _ids(live, app)
+        known = _ids(prev, app) if prev is not None and app in (prev.get("menus") or {}) else None
+        if force_vendor:                                        # as if nothing had been moved
+            known = before
+        order, took = menu_order([w for w in shipped if isinstance(w, dict)], before, known, list(by_id))
+        if order != list(by_id):
+            app_menu["items"] = [by_id[i] for i in order]
+        if took:
+            rep.reordered.append(_label("menu_app", app))
+
+
 def _menu_items(doc: dict[str, Any], kind: str, item_id: str, value: Any | None) -> None:
-    """Set (``value``) or remove (``None``) one ``[[menus.<app>.items]]`` entry by id, appending
-    new items at the end so the operator's ordering is kept."""
+    """Set (``value``) or remove (``None``) one ``[[menus.<app>.items]]`` entry by id. A new entry
+    is appended; :func:`_order_menus` then gives every entry its place."""
     _, _, app = kind.partition("/")
     app_menu = doc.setdefault("menus", {}).setdefault(app, {})
     items = app_menu.setdefault("items", [])
@@ -597,6 +672,8 @@ class MergeReport:
                 lines.append(f"      ↻ {x}")
             for x in f.removed:
                 lines.append(f"      − {x}")
+            for x in f.reordered:
+                lines.append(f"      ⇅ {x}: its entries take the shipment's order")
             for x in f.kept_modified + f.kept_withdrawn:
                 lines.append(f"      ! kept, changed locally without override: {x}")
         for x in self.copied:

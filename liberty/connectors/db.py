@@ -264,6 +264,12 @@ class PoolRegistry:
         # included), so raising it here speeds up big tables. Oracle only; other backends ignore it.
         if cfg.arraysize and url.get_backend_name() == "oracle":
             kwargs["arraysize"] = int(cfg.arraysize)
+        # PostgreSQL compiles (JIT) a query whose ESTIMATED cost is high, at every execution. On the short
+        # queries Liberty runs, an over-estimate is common (a sub-query counted once per row) and the
+        # compilation then costs far more than the query: each session of the pool turns it off, unless the
+        # pool asks to keep the database's setting (``jit = true``). asyncpg takes session settings this way.
+        if url.get_backend_name() == "postgresql" and url.get_driver_name() == "asyncpg" and not cfg.jit:
+            kwargs["connect_args"] = {"server_settings": {"jit": "off"}}
         # THICK Oracle pool (Native Network Encryption): python-oracledb thick mode is sync-only,
         # so build a SYNC engine and wrap it in an async-over-sync adapter (see thick_engine).
         # ``init_oracle_client`` is process-global → every Oracle pool takes this path once any

@@ -1,5 +1,31 @@
 # Liberty Next — Notes de version
 
+## 7.0.85 — 2026-11-22
+
+- **PostgreSQL : les connexions de Liberty ne compilent plus leurs requêtes (JIT).** PostgreSQL compile une requête
+  qu'il croit lourde avant de l'exécuter, à chaque exécution. Sur les requêtes courtes des écrans, des recherches et
+  des tableaux de bord, l'estimation est souvent fausse et la compilation coûte alors bien plus que la requête :
+  mesuré sur une recherche, 145 ms de compilation pour 4 ms de travail — et des secondes sur un serveur à un seul
+  processeur. Chaque pool PostgreSQL la désactive maintenant pour ses propres sessions ; rien ne change pour les
+  autres utilisateurs de la base. Un pool qui veut le réglage de la base le dit (Pools → *Tuning* → *Let PostgreSQL
+  compile queries*). Les collectes et les traitements passent par les mêmes pools : les lectures lourdes mesurées
+  sont aussi rapides, ou plus rapides, sans elle.
+
+- **Mise à jour des applications : un menu garde l'ordre livré.** Une nouvelle entrée de menu était placée à la fin
+  de son menu, et un ordre livré de nouveau était ignoré. Quand personne n'a déplacé d'entrée sur la plateforme, le
+  menu prend maintenant l'ordre de la livraison : une nouvelle entrée arrive là où elle a été placée, les entrées
+  propres au client restent après celle qu'elles suivaient. Quand l'opérateur a déplacé des entrées, son ordre est
+  conservé comme avant, et une nouvelle entrée va dans son dossier, après celle qu'elle suit dans la livraison.
+  `--force-config` prend l'ordre livré comme il prend le reste. Le rapport de fusion dit quels menus ont été
+  remis en ordre.
+
+- **Supervision → Direct : plus aucun tableau n'est coupé.** Les quatre panneaux (pools de bases de données,
+  utilisateurs connectés, verrous d'enregistrements, exécution) se partageaient la largeur à parts égales, et le
+  tableau des pools — cinq colonnes — était plus large que son quart : sa dernière colonne était coupée. Chaque
+  panneau prend maintenant la place dont son contenu a besoin et ils passent à la ligne quand elle manque ; un pool
+  pas encore ouvert le dit sur une seule ligne ; un tableau encore trop large pour une fenêtre étroite défile dans
+  son panneau.
+
 ## 7.0.84 — 2026-11-22
 
 - **Configurer sans connaître le fichier derrière** — ce qu'un consultant rencontrait en construisant une

@@ -123,6 +123,12 @@ class PoolConfig(BaseModel):
     pool_pre_ping: bool = Field(default=True, description="Test connection liveness before handing it out.", json_schema_extra={"x_group": "Pool"})
     pool_recycle: int = Field(default=-1, description="Recycle a connection after this many seconds (-1 = never).", json_schema_extra={"x_group": "Pool"})
     echo: bool = Field(default=False, description="Log every SQL statement (debug only).", json_schema_extra={"x_group": "Pool"})
+    jit: bool = Field(default=False, json_schema_extra={"x_group": "Pool"}, description=(
+        "PostgreSQL only. Let the database compile a query it believes heavy before running it (JIT). Off by "
+        "default: Liberty runs the short queries of screens, searches and dashboards, where the compilation "
+        "costs more than it saves — measured on a search: 145 ms of compilation for 4 ms of work, redone at "
+        "every run, and seconds on a server with one processor. ``true`` leaves the database's own setting."
+    ))
     max_rows: int | None = Field(default=None, json_schema_extra={"x_group": "Pool"}, description=(
         "Default row cap for SELECTs on this pool. Falls back to 1000. Per-screen / per-request overrides win."
     ))
