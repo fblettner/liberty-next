@@ -1,6 +1,6 @@
 # Liberty Next — Release notes
 
-## 7.0.87 — unreleased
+## 7.0.87 — 2026-11-23
 
 - **A pool may point at SQL Server, Db2 and an IBM i (AS/400).** Liberty opened its pools through drivers that speak
   asyncio only, which neither IBM's Db2 driver nor the plain SQL Server one does. A pool whose driver does not is now

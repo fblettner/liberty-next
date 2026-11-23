@@ -1,6 +1,6 @@
 # Liberty Next — Notes de version
 
-## 7.0.87 — unreleased
+## 7.0.87 — 2026-11-23
 
 - **Un pool peut pointer sur SQL Server, Db2 et un IBM i (AS/400).** Liberty ouvrait ses pools par des pilotes qui
   parlent asyncio seulement, ce que ne font ni le pilote Db2 d'IBM ni le pilote SQL Server simple. Un pool dont le
