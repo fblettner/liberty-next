@@ -18,11 +18,20 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!-- DM Sans is the default UI font; Inter / Roboto / Source Sans 3 are the other curated
-         options the Theme editor can switch to (font_family). All loaded here so every choice
-         renders immediately; display=swap keeps them non-blocking. -->
+         options the Theme editor can switch to (font_family). All named here so every choice
+         renders as soon as it has arrived.
+         NEVER a plain rel="stylesheet" for this one: a stylesheet in the head holds the whole
+         page — nothing is drawn, the application does not start — until it has answered, and
+         this one comes from another server. Where the browser cannot reach it and the network
+         stays silent (a customer's closed network), the page stayed blank for as long as the
+         browser waited: measured, 15 s of silence = 15 s before the sign-in page. Asked for as a
+         "print" sheet it holds nothing, and becomes the page's own once it has arrived; until
+         then, or for ever without it, the text is in the system font of the stack (theme.ts). -->
     <link
       href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Inter:wght@300;400;500;600;700&family=Roboto:wght@300;400;500;700&family=Source+Sans+3:wght@300;400;500;600;700&display=swap"
       rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
     />
   </head>
   <body>

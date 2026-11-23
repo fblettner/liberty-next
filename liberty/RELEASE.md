@@ -1,5 +1,21 @@
 # Liberty Next — Release notes
 
+## 7.0.86 — 2026-11-23
+
+- **Docker install: the administrator's password is given whenever the install creates the account.** The end of
+  `./install.sh` showed the password only when that same run had written the `.env`. With an `.env` already there and
+  no account yet — `./install.sh prepare` first, a first run stopped before the stack started, data volumes removed by
+  hand — it said *password unchanged from the original install*, while the server had just created `admin` with a
+  password of its own, written only in the container's log (and lost when the applications' install recreates the
+  container). The install now reads what the server did: an account created by this run is shown with its password,
+  whoever chose it; an account that was already there is said to be so, with the command that sets a new password —
+  and a password is no longer shown for an account this run did not create.
+- **Opening the application no longer waits for the fonts.** The page asked Google Fonts for its fonts in a way that
+  held everything — nothing drawn, the application not started — until the answer. On a network that lets the browser
+  reach Liberty but not the internet, and stays silent instead of refusing, the page stayed blank for as long as the
+  browser waited, at each opening: measured, 15 s of silence was 15 s before the sign-in page. The fonts are now asked
+  for beside the page: it shows at once in the system font and takes its own when — and if — it arrives.
+
 ## 7.0.85 — 2026-11-22
 
 - **PostgreSQL: Liberty's own connections no longer compile their queries (JIT).** PostgreSQL compiles a query it

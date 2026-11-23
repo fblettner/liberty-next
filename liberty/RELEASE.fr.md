@@ -1,5 +1,23 @@
 # Liberty Next — Notes de version
 
+## 7.0.86 — 2026-11-23
+
+- **Installation Docker : le mot de passe de l'administrateur est donné chaque fois que l'installation crée le compte.**
+  La fin de `./install.sh` n'affichait le mot de passe que si cette même exécution avait écrit le `.env`. Avec un `.env`
+  déjà présent et aucun compte encore — `./install.sh prepare` d'abord, une première exécution arrêtée avant le
+  démarrage, des volumes de données supprimés à la main — elle disait *password unchanged from the original install*,
+  alors que le serveur venait de créer `admin` avec un mot de passe à lui, écrit seulement dans le journal du conteneur
+  (et perdu quand l'installation des applications recrée le conteneur). L'installation lit maintenant ce que le serveur
+  a fait : un compte créé par cette exécution est affiché avec son mot de passe, quel que soit celui qui l'a choisi ;
+  un compte déjà présent est dit tel, avec la commande qui fixe un nouveau mot de passe — et un mot de passe n'est plus
+  affiché pour un compte que cette exécution n'a pas créé.
+- **L'ouverture de l'application n'attend plus les polices.** La page demandait ses polices à Google Fonts d'une façon
+  qui retenait tout — rien d'affiché, l'application non démarrée — jusqu'à la réponse. Sur un réseau qui laisse le
+  navigateur joindre Liberty mais pas Internet, et qui reste muet au lieu de refuser, la page restait blanche aussi
+  longtemps que le navigateur attendait, à chaque ouverture : mesuré, 15 s de silence faisaient 15 s avant la page de
+  connexion. Les polices sont maintenant demandées à côté de la page : elle s'affiche tout de suite dans la police du
+  système et prend la sienne quand — et si — elle arrive.
+
 ## 7.0.85 — 2026-11-22
 
 - **PostgreSQL : les connexions de Liberty ne compilent plus leurs requêtes (JIT).** PostgreSQL compile une requête
