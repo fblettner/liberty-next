@@ -46,7 +46,7 @@ the query it runs.
 
 | | |
 |---|---|
-| **Connectors** | SQL on PostgreSQL and Oracle (named queries, tables with their read and write statements, sequences, audit mirrors), and HTTP APIs with five kinds of authentication. One connector can serve several environments. Secrets are encrypted at rest, never plain text. |
+| **Connectors** | SQL on PostgreSQL and Oracle — and SQL Server, Db2 and IBM i (AS/400) through optional drivers — (named queries, tables with their read and write statements, sequences, audit mirrors), and HTTP APIs with five kinds of authentication. One connector can serve several environments. Secrets are encrypted at rest, never plain text. |
 | **Screens** | Grids that stream large results, record forms with tabs and nested tables, cascading filters, row and toolbar actions, bulk edit, Excel import and export, summary, tree and chart views, saved views, record locks. |
 | **Dictionary and menus** | One dictionary of data items — labels in every language, formats, lists of values, rules — shared by every screen. A menu per application, a start page per role. |
 | **Dashboards and Data Explorer** | KPIs, charts and tables with a period compared with the one before. Explore a model without SQL: rows, measures, filters, pivots, charts, drill to the detail, calculated fields, saved analyses, Excel and PDF. |
