@@ -12,6 +12,8 @@
   needs unixODBC and IBM's *IBM i Access ODBC Driver* on the server). A pool whose driver is missing says which of the
   three to install instead of a bare import error. Checked on a SQL Server 2022 and a Db2 12.1 run locally; **no IBM i
   was at hand: the `ibmi` path is not tested.**
+- The image always takes the system packages' latest security fixes: the build step that upgrades them was kept from the
+  build cache, so a fix Debian published after that cache was made was missing (the release's image scan refused it).
 - Settings → Pools: *SQL Server* starts from the driver that needs nothing installed (`mssql+pymssql`; the ODBC one is
   still offered), and *Db2* and *Db2 for i (IBM i, AS/400)* are kinds of database of their own, with their usual port.
   *Test connection* asks Db2 the one statement it accepts (`SELECT 1` has no meaning there).

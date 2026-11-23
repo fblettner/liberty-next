@@ -38,7 +38,12 @@ FROM python:3.12.15-slim AS runtime
 # (Alembic's sync runner) all ship self-contained wheels.
 # ``apt-get upgrade``: the base image is pinned, so the security fixes Debian published since it
 # was built (apt, zlib… — what the release's image scan refuses) come in here.
-RUN apt-get update \
+# APT_REFRESH: the release gives a new value at every run, so this layer is never taken from the build
+# cache — a cached one keeps the packages of the day it was built, and the scan then refuses a fix Debian
+# published since (krb5, 2026-11-23). A local build without it keeps its cache.
+ARG APT_REFRESH=""
+RUN echo "system packages refreshed: ${APT_REFRESH:-from the cache}" \
+    && apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         curl \

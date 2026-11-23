@@ -222,6 +222,9 @@ jobs:
             org.opencontainers.image.version=${{ steps.ver.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          # a new value at every run: the layer that upgrades the system packages is rebuilt, never cached
+          build-args: |
+            APT_REFRESH=${{ github.run_id }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           # Supply-chain attestations attached to the image in ghcr.io (inspect with

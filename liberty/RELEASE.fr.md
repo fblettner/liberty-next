@@ -13,6 +13,9 @@
   par ODBC : il faut aussi unixODBC et le pilote *IBM i Access ODBC Driver* d'IBM sur le serveur). Un pool dont le
   pilote manque dit lequel des trois installer au lieu d'une simple erreur d'import. Vérifié sur un SQL Server 2022 et
   un Db2 12.1 lancés en local ; **aucun IBM i n'était disponible : le chemin `ibmi` n'est pas testé.**
+- L'image prend toujours les derniers correctifs de sécurité des paquets système : l'étape qui les met à jour était
+  reprise du cache de construction, et un correctif publié par Debian après ce cache manquait (l'analyse de l'image à la
+  publication le refusait).
 - Configuration → Pools : *SQL Server* part du pilote qui ne demande rien d'installé (`mssql+pymssql` ; celui par ODBC
   reste proposé), et *Db2* et *Db2 for i (IBM i, AS/400)* sont des types de base à part entière, avec leur port
   habituel. *Tester la connexion* envoie à Db2 la seule instruction qu'il accepte (`SELECT 1` n'y veut rien dire).
