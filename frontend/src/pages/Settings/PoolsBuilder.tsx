@@ -41,6 +41,7 @@ const TEMPLATE_SET = new Set([
   'postgresql+asyncpg://user:password@host:5432/dbname', 'oracle+oracledb://user@host:1521/?service_name=ORCL',
   'mysql+aiomysql://user:password@host:3306/dbname', 'mariadb+asyncmy://user:password@host:3306/dbname',
   'mssql+aioodbc://user:password@host:1433/dbname?driver=ODBC+Driver+18+for+SQL+Server', 'sqlite+aiosqlite:///./database.db',
+  'mssql+aioodbc://user@host:1433/dbname?driver=ODBC+Driver+18+for+SQL+Server',
 ])
 // the schema's groups (a Pydantic field's x_group; none = General) and the stage that shows each
 const GROUP_OF: Record<'schemas' | 'dblinks' | 'tuning', string> = { schemas: 'Schemas', dblinks: 'DB Links', tuning: 'Pool' }

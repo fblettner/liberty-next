@@ -27,6 +27,38 @@ from liberty.crypto import decrypt_or_keep, is_encrypted
 
 _log = logging.getLogger(__name__)
 
+#: the optional extra that brings the driver of a database Liberty does not install by default
+DRIVER_EXTRAS = {"mssql": "mssql", "db2": "db2", "ibm_db_sa": "db2", "ibmi": "ibmi"}
+
+#: the smallest statement each database accepts (DB2 and Oracle want a FROM)
+_PINGS = {"oracle": "SELECT 1 FROM DUAL", "db2": "SELECT 1 FROM SYSIBM.SYSDUMMY1", "ibm_db_sa": "SELECT 1 FROM SYSIBM.SYSDUMMY1",
+          "ibmi": "SELECT 1 FROM SYSIBM.SYSDUMMY1"}
+
+
+def ping_sql(backend: str) -> str:
+    """The statement that only checks a connection, for the database *backend* names."""
+    return _PINGS.get((backend or "").lower(), "SELECT 1")
+
+
+def driver_is_async(url: Any) -> bool:
+    """Whether the driver *url* names speaks asyncio (asyncpg, oracledb, aiosqlite, aioodbc…). The
+    others (SQL Server through pymssql, DB2, IBM i through ODBC) are run in threads behind the same
+    interface. A :class:`ConnectorError` that names the extra to install when the driver is not there."""
+    try:
+        # the dialect an ASYNC engine would run on: a driver that speaks both (oracledb, psycopg) answers
+        # its asyncio one here, a driver that does not answers its only one — which says it is not
+        return bool(getattr(url.get_dialect(_is_async=True), "is_async", False))
+    except Exception as exc:  # noqa: BLE001 — NoSuchModuleError, or the dialect's own import failing
+        raise ConnectorError(missing_driver(url, exc)) from exc
+
+
+def missing_driver(url: Any, exc: BaseException) -> str:
+    """What to say when the driver *url* names is not installed: the extra that brings it."""
+    extra = DRIVER_EXTRAS.get(url.get_backend_name())
+    hint = f" — install it with: pip install 'liberty-next[{extra}]'" if extra else ""
+    return f"no driver for a {url.drivername!r} database is installed{hint} ({type(exc).__name__}: {str(exc).splitlines()[0][:200]})"
+
+
 # ``init_oracle_client()`` is process-global and may only be called once. Guarded so the first
 # thick Oracle pool built anywhere in the process initialises the client and the rest reuse it.
 _thick_client_ready = False
@@ -280,6 +312,17 @@ class PoolRegistry:
             engine = ThickAsyncEngine(sync_engine)
             self._engines[name] = engine
             return engine
+        if not driver_is_async(url):
+            # a driver with no asyncio (SQL Server through pymssql, DB2, IBM i through ODBC, …): a SYNC
+            # engine behind the same interface, each connection on a thread of its own — what the
+            # thick Oracle pools already run on (see thick_engine)
+            try:
+                sync_engine = create_engine(url, **kwargs)
+            except ImportError as exc:                       # the dialect is known, its driver is not installed
+                raise ConnectorError(f"pool {name!r}: {missing_driver(url, exc)}") from exc
+            engine = ThickAsyncEngine(sync_engine, thread_name=f"pool-{url.get_backend_name()}")
+            self._engines[name] = engine
+            return engine
         engine = create_async_engine(url, **kwargs)
         # SQLite ships with FK enforcement OFF by default — without ``PRAGMA
         # foreign_keys=ON`` per-connection, ON DELETE CASCADE silently no-ops on
@@ -345,7 +388,7 @@ async def try_pool(cfg: PoolConfig, *, master_key: str = "", oracle_thick: bool 
 
     async def _probe() -> str:
         async with registry.engine("probe").connect() as conn:
-            await conn.execute(text("SELECT 1 FROM DUAL" if backend == "oracle" else "SELECT 1"))
+            await conn.execute(text(ping_sql(backend)))
             info = getattr(getattr(conn, "dialect", None), "server_version_info", None)
             return ".".join(str(n) for n in info) if info else ""
 

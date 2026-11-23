@@ -125,6 +125,12 @@ COPY liberty/ ./liberty/
 # the image, CI and the dev venv resolve to the same versions. Refresh it with:
 #   pip-compile --extra all --strip-extras --output-file requirements.txt pyproject.toml
 RUN pip install --no-cache-dir -c requirements.txt ".[all]"
+# The drivers of the other databases a pool may point at (pinned at the end of requirements.txt):
+# SQL Server on both architectures (its wheel carries FreeTDS), Db2 for Linux / UNIX / Windows on
+# amd64 ONLY — IBM publishes no driver for arm64 Linux, so an arm64 image has no Db2. The IBM i
+# (AS/400) driver is IBM's own download under its licence: not in the image (see the `ibmi` extra).
+RUN if [ "${TARGETARCH}" = "amd64" ]; then extras="mssql,db2"; else extras="mssql"; fi; \
+    pip install --no-cache-dir -c requirements.txt ".[${extras}]"
 
 COPY --from=frontend /build/frontend/dist ./frontend/dist
 COPY docker/entrypoint.sh /usr/local/bin/liberty-entrypoint

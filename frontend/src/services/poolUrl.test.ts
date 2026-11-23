@@ -9,6 +9,7 @@ describe("a pool's URL as parts", () => {
       'oracle+oracledb://jde@ora.example.com:1521/?service_name=JDEPD',
       'oracle+oracledb://jde@ora.example.com:1521/ORCL',
       'mssql+aioodbc://sa@host:1433/db?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes',
+      'mssql+pymssql://jde@sql.example.com:1433/JDE920', 'db2+ibm_db://jde@db2.example.com:50000/JDE', 'ibmi://jde@as400.example.com/S1234567',
       'sqlite+aiosqlite:///./database.db',
       'sqlite+aiosqlite:////var/lib/liberty/app.db',
       'postgresql+asyncpg://${PGUSER}@${PGHOST:-localhost}:${PGPORT:-5432}/${PGDATABASE}',
@@ -71,7 +72,9 @@ describe("a pool's driver", () => {
     expect(driversFor('postgresql+asyncpg')).toEqual(['postgresql+asyncpg', 'postgresql+psycopg'])
     expect(driversFor('postgresql+pg8000')).toEqual(['postgresql+pg8000', 'postgresql+asyncpg', 'postgresql+psycopg'])
     expect(driversFor('oracle+oracledb')).toEqual(['oracle+oracledb'])
-    expect(driversFor('db2+ibm_db')).toEqual(['db2+ibm_db'])
+    expect(driversFor('firebird+fdb')).toEqual(['firebird+fdb'])                       // a kind the page does not list: the driver it has
+    expect(driversFor('mssql+aioodbc')).toEqual(['mssql+pymssql', 'mssql+aioodbc'])     // SQL Server: the driver that needs nothing first
+    expect(driversFor('ibmi')).toEqual(['ibmi'])
     for (const [kind, d] of Object.entries(DIALECTS)) expect(DRIVERS[kind][0], kind).toBe(d.scheme)
   })
   it('follows the kind of database: the driver, and the port when it was the usual one', () => {
@@ -87,7 +90,11 @@ describe("a pool's driver", () => {
   })
   it('leaves the URL alone when there is nothing to follow', () => {
     expect(withDialect('postgresql+psycopg://app@h:5432/app', 'postgresql')).toBe('postgresql+psycopg://app@h:5432/app')   // already of that kind: its driver is kept
-    expect(withDialect('postgresql+asyncpg://app@h:5432/app', 'db2')).toBe('postgresql+asyncpg://app@h:5432/app')
+    expect(withDialect('postgresql+asyncpg://app@h:5432/app', 'firebird')).toBe('postgresql+asyncpg://app@h:5432/app')
+    // to Db2 and to an IBM i: the driver and the usual port follow (an IBM i has no port: the driver knows it)
+    expect(withDialect('oracle+oracledb://jde@h:1521/?service_name=JDE', 'db2')).toBe('db2+ibm_db://jde@h:50000/JDE')
+    expect(withDialect('oracle+oracledb://jde@h:1521/?service_name=JDE', 'ibmi')).toBe('ibmi://jde@h/JDE')
+    expect(withDialect('postgresql+asyncpg://jde@h:5432/JDE920', 'mssql')).toBe('mssql+pymssql://jde@h:1433/JDE920')
     expect(withDialect('not a url', 'oracle')).toBe('not a url')
     expect(withDialect('', 'oracle')).toBe('')
   })

@@ -1,5 +1,21 @@
 # Liberty Next — Release notes
 
+## 7.0.87 — unreleased
+
+- **A pool may point at SQL Server, Db2 and an IBM i (AS/400).** Liberty opened its pools through drivers that speak
+  asyncio only, which neither IBM's Db2 driver nor the plain SQL Server one does. A pool whose driver does not is now
+  run in threads behind the same interface — what the *thick* Oracle pools already ran on — so queries, screens, jobs
+  and the applications read it like any other pool; a driver that speaks both ways (Oracle's, PostgreSQL's) keeps its
+  asyncio path. The image carries the SQL Server driver, and the Db2 one on amd64 only (IBM publishes none for arm64 Linux); elsewhere they are optional: `pip install 'liberty-next[mssql]'` (SQL Server,
+  `mssql+pymssql://` — nothing else to install), `liberty-next[db2]` (Db2 for Linux / UNIX / Windows, `db2+ibm_db://`
+  — IBM's driver has no wheel for arm64 Linux), `liberty-next[ibmi]` (Db2 for i, `ibmi://` — through ODBC: it also
+  needs unixODBC and IBM's *IBM i Access ODBC Driver* on the server). A pool whose driver is missing says which of the
+  three to install instead of a bare import error. Checked on a SQL Server 2022 and a Db2 12.1 run locally; **no IBM i
+  was at hand: the `ibmi` path is not tested.**
+- Settings → Pools: *SQL Server* starts from the driver that needs nothing installed (`mssql+pymssql`; the ODBC one is
+  still offered), and *Db2* and *Db2 for i (IBM i, AS/400)* are kinds of database of their own, with their usual port.
+  *Test connection* asks Db2 the one statement it accepts (`SELECT 1` has no meaning there).
+
 ## 7.0.86 — 2026-11-23
 
 - **Docker install: the administrator's password is given whenever the install creates the account.** The end of

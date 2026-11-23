@@ -73,7 +73,13 @@ export const DIALECTS: Record<string, { scheme: string; port: string; database: 
   oracle: { scheme: 'oracle+oracledb', port: '1521', database: 'sid', template: 'oracle+oracledb://user@host:1521/?service_name=ORCL' },
   mysql: { scheme: 'mysql+aiomysql', port: '3306', database: 'database', template: 'mysql+aiomysql://user@host:3306/dbname' },
   mariadb: { scheme: 'mariadb+asyncmy', port: '3306', database: 'database', template: 'mariadb+asyncmy://user@host:3306/dbname' },
-  mssql: { scheme: 'mssql+aioodbc', port: '1433', database: 'database', template: 'mssql+aioodbc://user@host:1433/dbname?driver=ODBC+Driver+18+for+SQL+Server' },
+  // SQL Server through pymssql (the `mssql` extra): the driver's own package is all it needs — `mssql+aioodbc` wants
+  // Microsoft's ODBC driver installed on the server
+  mssql: { scheme: 'mssql+pymssql', port: '1433', database: 'database', template: 'mssql+pymssql://user@host:1433/dbname' },
+  // Db2 for Linux, UNIX and Windows (the `db2` extra), and Db2 for i — the database of an IBM i / AS/400 — through
+  // ODBC (the `ibmi` extra and IBM's "IBM i Access ODBC Driver"): no port, the database is the system's own name
+  db2: { scheme: 'db2+ibm_db', port: '50000', database: 'database', template: 'db2+ibm_db://user@host:50000/dbname' },
+  ibmi: { scheme: 'ibmi', port: '', database: 'database', template: 'ibmi://user@host/dbname' },
   sqlite: { scheme: 'sqlite+aiosqlite', port: '', database: 'file', template: 'sqlite+aiosqlite:///./database.db' },
   // not a database: an LDAP directory, set up here like one (its account, its password) and named by what reads it
   ldap: { scheme: 'ldaps', port: '636', database: 'base', template: 'ldaps://user@host:636' },
@@ -142,7 +148,9 @@ export const DRIVERS: Record<string, string[]> = {
   oracle: ['oracle+oracledb'],
   mysql: ['mysql+aiomysql', 'mysql+asyncmy'],
   mariadb: ['mariadb+asyncmy', 'mariadb+aiomysql'],
-  mssql: ['mssql+aioodbc'],
+  mssql: ['mssql+pymssql', 'mssql+aioodbc'],
+  db2: ['db2+ibm_db', 'db2+pyodbc'],
+  ibmi: ['ibmi'],
   sqlite: ['sqlite+aiosqlite'],
   ldap: ['ldaps', 'ldap'],          // over TLS, or plain
   http: ['https', 'http'],
@@ -195,7 +203,7 @@ export function targetField(parts: UrlParts): TargetField {
 
 /** The kinds of database, as the form names them. */
 export const DIALECT_LABELS: Record<string, string> = {
-  postgresql: 'PostgreSQL', oracle: 'Oracle', mysql: 'MySQL', mariadb: 'MariaDB', mssql: 'SQL Server', sqlite: 'SQLite',
+  postgresql: 'PostgreSQL', oracle: 'Oracle', mysql: 'MySQL', mariadb: 'MariaDB', mssql: 'SQL Server', db2: 'Db2', ibmi: 'Db2 for i (IBM i, AS/400)', sqlite: 'SQLite',
   ldap: 'LDAP directory', http: 'HTTP server (an API)',
 }
 

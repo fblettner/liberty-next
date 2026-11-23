@@ -93,6 +93,7 @@ FRAMEWORK_ENUMS: dict[str, dict[str, Any]] = {
             {"value": "mssql", "label": "Microsoft SQL Server"},
             {"value": "sqlite", "label": "SQLite"},
             {"value": "db2", "label": "IBM DB2"},
+            {"value": "ibmi", "label": "IBM Db2 for i (AS/400)"},
         ],
     },
     "HTTP_METHOD": {

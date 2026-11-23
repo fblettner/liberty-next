@@ -1,6 +1,6 @@
 [project]
 name = "liberty-next"
-version = "7.0.86"
+version = "7.0.87"
 description = "Liberty Next — connector-driven low-code framework (SQL + API connectors, React admin UI, AI tool-use assistant, dependency-aware deployment packaging)"
 readme = "README.md"
 license = {text = "BUSL-1.1"}
@@ -76,6 +76,16 @@ ldap = ["ldap3>=2.9"]
 alembic = ["alembic>=1.13", "psycopg2-binary>=2.9"]
 mcp = ["mcp>=2.3,<3"]          # the MCP endpoint (/mcp, [ai] mcp_enabled): the assistant's tools for Claude
 all = ["liberty-next[reports,ldap,alembic,mcp]"]
+# Drivers of the other databases a pool may point at — NOT in ``all`` (the image adds mssql, and db2 on amd64: Dockerfile): none of the
+# three speaks asyncio, the pool runs them in threads (liberty.connectors.db.driver_is_async).
+#   mssql → SQL Server, ``mssql+pymssql://``: the wheel carries FreeTDS, nothing to install on the system.
+#   db2   → Db2 for Linux / UNIX / Windows, ``db2+ibm_db://``: IBM's driver — wheels for x86-64 Linux, macOS and
+#           Windows only (none for arm64 Linux).
+#   ibmi  → Db2 for i (IBM i, AS/400), ``ibmi://``: through ODBC — needs unixODBC and IBM's "IBM i Access ODBC
+#           Driver" on the system (IBM's download, its own licence).
+mssql = ["pymssql>=2.3"]
+db2 = ["ibm_db_sa>=0.4.1"]
+ibmi = ["sqlalchemy-ibmi>=0.9.3", "pyodbc>=5.1"]
 dev = [
     "liberty-next[all]",       # the test suite renders PDFs and exercises the ldap step
     "pytest>=8.3",

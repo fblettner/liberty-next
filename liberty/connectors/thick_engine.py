@@ -1,4 +1,6 @@
-"""Async-over-sync engine adapter for python-oracledb **thick** mode.
+"""Async-over-sync engine adapter — written for python-oracledb **thick** mode, and what every pool
+whose driver has no asyncio runs on (SQL Server through pymssql, DB2, IBM i through ODBC:
+``PoolRegistry.engine`` picks it from the driver, see ``liberty.connectors.db.driver_is_async``).
 
 Thick mode (OCI) is required for Oracle Native Network Encryption (NNE) — thin mode raises
 ``DPY-3001`` — but python-oracledb only supports asyncio in *thin* mode, and
@@ -150,8 +152,9 @@ class ThickAsyncEngine:
     a thick Oracle pool — ``PoolRegistry.engine()`` returns this so connectors / ETL / screens run
     unchanged. Only the methods the codebase actually calls are implemented."""
 
-    def __init__(self, sync_engine: Engine) -> None:
+    def __init__(self, sync_engine: Engine, *, thread_name: str = "oracle-thick") -> None:
         self._engine = sync_engine
+        self._thread_name = thread_name
 
     # -- passthrough attributes callers read -------------------------------- #
     @property
@@ -170,7 +173,7 @@ class ThickAsyncEngine:
     @asynccontextmanager
     async def connect(self) -> AsyncIterator[_ThickConn]:
         loop = asyncio.get_running_loop()
-        ex = ThreadPoolExecutor(max_workers=1, thread_name_prefix="oracle-thick")
+        ex = ThreadPoolExecutor(max_workers=1, thread_name_prefix=self._thread_name)
         try:
             conn = await loop.run_in_executor(ex, self._engine.connect)
             try:
@@ -184,7 +187,7 @@ class ThickAsyncEngine:
     async def begin(self) -> AsyncIterator[_ThickConn]:
         """``engine.begin()`` — a transaction that commits on clean exit, rolls back on error."""
         loop = asyncio.get_running_loop()
-        ex = ThreadPoolExecutor(max_workers=1, thread_name_prefix="oracle-thick")
+        ex = ThreadPoolExecutor(max_workers=1, thread_name_prefix=self._thread_name)
         try:
             conn = await loop.run_in_executor(ex, self._engine.connect)
             trans = await loop.run_in_executor(ex, conn.begin)

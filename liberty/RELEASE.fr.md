@@ -1,5 +1,22 @@
 # Liberty Next — Notes de version
 
+## 7.0.87 — unreleased
+
+- **Un pool peut pointer sur SQL Server, Db2 et un IBM i (AS/400).** Liberty ouvrait ses pools par des pilotes qui
+  parlent asyncio seulement, ce que ne font ni le pilote Db2 d'IBM ni le pilote SQL Server simple. Un pool dont le
+  pilote ne le fait pas tourne désormais dans des threads derrière la même interface — ce sur quoi tournaient déjà les
+  pools Oracle *thick* — et les requêtes, les écrans, les traitements et les applications le lisent comme n'importe
+  quel autre pool ; un pilote qui parle les deux (celui d'Oracle, celui de PostgreSQL) garde son chemin asyncio. L'image
+  contient le pilote SQL Server, et celui de Db2 sur amd64 seulement (IBM n'en publie pas pour Linux arm64) ; ailleurs ils sont optionnels : `pip install 'liberty-next[mssql]'` (SQL Server,
+  `mssql+pymssql://` — rien d'autre à installer), `liberty-next[db2]` (Db2 pour Linux / UNIX / Windows,
+  `db2+ibm_db://` — le pilote d'IBM n'a pas de paquet pour Linux arm64), `liberty-next[ibmi]` (Db2 for i, `ibmi://` —
+  par ODBC : il faut aussi unixODBC et le pilote *IBM i Access ODBC Driver* d'IBM sur le serveur). Un pool dont le
+  pilote manque dit lequel des trois installer au lieu d'une simple erreur d'import. Vérifié sur un SQL Server 2022 et
+  un Db2 12.1 lancés en local ; **aucun IBM i n'était disponible : le chemin `ibmi` n'est pas testé.**
+- Configuration → Pools : *SQL Server* part du pilote qui ne demande rien d'installé (`mssql+pymssql` ; celui par ODBC
+  reste proposé), et *Db2* et *Db2 for i (IBM i, AS/400)* sont des types de base à part entière, avec leur port
+  habituel. *Tester la connexion* envoie à Db2 la seule instruction qu'il accepte (`SELECT 1` n'y veut rien dire).
+
 ## 7.0.86 — 2026-11-23
 
 - **Installation Docker : le mot de passe de l'administrateur est donné chaque fois que l'installation crée le compte.**

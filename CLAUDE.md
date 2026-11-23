@@ -88,7 +88,9 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
   cli.py / admin_cli.py / migrate_cli.py / license_cli.py   the console scripts (below)
   connectors/             config.py (Pydantic for connectors.toml + ParamBind + ColumnHint),
                           db.py (PoolRegistry: lazy engines, ENC: passwords, terminal
-                          dispose; a PostgreSQL pool's sessions run with `jit` off unless the pool says `jit = true`), sql.py (SQLConnector: text() binds, filter / summary wraps,
+                          dispose; a PostgreSQL pool's sessions run with `jit` off unless the pool says `jit = true`; a driver that does not speak asyncio — SQL Server through
+                          pymssql, Db2, IBM i through ODBC: the extras `mssql` / `db2` / `ibmi`, not in `all` — runs in threads behind the same interface:
+                          `driver_is_async`, the thick Oracle adapter of thick_engine.py), sql.py (SQLConnector: text() binds, filter / summary wraps,
                           form rules, SEQUENCE, audit mirror, Oracle quirks, NDJSON streaming,
                           multi-pool; the pure SQL-text helpers — ORDER BY split, aggregate / filter wraps,
                           #SCHEMA# / #DBLINK# placeholders — in sqltext.py), api.py (APIConnector: httpx, 6 auth kinds — `user_jwt` makes each call AS THE SIGNED-IN USER: a short-lived token signed with the connector's key names him on the server (`acting_user` from a user attribute, `user_token`, `ApiAuthError`; made for JD Edwards AIS) —, templating — a value stays where its placeholder is: `substitute_path` / `_json` / `_form`, `file_part_path` for a user's values, `call(..., untrusted=True)`; a parameter's help / example / choices; `generators` = the editor's "Create from…", a plugin function run by `web/admin/api_test.py` `POST /admin/config/api/generate`),
