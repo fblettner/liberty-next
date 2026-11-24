@@ -2707,6 +2707,7 @@ const en = {
     },
     pools: {
       kind: "Database type",
+      kinds: { ldap: "LDAP directory", http: "HTTP server (an API)", ibmi: "Db2 for i (IBM i, AS/400)" },
       advanced: "Advanced: driver, options, URL",
       service: "Service name",
       test: "Test connection",

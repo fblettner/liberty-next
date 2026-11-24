@@ -28,6 +28,9 @@ from liberty.crypto import decrypt_or_keep, is_encrypted
 _log = logging.getLogger(__name__)
 
 #: the optional extra that brings the driver of a database Liberty does not install by default
+# A driver's own dialect name → the database's name, the one a URL gives (``db2+ibm_db://`` → ``db2``) and a query's
+# per-database variant is written under: IBM's dialects name themselves after their package.
+DIALECT_NAMES = {"ibm_db_sa": "db2", "sqlalchemy_ibmi": "ibmi"}
 DRIVER_EXTRAS = {"mssql": "mssql", "db2": "db2", "ibm_db_sa": "db2", "ibmi": "ibmi"}
 
 #: the smallest statement each database accepts (DB2 and Oracle want a FROM)
@@ -150,10 +153,10 @@ class PoolRegistry:
         ``[pools.<name>] dialect``, else derived from the URL."""
         engine = self._engines.get(name)
         if engine is not None:
-            return engine.dialect.name
+            return DIALECT_NAMES.get(engine.dialect.name, engine.dialect.name)
         cfg = self._config(name)
         if cfg.dialect:
-            return cfg.dialect
+            return DIALECT_NAMES.get(cfg.dialect, cfg.dialect)
         return make_url(cfg.url).get_backend_name()
 
     def trim_strings(self, name: str) -> bool:

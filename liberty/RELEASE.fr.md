@@ -1,5 +1,29 @@
 # Liberty Next — Notes de version
 
+## 7.0.88 — unreleased
+
+- **Une page qui lit beaucoup s'ouvre tout de suite : le serveur conserve sa réponse.** Certaines pages livrées par une
+  application lisent toute une plateforme, ou chaque utilisateur et chaque règle, avant de pouvoir s'afficher, et ce
+  qu'elles montrent change quand une collecte s'exécute, pas pendant qu'on regarde. On peut désormais demander à la
+  fonction derrière une telle page sa **réponse conservée** : ce qu'elle a répondu la fois précédente revient
+  immédiatement, avec le moment du calcul — que la page affiche, pour qu'un chiffre ancien ne soit jamais pris pour le
+  présent — et le bouton *Relire* de la page recalcule, aussi longtemps qu'il faut, et remplace la réponse pour tout
+  le monde. Un traitement la prépare : l'étape `liberty.kept:j_keep` (`function = "module:j_fonction"`, les paramètres
+  de la fonction à côté, `langs = "en,fr"` pour une réponse par langue) exécute la fonction et conserve sa réponse ;
+  la première personne qui ouvre la page après la collecte de la nuit n'attend donc pas. Une réponse est conservée par
+  fonction, paramètres **et périmètre de données** : ce qu'un utilisateur limité à certaines lignes a calculé n'est
+  jamais donné à un autre périmètre, et la réponse d'un traitement va aux utilisateurs qui n'en ont pas. Le droit sur
+  la fonction est vérifié avant toute lecture. Pour les pages des applications : `sdk.callKept(fn, params, refresh?)`
+  (contrat de page version 7) ; pour le reste, `kept: "use" | "refresh"` sur `POST /api/plugins/run`. Une table,
+  `ly2_kept_answer`, créée au démarrage à côté des comptes.
+- Un pool sur Db2 ou sur un IBM i s'appelle `db2` / `ibmi` partout : une fois connecté, le pool prenait le nom que le
+  pilote d'IBM se donne (`ibm_db_sa`, `sqlalchemy_ibmi`), et une requête écrite avec une variante par base sous `db2` ou
+  `ibmi` retombait sur son texte par défaut. **Non exécuté sur un Db2 ni sur un IBM i : vérifié sur les noms seulement.**
+- Supervision → Direct : le *Dépassement* d'un pool n'est jamais négatif (un pool avec moins de connexions ouvertes que
+  sa taille affichait `-4/0`).
+- Paramètres → Pools : les types qui ne sont pas un nom de produit (*Annuaire LDAP*, *Serveur HTTP*) sont aussi en
+  français.
+
 ## 7.0.87 — 2026-11-23
 
 - **Un pool peut pointer sur SQL Server, Db2 et un IBM i (AS/400).** Liberty ouvrait ses pools par des pilotes qui

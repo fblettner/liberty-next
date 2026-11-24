@@ -2705,6 +2705,7 @@ const fr: Resources = {
     },
     pools: {
       kind: "Type de base",
+      kinds: { ldap: "Annuaire LDAP", http: "Serveur HTTP (une API)", ibmi: "Db2 for i (IBM i, AS/400)" },
       advanced: "Avancé : pilote, options, URL",
       service: "Nom de service",
       test: "Tester la connexion",

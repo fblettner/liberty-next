@@ -26,7 +26,7 @@ from liberty.auth.oauth import router as oauth_router
 from liberty.auth.routes import router as auth_router
 from liberty.auth.dependencies import OptionalPrincipal
 from liberty.auth.tokens import MIN_SECRET_BYTES, TokenConfig, TokenService
-from liberty.runtime import build_ai_usage, build_oauth_grants, build_changesets_db, build_dispatcher, build_notifications, build_user_views, load_registry
+from liberty.runtime import build_ai_usage, build_kept, build_oauth_grants, build_changesets_db, build_dispatcher, build_notifications, build_user_views, load_registry
 from liberty.config import AuthSettings, Settings, load_settings
 from liberty.connectors import ConnectorRegistry
 from liberty.connectors.base import ConnectorError
@@ -257,6 +257,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # feature rather than failing boot (the grid then just won't persist).
         app.state.user_views = await build_user_views(settings, app.state.connectors)
         app.state.ai_usage = await build_ai_usage(settings, app.state.connectors)
+        app.state.kept = await build_kept(settings, app.state.connectors)
         app.state.oauth_grants = await build_oauth_grants(settings, app.state.connectors)
         if app.state.user_views is not None:
             from liberty.explorer.store import sync_bundled

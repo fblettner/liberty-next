@@ -80,6 +80,9 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
   licensing/              RS256 license-key verification (embedded public.pem); usage.py = the daily usage report to the licence
                           tool (environment / version / enabled accounts, NomaUBL's shape; `[license] usage_url`)
   theme.py                theme.toml + GET /api/theme (operator branding)
+  kept.py                 kept answers: what a page's function answered, stored (ly2_kept_answer, per function + parameters + data scope) so the
+                          page opens at once — `kept: use | refresh` on POST /api/plugins/run, `sdk.callKept` (page contract version 7),
+                          prepared by the job step `liberty.kept:j_keep`
   framework_enums.py      the widget / enum registries the builders render from
   coercion.py             kwargs coercion shared by python job steps and reports
   diagram.py              a diagram laid out ONCE on the server (model: tiers / hosts, cards with a state and `declared`, links with their

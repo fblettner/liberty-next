@@ -1,5 +1,26 @@
 # Liberty Next — Release notes
 
+## 7.0.88 — unreleased
+
+- **A page that reads a lot opens at once: the server keeps its answer.** Some pages an application ships read a whole
+  platform or every user and every rule before they can draw, and what they show changes when a collection runs, not
+  while one looks. The function behind such a page may now be asked for its **kept answer**: what it answered before
+  comes back at once, with the moment it was computed — which the page shows, so an old figure is never taken for the
+  present — and the page's *Read again* computes anew, however long, and replaces it for everybody. A job prepares it:
+  the step `liberty.kept:j_keep` (`function = "module:j_function"`, the function's parameters next to it,
+  `langs = "en,fr"` for one answer per language) runs the function and keeps what it answers, so the first person to
+  open the page after the night's collection does not wait. An answer is kept per function, parameters **and data
+  scope**: what a user with a row-level scope computed is never given to another scope, and a job's answer goes to the
+  users who have none. The permission on the function is checked before anything is read. For the applications' pages:
+  `sdk.callKept(fn, params, refresh?)` (page contract version 7); for anything else, `kept: "use" | "refresh"` on
+  `POST /api/plugins/run`. One table, `ly2_kept_answer`, created at start-up next to the accounts.
+- A pool on Db2 or an IBM i is named `db2` / `ibmi` everywhere: once connected, the pool took the name IBM's driver
+  gives itself (`ibm_db_sa`, `sqlalchemy_ibmi`), so a query written with a variant per database under `db2` or `ibmi`
+  fell back to its default text. **Not run against a Db2 or an IBM i: checked on the names alone.**
+- Monitoring → Direct: a pool's *Overflow* is never negative (a pool with fewer connections open than its size showed
+  `-4/0`).
+- Settings → Pools: the kinds that are not a product's name (*LDAP directory*, *HTTP server*) are in French too.
+
 ## 7.0.87 — 2026-11-23
 
 - **A pool may point at SQL Server, Db2 and an IBM i (AS/400).** Liberty opened its pools through drivers that speak

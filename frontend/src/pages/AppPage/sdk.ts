@@ -29,7 +29,7 @@ import { can } from '../../services/permissions'
 import { pageFacts, setPageContext } from '../../services/aiContext'
 
 // 2: `Grid` (the shared grid) · 3: a row of the grid opens (`detail`) · 4: `useAssistantContext` · 5: `Diagram`
-export const PAGE_SDK_VERSION = 6
+export const PAGE_SDK_VERSION = 7
 
 export interface PageSdk {
   /** the contract's version (this file) */
@@ -64,6 +64,12 @@ export interface PageSdk {
    *  runs `<app>.xref:j_xref_search` — or name another package in full (`'pkg.mod:fn'`). The caller
    *  needs `plugin:<that reference>`. */
   call: <T = unknown>(fn: string, params?: Record<string, unknown>) => Promise<T>
+  /** The same, for a page that reads a lot: the server KEEPS what the function answered and gives it back at once
+   *  — with the moment it was computed, to be shown (`at`, an ISO date; `by`, who or which job; `fresh` = computed
+   *  by this very call). `callKept(fn, params, true)` computes anew, however long, and replaces what is kept: the
+   *  page's *Read again*. An answer is kept per function, parameters and data scope; a job prepares it with the
+   *  step `liberty.kept:j_keep`. Since version 7. */
+  callKept: <T = unknown>(fn: string, params?: Record<string, unknown>, refresh?: boolean) => Promise<KeptAnswer<T>>
   /** hook: the language of the interface ('en', 'fr'…) — the page ships its own texts */
   useLang: () => string
   /** hook: who is signed in */
@@ -85,6 +91,19 @@ export interface PageSdk {
   useAssistantContext: (title: string, facts?: Record<string, string | number | boolean | null | undefined>) => void
 }
 
+/** What `callKept` answers: the function's answer and when it was computed. */
+export interface KeptAnswer<T = unknown> {
+  data: T
+  /** when it was computed (ISO date, UTC) — null when the server could not keep it */
+  at: string | null
+  /** who computed it: a user, or `job` */
+  by: string | null
+  /** how long the computing took, in milliseconds */
+  ms: number | null
+  /** true when this call computed it, false when it was already kept */
+  fresh: boolean
+}
+
 export function buildSdk(app: string, page: string): PageSdk {
   return {
     version: PAGE_SDK_VERSION, app, page,
@@ -96,6 +115,11 @@ export function buildSdk(app: string, page: string): PageSdk {
     call: async <T,>(fn: string, params: Record<string, unknown> = {}) => {
       const r = await api.post<{ extras?: unknown }>('/api/plugins/run', { callable: callableRef(app, fn), params })
       return (r.extras ?? r) as T
+    },
+    callKept: async <T,>(fn: string, params: Record<string, unknown> = {}, refresh = false) => {
+      const r = await api.post<{ extras?: unknown; kept?: { at?: string; by?: string | null; ms?: number | null; fresh?: boolean } }>(
+        '/api/plugins/run', { callable: callableRef(app, fn), params, kept: refresh ? 'refresh' : 'use' })
+      return { data: (r.extras ?? r) as T, at: r.kept?.at ?? null, by: r.kept?.by ?? null, ms: r.kept?.ms ?? null, fresh: r.kept?.fresh ?? true }
     },
     useLang: () => useTranslation().i18n.language || 'en',
     useUser: () => {

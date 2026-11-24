@@ -125,6 +125,23 @@ async def build_user_views(settings: Settings, connectors: ConnectorRegistry) ->
         return None
 
 
+async def build_kept(settings: Settings, connectors: ConnectorRegistry) -> Any | None:
+    """Kept answers (:mod:`liberty.kept`) on the auth pool — ``None`` when the pool is unusable (logged;
+    the pages then compute at each opening, as before)."""
+    auth = getattr(settings, "auth", None)
+    if auth is None:
+        return None
+    try:
+        from liberty.kept import KeptStore
+
+        store = KeptStore(connectors.pools, auth.pool)
+        journal_schema(settings, await store.create_schema())
+        return store
+    except Exception as exc:  # noqa: BLE001 — never let this store take the app down
+        _log.warning("kept-answer store on pool %r unusable (%s) — pages compute at each opening", auth.pool, exc)
+        return None
+
+
 async def build_ai_usage(settings: Settings, connectors: ConnectorRegistry) -> Any | None:
     """The assistant's audit and usage record on the auth pool — ``None`` when the assistant is
     off or the pool is unusable (logged; the chat then works without being recorded)."""
@@ -353,6 +370,13 @@ async def _rebind_pool_holders(app: Any, settings: Settings, new: ConnectorRegis
             state.user_views.rebind(new.pools)
         else:
             state.user_views = await build_user_views(settings, new)
+
+    # Kept answers — same policy.
+    if hasattr(state, "kept"):
+        if state.kept is not None:
+            state.kept.rebind(new.pools)
+        else:
+            state.kept = await build_kept(settings, new)
 
     # The assistant's usage record — same policy.
     if hasattr(state, "ai_usage"):

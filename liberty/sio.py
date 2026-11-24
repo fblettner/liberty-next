@@ -265,6 +265,12 @@ LOCK_NS = "/"                # default namespace; everything lives here for simp
 DASHBOARD_ROOM = "dashboard"
 
 
+def _beyond(overflow: Any) -> Any:
+    """A pool's connections beyond its size. SQLAlchemy counts from minus the size (a pool of 5 with one
+    connection open says -4): what the dashboard shows is how many are open beyond it, never below 0."""
+    return max(0, overflow) if isinstance(overflow, int) else overflow
+
+
 def user_room(username: str) -> str:
     """The Socket.IO room every socket of a user joins at connect."""
     return f"user:{username}"
@@ -458,7 +464,7 @@ class LibertySio:
                 pools.append({
                     "name": name, "dialect": dialect, "materialised": True,
                     "size": safe("size"), "checked_out": safe("checkedout"),
-                    "checked_in": safe("checkedin"), "overflow": safe("overflow"),
+                    "checked_in": safe("checkedin"), "overflow": _beyond(safe("overflow")),
                     "max_overflow": getattr(pool, "_max_overflow", None),
                     "class": type(pool).__name__,
                 })

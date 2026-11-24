@@ -82,3 +82,24 @@ async def test_a_sync_driver_pool_reads_writes_and_streams(tmp_path: Path) -> No
 async def test_the_connection_test_of_a_sync_driver_pool(tmp_path: Path) -> None:
     answer = await try_pool(PoolConfig(url=f"sqlite:///{tmp_path / 'probe.db'}"))
     assert answer["ok"] is True and answer["dialect"] == "sqlite"
+
+
+def test_a_pool_is_named_after_its_database_not_after_ibms_driver_package() -> None:
+    """IBM's dialects name themselves after their package; a query's variant is written under ``db2`` / ``ibmi``."""
+    import types
+
+    from liberty.connectors.config import PoolConfig
+    from liberty.connectors.db import PoolRegistry
+
+    pools = PoolRegistry({"luw": PoolConfig(url="db2+ibm_db://u@h:50000/db"), "i": PoolConfig(url="ibmi://u@h/db"),
+                          "said": PoolConfig(url="sqlite+aiosqlite://", dialect="ibm_db_sa")})
+    assert (pools.dialect("luw"), pools.dialect("i"), pools.dialect("said")) == ("db2", "ibmi", "db2")
+    for pool, own, name in (("luw", "ibm_db_sa", "db2"), ("i", "sqlalchemy_ibmi", "ibmi")):      # once the engine is there
+        pools._engines[pool] = types.SimpleNamespace(dialect=types.SimpleNamespace(name=own))
+        assert pools.dialect(pool) == name
+
+
+def test_overflow_is_never_shown_below_zero() -> None:
+    from liberty.sio import _beyond
+
+    assert (_beyond(-4), _beyond(0), _beyond(3), _beyond(None)) == (0, 0, 3, None)

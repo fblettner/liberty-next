@@ -272,7 +272,7 @@ export default function PoolsBuilder() {
             <Part label={t('settings.pools.kind')}>
               <div data-part="dialect">
                 <SearchSelect value={picked} onChange={(d) => { if (d) onFormChange(name, { ...value, dialect: d }) }}
-                  options={kinds.map((k) => ({ value: k, label: DIALECT_LABELS[k] ?? k }))} />
+                  options={kinds.map((k) => ({ value: k, label: t(`settings.pools.kinds.${k}`, { defaultValue: DIALECT_LABELS[k] ?? k }) }))} />
               </div>
             </Part>
             {parts && target !== 'file' && (

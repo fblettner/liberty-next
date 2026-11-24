@@ -17,11 +17,13 @@ module. Runs synchronously — long batch work should target a nomaflow job inst
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 
+from liberty import kept
 from liberty.auth.dependencies import CurrentPrincipal
 from liberty.connectors import ConnectorRegistry
 from liberty.jobs.discover import discover_callables
@@ -77,7 +79,40 @@ async def run_plugin(
     if not isinstance(params, dict):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="`params` must be an object")
 
-    return await run_plugin_callable(request.app.state, principal, connectors, ref, params, body.get("_change_context"))
+    mode, store = body.get("kept"), getattr(request.app.state, "kept", None)
+    if mode not in kept.MODES or store is None:
+        return await run_plugin_callable(request.app.state, principal, connectors, ref, params, body.get("_change_context"))
+
+    # A kept answer (liberty.kept): what the function answered before, returned at once — "refresh" computes anew.
+    # The permission and the allow-list first: the store is never read for a caller who may not run the function.
+    _may_run(principal, ref)
+    scope = kept.scope_of(principal)
+    if mode == kept.USE:
+        try:
+            hit = await store.get(ref, params, scope)
+        except Exception:  # noqa: BLE001 — a store that cannot be read: compute, as without it
+            _log.exception("kept answers: could not be read for %s", ref)
+            hit = None
+        if hit is not None:
+            return {"success": True, "callable": ref, "rows_affected": None, "extras": hit["answer"], "rows": [], "first_row": hit["answer"],
+                    "kept": {"at": hit["at"], "by": hit["by"], "ms": hit["ms"], "fresh": False}}
+    started = time.monotonic()
+    result = await run_plugin_callable(request.app.state, principal, connectors, ref, params, body.get("_change_context"))
+    answer = result.get("extras")
+    if isinstance(answer, dict) and answer:
+        took = int((time.monotonic() - started) * 1000)
+        try:
+            result["kept"] = {**await store.put(ref, params, answer, scope=scope, by=principal.username, duration_ms=took), "fresh": True}
+        except Exception:  # noqa: BLE001 — the answer is still the caller's; it is only not kept
+            _log.exception("kept answers: could not be stored for %s", ref)
+    return result
+
+
+def _may_run(principal: Any, ref: str) -> None:
+    """The gate of :func:`run_plugin_callable`, alone: the permission, then the allow-list."""
+    require_permission(principal, f"plugin:{ref}")
+    if ref not in {c.callable for c in discover_callables(_plugins_root())}:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Unknown plugin callable: {ref}")
 
 
 async def run_plugin_callable(
