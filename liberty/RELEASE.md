@@ -1,6 +1,6 @@
 # Liberty Next — Release notes
 
-## 7.0.88 — unreleased
+## 7.0.88 — 2026-11-24
 
 - **A page that reads a lot opens at once: the server keeps its answer.** Some pages an application ships read a whole
   platform or every user and every rule before they can draw, and what they show changes when a collection runs, not

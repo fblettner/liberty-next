@@ -1,6 +1,6 @@
 # Liberty Next — Notes de version
 
-## 7.0.88 — unreleased
+## 7.0.88 — 2026-11-24
 
 - **Une page qui lit beaucoup s'ouvre tout de suite : le serveur conserve sa réponse.** Certaines pages livrées par une
   application lisent toute une plateforme, ou chaque utilisateur et chaque règle, avant de pouvoir s'afficher, et ce
