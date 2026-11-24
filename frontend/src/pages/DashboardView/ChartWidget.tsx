@@ -19,7 +19,7 @@ import type { ChartWidgetWire, DashboardFilterWire, DashboardPeriodWire } from '
 import type { ChartSpec } from '../../types/charts'
 import { buildWidgetFilterParams, buildWidgetPeriodParams, type PeriodSelection } from './widgetFilters'
 import { Sub, Title } from './cardParts'
-import { colors, glass, radius, shadow } from '../../theme'
+import { colors, radius, shadow } from '../../theme'
 
 // Mirrors ChartCanvas's Frame so the loading placeholder looks identical to the loaded chart —
 // no visible flash when data lands. Glass surface + shadow + inset highlight = same depth.
@@ -27,7 +27,6 @@ const Placeholder = styled.div<{ $h: number }>`
   height: ${({ $h }) => $h}px; min-width: 0; padding: 14px; flex-direction: column;
   border: 1px solid ${colors.border}; border-radius: ${radius.lg};
   background: ${colors.bg.card};
-  ${glass.surface}
   box-shadow: ${shadow.sm}, inset 0 1px 0 rgba(255, 255, 255, 0.08);
   display: flex; align-items: center; justify-content: center;
 `

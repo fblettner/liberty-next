@@ -1,5 +1,11 @@
 # Liberty Next — Release notes
 
+## 7.0.89 — 2026-11-24
+
+- **Cards no longer disappear on a long page.** On a page listing many cards (Performance, a review, a dashboard), some browsers
+  left cards as empty bands that came and went while scrolling. Each card carried a background blur, which made it a
+  graphics layer of its own; the blur showed nothing on the page's plain background, so it is removed.
+
 ## 7.0.88 — 2026-11-24
 
 - **A page that reads a lot opens at once: the server keeps its answer.** Some pages an application ships read a whole

@@ -1,5 +1,12 @@
 # Liberty Next — Notes de version
 
+## 7.0.89 — 2026-11-24
+
+- **Les cartes ne disparaissent plus sur une longue page.** Sur une page listant beaucoup de cartes (Performance, un tableau de bord, une
+  revue), certains navigateurs laissaient des cartes en bandes vides qui allaient et venaient au défilement. Chaque
+  carte portait un flou d'arrière-plan, qui en faisait une couche graphique à part ; ce flou ne montrait rien sur le
+  fond uni de la page, il est donc retiré.
+
 ## 7.0.88 — 2026-11-24
 
 - **Une page qui lit beaucoup s'ouvre tout de suite : le serveur conserve sa réponse.** Certaines pages livrées par une

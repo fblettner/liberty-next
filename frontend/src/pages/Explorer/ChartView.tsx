@@ -8,14 +8,14 @@ import { ChartCanvas } from '../TableView/ChartCanvas'
 import { kpiTotals, shapeChart } from '../../services/explorerPivot'
 import type { ChartType } from '../../types/charts'
 import type { AggregateResult } from '../../types/explorer'
-import { colors, fontSize, fonts, glass, radius, shadow } from '../../theme'
+import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 
 const Box = styled.div`flex: 1; min-height: 280px; display: flex; flex-direction: column; border: 1px solid ${colors.border}; border-radius: ${radius.md}; background: ${colors.bg.card}; padding: 8px;`
 const Note = styled.div`font-size: ${fontSize.micro}; color: ${colors.text.muted}; font-family: ${fonts.sans}; padding: 0 6px 4px;`
 const Cards = styled.div`display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;`
 const Card = styled.div`
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 18px 14px; min-height: 120px;
-  border: 1px solid ${colors.border}; border-radius: ${radius.lg}; background: ${colors.bg.card}; ${glass.surface}
+  border: 1px solid ${colors.border}; border-radius: ${radius.lg}; background: ${colors.bg.card};
   box-shadow: ${shadow.sm}, inset 0 1px 0 rgba(255, 255, 255, 0.08);
 `
 const Value = styled.div`font-size: clamp(1.6rem, 3.5vw, 2.2rem); font-weight: 700; font-family: ${fonts.sans}; color: ${colors.text.primary}; font-variant-numeric: tabular-nums; letter-spacing: -0.02em;`

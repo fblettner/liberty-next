@@ -18,16 +18,15 @@ import type { Aggregation } from '../../types/charts'
 import { buildWidgetFilterParams, buildWidgetPeriodParams, type PeriodSelection } from './widgetFilters'
 import { formatKpi, kpiDelta } from '../../services/kpi'
 import { previousPeriod } from '../../services/period'
-import { colors, fontSize, fonts, glass, radius, shadow } from '../../theme'
+import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 
-// Liquid-glass KPI card — backdrop blur over a slightly-translucent base, soft drop shadow, a
+// KPI card — a slightly-translucent base (no backdrop blur: see common/Card.ts), soft drop shadow, a
 // thin inset highlight (the "specular") on the top edge that fakes a light from above (the macOS
 // look). The card is its own little frosted panel that floats slightly off the page background.
 const Frame = styled.div`
   flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; align-items: flex-start;
   gap: 8px; padding: 16px 18px; border: 1px solid ${colors.border}; border-radius: ${radius.lg};
   background: ${colors.bg.card};
-  ${glass.surface}
   box-shadow: ${shadow.sm}, inset 0 1px 0 rgba(255, 255, 255, 0.08);
   /* Subtle radial vignette top-left → bottom-right; cheap depth without a real gradient layer. */
   background-image: radial-gradient(120% 100% at 0% 0%, rgba(255, 255, 255, 0.04), transparent 60%);

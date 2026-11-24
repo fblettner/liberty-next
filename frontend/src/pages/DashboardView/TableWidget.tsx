@@ -16,13 +16,12 @@ import type { Column, QueryResult } from '../../types/connectors'
 import type { DashboardFilterWire, DashboardPeriodWire, TableWidgetWire } from '../../types/dashboards'
 import { buildWidgetFilterParams, buildWidgetPeriodParams, type PeriodSelection } from './widgetFilters'
 import { Sub, Title } from './cardParts'
-import { colors, fontSize, fonts, glass, radius, shadow } from '../../theme'
+import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 
 const Frame = styled.div`
   flex: 1; min-height: 0; min-width: 0; overflow: auto;
   border: 1px solid ${colors.border}; border-radius: ${radius.lg};
   background: ${colors.bg.card};
-  ${glass.surface}
   box-shadow: ${shadow.sm}, inset 0 1px 0 rgba(255, 255, 255, 0.08);
 `
 const Center = styled.div`height: 100%; display: flex; align-items: center; justify-content: center;`

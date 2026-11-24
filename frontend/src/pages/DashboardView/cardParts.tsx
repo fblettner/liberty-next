@@ -2,12 +2,11 @@
 // cards), the list line, the figure column, the tone dot, the tag pill, the bar track.
 import styled from '@emotion/styled'
 import type { Tone } from '../../services/widgets'
-import { colors, fontSize, fonts, glass, radius, shadow } from '../../theme'
+import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 
 export const Card = styled.div`
   flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 16px 18px;
   border: 1px solid ${colors.border}; border-radius: ${radius.lg}; background: ${colors.bg.card};
-  ${glass.surface}
   box-shadow: ${shadow.sm}, inset 0 1px 0 rgba(255, 255, 255, 0.08);
   overflow: hidden;
 `
