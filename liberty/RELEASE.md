@@ -1,5 +1,11 @@
 # Liberty Next — Release notes
 
+## 7.0.90 — 2026-11-25
+
+- **Pools: *Test connection* works on an LDAP directory.** The test answered *required argument is not an integer*
+  before the directory was even asked: the waiting time was handed to the LDAP client as a decimal number, which it
+  refuses. It is now given in whole seconds.
+
 ## 7.0.89 — 2026-11-24
 
 - **Cards no longer disappear on a long page.** On a page listing many cards (Performance, a review, a dashboard), some browsers

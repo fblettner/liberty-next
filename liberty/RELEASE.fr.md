@@ -1,5 +1,11 @@
 # Liberty Next — Notes de version
 
+## 7.0.90 — 2026-11-25
+
+- **Pools : *Tester la connexion* fonctionne sur un annuaire LDAP.** Le test répondait *required argument is not an
+  integer* avant même d'interroger l'annuaire : le délai d'attente était donné au client LDAP en nombre décimal, ce
+  qu'il refuse. Il est maintenant donné en secondes entières.
+
 ## 7.0.89 — 2026-11-24
 
 - **Les cartes ne disparaissent plus sur une longue page.** Sur une page listant beaucoup de cartes (Performance, un tableau de bord, une

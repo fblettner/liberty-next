@@ -18,6 +18,7 @@ the :class:`DirectoryTarget` to bind with.
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -71,8 +72,10 @@ def _bind(target: DirectoryTarget, timeout: float) -> str:
     # ldap3 is the optional 'ldap' extra: imported only when a directory is actually reached
     from ldap3 import ALL, Connection, Server
 
-    server = Server(target.url, get_info=ALL, connect_timeout=timeout)
-    conn = Connection(server, user=target.user, password=target.password, auto_bind=True, receive_timeout=timeout)
+    # whole seconds: ldap3 packs the read timeout as integers ("required argument is not an integer" on 10.0)
+    seconds = max(1, math.ceil(timeout))
+    server = Server(target.url, get_info=ALL, connect_timeout=seconds)
+    conn = Connection(server, user=target.user, password=target.password, auto_bind=True, receive_timeout=seconds)
     try:
         info = server.info
         vendor = getattr(info, "vendor_name", None) if info is not None else None
