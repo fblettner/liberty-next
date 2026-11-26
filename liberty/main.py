@@ -90,13 +90,22 @@ class SPAStaticFiles(StaticFiles):
         if self.base_path and path in ("", ".", "index.html"):
             return self._index_response()
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except StarletteHTTPException as exc:
             if exc.status_code == 404:
                 if self.base_path:
                     return self._index_response()
-                return await super().get_response("index.html", scope)
+                return self._fresh(await super().get_response("index.html", scope))
             raise
+        return self._fresh(response) if path in ("", ".", "index.html") else response
+
+    @staticmethod
+    def _fresh(response: Response) -> Response:
+        """index.html names the build's files (their names change at each build): a browser must ask
+        for it again each time — without this it may keep an old one for hours after an upgrade and
+        run the old application against the new server."""
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 class RootPathMiddleware:

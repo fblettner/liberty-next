@@ -25,6 +25,16 @@
   screens count as reached from the menu, *Find usages* lists the entry, and the integrity check says a screen that
   does not exist.
 
+- **Application pages: a screen's record form can be opened from a page.** The page contract (now version 8) gains
+  `sdk.Record`: a page adds or changes a record through a screen's own form — its fields, its rules per value, its
+  lookups, its defaults, its save — without sending the user to the screen:
+  `<Record app screen mode="add" values={…} onClose onSaved />`.
+
+- **After an upgrade, a browser no longer keeps the old application.** The application's entry page was served without
+  telling the browser to ask for it again, so a browser could go on running the previous version against the upgraded
+  server for hours — a new button doing nothing, or doing what it did before. The entry page is now always re-checked;
+  the build's own files keep their caching.
+
 ## 7.0.90 — 2026-11-25
 
 - **Pools: *Test connection* works on an LDAP directory.** The test answered *required argument is not an integer*

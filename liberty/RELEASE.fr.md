@@ -28,6 +28,17 @@
   modification avec le droit de modification de l'entrée — les écrans comptent comme atteints depuis le menu,
   *Rechercher les utilisations* liste l'entrée, et le contrôle d'intégrité signale un écran qui n'existe pas.
 
+- **Pages d'application : le formulaire d'un écran s'ouvre depuis une page.** Le contrat de page (désormais version 8)
+  gagne `sdk.Record` : une page ajoute ou modifie un enregistrement par le formulaire de l'écran — ses champs, ses
+  règles selon les valeurs, ses recherches, ses valeurs par défaut, son enregistrement — sans renvoyer l'utilisateur
+  vers l'écran : `<Record app screen mode="add" values={…} onClose onSaved />`.
+
+- **Après une mise à jour, un navigateur ne garde plus l'ancienne application.** La page d'entrée de l'application était
+  servie sans dire au navigateur de la redemander : un navigateur pouvait continuer à faire tourner la version
+  précédente contre le serveur mis à jour pendant des heures — un nouveau bouton sans effet, ou faisant ce qu'il
+  faisait avant. La page d'entrée est maintenant toujours revérifiée ; les fichiers de la construction gardent leur
+  mise en cache.
+
 ## 7.0.90 — 2026-11-25
 
 - **Pools : *Tester la connexion* fonctionne sur un annuaire LDAP.** Le test répondait *required argument is not an

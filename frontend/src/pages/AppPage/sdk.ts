@@ -25,11 +25,13 @@ import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 import { callableRef } from '../../tabs/pageTabs'
 import { PageGrid } from './PageGrid'
 import { Diagram } from '../../common/Diagram'
+import { PageRecord } from './PageRecord'
 import { can } from '../../services/permissions'
 import { pageFacts, setPageContext } from '../../services/aiContext'
 
 // 2: `Grid` (the shared grid) · 3: a row of the grid opens (`detail`) · 4: `useAssistantContext` · 5: `Diagram`
-export const PAGE_SDK_VERSION = 7
+// 8: `Record` (a screen's record form, opened from the page)
+export const PAGE_SDK_VERSION = 8
 
 export interface PageSdk {
   /** the contract's version (this file) */
@@ -56,6 +58,11 @@ export interface PageSdk {
    *  builds the model and returns it laid out); the same data gives the PDF's picture (`render_svg`). The words
    *  are the page's, in its language. Since version 5. */
   Diagram: typeof Diagram
+  /** A screen's own record form, opened from the page: add or change a record through the SCREEN — its fields, its
+   *  rules, its lookups, its save — without leaving the page:
+   *  `<Record app="shop" screen="orders" mode="add" values={{ CUSTOMER: 'C1' }} onClose={…} onSaved={…} />`.
+   *  `mode="edit"`: `values` are the record's key values, read through the screen. Since version 8. */
+  Record: typeof PageRecord
   /** a menu icon by its name ("search", "database"…), or null */
   icon: typeof iconFor
   /** the API client (get / post / put / delete on the server's routes, the session handled) */
@@ -110,6 +117,7 @@ export function buildSdk(app: string, page: string): PageSdk {
     React, styled, ui, api,
     Grid: PageGrid,
     Diagram,
+    Record: PageRecord,
     theme: { colors, fontSize, fonts, radius, shadow },
     icon: iconFor,
     call: async <T,>(fn: string, params: Record<string, unknown> = {}) => {
