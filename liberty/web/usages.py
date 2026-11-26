@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from collections.abc import Iterable, Iterator
 from typing import Any, Literal
 
 
@@ -567,12 +568,17 @@ def _find_screen_rule_usages(state: Any, accept: set[str], name: str, scope: str
 
 # ── query usages ────────────────────────────────────────────────────────────────────────
 
-def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
-    """Find every reference to ``<connector>.<query>``. A query reference always carries a
-    connector hint (sometimes ``None`` meaning "the parent's connector") — we treat a
-    ``None`` connector as matching the entity's surrounding default."""
-    out: list[Usage] = []
+# A reference whose connector is not said (a shared action's step without one): it counts for
+# the query of that name on every connector.
+_ANY_CONNECTOR = "*"
 
+
+def _iter_query_refs(state: Any) -> Iterator[tuple[str | None, str, Usage]]:
+    """Every reference to a query in the loaded configuration, in ONE walk: ``(connector, query,
+    usage)``. A query reference always carries a connector hint (sometimes ``None`` meaning "the
+    parent's connector") — resolved here to the entity's surrounding default; ``_ANY_CONNECTOR``
+    where nothing says it. Find usages filters the walk on one query; the integrity check reads it
+    once for all of them (a walk per query took over a second on a real configuration)."""
     screens = getattr(state, "screens", None)
     if screens is not None:
         for app, screen_map in (screens.screens if hasattr(screens, "screens") else {}).items():
@@ -590,12 +596,8 @@ def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
                     v = getattr(screen, attr, None)
                     # the saves may live on another connector than the read (save_connector)
                     on = screen_conn if attr == "read_query" else (getattr(screen, "save_connector", None) or screen_conn)
-                    if v == query and on == connector:
-                        out.append(Usage(
-                            type=kind,
-                            label=f"{app}.{sid} · {attr}",
-                            deep_link=_screen_deep_link(app, sid),
-                        ))
+                    if v:
+                        yield on, v, Usage(type=kind, label=f"{app}.{sid} · {attr}", deep_link=_screen_deep_link(app, sid))
                 # Column groups — a 1:1 related table edited inline and written back through the
                 # group's own update / insert / delete queries (``ColumnGroup``). Effective connector
                 # is the group's own, else the screen's. Integrity validates these (``_check_screens``);
@@ -603,64 +605,48 @@ def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
                 # ``f00921`` from ``f0092``'s columns) shows 0 references and looks safe to delete.
                 for grp in getattr(screen, "column_groups", None) or []:
                     g_conn = getattr(grp, "connector", None) or screen_conn
-                    if g_conn != connector:
-                        continue
                     for attr, kind in (
                         ("update_query", "column_group_update_query"),
                         ("insert_query", "column_group_insert_query"),
                         ("delete_query", "column_group_delete_query"),
                     ):
-                        if getattr(grp, attr, None) == query:
-                            out.append(Usage(
-                                type=kind,
-                                label=f"{app}.{sid} · group[{getattr(grp, 'id', '?')}].{attr}",
-                                deep_link=_screen_deep_link(app, sid),
-                            ))
+                        v = getattr(grp, attr, None)
+                        if v:
+                            yield g_conn, v, Usage(type=kind, label=f"{app}.{sid} · group[{getattr(grp, 'id', '?')}].{attr}",
+                                                   deep_link=_screen_deep_link(app, sid))
                 # Actions — run_query (`query`) + navigate (`to`).
                 for where, action in _iter_screen_actions(screen):
                     a_type = getattr(action, "type", None)
                     a_conn = getattr(action, "connector", None) or screen_conn
-                    if a_type == "run_query" and getattr(action, "query", None) == query and a_conn == connector:
-                        out.append(Usage(
-                            type="action_run_query",
-                            label=f"{app}.{sid} · {where} · run_query",
-                            deep_link=_screen_deep_link(app, sid),
-                        ))
-                    if a_type == "navigate" and getattr(action, "to", None) == query and a_conn == connector:
-                        out.append(Usage(
-                            type="action_navigate_to",
-                            label=f"{app}.{sid} · {where} · navigate to",
-                            deep_link=_screen_deep_link(app, sid),
-                        ))
+                    if a_type == "run_query" and getattr(action, "query", None):
+                        yield a_conn, action.query, Usage(type="action_run_query", label=f"{app}.{sid} · {where} · run_query",
+                                                          deep_link=_screen_deep_link(app, sid))
+                    if a_type == "navigate" and getattr(action, "to", None):
+                        yield a_conn, action.to, Usage(type="action_navigate_to", label=f"{app}.{sid} · {where} · navigate to",
+                                                       deep_link=_screen_deep_link(app, sid))
                 # Excel export sheets.
                 export = getattr(screen, "export", None)
                 if export is not None:
                     for sheet in getattr(export, "sheets", None) or []:
                         s_conn = getattr(sheet, "connector", None) or screen_conn
-                        if getattr(sheet, "query", None) == query and s_conn == connector:
-                            out.append(Usage(
-                                type="export_sheet_query",
-                                label=f"{app}.{sid} · export sheet",
-                                deep_link=_screen_deep_link(app, sid),
-                            ))
+                        if getattr(sheet, "query", None):
+                            yield s_conn, sheet.query, Usage(type="export_sheet_query", label=f"{app}.{sid} · export sheet",
+                                                             deep_link=_screen_deep_link(app, sid))
 
     # Shared actions (actions.toml) — a run_query / navigate step inside a reusable action.
     for aid, step in _iter_shared_action_steps(state):
         s_type = getattr(step, "type", None)
-        s_conn = getattr(step, "connector", None)
         # A shared-action step pins its own connector (it isn't tied to a screen); a None connector
         # is treated as a match so an unpinned step still surfaces rather than hiding silently.
-        conn_ok = s_conn == connector or s_conn is None
-        if s_type == "run_query" and getattr(step, "query", None) == query and conn_ok:
-            out.append(Usage(
-                type="action_run_query", label=f"action {aid} · run_query",
-                deep_link={"editor": "actions", "action": aid},
-            ))
-        if s_type == "navigate" and getattr(step, "to", None) == query and conn_ok:
-            out.append(Usage(
-                type="action_navigate_to", label=f"action {aid} · navigate to",
-                deep_link={"editor": "actions", "action": aid},
-            ))
+        s_conn = getattr(step, "connector", None)
+        if s_conn is None:
+            s_conn = _ANY_CONNECTOR
+        if s_type == "run_query" and getattr(step, "query", None):
+            yield s_conn, step.query, Usage(type="action_run_query", label=f"action {aid} · run_query",
+                                            deep_link={"editor": "actions", "action": aid})
+        if s_type == "navigate" and getattr(step, "to", None):
+            yield s_conn, step.to, Usage(type="action_navigate_to", label=f"action {aid} · navigate to",
+                                         deep_link={"editor": "actions", "action": aid})
 
     # Menus pointing at this query — a ``query`` leaf's ``target`` is a query name on the item's
     # connector (defaults to the menu app). This is how a menu opens a table view / screen, so a
@@ -672,15 +658,11 @@ def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
             for item in getattr(app_menu, "items", None) or []:
                 # A ``query`` leaf targets a query name directly. (A ``screen`` leaf targets a
                 # screen id, not a query — those surface under the screen's usages instead.)
-                if getattr(item, "type", None) != "query":
+                if getattr(item, "type", None) != "query" or not getattr(item, "target", None):
                     continue
-                item_conn = getattr(item, "connector", None) or menu_app
-                if getattr(item, "target", None) == query and item_conn == connector:
-                    out.append(Usage(
-                        type="menu_target_query",
-                        label=f"{menu_app} · {item.id} → {item.target}",
-                        deep_link=_menu_deep_link(menu_app, item.id),
-                    ))
+                yield (getattr(item, "connector", None) or menu_app), item.target, Usage(
+                    type="menu_target_query", label=f"{menu_app} · {item.id} → {item.target}",
+                    deep_link=_menu_deep_link(menu_app, item.id))
 
     # Lookups + sequences (within the connector's scope OR shared).
     dictionary = _get_dictionary(state)
@@ -689,39 +671,27 @@ def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
             # A lookup/sequence's `query` defaults to the section's connector when None.
             section_conn = None if s == "shared" else s
             for lk_id, lk in (section.get("lookups") or {}).items():
-                lk_conn = getattr(lk, "connector", None) or section_conn
-                if getattr(lk, "query", None) == query and lk_conn == connector:
-                    out.append(Usage(
-                        type="lookup_query",
-                        label=f"{s} · lookup {lk_id}",
-                        deep_link=_dict_deep_link("lookups", s, lk_id),
-                    ))
+                if getattr(lk, "query", None):
+                    yield (getattr(lk, "connector", None) or section_conn), lk.query, Usage(
+                        type="lookup_query", label=f"{s} · lookup {lk_id}", deep_link=_dict_deep_link("lookups", s, lk_id))
             for seq_id, seq in (section.get("sequences") or {}).items():
                 seq_conn = getattr(seq, "connector", None) or section_conn
-                if getattr(seq, "query", None) == query and seq_conn == connector:
-                    out.append(Usage(
-                        type="sequence_query",
-                        label=f"{s} · sequence {seq_id}",
-                        deep_link=_dict_deep_link("sequences", s, seq_id),
-                    ))
-                if getattr(seq, "previous_query", None) == query and seq_conn == connector:
-                    out.append(Usage(
-                        type="sequence_previous_query",
-                        label=f"{s} · sequence {seq_id} (previous_query)",
-                        deep_link=_dict_deep_link("sequences", s, seq_id),
-                    ))
+                if getattr(seq, "query", None):
+                    yield seq_conn, seq.query, Usage(type="sequence_query", label=f"{s} · sequence {seq_id}",
+                                                     deep_link=_dict_deep_link("sequences", s, seq_id))
+                if getattr(seq, "previous_query", None):
+                    yield seq_conn, seq.previous_query, Usage(type="sequence_previous_query",
+                                                              label=f"{s} · sequence {seq_id} (previous_query)",
+                                                              deep_link=_dict_deep_link("sequences", s, seq_id))
 
     # Charts + dashboards.
     charts = getattr(state, "charts", None)
     if charts is not None and hasattr(charts, "charts"):
         for scope_name, chart_map in (charts.charts or {}).items():
             for cid, chart in chart_map.items():
-                if getattr(chart, "connector", None) == connector and getattr(chart, "query", None) == query:
-                    out.append(Usage(
-                        type="chart_query",
-                        label=f"{scope_name} · chart {cid}",
-                        deep_link=_chart_deep_link(scope_name, cid),
-                    ))
+                if getattr(chart, "query", None):
+                    yield getattr(chart, "connector", None), chart.query, Usage(
+                        type="chart_query", label=f"{scope_name} · chart {cid}", deep_link=_chart_deep_link(scope_name, cid))
     dashboards = getattr(state, "dashboards", None)
     if dashboards is not None and hasattr(dashboards, "dashboards"):
         # dashboards.dashboards is { scope: { id: Dashboard } } in the scoped form.
@@ -731,23 +701,39 @@ def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
             for did, dash in dash_map.items():
                 dash_conn = getattr(dash, "connector", None)
                 for w in getattr(dash, "widgets", None) or []:
-                    w_conn = getattr(w, "connector", None) or dash_conn
-                    w_query = getattr(w, "query", None)
-                    if w_conn == connector and w_query == query:
-                        out.append(Usage(
+                    if getattr(w, "query", None):
+                        yield (getattr(w, "connector", None) or dash_conn), w.query, Usage(
                             type="dashboard_widget_query",
                             label=f"{scope_name} · dashboard {did} · {getattr(w, 'type', 'widget')}",
-                            deep_link=_dashboard_deep_link(did),
-                        ))
+                            deep_link=_dashboard_deep_link(did))
     # Jobs, Explorer models, notification rules, the assistant's playbooks.
     for ref in _iter_outside_refs(state):
-        if ref.connector == connector and ref.query == query:
-            out.append(Usage(type=_REF_QUERY_TYPE[ref.kind], label=ref.label, deep_link=ref.deep_link))
+        if ref.query:
+            yield ref.connector, ref.query, Usage(type=_REF_QUERY_TYPE[ref.kind], label=ref.label, deep_link=ref.deep_link)
+
+
+def _find_query_usages(state: Any, connector: str, query: str) -> list[Usage]:
+    """Find every reference to ``<connector>.<query>``."""
+    out = [usage for on, named, usage in _iter_query_refs(state) if named == query and on in (connector, _ANY_CONNECTOR)]
     # The dictionary scan's own queries, read by name.
     scan = _dictionary_scan_usage(connector, query)
     if scan is not None:
         out.append(scan)
     return out
+
+
+def unused_queries(state: Any, queries: Iterable[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Those of *queries* (``(connector, query)``) nothing references — what Find usages would call
+    "0 references" for each, from one walk of the configuration."""
+    used: set[tuple[str | None, str]] = set()
+    anywhere: set[str] = set()
+    for on, named, _usage in _iter_query_refs(state):
+        if on == _ANY_CONNECTOR:
+            anywhere.add(named)
+        else:
+            used.add((on, named))
+    return [(c, q) for c, q in queries
+            if (c, q) not in used and q not in anywhere and _dictionary_scan_usage(c, q) is None]
 
 
 # ── connector usages ─────────────────────────────────────────────────────────────────────

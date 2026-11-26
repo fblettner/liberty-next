@@ -20,6 +20,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import socket
+import uuid
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -54,10 +56,35 @@ def licence_key(settings: Settings) -> str:
     return key
 
 
+IDENTITY_FILE = ".installation"
+
+
+def installation_identity(folder: Path) -> str:
+    """This installation's own identity: a random value written once next to the accounts file,
+    read from then on — "" when the folder cannot be written (the caller falls back)."""
+    path = folder / IDENTITY_FILE
+    try:
+        kept = path.read_text(encoding="utf-8").strip()
+        if kept:
+            return kept
+    except OSError:
+        pass
+    made = uuid.uuid4().hex
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        path.write_text(made + "\n", encoding="utf-8")
+    except OSError as exc:
+        _log.warning("usage report: the installation's identity could not be kept in %s (%s)", path, exc)
+        return ""
+    return made
+
+
 def fingerprint(settings: Settings, connectors: Any) -> str:
     """Tells one installation from another without naming it: a short hash of where its accounts
     live — the auth pool's address (two servers on one database are one installation), or, for
-    the file backend, this host and the file's path."""
+    the file backend, an identity kept next to the file. Never the host name alone: in a
+    container it is the container's id, new at each upgrade, and the licence tool then saw a
+    new installation each time."""
     auth = settings.auth
     if auth.backend == "db":
         from sqlalchemy.engine import make_url
@@ -66,7 +93,8 @@ def fingerprint(settings: Settings, connectors: Any) -> str:
         url = make_url(cfg.url)
         where = f"{url.host or ''}:{url.port or ''}/{url.database or ''}"
     else:
-        where = f"{socket.gethostname()}|{auth.toml_path.resolve()}"
+        path = auth.toml_path.resolve()
+        where = installation_identity(path.parent) or f"{socket.gethostname()}|{path}"
     return hashlib.sha256(where.lower().encode("utf-8")).hexdigest()[:16]
 
 

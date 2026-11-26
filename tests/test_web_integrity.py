@@ -304,6 +304,23 @@ def test_query_used_only_by_a_shared_action_is_not_flagged_unused() -> None:
 
 # ── what the other files name: jobs, Explorer models, notification rules, the dictionary scan ──────────
 
+def test_the_one_walk_says_what_find_usages_says_query_by_query() -> None:
+    """The unused-query check reads the configuration once for every query; it must agree with Find
+    usages asked query by query — a step with no connector counting on every connector."""
+    from liberty.web.usages import _find_query_usages, unused_queries
+
+    state = _state(
+        conns={"jde": ["f0004_get", "helper_q", "anywhere_q", "left_over"], "other": ["anywhere_q", "f0004_get"]},
+        screens={"jde": {"f0004": {"connector": "jde", "read_query": "f0004_get"}}},
+        actions={"helper": {"steps": [{"type": "run_query", "id": "s1", "connector": "jde", "query": "helper_q"},
+                                      {"type": "run_query", "id": "s2", "query": "anywhere_q"}]}},
+    )
+    every = [("jde", "f0004_get"), ("jde", "helper_q"), ("jde", "anywhere_q"), ("jde", "left_over"),
+             ("other", "anywhere_q"), ("other", "f0004_get")]
+    assert unused_queries(state, every) == [pair for pair in every if not _find_query_usages(state, *pair)]
+    assert unused_queries(state, every) == [("jde", "left_over"), ("other", "f0004_get")]
+
+
 def _jobs(*jobs: dict):
     """A stand-in for the nomaflow components parked on ``app.state.jobs`` (only ``registry.jobs()`` is read)."""
     from liberty.jobs.schema import JobsFile

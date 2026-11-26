@@ -210,3 +210,21 @@ def test_the_apps_version_of_a_development_checkout(tmp_path) -> None:
     assert checkout_version(config) is None                                    # another project's folder is not the applications
     (config.parent / "pyproject.toml").write_text("not toml [")
     assert checkout_version(config) is None and checkout_version(None) is None
+
+
+def _file_backend(folder: Path) -> Settings:
+    return Settings(auth=AuthSettings(backend="toml", jwt_secret=JWT_SECRET, toml_path=folder / "auth.toml"))
+
+
+def test_the_fingerprint_survives_a_new_host_name(tmp_path, monkeypatch) -> None:
+    """In a container the host name is the container's id: an upgrade must not look like a new installation."""
+    s = _file_backend(tmp_path)
+    monkeypatch.setattr(usage.socket, "gethostname", lambda: "container-one")
+    first = usage.fingerprint(s, None)
+    monkeypatch.setattr(usage.socket, "gethostname", lambda: "container-two")
+    assert usage.fingerprint(s, None) == first
+    assert (tmp_path / usage.IDENTITY_FILE).read_text().strip()
+
+
+def test_two_installations_have_two_fingerprints(tmp_path) -> None:
+    assert usage.fingerprint(_file_backend(tmp_path / "a"), None) != usage.fingerprint(_file_backend(tmp_path / "b"), None)

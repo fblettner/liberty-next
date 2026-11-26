@@ -1,5 +1,20 @@
 # Liberty Next — Notes de version
 
+## 7.0.91 — unreleased
+
+- **Rapport d'utilisation de la licence : une mise à jour ne ressemble plus à une nouvelle installation.** Quand les comptes
+  sont tenus dans un fichier (le réglage par défaut), le rapport identifiait l'installation par son nom d'hôte — dans un
+  conteneur, l'identifiant du conteneur, qui change à chaque recréation. L'outil de licence affichait donc un nouvel
+  environnement après chaque mise à jour. L'installation garde désormais sa propre identité dans un fichier à côté du
+  fichier des comptes (`.installation`) et c'est elle qui est envoyée. Elle change une dernière fois à cette mise à
+  jour ; les lignes précédentes peuvent être supprimées dans l'outil de licence.
+
+- **La vue d'ensemble de Liberty s'ouvre plus vite.** Ses chiffres d'intégrité cherchaient les requêtes inutilisées en
+  relisant toute la configuration pour chaque requête — plus d'une seconde sur une installation complète avec un
+  processeur rapide, plusieurs sur un petit serveur. La configuration est maintenant lue une seule fois pour toutes :
+  environ un dixième de seconde pour la même réponse. *Rechercher les utilisations* et la page Intégrité s'appuient sur
+  la même lecture et disent exactement ce qu'elles disaient avant.
+
 ## 7.0.90 — 2026-11-25
 
 - **Pools : *Tester la connexion* fonctionne sur un annuaire LDAP.** Le test répondait *required argument is not an

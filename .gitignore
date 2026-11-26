@@ -52,6 +52,7 @@ config/.versions/
 # The kept documentation reports (liberty.docreport.archive) and the promotion history, same place
 config/.reports/
 config/.promotion/
+config/.installation
 
 # Working documents live in the private liberty-apps repo (docs/work/); a stray local copy here
 # must never reach this public repo

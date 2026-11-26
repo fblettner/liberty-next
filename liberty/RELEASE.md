@@ -1,5 +1,18 @@
 # Liberty Next — Release notes
 
+## 7.0.91 — unreleased
+
+- **Licence usage report: an upgrade no longer looks like a new installation.** Where the accounts are kept in a file
+  (the default), the report identified the installation by its host name — in a container, the container's id, which
+  changes each time it is recreated. The licence tool therefore listed a new environment after every upgrade. The
+  installation now keeps its own identity in a file next to the accounts file (`.installation`) and reports that. It
+  changes one last time at this upgrade; the earlier lines can be deleted in the licence tool.
+
+- **The Liberty overview opens faster.** Its integrity figures looked for unused queries by reading the whole
+  configuration again for each query — over a second on a full installation with a fast processor, several on a small
+  server. The configuration is now read once for all of them: about a tenth of a second for the same answer. *Find
+  usages* and the Integrity page use the same reading and say exactly what they said before.
+
 ## 7.0.90 — 2026-11-25
 
 - **Pools: *Test connection* works on an LDAP directory.** The test answered *required argument is not an integer*
