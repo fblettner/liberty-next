@@ -182,6 +182,11 @@ def _check_menus(state: Any, idx: _Index, out: list[Issue]) -> None:
             iid = getattr(it, "id", "?")
             label = getattr(it, "label", None) or iid
             link = _menu_deep_link(app, iid)
+            # the screens a page works through (``screens``) must exist: the entry gives their access
+            for sid in getattr(it, "screens", None) or []:
+                if sid not in idx.screens_by_app.get(app, set()):
+                    out.append(Issue("error", "Broken menu target",
+                                     f"{app} · \"{label}\" works through screen '{sid}', which does not exist", link))
             if itype in (None, "page", "dashboard"):
                 if itype == "dashboard" and target and target not in idx.dashboard_ids:
                     out.append(Issue("error", "Broken menu target",
@@ -605,6 +610,9 @@ def reached_screens(state: Any, idx: _Index | None = None) -> set[tuple[str, str
                 itype = getattr(it, "type", None)
                 conn = getattr(it, "connector", None) or app
                 target = getattr(it, "target", None)
+                # a page works through the screens it names: they are reached by it
+                for sid in getattr(it, "screens", None) or []:
+                    reached.add((app, sid))
                 if itype == "screen" and target:
                     reached.add((app, target))
                 elif itype == "query" and target:

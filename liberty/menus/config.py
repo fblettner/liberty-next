@@ -99,6 +99,16 @@ class MenuItem(BaseModel):
         # the names are offered from what the entry opens: a screen's filters, a query's parameters
         json_schema_extra={"x_group": "Advanced", "x_key_enum_ref": "MENU_TARGET_PARAMS"},
     )
+    screens: list[str] = Field(
+        default_factory=list,
+        title="Screens the page works through",
+        description=(
+            "For a page: the screens of this application it reads and saves through (their ids). Whoever is given "
+            "the entry is given those screens too — read, and change with the entry's change grant — and they "
+            "count as reached from the menu. Leave empty for a page that works through its own functions only."
+        ),
+        json_schema_extra={"x_group": "Advanced"},
+    )
     roles: list[str] = Field(
         default_factory=list,
         description="Restrict to these roles. Leave empty to show whenever the user can run the target.",

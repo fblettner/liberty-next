@@ -1019,6 +1019,9 @@ export function ResultTable({
   const initialVisibility = useMemo<VisibilityState>(() => {
     const v: VisibilityState = {}
     for (const c of result.columns) if (c.hidden) { v[c.name] = false; if (c.rule?.kind === 'lookup') v[`${c.name}__lookup`] = false }
+    // a lookup that hides its code (``hide_value``: an identifier nobody reads): the code column starts hidden — the
+    // label column stays; the code is still there in the column chooser and in an export of all columns
+    for (const c of result.columns) if (!c.hidden && c.rule?.kind === 'lookup' && c.rule.hide_value && !c.hide_label) v[c.name] = false
     return v
   }, [result.columns])
 

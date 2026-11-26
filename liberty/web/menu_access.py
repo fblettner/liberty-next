@@ -113,6 +113,11 @@ def build(state: Any) -> MenuAccess:
                 perm = page_permission(it.target)
                 if perm:
                     read.add(perm)
+                # a page that works through screens (``screens``): the entry gives what those screens need
+                for sid in getattr(it, "screens", None) or []:
+                    more_read, more_change = _walk(state, Seed("screen", sid, app), memo)
+                    read |= more_read
+                    change |= more_change
                 if it.target == EXPLORER_PAGE:
                     read.update(f"explorer:{app}:{m}" for m in _explorer_models(explorer, app))
             elif it.type != "url":

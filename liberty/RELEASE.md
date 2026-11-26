@@ -16,7 +16,14 @@
 - **Lookups: a dropdown can hide an unreadable code.** A lookup whose value is a generated identifier (a JD Edwards
   task id) listed that identifier first, in a wide column, with the name cut off beside it. The lookup's new setting
   *Hide the code* (Dictionary → Lookups) lists the label and the extra columns only, in the label's order — in the
-  record form, the grid's edit cells and the filters. The value saved is unchanged.
+  record form, the grid's edit cells and the filters — and the grid starts with the code column hidden (it stays in
+  the column chooser and in an export of all columns). The value saved is unchanged.
+
+- **Menus: a page can name the screens it works through.** A page an application ships may read and save through a
+  screen's own queries. Its menu entry can now list those screens (*Screens the page works through*, under Advanced):
+  whoever is given the entry is given what the screens need — read, and change with the entry's change grant — the
+  screens count as reached from the menu, *Find usages* lists the entry, and the integrity check says a screen that
+  does not exist.
 
 ## 7.0.90 — 2026-11-25
 

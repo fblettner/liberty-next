@@ -232,3 +232,14 @@ def test_the_answer_follows_a_reload() -> None:
     second = access_of(state)
     assert second is not first and list(second.needs) == [("shop", "stock")]
     assert build(state).needs == second.needs
+
+
+def test_a_page_gives_the_screens_it_works_through() -> None:
+    """A page an application ships may read and save through a screen: its entry names the screen, and
+    whoever is given the entry is given what that screen needs — read, and change with the change grant."""
+    menus = {"shop": {"label": "Shop", "items": [
+        {"id": "desk", "label": "Customer desk", "type": "page", "target": "/app/shop/desk", "screens": ["customers"]}]}}
+    state = _state()
+    state.menus = parse_menus({"menus": menus})
+    need = build(state).needs[("shop", "desk")]
+    assert need == {"read": ("page:shop:desk", "sql:shop:customers_get"), "change": ("sql:shop:customers_put",)}

@@ -931,6 +931,13 @@ def _find_screen_usages(state: Any, app: str, screen_id: str) -> list[Usage]:
                         label=f"{menu_app} · {item.id} → {target}",
                         deep_link=_menu_deep_link(menu_app, item.id),
                     ))
+                # a page that works through this screen (MenuItem.screens)
+                if menu_app == app and screen_id in (getattr(item, "screens", None) or []):
+                    out.append(Usage(
+                        type="menu_target_screen",
+                        label=f"{menu_app} · {item.id} works through {screen_id}",
+                        deep_link=_menu_deep_link(menu_app, item.id),
+                    ))
     # NestedTableTab.screen / NestedFormTab.form_screen — a parent screen embedding this one — and
     # navigate actions that pin this screen (NavigateAction.screen) so a drill opens it specifically.
     screens = getattr(state, "screens", None)

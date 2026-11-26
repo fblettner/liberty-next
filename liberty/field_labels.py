@@ -195,6 +195,7 @@ LABELS.update({
         "connector": ("Application", "The application that holds what is opened; blank for this one."),
         "target": ("Opens", "The screen, dashboard, job, page or address this entry opens."),
         "params": ("Fixed values", "Values given to what is opened, such as a filter already filled in."),
+        "screens": ("Screens the page works through", "For a page: the screens it reads and saves through; the entry gives their access too."),
         "roles": ("Only for the roles", "Show the entry to these roles only; blank shows it to whoever may open it."),
         "override": _KEEP,
     },

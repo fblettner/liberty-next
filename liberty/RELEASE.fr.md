@@ -19,7 +19,14 @@
   identifiant de tâche JD Edwards) affichait cet identifiant en premier, dans une large colonne, le nom tronqué à côté.
   Le nouveau réglage *Hide the code* de la recherche (Dictionnaire → Recherches) n'affiche que le libellé et les
   colonnes supplémentaires, triés sur le libellé — dans le formulaire, les cellules de la grille en modification et les
-  filtres. La valeur enregistrée ne change pas.
+  filtres — et la grille démarre avec la colonne du code masquée (elle reste dans le choix des colonnes et dans un
+  export de toutes les colonnes). La valeur enregistrée ne change pas.
+
+- **Menus : une page peut nommer les écrans par lesquels elle travaille.** Une page livrée par une application peut lire
+  et enregistrer par les requêtes d'un écran. Son entrée de menu peut maintenant lister ces écrans (*Screens the page
+  works through*, sous Advanced) : qui reçoit l'entrée reçoit ce dont les écrans ont besoin — la lecture, et la
+  modification avec le droit de modification de l'entrée — les écrans comptent comme atteints depuis le menu,
+  *Rechercher les utilisations* liste l'entrée, et le contrôle d'intégrité signale un écran qui n'existe pas.
 
 ## 7.0.90 — 2026-11-25
 

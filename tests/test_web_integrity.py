@@ -434,3 +434,19 @@ def test_a_playbook_that_names_a_query_nobody_has_is_an_error() -> None:
     assert errors == ["playbook 'nomaflow.investigate' tells the assistant to run query 'gone_get' (not a query of jde)",
                       "playbook 'nomaflow.investigate' tells the assistant to run query 'list_runs' (not a query of nomaflow)"]
     assert all(i.severity == "error" for i in check_integrity(state) if i.category == "Assistant playbook")
+
+
+def test_a_page_reaches_the_screens_it_works_through() -> None:
+    """A page that reads and saves through a screen names it on its menu entry: the screen is then
+    reached (no orphan warning), Find usages lists the entry, and a name that does not exist is said."""
+    from liberty.web.usages import find_usages
+
+    state = _state(
+        conns={"jde": ["f9006_get"]},
+        screens={"jde": {"f9006": {"connector": "jde", "read_query": "f9006_get"}}},
+        menus={"jde": {"items": [{"id": "filtering", "label": "Menu Filtering", "type": "page", "target": "/app/jde/security", "screens": ["f9006", "gone"]}]}},
+    )
+    issues = check_integrity(state)
+    assert not any(c[1] == "Orphan screen" for c in _cats(issues))
+    assert [i.message for i in issues if i.category == "Broken menu target"] == ['jde · "Menu Filtering" works through screen \'gone\', which does not exist']
+    assert [u.label for u in find_usages(state, kind="screen", name="f9006", scope="jde")] == ["jde · filtering works through f9006"]
