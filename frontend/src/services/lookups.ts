@@ -53,6 +53,7 @@ export function lookupOptions(
   data: LookupData,
   filter?: { column: string; value: string },
   displayFields?: string[],
+  hideValue?: boolean,
 ): { value: string; label: string; mono: string; cells?: string[] }[] {
   const colKey = filter ? (data.byColLower.get(filter.column.toLowerCase()) ?? filter.column) : undefined
   // Trim-tolerant cascade match: JDE pads / right-justifies UDC codes, so the dependent column
@@ -79,7 +80,9 @@ export function lookupOptions(
       : undefined
     // ``mono`` = the code column, ``label`` = the description, ``cells`` = display_fields. This is
     // the ONE option shape every picker (dialog / grid / column-filter / advanced-filter) renders.
-    out.push({ value: sv, label: base, mono: sv, cells })
+    // ``hideValue`` (the lookup's ``hide_value``): the code is an identifier nobody reads — no code
+    // column, so the line starts with its label and the list is ordered on it.
+    out.push({ value: sv, label: base, mono: hideValue ? '' : sv, cells })
   }
   return out
 }

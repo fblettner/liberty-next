@@ -13,6 +13,11 @@
   server. The configuration is now read once for all of them: about a tenth of a second for the same answer. *Find
   usages* and the Integrity page use the same reading and say exactly what they said before.
 
+- **Lookups: a dropdown can hide an unreadable code.** A lookup whose value is a generated identifier (a JD Edwards
+  task id) listed that identifier first, in a wide column, with the name cut off beside it. The lookup's new setting
+  *Hide the code* (Dictionary → Lookups) lists the label and the extra columns only, in the label's order — in the
+  record form, the grid's edit cells and the filters. The value saved is unchanged.
+
 ## 7.0.90 — 2026-11-25
 
 - **Pools: *Test connection* works on an LDAP directory.** The test answered *required argument is not an integer*

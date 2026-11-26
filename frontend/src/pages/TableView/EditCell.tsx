@@ -87,6 +87,7 @@ export function EditCell({
   if (ctrl === 'lookup' && column.rule?.kind === 'lookup') {
     const rule = column.rule
     const ready = !!lookupOptions
+    const hideValue = !!rule.hide_value
     // When the cell has active cascading deps (filter_from + same-row sibling values),
     // build options from the *filtered* lookup rows so the dropdown narrows. Otherwise
     // use the pre-projected value→label map directly — faster, no per-row scan.
@@ -132,7 +133,7 @@ export function EditCell({
           const l = r[labKey] ?? r[labKey.toLowerCase()] ?? r[labKey.toUpperCase()]
           return v == null
             ? null
-            : { value: String(v), label: l == null ? String(v) : String(l), mono: String(v), cells: cellsByCode?.get(String(v)) }
+            : { value: String(v), label: l == null ? String(v) : String(l), mono: hideValue ? '' : String(v), cells: cellsByCode?.get(String(v)) }
         })
         .filter((o): o is Opt => o !== null)
     } else if (ready && prebuiltOptions) {
@@ -140,7 +141,7 @@ export function EditCell({
       opts = prebuiltOptions
     } else if (ready) {
       opts = [...lookupOptions!.entries()]
-        .map(([value, label]) => ({ value, label, mono: value, cells: cellsByCode?.get(value) }))
+        .map(([value, label]) => ({ value, label, mono: hideValue ? '' : value, cells: cellsByCode?.get(value) }))
     } else {
       opts = []
     }

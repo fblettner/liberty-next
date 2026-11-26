@@ -46,6 +46,8 @@ export type DisplayRule =
       return_params?: string[]
       /** Extra result columns shown beside code + label in the dropdown (display only). */
       display_fields?: string[]
+      /** The value is an identifier nobody reads: the dropdown lists the label (and display fields) only. */
+      hide_value?: boolean
       /** Which display_fields get an in-dropdown facet-chip filter (subset of display_fields). */
       filter_fields?: string[]
       /** Multi-source union sources `{connector, query}` (primary first) — fetched per-connector and

@@ -324,6 +324,16 @@ class LookupDef(BaseModel):
         ),
         json_schema_extra={"x_group": "Target", "x_enum_ref": "LOOKUP_DD_FIELDS"},
     )
+    hide_value: bool = Field(
+        default=False,
+        title="Hide the value",
+        description=(
+            "The value is a technical identifier nobody reads (a generated id): the dropdown lists the "
+            "label and the display fields only, in the label's order. The value is still what is saved, "
+            "and typing it in the search still finds its line."
+        ),
+        json_schema_extra={"x_group": "Target"},
+    )
     filter_fields: list[str] = Field(
         default_factory=list,
         title="Filter fields",
@@ -564,6 +574,9 @@ class DictionaryFile(BaseModel):
             # ``display_fields`` — extra result columns shown beside code + label in the dropdown.
             if lk.display_fields:
                 wire["display_fields"] = list(lk.display_fields)
+            # ``hide_value`` — the value is an identifier nobody reads: the dropdown shows the label only.
+            if lk.hide_value:
+                wire["hide_value"] = True
             # ``filter_fields`` — which of those get an in-dropdown facet-chip filter.
             if lk.filter_fields:
                 wire["filter_fields"] = list(lk.filter_fields)

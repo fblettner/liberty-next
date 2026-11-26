@@ -146,7 +146,7 @@ export function FieldRow({
     widget = (
       <ReadOnlyBox aria-readonly>
         {textValue
-          ? <>{textValue}{opt && opt.label !== opt.value && <span style={{ color: colors.text.secondary }}> — {opt.label}</span>}</>
+          ? (effectiveRule.hide_value && opt ? <>{opt.label}</> : <>{textValue}{opt && opt.label !== opt.value && <span style={{ color: colors.text.secondary }}> — {opt.label}</span>}</>)
           : <span style={{ color: colors.text.muted }}>—</span>}
       </ReadOnlyBox>
     )
@@ -183,7 +183,7 @@ export function FieldRow({
       />
     )
   } else if (effectiveRule?.kind === 'lookup' && lookupSpec && !suppressLookup) {
-    const opts = lookupData ? lookupOptions(lookupData, undefined, effectiveRule.display_fields) : []
+    const opts = lookupData ? lookupOptions(lookupData, undefined, effectiveRule.display_fields, effectiveRule.hide_value) : []
     // Lookup pick handler — writes the picked value, then applies this field's ``return_binds``:
     // for each {param, column}, read the picked row's ``param`` column (case-insensitive) and fire
     // ``onLookupPick`` with a ``{targetColumn: value}`` map. The parent (ScreenDialog) writes each

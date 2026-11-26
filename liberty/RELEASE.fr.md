@@ -15,6 +15,12 @@
   environ un dixième de seconde pour la même réponse. *Rechercher les utilisations* et la page Intégrité s'appuient sur
   la même lecture et disent exactement ce qu'elles disaient avant.
 
+- **Recherches : une liste peut masquer un code illisible.** Une recherche dont la valeur est un identifiant généré (un
+  identifiant de tâche JD Edwards) affichait cet identifiant en premier, dans une large colonne, le nom tronqué à côté.
+  Le nouveau réglage *Hide the code* de la recherche (Dictionnaire → Recherches) n'affiche que le libellé et les
+  colonnes supplémentaires, triés sur le libellé — dans le formulaire, les cellules de la grille en modification et les
+  filtres. La valeur enregistrée ne change pas.
+
 ## 7.0.90 — 2026-11-25
 
 - **Pools : *Tester la connexion* fonctionne sur un annuaire LDAP.** Le test répondait *required argument is not an

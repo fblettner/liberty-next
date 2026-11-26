@@ -162,7 +162,7 @@ export function FilterPanel({ cols, values, onChange, onClearAll, autoLoad }: {
     const data = lookupTables.get(lookupKey({ connector: c.rule.connector, query: c.rule.query, value: c.rule.value, label: c.rule.label, params: c.rule.params, sources: c.rule.sources }))
     if (!data) return undefined
     const dep = c.filter_from?.find((d) => (values[d.source]?.val ?? '') !== '')
-    return lookupOptions(data, dep ? { column: dep.column, value: values[dep.source]!.val } : undefined, c.rule.display_fields)
+    return lookupOptions(data, dep ? { column: dep.column, value: values[dep.source]!.val } : undefined, c.rule.display_fields, c.rule.hide_value)
   }
   return (
     <Wrap>

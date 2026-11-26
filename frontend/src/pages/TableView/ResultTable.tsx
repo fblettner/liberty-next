@@ -621,9 +621,9 @@ export function ResultTable({
       let prebuiltOptions: LookupOpt[] | undefined
       if (ec.rule?.kind === 'lookup' && !narrowActive && lookupData && lookupSpecKey) {
         const df = ec.rule.display_fields
-        const ckey = `${lookupSpecKey}|${(df ?? []).join(',')}`
+        const ckey = `${lookupSpecKey}|${(df ?? []).join(',')}|${ec.rule.hide_value ? 'h' : ''}`
         let o = editOptsCache.get(ckey)
-        if (!o) { o = lookupOptions(lookupData, undefined, df); editOptsCache.set(ckey, o) }
+        if (!o) { o = lookupOptions(lookupData, undefined, df, ec.rule.hide_value); editOptsCache.set(ckey, o) }
         prebuiltOptions = o
       }
       return (
@@ -765,7 +765,7 @@ export function ResultTable({
           ? data.rows.map((row) => {
               const code = row[data.vKey] == null ? '' : String(row[data.vKey])
               const label = row[data.lKey] == null ? '' : String(row[data.lKey])
-              return { value: code, label: label || code, mono: code, cells: cellsOf(row) }
+              return { value: code, label: label || code, mono: r.hide_value ? '' : code, cells: cellsOf(row) }
             })
           : undefined
         const lookupOptsByLabel = data && data.rows

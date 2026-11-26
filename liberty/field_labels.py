@@ -158,6 +158,7 @@ LABELS: dict[str, dict[str, Label]] = {
         "key_columns": ("Key columns", "Other columns that tell two lines with the same code apart."),
         "return_params": ("Columns handed back", "Columns of the picked line that may fill other fields of the record."),
         "display_fields": ("Extra columns shown", "Other columns shown beside the code and the label in the dropdown."),
+        "hide_value": ("Hide the code", "The code is an identifier nobody reads: the dropdown lists the label only. It is still what is saved."),
         "filter_fields": ("Columns to filter on", "The extra columns offered as quick filters at the top of the dropdown."),
         "override": _KEEP,
     },
