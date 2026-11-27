@@ -33,6 +33,12 @@
   règles selon les valeurs, ses recherches, ses valeurs par défaut, son enregistrement — sans renvoyer l'utilisateur
   vers l'écran : `<Record app screen mode="add" values={…} onClose onSaved />`.
 
+- **Import : la liste de valeurs d'une ligne est la sienne.** Le contrôle de l'import demandait toute la liste de
+  valeurs d'une colonne quand cette liste est restreinte par d'autres colonnes de la ligne (une tâche enfant par sa vue
+  et son parent) : sur une grande table le contrôle ne finissait jamais. Une colonne de résultat dit désormais ce qui
+  restreint sa propre liste (`lookup_param_binds`), et le contrôle demande la liste de chaque ligne — comme le
+  formulaire.
+
 - **Intégrité : un connecteur qui sert, ou que les tests appellent, n'est pas « inutilisé ».** Un connecteur API que
   rien dans la configuration ne nomme était signalé inutilisé même quand un de ses points d'accès est servi par une
   fonction ou une action partagée (il est là pour être appelé de l'extérieur) ou qu'une suite de tests l'appelle. Les

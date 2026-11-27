@@ -2527,8 +2527,18 @@ def test_filter_period_reaches_the_column() -> None:
     d = _hint_to_dict(ColumnHint(name="check_date", format="date", filter=True, filter_period="last7"), DictionaryFile(), None)
     assert d["filter"] is True and d["filter_period"] == "last7"
     assert "filter_period" not in _hint_to_dict(ColumnHint(name="x", filter=True), DictionaryFile(), None)
+
     with pytest.raises(Exception):
         ColumnHint(name="x", filter_period="nextweek")
+
+
+def test_a_column_says_what_narrows_its_own_lookup() -> None:
+    """The base rule's lookup binds reach the page: the import's check asks for each row's own list (a child task by its
+    view and parent), never for the whole list."""
+    from liberty.connectors.sql import _hint_to_dict
+    hint = ColumnHint(name="CHILD", lookup_param_binds=[{"param": "VIEW", "source": "VIEW_ID"}, {"param": "KIND", "value": "T"}])
+    assert _hint_to_dict(hint, DictionaryFile(), None)["lookup_param_binds"] == [{"param": "VIEW", "source": "VIEW_ID"}, {"param": "KIND", "value": "T"}]
+    assert "lookup_param_binds" not in _hint_to_dict(ColumnHint(name="x"), DictionaryFile(), None)
 
 
 @pytest.mark.asyncio

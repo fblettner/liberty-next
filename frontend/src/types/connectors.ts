@@ -163,6 +163,9 @@ export interface Column {
    *  the sibling column ``column`` on the same row. Drives the grid bulk-edit + Excel import
    *  return-fill (explicit replacement for v1's auto-by-dd return-param mapping). */
   return_binds?: { param: string; column: string }[]
+  /** The BASE rule's lookup binds: what narrows this column's own lookup by the row's values (a `rules_when` entry
+   *  carries its own). The import's check resolves each row's list with them. */
+  lookup_param_binds?: { param: string; value?: string | null; source?: string | null }[]
   /** Conditional forced defaults: when sibling `field` == `value`, this column is set to `default`
    *  and locked (read-only). First matching rule wins. Honoured by the grid + dialog. */
   default_when?: { field: string; value: string | string[]; default: string; lock?: boolean }[]

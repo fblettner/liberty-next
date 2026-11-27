@@ -848,6 +848,10 @@ class Column:
     # on a pick, the picked row's ``param`` value is written into the row's ``column``. Drives the
     # grid bulk-edit + Excel import return-fill.
     return_binds: list[dict[str, str]] = field(default_factory=list)
+    # The BASE rule's lookup binds (``ColumnHint.lookup_param_binds``): what narrows the column's own lookup by the
+    # row (a child task by its view and parent). The import's check resolves each row's list with them — without, it
+    # would ask for the whole list.
+    lookup_param_binds: list[dict[str, Any]] = field(default_factory=list)
     # Conditional forced defaults (``ColumnHint.default_when``). Each ``{field, value, default}``:
     # when sibling ``field`` == ``value``, this column is forced to ``default`` and locked. Honoured
     # by the grid bulk-edit + the dialog.
@@ -911,6 +915,8 @@ class Column:
             d["visible_when"] = self.visible_when
         if self.return_binds:
             d["return_binds"] = self.return_binds
+        if self.lookup_param_binds:
+            d["lookup_param_binds"] = self.lookup_param_binds
         if self.default_when:
             d["default_when"] = self.default_when
         if self.hide_label:
@@ -3104,6 +3110,7 @@ def _resolve_hint(
         filter_from=[{"source": d.source, "column": d.column} for d in h.filter_from],
         visible_when=[r.as_dict() for r in h.visible_when_rules],
         return_binds=[{"param": b.param, "column": b.column} for b in h.return_binds],
+        lookup_param_binds=[b.model_dump(mode="json", exclude_none=True) for b in h.lookup_param_binds],
         default_when=[w.as_dict() for w in h.default_when],
         hide_label=h.hide_label,
         rules_when=[

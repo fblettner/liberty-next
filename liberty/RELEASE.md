@@ -30,6 +30,11 @@
   lookups, its defaults, its save — without sending the user to the screen:
   `<Record app screen mode="add" values={…} onClose onSaved />`.
 
+- **Import: a row's list of values is its own.** The import's check asked for a column's whole list of values when the
+  list is narrowed by other columns of the row (a child task by its view and its parent): on a large table the check
+  never ended. A result column now says what narrows its own lookup (`lookup_param_binds`), and the check asks for each
+  row's list — as the form does.
+
 - **Integrity: a connector that serves, or that the tests call, is not "unused".** An API connector nothing of the
   configuration names was reported as unused even when one of its endpoints is served by a function or a shared action
   (it is there to be called from outside) or when a test suite calls it. Both now count as a use.

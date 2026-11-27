@@ -51,7 +51,8 @@ export async function validateRow(columns: Column[], row: Record<string, unknown
     const aw = c.rules_when?.length ? activeRulesWhen(c.rules_when, row) : null
     const rule = aw ? (aw.rule ?? null) : (c.rule ?? null)
     if (rule?.kind === 'lookup') {
-      const s = spec(rule, aw ? aw.lookup_param_binds : undefined, row)
+      // this row's list: the rule's own binds, resolved on the row (the base rule's are the column's)
+      const s = spec(rule, aw ? aw.lookup_param_binds : c.lookup_param_binds, row)
       if (!s) continue
       let codes: Set<string>
       try {
