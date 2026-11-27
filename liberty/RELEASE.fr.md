@@ -1,6 +1,6 @@
 # Liberty Next — Notes de version
 
-## 7.0.91 — unreleased
+## 7.0.91 — 2026-11-27
 
 - **Licence : une application, l'autre, ou toutes.** Une clé de licence peut nommer les applications qu'elle couvre
   (sa liste `apps` — ce que vend une offre de l'outil de licences) ; une clé qui n'en nomme aucune les couvre

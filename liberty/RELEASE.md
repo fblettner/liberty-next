@@ -1,6 +1,6 @@
 # Liberty Next — Release notes
 
-## 7.0.91 — unreleased
+## 7.0.91 — 2026-11-27
 
 - **Licence: one application, another, or all.** A licence key may name the applications it covers (its `apps`
   list — what a plan of the licence tool sells); a key that names none covers every one, as before. An application

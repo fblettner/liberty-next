@@ -175,8 +175,9 @@ Nomana-IT's applications — **nomasx1** (JD Edwards security, segregation of du
 licence auditing), **nomajde** (JD Edwards administration) and **nomaflow** (the ETL and
 scheduler jobs) — are separate products: their connectors are flagged `licensed = true` and
 load only under a license key, set in Administer → App → License and checked with
-`liberty-license verify`. Without a key the framework runs with everything that is not
-licensed. Your own applications need no key.
+`liberty-license verify`. A key covers one application, another, or all of them: nothing of an
+application it does not cover is offered (menu, pages, jobs). Without a key the framework runs
+with everything that is not licensed. Your own applications need no key.
 
 ## Operating it
 
