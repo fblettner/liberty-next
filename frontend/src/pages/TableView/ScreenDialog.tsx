@@ -471,13 +471,18 @@ export function ScreenDialog({
     onLoadFiredRef.current = true
     if (actions.length === 0) return
     void (async () => {
-      const ctx: Row = { ...savedRow, ...formValues }
+      // The record the form opened on is part of what the actions see even before the seeding above has
+      // reached the state (both effects run on the same render): without it an action that asks "is
+      // this field empty?" answered yes on a record being EDITED — and replaced its key with a new one.
+      // Not after Duplicate: the form then holds a new record, its key dropped.
+      const opened: Row = mode === 'add' || duplicating ? {} : (row ?? {})
+      const ctx: Row = { ...opened, ...savedRow, ...formValues }
       const result = await runOnSaveActions(actions, ctx)
       if (!result.ok) setActionStatus({ message: result.error || t('dialog.onLoadFailed'), tone: 'error' })
       else if (result.errors.length > 0) setActionStatus({ message: result.errors.join(' · '), tone: 'error' })
       if (result.refresh) onSaved()
     })()
-  }, [open, dlg, formValues, savedRow, runOnSaveActions, onSaved, t])
+  }, [open, dlg, formValues, savedRow, runOnSaveActions, onSaved, t, mode, duplicating, row])
 
   // Dirty tracking — true when any field's current value differs from the seeded original.
   // Compared as strings so a number-typed input that the user typed identical to the saved

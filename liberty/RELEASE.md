@@ -4,7 +4,9 @@
 
 - **A form's opening actions run again on Duplicate.** *Duplicate* turns the record into a new one in the same
   form; the actions set to run when the form opens (`on_load`) now run for that copy too — so a value they fetch for a
-  new record (an identifier asked of another system) is fetched again instead of being left blank.
+  new record (an identifier asked of another system) is fetched again instead of being left blank. And when the
+  form opens on an existing record, those actions now see that record's values from the start: an action that tests
+  whether a field is empty no longer answers yes on a record being edited.
 
 - **Lists: a long one opens as a table, and a parameter can have one.** Every dropdown whose list is long (40 lines
   or more) or has several columns now ends with *Open as a table*: a dialog with the code, the description and each
