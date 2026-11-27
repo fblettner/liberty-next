@@ -1,6 +1,6 @@
 # Liberty Next — Notes de version
 
-## 7.0.93 — unreleased
+## 7.0.93 — 2026-11-27
 
 - **Un nom de schéma que la base n'a pas à définir.** Un connecteur peut déclarer un nom de schéma facultatif
   (*Noms de schéma facultatifs*, `schema_defaults` : `UDO_SEC = "SY"`) : `#SCHEMA.UDO_SEC#` vaut alors le `UDO_SEC`

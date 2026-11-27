@@ -1,6 +1,6 @@
 # Liberty Next — Release notes
 
-## 7.0.93 — unreleased
+## 7.0.93 — 2026-11-27
 
 - **A schema name the database need not define.** A connector can declare a schema name as optional
   (*Optional schema names*, `schema_defaults`: `UDO_SEC = "SY"`): `#SCHEMA.UDO_SEC#` is then the pool's `UDO_SEC`
