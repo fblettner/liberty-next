@@ -2,6 +2,10 @@
 
 ## 7.0.91 — unreleased
 
+- **A form's opening actions run again on Duplicate.** *Duplicate* turns the record into a new one in the same
+  form; the actions set to run when the form opens (`on_load`) now run for that copy too — so a value they fetch for a
+  new record (an identifier asked of another system) is fetched again instead of being left blank.
+
 - **Lists: a long one opens as a table, and a parameter can have one.** Every dropdown whose list is long (40 lines
   or more) or has several columns now ends with *Open as a table*: a dialog with the code, the description and each
   column under its heading, the same search and filter chips, and room to read — on every screen, form, filter and

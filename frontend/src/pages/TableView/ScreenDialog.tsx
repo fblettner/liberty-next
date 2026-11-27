@@ -425,8 +425,9 @@ export function ScreenDialog({
   // of a per-tab button click; ``actionBusy`` tracks the firing button to show a spinner.
   const [actionStatus, setActionStatus] = useState<{ message: string; tone: 'ok' | 'error' } | null>(null)
   const [actionBusy, setActionBusy] = useState<string | null>(null)
-  // ``on_load`` fires once per open session — after seeding completes. The ref gates against
-  // refiring on every formValues change while the dialog stays open.
+  // ``on_load`` fires once per record the form opens on — after seeding completes — and again when
+  // Duplicate turns it into a new record. The ref gates against refiring on every formValues change
+  // while the dialog stays open.
   const onLoadFiredRef = useRef(false)
   useEffect(() => { if (!open) onLoadFiredRef.current = false }, [open])
   const fireTabAction = useCallback(async (a: Action) => {
@@ -559,6 +560,9 @@ export function ScreenDialog({
     })
     setSavedRow({})
     seededRef.current = {}   // editable (lock=false) defaults seed again on the copy, as on an Add
+    // the form now holds a NEW record: its opening actions run again, as when a form opens to add
+    // (an identifier an action asks an outside system for is asked for the copy too)
+    onLoadFiredRef.current = false
     setError(null)
     setDuplicating(true)
   }, [keyColumnSet])

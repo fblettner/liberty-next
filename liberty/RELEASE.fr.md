@@ -2,6 +2,11 @@
 
 ## 7.0.91 — unreleased
 
+- **Les actions d'ouverture d'un formulaire s'exécutent aussi après Dupliquer.** *Dupliquer* transforme
+  l'enregistrement en un nouveau dans le même formulaire ; les actions prévues à l'ouverture (`on_load`) s'exécutent
+  maintenant pour cette copie — une valeur qu'elles vont chercher pour un nouvel enregistrement (un identifiant
+  demandé à un autre système) est redemandée au lieu de rester vide.
+
 - **Listes : une longue s'ouvre en tableau, et un paramètre peut en avoir une.** Toute liste déroulante longue
   (40 lignes ou plus) ou à plusieurs colonnes se termine par *Ouvrir en tableau* : une fenêtre avec le code, la
   description et chaque colonne sous son en-tête, la même recherche et les mêmes filtres, et la place de lire — sur
