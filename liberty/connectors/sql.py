@@ -1135,6 +1135,27 @@ class SQLConnector:
             return frozenset()
         return frozenset(str(w).lower() for w in words)
 
+    def _with_defaults(self, mapped: dict[str, str]) -> dict[str, str]:
+        """*mapped* (the pool's schemas, or its database links) with the names this connector declares optional
+        (``schema_defaults``): a name the pool leaves out — or blank — takes the pool's value of the other name."""
+        defaults = getattr(self.config, "schema_defaults", None) or {}
+        if not defaults:
+            return mapped
+        upper = {str(k).upper(): v for k, v in mapped.items()}
+        out = dict(mapped)
+        for name, other in defaults.items():
+            if not str(upper.get(str(name).upper()) or "").strip() and str(upper.get(str(other).upper()) or "").strip():
+                out[str(name).upper()] = upper[str(other).upper()]
+        return out
+
+    def schemas(self) -> dict[str, str]:
+        """The pool's ``#SCHEMA.<NAME>#`` names as this connector reads them — its optional names filled in."""
+        return self._with_defaults(self._pools.schemas(self.pool_name))
+
+    def dblinks(self) -> dict[str, str]:
+        """The pool's ``#DBLINK.<NAME>#`` links as this connector reads them — its optional names filled in."""
+        return self._with_defaults(self._pools.dblinks(self.pool_name))
+
     def _resolve_dialect(self) -> str:
         if self._dialect is None:
             self._dialect = self._pools.dialect(self.pool_name)  # may raise UnknownPoolError
@@ -2115,11 +2136,11 @@ class SQLConnector:
                 )
                 continue
             seq_sql = _apply_schema_placeholders(
-                seq_qdef.sql_for(self._resolve_dialect()), self._pools.schemas(self.pool_name),
+                seq_qdef.sql_for(self._resolve_dialect()), self.schemas(),
                 connector=self.name, query=seq_qdef.name, pool=self.pool_name,
             )
             seq_sql = _apply_dblink_placeholders(
-                seq_sql, self._pools.dblinks(self.pool_name),
+                seq_sql, self.dblinks(),
                 connector=self.name, query=seq_qdef.name, pool=self.pool_name,
             )
             # The column's configured param binds (``lookup_param_binds`` — the SAME field a lookup
@@ -2242,11 +2263,11 @@ class SQLConnector:
         qdef = self.get_query(query_name)
         cap = self._row_cap(qdef, max_rows, screen_max_rows)
         sql_text = _apply_schema_placeholders(
-            qdef.sql_for(self._resolve_dialect()), self._pools.schemas(self.pool_name),
+            qdef.sql_for(self._resolve_dialect()), self.schemas(),
             connector=self.name, query=query_name, pool=self.pool_name,
         )
         sql_text = _apply_dblink_placeholders(
-            sql_text, self._pools.dblinks(self.pool_name),
+            sql_text, self.dblinks(),
             connector=self.name, query=query_name, pool=self.pool_name,
         )
         stmt_type = detect_statement_type(sql_text)
@@ -2631,11 +2652,11 @@ class SQLConnector:
         cap = self._row_cap(qdef, max_rows, screen_max_rows)
         chunk = max(1, min(int(chunk_size or self.DEFAULT_CHUNK_SIZE), self.MAX_CHUNK_SIZE))
         sql_text = _apply_schema_placeholders(
-            qdef.sql_for(self._resolve_dialect()), self._pools.schemas(self.pool_name),
+            qdef.sql_for(self._resolve_dialect()), self.schemas(),
             connector=self.name, query=query_name, pool=self.pool_name,
         )
         sql_text = _apply_dblink_placeholders(
-            sql_text, self._pools.dblinks(self.pool_name),
+            sql_text, self.dblinks(),
             connector=self.name, query=query_name, pool=self.pool_name,
         )
         stmt_type = detect_statement_type(sql_text)
@@ -2748,11 +2769,11 @@ class SQLConnector:
         engine builds its joins and aggregates on top of these."""
         qdef = self.get_query(query_name)
         sql_text = _apply_schema_placeholders(
-            qdef.sql_for(self._resolve_dialect()), self._pools.schemas(self.pool_name),
+            qdef.sql_for(self._resolve_dialect()), self.schemas(),
             connector=self.name, query=query_name, pool=self.pool_name,
         )
         sql_text = _apply_dblink_placeholders(
-            sql_text, self._pools.dblinks(self.pool_name),
+            sql_text, self.dblinks(),
             connector=self.name, query=query_name, pool=self.pool_name,
         )
         if detect_statement_type(sql_text) != "SELECT":
@@ -2814,11 +2835,11 @@ class SQLConnector:
         field is the literal ``"<test-run>"`` so the result is obviously not a named query.
         """
         sql_text = _apply_schema_placeholders(
-            sql_text, self._pools.schemas(self.pool_name),
+            sql_text, self.schemas(),
             connector=self.name, query="<test-run>", pool=self.pool_name,
         )
         sql_text = _apply_dblink_placeholders(
-            sql_text, self._pools.dblinks(self.pool_name),
+            sql_text, self.dblinks(),
             connector=self.name, query="<test-run>", pool=self.pool_name,
         )
         stmt_type = detect_statement_type(sql_text)

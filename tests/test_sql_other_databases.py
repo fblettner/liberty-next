@@ -70,3 +70,30 @@ def test_sql_server_and_db2_get_their_own_words() -> None:
         days = _compiled(dialect, "days(FROM_DAY, TO_DAY)")
         assert days.startswith("(DAYS(CASE WHEN e.TO_DAY > 0 THEN DATE(DAYS(DATE(") and "TO_DATE" not in days and "AS TEXT" not in days
         assert _compiled(dialect, "month(FROM_DAY)").startswith("EXTRACT(MONTH FROM CASE WHEN e.FROM_DAY > 0")
+
+
+# ── a schema name the pool need not define ──
+def test_an_optional_schema_name_takes_another_one_unless_the_pool_sets_it(tmp_path) -> None:
+    from liberty.connectors import load_connectors
+
+    def registry(schemas: str, links: str = "") -> object:
+        p = tmp_path / "connectors.toml"
+        p.write_text(f"""
+[pools.default]
+url = "sqlite+aiosqlite://"
+schemas = {{ {schemas} }}
+dblinks = {{ {links} }}
+
+[connectors.app]
+type = "sql"
+pool = "default"
+schema_defaults = {{ UDO_SEC = "SY" }}
+""")
+        return load_connectors(p).get("app")
+
+    usual = registry('SY = "SY920"', 'SY = "@PROD"')
+    assert usual.schemas()["UDO_SEC"] == "SY920" and usual.dblinks()["UDO_SEC"] == "@PROD"
+    elsewhere = registry('SY = "SY910", UDO_SEC = "SY920"')
+    assert elsewhere.schemas()["UDO_SEC"] == "SY920" and elsewhere.schemas()["SY"] == "SY910" and "UDO_SEC" not in elsewhere.dblinks()
+    blank = registry('SY = "SY920", UDO_SEC = ""')
+    assert blank.schemas()["UDO_SEC"] == "SY920"

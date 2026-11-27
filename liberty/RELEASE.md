@@ -1,5 +1,13 @@
 # Liberty Next — Release notes
 
+## 7.0.93 — unreleased
+
+- **A schema name the database need not define.** A connector can declare a schema name as optional
+  (*Optional schema names*, `schema_defaults`: `UDO_SEC = "SY"`): `#SCHEMA.UDO_SEC#` is then the pool's `UDO_SEC`
+  when the pool sets one, and its `SY` otherwise — the database links follow the same rule. For a table that sits
+  in its usual library on most installations and elsewhere on a few: the queries name it once, and only the
+  installation that differs adds a line to its pool.
+
 ## 7.0.92 — 2026-11-27
 
 - **A screen's heading is the screen's.** The title of a data screen came from the description of the query's table

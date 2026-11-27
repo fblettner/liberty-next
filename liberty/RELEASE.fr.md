@@ -1,5 +1,13 @@
 # Liberty Next — Notes de version
 
+## 7.0.93 — unreleased
+
+- **Un nom de schéma que la base n'a pas à définir.** Un connecteur peut déclarer un nom de schéma facultatif
+  (*Noms de schéma facultatifs*, `schema_defaults` : `UDO_SEC = "SY"`) : `#SCHEMA.UDO_SEC#` vaut alors le `UDO_SEC`
+  du pool quand le pool en définit un, et son `SY` sinon — les liens de base suivent la même règle. Pour une table
+  qui se trouve dans sa bibliothèque habituelle sur la plupart des installations et ailleurs sur quelques-unes :
+  les requêtes la nomment une fois, et seule l'installation qui diffère ajoute une ligne à son pool.
+
 ## 7.0.92 — 2026-11-27
 
 - **L'en-tête d'un écran est celui de l'écran.** Le titre d'un écran de données venait de la description de la table

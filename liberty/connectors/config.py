@@ -912,6 +912,15 @@ class SqlConnectorConfig(BaseModel):
         json_schema_extra={"x_enum_ref": "CONNECTOR_NAMES"},
     )
     max_rows: int | None = Field(default=None, description="Default SELECT row cap. Falls back to the pool's, then 1000. A per-screen / per-request cap takes precedence.")
+    schema_defaults: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Schema names that are optional in the pool: a name the pool does not map takes the pool's mapping of "
+            "another one (`UDO_SEC = \"SY\"`: `#SCHEMA.UDO_SEC#` is the pool's `UDO_SEC` when it sets one, else its "
+            "`SY`). The same holds for the database links. For a table that sits in its usual library on most "
+            "installations and elsewhere on a few."
+        ),
+    )
     dd_prefix: int = Field(
         default=0, ge=0, le=4,
         description=(

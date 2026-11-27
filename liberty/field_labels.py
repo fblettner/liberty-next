@@ -67,6 +67,7 @@ LABELS: dict[str, dict[str, Label]] = {
         "licensed": ("Needs a licence", "The application is loaded only when the installation holds a valid licence key."),
         "applications": ("Serves the applications", "The licensed applications this connector serves: it is loaded when the licence covers one of them. Empty: it stands alone."),
         "max_rows": ("Rows read at most", "How many rows a screen of this application reads unless it says otherwise."),
+        "schema_defaults": ("Optional schema names", "A schema name the database need not define: it then takes the value of another one (UDO_SEC = SY)."),
         "dd_prefix": ("Column prefix length", "How many leading characters of a column name are the table's prefix; 0 for none."),
         "show_in_switcher": ("Show in the application list", "Offer this application in the list at the top of the menu."),
         "home": ("Home page", "The menu entry opened when the application is picked."),
