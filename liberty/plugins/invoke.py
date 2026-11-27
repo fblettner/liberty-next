@@ -95,8 +95,49 @@ def build_kwargs(
         if value is None:
             continue
         if accepts_kwargs or name in params:
-            kwargs.setdefault(name, value)
+            kwargs.setdefault(name, following_pool(value) if name == "connectors" else value)
     return kwargs
+
+
+class _PoolFollowing:
+    """The connector registry as an application's function sees it: a SQL connector that runs on several databases
+    (one per environment) is handed bound to the environment of the moment — the pool picked on the page
+    (``X-Liberty-Pool``) or named by the job step — as the screens' queries and the API connectors already are.
+    A pool that is not one of the connector's leaves it on its main database. Everything else is the registry's."""
+
+    def __init__(self, registry: Any) -> None:
+        self._registry = registry
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._registry, name)
+
+    def __contains__(self, name: object) -> bool:
+        return name in self._registry
+
+    def __len__(self) -> int:
+        return len(self._registry)
+
+    def _bound(self, conn: Any) -> Any:
+        from liberty.connectors.api import current_pool
+
+        pool = current_pool.get()
+        if pool and pool in (getattr(conn, "allowed_pools", None) or ()) and hasattr(conn, "for_pool") and hasattr(conn, "run_select"):
+            return conn.for_pool(pool)
+        return conn
+
+    def get(self, name: str) -> Any:
+        return self._bound(self._registry.get(name))
+
+    def sql(self, name: str) -> Any:
+        return self._bound(self._registry.sql(name))
+
+
+def following_pool(registry: Any) -> Any:
+    """*registry* as a function is handed it (see :class:`_PoolFollowing`); anything that is not a connector
+    registry — a test's stand-in — is handed back as it is."""
+    from liberty.connectors import ConnectorRegistry
+
+    return _PoolFollowing(registry) if isinstance(registry, ConnectorRegistry) else registry
 
 
 async def call_target(target: Callable[..., Any], kwargs: dict[str, Any]) -> Any:

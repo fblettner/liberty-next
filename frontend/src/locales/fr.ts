@@ -309,6 +309,7 @@ const fr: Resources = {
   lookupDialog: { title: 'Choisir dans la liste', open: 'Ouvrir en tableau', code: 'Code', label: 'Description', count: '{{n}} sur {{total}}' },
   paramInput: { pickFirst: "choisissez d'abord {{name}}" },
   common: {
+    poolDefault: 'Défaut',
     callablePick: 'Choisir une fonction…',
     callableUnknown: 'absente des fonctions livrées par les applications : vérifiez le nom',
     otherLanguages: 'Dans les autres langues',

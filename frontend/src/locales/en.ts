@@ -307,6 +307,7 @@ const en = {
   lookupDialog: { title: 'Choose in the list', open: 'Open as a table', code: 'Code', label: 'Description', count: '{{n}} of {{total}}' },
   paramInput: { pickFirst: 'pick {{name}} first' },
   common: {
+    poolDefault: 'Default',
     callablePick: 'Pick a function…',
     callableUnknown: 'not among the functions the applications ship: check the name',
     otherLanguages: 'In the other languages',

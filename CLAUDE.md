@@ -211,7 +211,8 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           (notifications.toml: screen | job | action triggers, `when` on the row),
                           events.py (fire_screen_event from the write route, fire_job_event from the
                           runner's on_finished hook, fire_action_rule from `send_notification`)
-  plugins/invoke.py       module:function resolution for the apps' Python (allow-listed)
+  plugins/invoke.py       module:function resolution for the apps' Python (allow-listed); a function is handed the registry FOLLOWING THE POOL of the
+                          moment (`following_pool`: a multi-pool SQL connector bound to `current_pool` — the page's X-Liberty-Pool or the job step's)
   config_merge.py         per-entity additive merge of a shipped config into the live one (the apps
                           installer + Package & Deploy): override / untouched-vs-.bundled snapshot /
                           custom / withdrawn rules, secrets always from the live connectors.toml; a menu takes the

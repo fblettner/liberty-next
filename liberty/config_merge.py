@@ -246,14 +246,17 @@ def restore_blanked(node: Any, live: Any) -> int:
 # pool (AIS per JDE environment) — and the server pool it names belong to the install, like the
 # pools: the live one is kept whatever the wheel ships, and it never makes a vendor connector look changed.
 _API_INSTALL_KEYS = ("pool", "targets", "server")
+# The same for a SQL connector: the database it runs on and the other databases a user may switch to (one per
+# JD Edwards environment) are the installation's choice, never the shipment's.
+_SQL_INSTALL_KEYS = ("pool", "pools")
 
 
 def _with_live_secrets(value: Any, live: Any) -> tuple[Any, int]:
     """A copy of *value* with the blanks filled from *live* + how many were filled (and, on an API
     connector, *live*'s environment binding)."""
     copy = json.loads(json.dumps(value, default=str))
-    if isinstance(copy, dict) and isinstance(live, dict) and copy.get("type") == "api":
-        for k in _API_INSTALL_KEYS:
+    if isinstance(copy, dict) and isinstance(live, dict) and copy.get("type") in ("api", "sql"):
+        for k in (_API_INSTALL_KEYS if copy.get("type") == "api" else _SQL_INSTALL_KEYS):
             if k in live:
                 copy[k] = live[k]
     return copy, restore_blanked(copy, live)

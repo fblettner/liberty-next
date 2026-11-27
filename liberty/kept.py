@@ -70,8 +70,17 @@ def scope_of(principal: Any) -> list[Any]:
 
 
 def answer_key(ref: str, params: dict[str, Any], scope: list[Any] | None = None) -> str:
-    """What names a kept answer: the function, its parameters (their order does not matter) and the scope."""
-    said = json.dumps({"callable": ref, "params": {k: _plain(v) for k, v in params.items() if v is not None}, "scope": scope or []},
+    """What names a kept answer: the function, its parameters (their order does not matter), the scope — and the
+    environment (pool) picked for the page or named by the job step, when there is one: a function reads the
+    database of that environment, so one environment's answer is never another's. Nothing picked (the main
+    database) names the answer as it always was."""
+    from liberty.connectors.api import current_pool
+
+    named = {"callable": ref, "params": {k: _plain(v) for k, v in params.items() if v is not None}, "scope": scope or []}
+    pool = (current_pool.get() or "").strip()
+    if pool:
+        named["pool"] = pool
+    said = json.dumps(named,
                       sort_keys=True, default=str, ensure_ascii=False)
     return hashlib.sha256(said.encode("utf-8")).hexdigest()
 

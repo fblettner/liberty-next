@@ -21,6 +21,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, setConnectorPools, setCurrentPool as setClientPool } from '../api/client'
+import { mainPoolOf } from '../services/pools'
 import type { ConnectorMeta } from '../types/connectors'
 import type { AppMenuTree, MenusByApp } from '../types/menus'
 import type { ScreenListItem, ScreensByApp, SharedAction } from '../types/screens'
@@ -81,6 +82,8 @@ interface WorkspaceState {
   /** The pools the current app can run against (union of the >1-pool connectors its screens use).
    *  Empty ⇒ no picker (single-pool). */
   currentPoolOptions: string[]
+  /** The main database of those connectors (what runs when no pool is picked) when they share one; else null. */
+  currentMainPool: string | null
   /** The pool picked for the current app (persisted per app); null = each connector's default.
    *  Sent as `X-Liberty-Pool` on every SQL call. */
   currentPool: string | null
@@ -258,14 +261,24 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
     return [...pools].sort()
   }, [currentApp, connectors, screens])
+  // The database those connectors run on when nothing is picked — named in the picker in place of "Default"
+  // when they all agree on it (connectors with different main databases keep the word).
+  const currentMainPool = useMemo<string | null>(() => {
+    if (!currentApp || !connectors) return null
+    const used = new Set<string>([currentApp])
+    for (const s of (screens?.[currentApp] ?? [])) used.add(s.connector)
+    return mainPoolOf(connectors.filter((c) => used.has(c.name)))
+  }, [currentApp, connectors, screens])
 
   // The picked pool for the current app — only honoured when it's still a valid option (a stale
   // localStorage pick for a since-removed pool falls back to the default).
   const currentPool = useMemo<string | null>(() => {
     if (!currentApp) return null
     const picked = poolByApp[currentApp]
-    return picked && currentPoolOptions.includes(picked) ? picked : null
-  }, [currentApp, poolByApp, currentPoolOptions])
+    // the main database is "nothing picked": no header is sent for it, so what is kept or prepared without a
+    // pool (a job's reading) is what the page gets
+    return picked && picked !== currentMainPool && currentPoolOptions.includes(picked) ? picked : null
+  }, [currentApp, poolByApp, currentPoolOptions, currentMainPool])
 
   const setCurrentPool = useCallback((pool: string | null) => {
     if (!currentApp) return
@@ -333,8 +346,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   )
 
   const value = useMemo<WorkspaceState>(
-    () => ({ connectors, apps, menus, screens, dashboards, sharedActions, explorerModels, license, error, currentApp, currentMenu, setCurrentApp, libertyMenu, lastApp, focusApp, currentPoolOptions, currentPool, setCurrentPool, refresh, findScreen, findScreenById, appSwitches }),
-    [connectors, apps, menus, screens, dashboards, sharedActions, explorerModels, license, error, currentApp, currentMenu, setCurrentApp, libertyMenu, lastApp, focusApp, currentPoolOptions, currentPool, setCurrentPool, refresh, findScreen, findScreenById, appSwitches],
+    () => ({ connectors, apps, menus, screens, dashboards, sharedActions, explorerModels, license, error, currentMainPool, currentApp, currentMenu, setCurrentApp, libertyMenu, lastApp, focusApp, currentPoolOptions, currentPool, setCurrentPool, refresh, findScreen, findScreenById, appSwitches }),
+    [connectors, apps, menus, screens, dashboards, sharedActions, explorerModels, license, error, currentMainPool, currentApp, currentMenu, setCurrentApp, libertyMenu, lastApp, focusApp, currentPoolOptions, currentPool, setCurrentPool, refresh, findScreen, findScreenById, appSwitches],
   )
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
 }

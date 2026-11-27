@@ -97,3 +97,54 @@ schema_defaults = {{ UDO_SEC = "SY" }}
     assert elsewhere.schemas()["UDO_SEC"] == "SY920" and elsewhere.schemas()["SY"] == "SY910" and "UDO_SEC" not in elsewhere.dblinks()
     blank = registry('SY = "SY920", UDO_SEC = ""')
     assert blank.schemas()["UDO_SEC"] == "SY920"
+
+
+# ── an application's function reads the environment picked on the page ──
+def test_a_function_is_handed_the_connector_of_the_pool_of_the_moment(tmp_path) -> None:
+    import liberty.jobs  # noqa: F401 — the package that completes liberty.plugins.invoke's imports, as the server loads it
+    from liberty.connectors import load_connectors
+    from liberty.connectors.api import current_pool
+    from liberty.kept import answer_key
+    from liberty.plugins.invoke import build_kwargs
+
+    p = tmp_path / "connectors.toml"
+    p.write_text("""
+[pools.prod]
+url = "sqlite+aiosqlite://"
+[pools.test]
+url = "sqlite+aiosqlite://"
+[pools.other]
+url = "sqlite+aiosqlite://"
+
+[connectors.erp]
+type = "sql"
+pool = "prod"
+pools = ["test"]
+
+[connectors.own]
+type = "sql"
+pool = "other"
+""")
+    registry = load_connectors(p)
+
+    def j_read(*, connectors, **_: object) -> tuple[str, str]:
+        return connectors.get("erp").pool_name, connectors.sql("own").pool_name
+
+    def run() -> tuple[str, str]:
+        return j_read(**build_kwargs(j_read, {}, injections=(("connectors", registry),)))
+
+    assert run() == ("prod", "other")                               # nothing picked: each connector's main database
+    plain = answer_key("app.mod:j_x", {"a": 1})
+    token = current_pool.set("test")
+    try:
+        assert run() == ("test", "other")                           # the pool picked, for the connector that has it
+        assert answer_key("app.mod:j_x", {"a": 1}) != plain         # and an answer kept for it is its own
+    finally:
+        current_pool.reset(token)
+    token = current_pool.set("elsewhere")
+    try:
+        assert run() == ("prod", "other")                           # a pool that is not the connector's: its main database
+    finally:
+        current_pool.reset(token)
+    assert answer_key("app.mod:j_x", {"a": 1}) == plain
+    assert "erp" in build_kwargs(j_read, {}, injections=(("connectors", registry),))["connectors"]

@@ -555,3 +555,16 @@ def test_env_reference_with_default_keeps_a_live_boolean() -> None:
         ais = merged["connectors"]["ais"]
         assert ais["verify_ssl"] is False and ais["base_url"] == "https://jde.customer/jderest"
         assert [e["name"] for e in ais.get("endpoints", [])] == ["new"], rep
+
+
+def test_a_sql_connectors_databases_are_the_installs() -> None:
+    """The database a connector runs on and the others a user may switch to are set per installation: a shipment —
+    forced or not, with or without an earlier one on record — refreshes the queries and leaves them."""
+    wheel = _toml('[connectors.jde]\ntype = "sql"\npool = "jde"\n[[connectors.jde.queries]]\nname = "new_get"\nsql = "SELECT 2"\n')
+    live = _toml('[connectors.jde]\ntype = "sql"\npool = "jde_prd"\npools = ["jde_test"]\n[[connectors.jde.queries]]\nname = "old_get"\nsql = "SELECT 1"\n')
+    prev = _toml('[connectors.jde]\ntype = "sql"\npool = "jde"\n[[connectors.jde.queries]]\nname = "old_get"\nsql = "SELECT 1"\n')
+    for previous, force in ((prev, False), (prev, True), (None, False), (None, True)):
+        merged, _rep = merge_file("connectors.toml", wheel, live, previous, force_vendor=force)
+        jde = merged["connectors"]["jde"]
+        assert (jde["pool"], jde["pools"]) == ("jde_prd", ["jde_test"]), (previous is None, force)
+        assert jde["queries"][0]["name"] == "new_get"

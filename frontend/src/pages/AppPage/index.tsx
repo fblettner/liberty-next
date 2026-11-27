@@ -1,6 +1,7 @@
 // A page an application ships (plugins/<app>/pages/<page>.js, served by liberty/web/app_pages.py):
 // fetched with the session, imported as a module, and drawn with what sdk.ts hands it. The tab's
 // ErrorBoundary (TabHost) catches what the page throws while it draws.
+import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { useEffect, useState, type ComponentType } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FileCode2 } from 'lucide-react'
@@ -34,6 +35,7 @@ async function load(app: string, page: string): Promise<Loaded> {
 
 export default function AppPage({ app, page }: { app: string; page: string }) {
   const { t } = useTranslation()
+  const { currentPool } = useWorkspace()
   const key = `${app}/${page}`
   const [loaded, setLoaded] = useState<{ key: string; value: Loaded } | null>(null)
   useEffect(() => {
@@ -47,7 +49,8 @@ export default function AppPage({ app, page }: { app: string; page: string }) {
     return () => { cancelled = true }
   }, [app, page, key])
   const value = loaded?.key === key ? loaded.value : null
-  if (value && 'Page' in value) return <value.Page />
+  // the page reads the environment (pool) picked for the application: another one picked, it starts again on it
+  if (value && 'Page' in value) return <value.Page key={currentPool ?? ''} />
   return (
     <PageLayout icon={<FileCode2 size={18} />} title={key}>
       {!value ? <Centered /> : (

@@ -1,5 +1,19 @@
 # Liberty Next — Release notes
 
+## 7.0.94 — unreleased
+
+- **An application's pages follow the pool picked.** A connector that runs on several databases (one per
+  environment) was followed by the screens' queries and by the API connectors, not by the applications' functions:
+  a page read the connector's main database whatever was picked. A function is now handed each such connector
+  bound to the pool picked on the page (or named by the job step); a pool that is not one of the connector's
+  leaves it on its main database. An answer kept for a page is kept per pool, and an open page starts again when
+  another pool is picked.
+- **The pool list names the main database.** The first choice read "Default" and the main database appeared a
+  second time under its name; it is now listed once, under its name.
+- **An apps upgrade keeps a connector's databases.** *Database* and *Other databases* of a SQL connector are the
+  installation's choice, like the pools themselves: an upgrade of the applications (`--force-config` included, or
+  the first one after 7.0.58) refreshed the connector and put the shipped database back, dropping the others.
+
 ## 7.0.93 — 2026-11-27
 
 - **A schema name the database need not define.** A connector can declare a schema name as optional

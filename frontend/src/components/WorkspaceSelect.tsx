@@ -14,11 +14,13 @@
 // even when the operator loads with the sidebar collapsed).
 import { useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Database } from 'lucide-react'
 import { SearchSelect } from '../common'
 import { useWorkspace } from '../workspace/WorkspaceContext'
 import { appOfPath } from '../services/menuPath'
+import { poolChoices } from '../services/pools'
 import { colors, fontSize } from '../theme'
 
 const Wrap = styled.div`
@@ -36,7 +38,8 @@ const PoolLabel = styled.span`
 `
 
 export default function WorkspaceSelect({ collapsed = false }: { collapsed?: boolean }) {
-  const { apps, currentApp, setCurrentApp, libertyMenu, currentPoolOptions, currentPool, setCurrentPool } = useWorkspace()
+  const { apps, currentApp, setCurrentApp, libertyMenu, currentPoolOptions, currentMainPool, currentPool, setCurrentPool } = useWorkspace()
+  const { t } = useTranslation()
   // Auto-init when apps loaded but no app picked yet — drops the "(all apps)" middle state
   // so the picker always reflects a real app (the operator picks across apps, never "none").
   // Runs even when collapsed (component stays mounted) so the current app always resolves.
@@ -73,13 +76,10 @@ export default function WorkspaceSelect({ collapsed = false }: { collapsed?: boo
           <PoolLabel><Database size={12} /> Pool</PoolLabel>
           <SearchSelect
             value={currentPool ?? ''}
-            // '' = "Default (per connector)" → no X-Liberty-Pool header; each connector uses its
-            // own default. A named pool forces that environment on the connectors that have it.
+            // '' = the main database, shown under its own name → no X-Liberty-Pool header; each connector uses its
+            // own. A named pool forces that environment on the connectors that have it.
             onChange={(v) => setCurrentPool(v || null)}
-            options={[
-              { value: '', label: 'Default' },
-              ...currentPoolOptions.map((p) => ({ value: p, label: p })),
-            ]}
+            options={poolChoices(currentPoolOptions, currentMainPool, t('common.poolDefault'))}
           />
         </div>
       )}

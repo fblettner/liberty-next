@@ -1,5 +1,20 @@
 # Liberty Next — Notes de version
 
+## 7.0.94 — unreleased
+
+- **Les pages d'une application suivent le pool choisi.** Un connecteur qui travaille sur plusieurs bases (une par
+  environnement) était suivi par les requêtes des écrans et par les connecteurs API, pas par les fonctions des
+  applications : une page lisait la base principale du connecteur quel que soit le choix. Une fonction reçoit
+  maintenant chaque connecteur de ce type lié au pool choisi sur la page (ou nommé par l'étape du traitement) ; un
+  pool qui n'est pas l'un de ceux du connecteur le laisse sur sa base principale. Une réponse conservée pour une
+  page l'est par pool, et une page ouverte repart quand un autre pool est choisi.
+- **La liste des pools nomme la base principale.** Le premier choix s'appelait « Défaut » et la base principale
+  apparaissait une seconde fois sous son nom ; elle est maintenant listée une fois, sous son nom.
+- **Une mise à jour des applications garde les bases d'un connecteur.** *Base de données* et *Autres bases* d'un
+  connecteur SQL sont le choix de l'installation, comme les pools eux-mêmes : une mise à jour des applications
+  (`--force-config` compris, ou la première après la 7.0.58) rafraîchissait le connecteur et remettait la base
+  livrée, en perdant les autres.
+
 ## 7.0.93 — 2026-11-27
 
 - **Un nom de schéma que la base n'a pas à définir.** Un connecteur peut déclarer un nom de schéma facultatif
