@@ -187,7 +187,9 @@ class ReportStepExecutor:
             var_kw = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in names.values())
         except (TypeError, ValueError, NameError):  # pragma: no cover
             names, var_kw = {}, True
-        for name, value in (("connectors", getattr(st, "connectors", None)), ("settings", getattr(st, "settings", None))):
+        from liberty.plugins.invoke import following_pool
+
+        for name, value in (("connectors", following_pool(getattr(st, "connectors", None))), ("settings", getattr(st, "settings", None))):
             if var_kw or name in names:
                 kwargs.setdefault(name, value)
         raw = fn(**kwargs)

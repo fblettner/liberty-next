@@ -7,7 +7,13 @@
   applications : une page lisait la base principale du connecteur quel que soit le choix. Une fonction reçoit
   maintenant chaque connecteur de ce type lié au pool choisi sur la page (ou nommé par l'étape du traitement) ; un
   pool qui n'est pas l'un de ceux du connecteur le laisse sur sa base principale. Une réponse conservée pour une
-  page l'est par pool, et une page ouverte repart quand un autre pool est choisi.
+  page l'est par pool, et une page ouverte repart quand un autre pool est choisi. Le Data Explorer et les rapports
+  suivent aussi le pool choisi. Une page peut demander quel pool est choisi (`sdk.pool()`, contrat de page version
+  10), pour séparer ce qu'elle garde dans le navigateur.
+- **Un connecteur API à plusieurs serveurs suit la base principale.** Sans pool choisi, les connecteurs SQL lisent
+  leur base principale alors qu'un connecteur API avec un serveur par environnement appelait son propre serveur —
+  un autre environnement quand son `pool` n'était pas cette base principale. Il appelle maintenant le serveur de la
+  base principale du côté SQL ; le journal le dit au démarrage quand les deux diffèrent.
 - **La liste des pools nomme la base principale.** Le premier choix s'appelait « Défaut » et la base principale
   apparaissait une seconde fois sous son nom ; elle est maintenant listée une fois, sous son nom.
 - **Une mise à jour des applications garde les bases d'un connecteur.** *Base de données* et *Autres bases* d'un

@@ -7,7 +7,12 @@
   a page read the connector's main database whatever was picked. A function is now handed each such connector
   bound to the pool picked on the page (or named by the job step); a pool that is not one of the connector's
   leaves it on its main database. An answer kept for a page is kept per pool, and an open page starts again when
-  another pool is picked.
+  another pool is picked. The Data Explorer and the reports follow the pool picked too. A page can ask which pool
+  is picked (`sdk.pool()`, page contract version 10), to keep apart what it holds in the browser.
+- **An API connector with several servers follows the main database.** With no pool picked, the SQL connectors read
+  their main database while an API connector with one server per environment called its own server — another
+  environment when its `pool` was not that main database. It now calls the server of the SQL side's main
+  database; the log says so at start when the two differ.
 - **The pool list names the main database.** The first choice read "Default" and the main database appeared a
   second time under its name; it is now listed once, under its name.
 - **An apps upgrade keeps a connector's databases.** *Database* and *Other databases* of a SQL connector are the

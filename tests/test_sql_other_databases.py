@@ -148,3 +148,51 @@ pool = "other"
         current_pool.reset(token)
     assert answer_key("app.mod:j_x", {"a": 1}) == plain
     assert "erp" in build_kwargs(j_read, {}, injections=(("connectors", registry),))["connectors"]
+
+
+# ── two environments: the API connector's server follows the database the screens read ──
+def _two_environments(tmp_path, sql_main: str, api_pool: str):
+    from liberty.connectors import load_connectors
+
+    other = "uf" if api_pool == "bf" else "bf"
+    p = tmp_path / "connectors.toml"
+    p.write_text(f"""
+[pools.bf]
+url = "sqlite+aiosqlite://"
+[pools.uf]
+url = "sqlite+aiosqlite://"
+
+[connectors.erp]
+type = "sql"
+pool = "{sql_main}"
+pools = ["{'uf' if sql_main == 'bf' else 'bf'}"]
+
+[connectors.ais]
+type = "api"
+base_url = "https://ais-{api_pool}.example"
+pool = "{api_pool}"
+
+[connectors.ais.targets.{other}]
+base_url = "https://ais-{other}.example"
+""")
+    return load_connectors(p)
+
+
+def test_with_no_pool_picked_the_api_server_is_the_one_of_the_main_database(tmp_path) -> None:
+    from liberty.connectors.api import current_pool
+
+    def server(registry) -> str:
+        return str(registry.api("ais").config.base_url)
+
+    aligned = _two_environments(tmp_path, sql_main="bf", api_pool="bf")
+    assert server(aligned) == "https://ais-bf.example"
+    # the API connector's own server is UF's while the screens read BF by default: no pool picked still means BF
+    crossed = _two_environments(tmp_path, sql_main="bf", api_pool="uf")
+    assert server(crossed) == "https://ais-bf.example"
+    for registry in (aligned, crossed):
+        for pool, expected in (("uf", "https://ais-uf.example"), ("bf", "https://ais-bf.example")):
+            token = current_pool.set(pool)
+            try:
+                assert server(registry) == expected
+            finally:
+                current_pool.reset(token)

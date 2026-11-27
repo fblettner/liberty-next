@@ -18,7 +18,7 @@ import styled from '@emotion/styled'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import * as ui from '../../common'
-import { api, apiDownload } from '../../api/client'
+import { api, apiDownload, getCurrentPool } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { iconFor } from '../../components/SidebarMenu'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
@@ -33,7 +33,8 @@ import { pageFacts, setPageContext } from '../../services/aiContext'
 // 2: `Grid` (the shared grid) · 3: a row of the grid opens (`detail`) · 4: `useAssistantContext` · 5: `Diagram`
 // 8: `Record` (a screen's record form, opened from the page)
 // 9: `Grid` takes `toolbarEnd` / `noExport` · `Import` (the screens' import dialog) · `workbook` (an Excel file of sheets)
-export const PAGE_SDK_VERSION = 9
+// 10: `pool()` (the environment picked for the application: what a page keeps in the browser is kept per environment)
+export const PAGE_SDK_VERSION = 10
 
 export interface PageSdk {
   /** the contract's version (this file) */
@@ -89,6 +90,9 @@ export interface PageSdk {
    *  step `liberty.kept:j_keep`. Since version 7. */
   callKept: <T = unknown>(fn: string, params?: Record<string, unknown>, refresh?: boolean) => Promise<KeptAnswer<T>>
   /** hook: the language of the interface ('en', 'fr'…) — the page ships its own texts */
+  /** the environment (pool) picked for the application — '' when none is (the connectors' main database). The
+   *  server follows it by itself; a page needs it only to keep apart what it holds in the browser. Since version 10. */
+  pool: () => string
   useLang: () => string
   /** hook: who is signed in */
   useUser: () => { username: string; is_superuser: boolean; permissions: string[] } | null
@@ -151,6 +155,7 @@ export function buildSdk(app: string, page: string): PageSdk {
         '/api/plugins/run', { callable: callableRef(app, fn), params, kept: refresh ? 'refresh' : 'use' })
       return { data: (r.extras ?? r) as T, at: r.kept?.at ?? null, by: r.kept?.by ?? null, ms: r.kept?.ms ?? null, fresh: r.kept?.fresh ?? true }
     },
+    pool: () => getCurrentPool(),
     useLang: () => useTranslation().i18n.language || 'en',
     useUser: () => {
       const { user } = useAuth()

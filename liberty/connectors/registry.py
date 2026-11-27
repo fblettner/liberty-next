@@ -94,10 +94,19 @@ class ConnectorRegistry:
             if not isinstance(api, APIConnector) or not api.config.targets:
                 continue
             family = set(api.governed_pools)
+            mains: set[str] = set()
             for conn in sql:
                 if api.config.pool in conn.allowed_pools:
                     family |= conn.allowed_pools
+                    mains.add(conn.pool_name)
             api.governed_pools = frozenset(family)
+            # with no pool picked the SQL connectors read their main database: this connector then calls the server
+            # of that same pool, not its own when the two differ (one main database only — several: its own server)
+            api.main_pool = next(iter(mains)) if len(mains) == 1 else None
+            if api.main_pool and api.main_pool != api.config.pool:
+                _log.warning("API connector %s: its own server is the one of pool %r, while the SQL connectors of these environments "
+                             "read %r by default — a call made with no pool picked goes to the server of %r",
+                             api.name, api.config.pool, api.main_pool, api.main_pool)
             unknown = sorted(p for p in [api.config.pool, *api.config.targets] if p and p not in pool_names)
             if unknown:
                 _log.warning("API connector %s: pool(s) %s in pool / targets are not defined in [pools]",

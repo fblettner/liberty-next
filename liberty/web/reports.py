@@ -343,8 +343,10 @@ async def run_report(
         accepts_kwargs = any(
             p.kind is inspect.Parameter.VAR_KEYWORD for p in sig_params.values()
         )
+        from liberty.plugins.invoke import following_pool
+
         injections = [
-            ("connectors", getattr(request.app.state, "connectors", None)),
+            ("connectors", following_pool(getattr(request.app.state, "connectors", None))),      # the pool picked on the page
             ("settings", getattr(request.app.state, "settings", None)),
             ("request", request),
             ("principal", principal),

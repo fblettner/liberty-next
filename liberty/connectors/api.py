@@ -337,6 +337,9 @@ class APIConnector:
             for pool, target in config.targets.items()
         }
         self.governed_pools: frozenset[str] = frozenset([*config.targets, *([config.pool] if config.pool else [])])
+        # the pool a call is for when none is picked: the main database of the SQL connectors of these environments
+        # (set by the registry) — the server must be the one of the database the screens then read
+        self.main_pool: str | None = None
 
     @staticmethod
     def _for_target(name: str, config: ApiConnectorConfig, pool: str, target: ApiTargetConfig, *,
@@ -350,6 +353,7 @@ class APIConnector:
         pool or a pool outside its environments; the pool's target when it has one. A pool of its
         environments without a target raises :class:`ApiTargetMissingError` — never the default
         server, which would be another environment (often production)."""
+        pool = pool or self.main_pool            # nothing picked: the environment the SQL side reads by default
         if not self._targets or not pool or pool == self.config.pool:
             return self
         target = self._targets.get(pool)

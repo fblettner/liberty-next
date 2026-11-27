@@ -351,6 +351,11 @@ class _Builder:
         self._sqls: dict[str, str] = {}
         self._n = 0
         # One pool for everything: resolved lazily per entity, checked against the primary's.
+        # the environment (pool) picked on the page, as a screen's read: a connector that runs on several databases
+        # is asked the one of the moment
+        from liberty.plugins.invoke import following_pool
+
+        connectors = self.connectors = following_pool(connectors)
         self.conn: SQLConnector = connectors.sql(self.model.entities[self.primary].connector or self.app)
         self.dialect = self.conn._resolve_dialect()  # noqa: SLF001 — same family
         self.trim = self.conn._pools.trim_strings(self.conn.pool_name)  # noqa: SLF001

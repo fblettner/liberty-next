@@ -33,6 +33,10 @@ let currentPool: string | null = null;
 export function setCurrentPool(pool: string | null): void {
   currentPool = pool && pool.trim() ? pool : null;
 }
+/** The environment (pool) picked for the application: '' = none, the connectors' main database. */
+export function getCurrentPool(): string {
+  return currentPool ?? '';
+}
 
 // The environment a screen runs on, for messages (``#POOL#`` in a confirm) — display only, the
 // header above is what the server follows. Per connector: the picked pool when the connector has
