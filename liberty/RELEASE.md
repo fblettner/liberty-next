@@ -1,5 +1,13 @@
 # Liberty Next — Release notes
 
+## 7.0.92 — unreleased
+
+- **A screen's heading is the screen's.** The title of a data screen came from the description of the query's table
+  in the connector; it is now the screen's own description, in the user's language, and the query's only when the
+  screen has none.
+- **The function picker offers the framework's own function.** `liberty.kept:j_keep` — the job step that keeps a
+  page's answer — is listed with the applications' functions, and no longer flagged "check the name" once typed.
+
 ## 7.0.91 — 2026-11-27
 
 - **Licence: one application, another, or all.** A licence key may name the applications it covers (its `apps`

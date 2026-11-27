@@ -62,6 +62,27 @@ class Callable:
         return asdict(self)
 
 
+#: the framework's own entry points a job step may name (``module:function``) — offered in the picker beside the
+#: applications' functions, which are the only ones discovered under ``plugins/``
+FRAMEWORK_CALLABLES = ("liberty.kept:j_keep",)
+
+
+def framework_callables() -> list[Callable]:
+    """The framework's entry points of :data:`FRAMEWORK_CALLABLES`, described like a discovered one."""
+    import importlib
+    import inspect
+
+    out: list[Callable] = []
+    for ref in FRAMEWORK_CALLABLES:
+        module, _, name = ref.partition(":")
+        try:
+            fn = getattr(importlib.import_module(module), name)
+        except Exception:  # noqa: BLE001 — a function that cannot be read is only not offered
+            continue
+        out.append(Callable(callable=ref, module=module, name=name, is_async=inspect.iscoroutinefunction(fn), docstring=_first_line(inspect.getdoc(fn))))
+    return out
+
+
 def discover_callables(plugins_root: Path) -> list[Callable]:
     """Walk *plugins_root* and return every ``j_<name>`` entry point found.
 

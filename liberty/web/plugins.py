@@ -26,7 +26,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from liberty import kept
 from liberty.auth.dependencies import CurrentPrincipal
 from liberty.connectors import ConnectorRegistry
-from liberty.jobs.discover import discover_callables
+from liberty.jobs.discover import discover_callables, framework_callables
 from liberty.licensing import application_of, offered
 from liberty.jobs.steps.base import RunContext, StepResult
 from liberty.jobs.triggers import ManualTrigger
@@ -53,7 +53,8 @@ async def list_plugin_callables(principal: CurrentPrincipal, connectors: Connect
     catalog = discover_callables(root)
     return {
         "plugins_root": str(root.resolve()) if root.is_dir() else None,
-        "callables": [c.to_dict() for c in catalog if offered(connectors, application_of(c.callable))],
+        # with the framework's own (a job step may name them: liberty.kept:j_keep)
+        "callables": [c.to_dict() for c in [*catalog, *framework_callables()] if offered(connectors, application_of(c.callable))],
     }
 
 

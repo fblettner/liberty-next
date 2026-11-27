@@ -824,14 +824,14 @@ async def list_callables(request: Request, _: Editor) -> dict[str, Any]:
     fresh install)."""
     import os
     from pathlib import Path
-    from liberty.jobs.discover import discover_callables
+    from liberty.jobs.discover import discover_callables, framework_callables
 
     apps = os.environ.get("LIBERTY_APPS_DIR", "").strip()
     plugins = Path(apps).parent / "plugins" if apps else Path("plugins")
     catalog = discover_callables(plugins)
     return {
         "plugins_root": str(plugins.resolve()) if plugins.is_dir() else None,
-        "callables": [c.to_dict() for c in catalog],
+        "callables": [c.to_dict() for c in [*catalog, *framework_callables()]],
     }
 
 

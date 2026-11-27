@@ -1,5 +1,14 @@
 # Liberty Next — Notes de version
 
+## 7.0.92 — unreleased
+
+- **L'en-tête d'un écran est celui de l'écran.** Le titre d'un écran de données venait de la description de la table
+  de la requête dans le connecteur ; c'est maintenant la description de l'écran lui-même, dans la langue de
+  l'utilisateur, et celle de la requête seulement quand l'écran n'en a pas.
+- **Le sélecteur de fonctions propose la fonction du framework.** `liberty.kept:j_keep` — l'étape de traitement qui
+  conserve la réponse d'une page — est listée avec les fonctions des applications, et n'est plus signalée « vérifiez
+  le nom » une fois saisie.
+
 ## 7.0.91 — 2026-11-27
 
 - **Licence : une application, l'autre, ou toutes.** Une clé de licence peut nommer les applications qu'elle couvre

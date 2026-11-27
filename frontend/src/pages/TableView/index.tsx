@@ -477,7 +477,7 @@ export default function TableView({ connector, query, screenApp, screenId, embed
   // a title: there the screen's own label names the page, then the endpoint's label.
   const friendlyName = meta?.endpoint
     ? (screen?.label || meta.label || menuLabel || meta.description || `${connector}.${query}`)
-    : (meta?.description || meta?.label || menuLabel || `${connector}.${query}`)
+    : (screen?.description || meta?.description || meta?.label || menuLabel || `${connector}.${query}`)
 
   // The AI assistant's page context: while this tab is the active route, publish what the user
   // sees — the screen, the active filters, the loaded rows' shape and the row they last clicked —
