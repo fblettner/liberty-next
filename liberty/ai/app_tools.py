@@ -49,6 +49,7 @@ def _plain(raw: Any) -> Any:
 def build_app_tools(ai_config: Any, *, state: Callable[[], Any], allowed: list[str] | None = None, root: Path | None = None) -> list[Tool]:
     """The tools of *ai_config* that can be offered now (see the module doc for what is left out)."""
     from liberty.jobs.discover import discover_callables
+    from liberty.licensing import offered
     from liberty.plugins.invoke import PluginInvocationError, build_kwargs, call_target, resolve_callable
 
     declared = ai_config.tools() if ai_config is not None else []
@@ -62,7 +63,7 @@ def build_app_tools(ai_config: Any, *, state: Callable[[], Any], allowed: list[s
     tools: list[Tool] = []
     for app, tid, spec in declared:
         name = f"{app}_{tid}"
-        if app not in loaded or (allow and app not in allow):
+        if app not in loaded or not offered(connectors, app) or (allow and app not in allow):
             continue                    # the application is not here (license, allowed_connectors): silently
         if spec.callable not in known:
             _log.warning("ai.toml: tool %s — %s is not a plugin entry point (a `j_` function under plugins/); left out", name, spec.callable)

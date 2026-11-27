@@ -27,6 +27,7 @@ from liberty import kept
 from liberty.auth.dependencies import CurrentPrincipal
 from liberty.connectors import ConnectorRegistry
 from liberty.jobs.discover import discover_callables
+from liberty.licensing import application_of, offered
 from liberty.jobs.steps.base import RunContext, StepResult
 from liberty.jobs.triggers import ManualTrigger
 from liberty.plugins.invoke import PluginInvocationError, invoke_callable, plugins_root
@@ -44,7 +45,7 @@ def _plugins_root() -> Path:
 
 
 @router.get("/callables", summary="List plugin callables")
-async def list_plugin_callables(principal: CurrentPrincipal) -> dict[str, Any]:
+async def list_plugin_callables(principal: CurrentPrincipal, connectors: Connectors) -> dict[str, Any]:
     """The ``j_*`` callables discovered under ``plugins/`` — the catalog the call_plugin action's
     picker reads. Readable by any authenticated user (the picker only SUGGESTS; running one still
     needs the ``plugin:<callable>`` permission)."""
@@ -52,7 +53,7 @@ async def list_plugin_callables(principal: CurrentPrincipal) -> dict[str, Any]:
     catalog = discover_callables(root)
     return {
         "plugins_root": str(root.resolve()) if root.is_dir() else None,
-        "callables": [c.to_dict() for c in catalog],
+        "callables": [c.to_dict() for c in catalog if offered(connectors, application_of(c.callable))],
     }
 
 
@@ -85,7 +86,7 @@ async def run_plugin(
 
     # A kept answer (liberty.kept): what the function answered before, returned at once — "refresh" computes anew.
     # The permission and the allow-list first: the store is never read for a caller who may not run the function.
-    _may_run(principal, ref)
+    _may_run(principal, ref, connectors)
     scope = kept.scope_of(principal)
     if mode == kept.USE:
         try:
@@ -108,9 +109,17 @@ async def run_plugin(
     return result
 
 
-def _may_run(principal: Any, ref: str) -> None:
-    """The gate of :func:`run_plugin_callable`, alone: the permission, then the allow-list."""
+def _licensed(connectors: Any, ref: str) -> None:
+    """Refuse a function of an application the licence does not cover. What another application's own code imports
+    from it is not asked here: only what is run by name."""
+    if not offered(connectors, application_of(ref)):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=f"The licence of this installation does not cover the application {application_of(ref)}.")
+
+
+def _may_run(principal: Any, ref: str, connectors: Any = None) -> None:
+    """The gate of :func:`run_plugin_callable`, alone: the permission, the licence, then the allow-list."""
     require_permission(principal, f"plugin:{ref}")
+    _licensed(connectors, ref)
     if ref not in {c.callable for c in discover_callables(_plugins_root())}:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Unknown plugin callable: {ref}")
 
@@ -122,6 +131,7 @@ async def run_plugin_callable(
     step does when a screen action runs on the server (:mod:`liberty.screens.actions`): the
     ``plugin:<ref>`` permission, the allow-list, the change-package capture. Raises HTTPException."""
     require_permission(principal, f"plugin:{ref}")
+    _licensed(connectors, ref)
 
     # Refuse anything not discovered under plugins/ — bounds the callable to real plugin entry
     # points (the module:function string can't be used to import an arbitrary module).

@@ -10,8 +10,9 @@ Ported from nomaubl's ``custom.ubl.license.LicenseVerifier``; same JWT shape and
 No external JWT library — :mod:`cryptography` (already a dep) does the RSA verify.
 
 Claims used: ``customer`` / ``email`` / ``plan`` (informational), ``apps`` (optional list of
-connector names this key covers — absent ⇒ covers every ``licensed`` connector), ``exp`` (epoch
-seconds; absent ⇒ no expiry), ``iat`` (ignored).
+the licensed applications this key covers — absent ⇒ every one; this is how a plan sells one
+application, another, or all), ``exp`` (epoch seconds; absent ⇒ no expiry), ``iat`` (ignored).
+What a key does not cover is not offered at all: see :func:`offered`.
 """
 from __future__ import annotations
 
@@ -177,8 +178,22 @@ def verify_license(
         return _restricted(f"License verification error: {exc}")
 
 
+def offered(connectors: Any, application: str | None) -> bool:
+    """Whether *application* is offered on this installation — false only for a LICENSED application the key does
+    not cover. *connectors*: the :class:`~liberty.connectors.ConnectorRegistry` (its ``unlicensed`` names, set when
+    it is loaded). What asks: the menus, the applications' pages and functions, the jobs, the Explorer models, the
+    predefined roles. Such an application's connector may still be loaded, for another application that reads its
+    data (``applications`` on the connector) — which is why being loaded is not the question."""
+    return not application or application not in (getattr(connectors, "unlicensed", None) or ())
+
+
+def application_of(ref: str | None) -> str:
+    """The application a plugin reference belongs to: the first part of ``app.module:function`` (or ``app:page``)."""
+    return str(ref or "").split(":", 1)[0].split(".", 1)[0].strip()
+
+
 def _str_or_none(v: Any) -> str | None:
     return str(v) if v not in (None, "") else None
 
 
-__all__ = ["ALWAYS_LICENSED_CONNECTORS", "LicenseResult", "verify_license"]
+__all__ = ["ALWAYS_LICENSED_CONNECTORS", "LicenseResult", "application_of", "offered", "verify_license"]

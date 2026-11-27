@@ -2,6 +2,18 @@
 
 ## 7.0.91 — unreleased
 
+- **Licence: one application, another, or all.** A licence key may name the applications it covers (its `apps`
+  list — what a plan of the licence tool sells); a key that names none covers every one, as before. An application
+  the key does not cover is no longer only "not loaded": nothing of it is offered — its menu, its pages, its
+  functions (run by name: refused with "the licence does not cover the application"), its jobs, its Explorer
+  models, its predefined roles, its assistant tools, and the entries of another application's menu that open one of
+  its pages. Two settings say what belongs to what. A connector has **Serves the applications** (`applications`): a
+  connector that is a part of an application (its services, a second database) follows that application's licence,
+  and a licensed application whose data another one reads stays loaded for it, without being offered itself. A job
+  has **Applications**: it is listed, scheduled and run when the licence covers one of them; a job that names none
+  is always offered. A licence change moves the jobs at once. The technical dashboard shows the plan and the
+  applications covered.
+
 - **A form's opening actions run again on Duplicate.** *Duplicate* turns the record into a new one in the same
   form; the actions set to run when the form opens (`on_load`) now run for that copy too — so a value they fetch for a
   new record (an identifier asked of another system) is fetched again instead of being left blank. And when the

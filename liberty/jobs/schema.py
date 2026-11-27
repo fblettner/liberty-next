@@ -481,6 +481,9 @@ class Job(BaseModel):
     timezone: str | None = None  # IANA name (validated); None → system tz
     enabled: bool = True
     tags: list[str] = Field(default_factory=list)
+    # The licensed applications the job belongs to: it is offered (listed, scheduled, run) when the licence covers
+    # one of them. Empty: the job stands alone — always offered.
+    applications: list[str] = Field(default_factory=list)
     retry: JobRetry | None = None
     alerts: JobAlerts | None = None
     steps: list[Step] = Field(..., min_length=1)

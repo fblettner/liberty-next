@@ -2,6 +2,19 @@
 
 ## 7.0.91 — unreleased
 
+- **Licence : une application, l'autre, ou toutes.** Une clé de licence peut nommer les applications qu'elle couvre
+  (sa liste `apps` — ce que vend une offre de l'outil de licences) ; une clé qui n'en nomme aucune les couvre
+  toutes, comme avant. Une application que la clé ne couvre pas n'est plus seulement « non chargée » : rien d'elle
+  n'est proposé — son menu, ses pages, ses fonctions (appelées par leur nom : refusées avec « la licence ne couvre
+  pas l'application »), ses traitements, ses modèles de l'Explorateur, ses rôles prédéfinis, ses outils de
+  l'assistant, et les entrées du menu d'une autre application qui ouvrent une de ses pages. Deux réglages disent ce
+  qui appartient à quoi. Un connecteur a **Sert les applications** (`applications`) : un connecteur qui est une
+  partie d'une application (ses services, une seconde base) suit la licence de cette application, et une
+  application sous licence dont une autre lit les données reste chargée pour elle, sans être proposée elle-même. Un
+  traitement a **Applications** : il est listé, planifié et exécuté quand la licence couvre l'une d'elles ; un
+  traitement qui n'en nomme aucune est toujours proposé. Un changement de licence déplace les traitements aussitôt.
+  Le tableau de bord technique montre l'offre et les applications couvertes.
+
 - **Les actions d'ouverture d'un formulaire s'exécutent aussi après Dupliquer.** *Dupliquer* transforme
   l'enregistrement en un nouveau dans le même formulaire ; les actions prévues à l'ouverture (`on_load`) s'exécutent
   maintenant pour cette copie — une valeur qu'elles vont chercher pour un nouvel enregistrement (un identifiant

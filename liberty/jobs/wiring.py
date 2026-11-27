@@ -237,7 +237,7 @@ async def build_nomaflow(
         )
         return None
 
-    registry = load_jobs(settings.jobs.config_path, builtins=builtin_jobs(settings))
+    registry = load_jobs(settings.jobs.config_path, builtins=builtin_jobs(settings), unlicensed=getattr(connectors, "unlicensed", None))
     db = JobDatabase(connectors.pools, pool_name)
     # Self-bootstrap the schema. Idempotent (create_all skips existing tables);
     # makes "deploy and forget init-db" work as long as the pool itself exists.
@@ -329,7 +329,10 @@ async def hot_reload_registry(
     ``app.state.jobs.registry`` (the runner's reference also gets updated via
     :attr:`JobScheduler._registry` — kept atomic by happening in one task).
     """
-    new_registry = load_jobs(settings.jobs.config_path, builtins=builtin_jobs(settings))
+    # the applications the licence does not cover, as the connector registry of the moment says
+    live = components.state() if callable(components.state) else components.state
+    new_registry = load_jobs(settings.jobs.config_path, builtins=builtin_jobs(settings),
+                             unlicensed=getattr(getattr(live, "connectors", None), "unlicensed", None))
     scheduler = components.scheduler
 
     # The scheduler's _registry attribute is what _run_or_drop reads to find

@@ -95,6 +95,8 @@ export interface JobConfig {
   timezone?: string | null
   enabled?: boolean
   tags?: string[]
+  /** The licensed applications the job belongs to: offered when the licence covers one of them. */
+  applications?: string[]
   retry?: JobRetry | null
   alerts?: JobAlerts | null
   steps: StepConfig[]

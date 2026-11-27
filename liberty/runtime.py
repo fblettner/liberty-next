@@ -331,7 +331,7 @@ async def rebuild_runtime(
         # ── nomaflow: jobs.toml reconcile (the executors were rebound above) ──────
         jobs = getattr(app.state, "jobs", None)
         if jobs is not None:
-            if "jobs" in wanted:
+            if "jobs" in wanted or "connectors" in wanted:        # a licence change moves which jobs are offered
                 from liberty.jobs.wiring import hot_reload_registry
 
                 await hot_reload_registry(jobs, settings)

@@ -25,9 +25,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 
 from liberty.auth.dependencies import CurrentPrincipal
+from liberty.licensing import offered
 from liberty.plugins.invoke import plugins_root
 from liberty.web.deps import require_permission
 
@@ -73,16 +74,20 @@ def discover_pages(root: Path | None = None) -> list[dict[str, str]]:
 
 
 @router.get("/pages", summary="List the applications' pages")
-async def list_pages(principal: CurrentPrincipal) -> dict[str, Any]:
-    """The pages the applications ship that the caller may open."""
-    return {"pages": [p for p in discover_pages() if principal.is_superuser or principal.has_permission(permission_for(p["app"], p["page"]))]}
+async def list_pages(principal: CurrentPrincipal, request: Request) -> dict[str, Any]:
+    """The pages the applications ship that the caller may open — none of an application the licence does not cover."""
+    connectors = getattr(request.app.state, "connectors", None)
+    return {"pages": [p for p in discover_pages() if offered(connectors, p["app"])
+                      and (principal.is_superuser or principal.has_permission(permission_for(p["app"], p["page"])))]}
 
 
 @router.get("/pages/{app}/{page}", summary="Read an application's page")
-async def read_page(app: str, page: str, principal: CurrentPrincipal) -> Response:
-    """The page's module (JavaScript). 403 without ``page:<app>:<page>``; 404 when the application
-    ships no such page — or has not built it."""
+async def read_page(app: str, page: str, principal: CurrentPrincipal, request: Request) -> Response:
+    """The page's module (JavaScript). 403 without ``page:<app>:<page>``, or when the licence does not cover the
+    application; 404 when the application ships no such page — or has not built it."""
     require_permission(principal, permission_for(app, page))
+    if not offered(getattr(request.app.state, "connectors", None), app):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=f"The licence of this installation does not cover the application {app}.")
     path = page_file(app, page)
     if path is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"No page {app}/{page}: the application ships none, or it is not built.")

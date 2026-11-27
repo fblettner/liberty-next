@@ -901,6 +901,16 @@ class SqlConnectorConfig(BaseModel):
         json_schema_extra={"x_enum_ref": "POOL_NAMES"},  # each entry picks from configured pools
     )
     licensed: bool = Field(default=False, description="Require a valid [license] key. Without one this connector isn't loaded.")
+    applications: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The licensed applications this connector serves. It is loaded when the licence covers one of them: "
+            "a connector that is only a part of an application (its services, its second database) follows that "
+            "application; a licensed application whose data another one reads stays loaded for it — without its "
+            "own menu, pages, functions and jobs being offered. Empty: the connector stands alone."
+        ),
+        json_schema_extra={"x_enum_ref": "CONNECTOR_NAMES"},
+    )
     max_rows: int | None = Field(default=None, description="Default SELECT row cap. Falls back to the pool's, then 1000. A per-screen / per-request cap takes precedence.")
     dd_prefix: int = Field(
         default=0, ge=0, le=4,
@@ -1085,6 +1095,16 @@ class ApiConnectorConfig(BaseModel):
 
     type: Literal["api"]
     licensed: bool = Field(default=False, description="Gate this connector behind a valid [license] key — without one (the open framework) it isn't loaded.")
+    applications: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The licensed applications this connector serves. It is loaded when the licence covers one of them: "
+            "a connector that is only a part of an application (its services, its second database) follows that "
+            "application; a licensed application whose data another one reads stays loaded for it — without its "
+            "own menu, pages, functions and jobs being offered. Empty: the connector stands alone."
+        ),
+        json_schema_extra={"x_enum_ref": "CONNECTOR_NAMES"},
+    )
     show_in_switcher: bool = Field(
         default=True,
         description="Show this connector in the top app switcher.",

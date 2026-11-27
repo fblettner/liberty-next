@@ -170,6 +170,7 @@ async def role_templates(request: Request, _: Superuser, backend: Backend) -> di
     in the request's language, each with ``exists``: a role of that name is already in the store.
     Picking one in *Access → Roles* opens it as a new role; saving it is the ordinary upsert."""
     from liberty.auth.role_templates import load_role_templates
+    from liberty.licensing import offered
     from liberty.web.deps import request_language
 
     try:
@@ -184,6 +185,7 @@ async def role_templates(request: Request, _: Superuser, backend: Backend) -> di
             "permissions": list(t.permissions), "scope": [r.model_dump(exclude_none=True) for r in t.scope], "exists": rid in held,
         }
         for rid, t in sorted(catalogue.roles.items(), key=lambda kv: (kv[1].app or "", kv[0]))
+        if offered(getattr(request.app.state, "connectors", None), t.app)       # not those of an application the licence does not cover
     ]}
 
 

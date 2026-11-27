@@ -77,7 +77,10 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           lock, rebinds every pool holder, disposes the old registry last
   config.py               Settings (app.toml): one *Settings class per section, see below
   crypto.py / crypto_cli  AES-256-GCM "ENC:" field encryption, byte-compatible with v1
-  licensing/              RS256 license-key verification (embedded public.pem); usage.py = the daily usage report to the licence
+  licensing/              RS256 license-key verification (embedded public.pem); the key's `apps` = the licensed applications it covers (a plan: one, another, all) —
+                          `offered(connectors, app)` is THE question (registry `.unlicensed` / `.gated`, set by load_connectors): asked by the menus, the apps' pages and
+                          functions, the jobs (`Job.applications`), the Explorer, the predefined roles, the assistant tools; a connector's `applications` = the licensed
+                          applications it serves (a part follows its application; an application another one reads stays loaded, not offered); usage.py = the daily usage report to the licence
                           tool (environment / version / enabled accounts, NomaUBL's shape; `[license] usage_url`)
   theme.py                theme.toml + GET /api/theme (operator branding)
   kept.py                 kept answers: what a page's function answered, stored (ly2_kept_answer, per function + parameters + data scope) so the

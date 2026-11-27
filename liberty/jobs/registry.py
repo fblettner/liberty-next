@@ -83,6 +83,7 @@ def load_jobs(
     *,
     env: dict[str, str] | None = None,
     builtins: list[Job] | None = None,
+    unlicensed: frozenset[str] | set[str] | None = None,
 ) -> JobRegistry:
     """Read ``jobs.toml`` at *path* and build a :class:`JobRegistry`.
 
@@ -100,6 +101,10 @@ def load_jobs(
     *builtins* are the jobs the framework ships itself (:mod:`liberty.jobs.builtin`): each is
     added after the file's jobs unless the file has a job of that id — the file's version wins.
 
+    *unlicensed*: the licensed applications the key does not cover (the connector registry's). A job that names
+    its ``applications`` is left out when none of them is offered — not listed, not scheduled, not run. The editor
+    reads without it: it shows the whole file.
+
     Returns an empty registry for a missing file — the framework should boot
     without nomaflow as long as the operator hasn't provided a catalogue yet.
     """
@@ -111,6 +116,8 @@ def load_jobs(
     config = parse_jobs_data(data, env=env)
     in_file = {j.id for j in config.jobs}
     config.jobs = [*config.jobs, *(b for b in builtins or [] if b.id not in in_file)]
+    if unlicensed:
+        config.jobs = [j for j in config.jobs if not j.applications or any(a not in unlicensed for a in j.applications)]
     return JobRegistry(config)
 
 

@@ -33,6 +33,7 @@ from liberty.auth.scope import current_scope
 from liberty.connectors.base import ConnectorError
 from liberty.connectors.registry import ConnectorRegistry
 from liberty.explorer import ExplorerFile
+from liberty.licensing import offered
 from liberty.explorer.engine import AggregateRequest, CalcTestRequest, DetailRequest, ExplorerError, run_aggregate, run_calc_test, run_detail
 from liberty.explorer.model import ModelCache
 from liberty.explorer.report import build_sections, common_period, sections_to_pdf, sections_to_xlsx
@@ -80,12 +81,12 @@ def _saved_key(app: str, model: str) -> str:
 
 @router.get("/explorer", summary="List explorer models",
              responses={200: {"model": ExplorerModels, "description": "The models the caller may use."}})
-async def list_models(principal: CurrentPrincipal, explorer: Explorer) -> dict[str, Any]:
+async def list_models(request: Request, principal: CurrentPrincipal, explorer: Explorer) -> dict[str, Any]:
     """``{models: [{app, model, label, description, hub, entities: n}]}`` — only the models the
     caller holds ``explorer:{app}:{model}`` for."""
     out = []
     for app, mid, m in explorer.items():
-        if principal.has_permission(permission_for(app, mid)):
+        if offered(getattr(request.app.state, "connectors", None), app) and principal.has_permission(permission_for(app, mid)):
             out.append({"app": app, "model": mid, "label": m.label or mid, "description": m.description, "hub": m.hub, "entities": len(m.entities), "preset": m.preset, "derived": m.derived, "group": m.group})
     return {"models": out}
 
@@ -193,7 +194,7 @@ async def find_saved(request: Request, principal: CurrentPrincipal, explorer: Ex
     An object is saved under one model, and the page lists those of the model shown: this is
     how one is found without knowing where it is."""
     labels = {_saved_key(app, mid): (app, mid, m.label or mid) for app, mid, m in explorer.items()
-              if principal.has_permission(permission_for(app, mid))}
+              if offered(getattr(request.app.state, "connectors", None), app) and principal.has_permission(permission_for(app, mid))}
     items = []
     for r in await _saved_store(request).everywhere(principal.username):
         where = labels.get(r["key"])

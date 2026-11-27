@@ -33,6 +33,7 @@ import { api, ApiError } from '../../api/client'
 import {
   Banner, Button, CallableSelect, Checkbox, FrameworkEnumsContext, Input, Row, SearchSelect, SpinnerRing, Stack, StringMapEditor, useModals, PasswordInput,
 } from '../../common'
+import { StringListEditor } from '../../common/SchemaForm'
 import { EndpointGeneratorModal, type EndpointGeneratorDef } from './EndpointGeneratorModal'
 import { mergeGenerated, type GeneratedEndpoint, mergeModified, rowKeys } from '../../services/endpointRefresh'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -85,6 +86,7 @@ export type Endpoint = {
 export type ApiConnector = {
   type: 'api'
   licensed?: boolean
+  applications?: string[]
   show_in_switcher?: boolean
   home?: string | null
   /** A different home page for the users of a role: {role: menu entry}. */
@@ -342,6 +344,18 @@ function ConnectionTab({
             label={licenceLocked ? t('settings.api.app.licensedAlways') : t('settings.api.app.licensedLabel')}
           />
           <Hint>{t('settings.api.app.licensedHint')}</Hint>
+        </div>
+      </FieldRow>
+      {/* the licensed applications this connector serves: it follows their licence */}
+      <FieldRow>
+        <label>{t('settings.api.app.applications')}</label>
+        <div data-api-applications>
+          <StringListEditor
+            value={value.applications ?? []}
+            options={(enums?.CONNECTOR_NAMES?.values ?? []) as Array<{ value: string; label: string; mono?: string }>}
+            onChange={(v) => patch({ applications: v.length ? v : undefined })}
+          />
+          <Hint>{t('settings.api.app.applicationsHint')}</Hint>
         </div>
       </FieldRow>
       <SectionHead>{t('settings.api.connection.section')}</SectionHead>

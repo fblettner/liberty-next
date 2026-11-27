@@ -7,7 +7,7 @@ export interface LicenseInfo {
   customer?: string
   email?: string
   plan?: string
-  apps?: string[]       // connector names this key covers (absent ⇒ all licensed connectors)
+  apps?: string[]       // the licensed applications this key covers (absent ⇒ every one) — what a plan sells
   expires_at?: number   // epoch seconds (absent ⇒ no expiry)
   error?: string        // why it's restricted (e.g. "License key expired"), when applicable
 }

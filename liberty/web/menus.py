@@ -38,6 +38,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from liberty.auth.dependencies import CurrentPrincipal
 from liberty.auth.principal import Principal
 from liberty.connectors import ConnectorRegistry, UnknownConnectorError
+from liberty.licensing import offered
 from liberty.dashboards import DashboardsFile, LinksWidget, TextWidget
 from liberty.menus import AppMenu, MenuItem, MenusFile, build_menu_tree
 from liberty.screens import ScreensFile
@@ -60,6 +61,7 @@ _PAGE_PERMISSIONS: tuple[tuple[str, str], ...] = (
 _INCLUDED_IN: dict[str, tuple[str, ...]] = {"nomaflow:view": ("nomaflow:edit",), "tests:view": ("tests:run", "tests:edit")}
 
 
+_APP_PAGE = re.compile(r"^/app/([a-z0-9][a-z0-9_]*)/")      # an application's page, whatever follows
 _EXPLORER_ON = re.compile(r"^/explorer/([^/]+)/([^/]+)(?:/[ad]/[^/]+)?$")
 
 
@@ -153,7 +155,17 @@ def _keeper(
 
     A ``roles`` filter on the item is still honoured first."""
 
+    gated = getattr(connectors, "gated", None) or ()
+
     def keep(item: MenuItem, connector: str) -> bool:
+        # the licence first: nothing of an application it does not cover, nor of a connector it left out —
+        # an entry of another application's menu that opens one of its pages or runs on its services included
+        if not offered(connectors, app) or connector in gated:
+            return False
+        if item.type == "page" and (m := _APP_PAGE.match(item.target or "")) and not offered(connectors, m.group(1)):
+            return False
+        if item.type == "screen" and screens is not None and (scr := (screens.screens.get(app) or {}).get(item.target or "")) is not None and scr.connector in gated:
+            return False
         if item.roles and not any(principal.has_role(r) for r in item.roles):
             return False
         menu_perm = f"menu:{app}:{item.id}"

@@ -790,7 +790,7 @@ const en = {
         heading: 'Runtime',
         sio: 'Socket.IO',
         connectors: 'Connectors', screens: 'Screens', platform: 'Platform', ai: 'AI', license: 'License',
-        on: 'on', off: 'off', full: 'full', restricted: 'restricted',
+        on: 'on', off: 'off', full: 'full', restricted: 'restricted', plan: 'plan', covers: 'covers',
       },
     },
     list: {
@@ -1394,6 +1394,8 @@ const en = {
       fieldLogLevelHint: 'A run started by hand can ask for more or less.',
       logLevel: { WARNING: 'Problems only', INFO: 'The steps and their figures (usual)', DEBUG: 'Everything, with each statement' },
       fieldTags: 'Tags',
+      fieldApplications: 'Applications',
+      applicationsPlaceholder: 'The licensed applications it belongs to — empty: always offered',
       tagsPlaceholder: 'Type to add a tag, or pick from existing…',
       tagsNoMatch: 'No matching tags.',
       tagsCreate: 'Add',
@@ -2199,6 +2201,8 @@ const en = {
         licensedLabel: 'needs a licence key',
         licensedAlways: 'needs a licence key (always, for this connector)',
         licensedHint: 'The connector is loaded only when the installation holds a valid licence key.',
+        applications: 'Serves the applications',
+        applicationsHint: 'The licensed applications this connector serves: it is loaded when the licence covers one of them. Empty: it stands alone.',
       },
       connection: {
         section: 'Connection',

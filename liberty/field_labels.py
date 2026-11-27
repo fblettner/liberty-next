@@ -65,6 +65,7 @@ LABELS: dict[str, dict[str, Label]] = {
         "pool": ("Database", "The database this application's queries run on."),
         "pools": ("Other databases", "The other databases a user may switch to: same screens, another environment."),
         "licensed": ("Needs a licence", "The application is loaded only when the installation holds a valid licence key."),
+        "applications": ("Serves the applications", "The licensed applications this connector serves: it is loaded when the licence covers one of them. Empty: it stands alone."),
         "max_rows": ("Rows read at most", "How many rows a screen of this application reads unless it says otherwise."),
         "dd_prefix": ("Column prefix length", "How many leading characters of a column name are the table's prefix; 0 for none."),
         "show_in_switcher": ("Show in the application list", "Offer this application in the list at the top of the menu."),

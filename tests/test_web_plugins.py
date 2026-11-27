@@ -233,3 +233,18 @@ def test_the_menu_entry_of_a_page_asks_its_permission() -> None:
     assert page_permission("/app/nomajde") is None and page_permission("/app/Bad/x") is None and page_permission("/explorer") is None
     assert page_permission("/nomaflow/runs") == "nomaflow:view"
 
+
+
+# ── the licence: nothing of an application the key does not cover ─────────────────────────────
+def test_an_application_the_licence_does_not_cover_offers_no_function_and_no_page(env) -> None:
+    with TestClient(env) as client:
+        admin = _h(client, "admin")
+        client.app.state.connectors.unlicensed = frozenset({"plg"})
+        r = client.post("/api/plugins/run", headers=admin, json={"callable": CALLABLE, "params": {"role_id": "7"}})
+        assert r.status_code == 403 and "licence" in r.json()["detail"]
+        assert CALLABLE not in {c["callable"] for c in client.get("/api/plugins/callables", headers=admin).json()["callables"]}
+        assert client.get("/api/pages", headers=admin).json()["pages"] == []
+        assert client.get("/api/pages/plg/browse", headers=admin).status_code == 403
+        client.app.state.connectors.unlicensed = frozenset()
+        assert client.post("/api/plugins/run", headers=admin, json={"callable": CALLABLE, "params": {"role_id": "7"}}).status_code == 200
+        assert client.get("/api/pages/plg/browse", headers=admin).status_code == 200

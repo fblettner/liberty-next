@@ -339,7 +339,7 @@ export default function TechnicalDashboard(): ReactNode {
   const pools = snap.pools
   const users = snap.connected_users
   const locks = snap.locks
-  const license = snap.license as { mode?: string; customer?: string; expires_at?: number | null }
+  const license = snap.license as { mode?: string; customer?: string; plan?: string; apps?: string[]; expires_at?: number | null }
 
   return (
     <div>
@@ -392,6 +392,8 @@ export default function TechnicalDashboard(): ReactNode {
                 <td>
                   {license.mode === 'full' ? <Tag $tone="green">{t('dashboard.tech.runtime.full')}</Tag> : <Tag $tone="orange">{t('dashboard.tech.runtime.restricted')}</Tag>}
                   {license.customer ? <> <Mono>{license.customer}</Mono></> : null}
+                  {license.plan ? <> · {t('dashboard.tech.runtime.plan')} <Mono>{license.plan}</Mono></> : null}
+                  {license.apps ? <> · {t('dashboard.tech.runtime.covers')} <Mono>{license.apps.join(', ') || '—'}</Mono></> : null}
                 </td>
               </tr>
               <tr>

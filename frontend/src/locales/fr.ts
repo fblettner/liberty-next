@@ -792,7 +792,7 @@ const fr: Resources = {
         heading: 'Exécution',
         sio: 'Socket.IO',
         connectors: 'Connecteurs', screens: 'Écrans', platform: 'Plateforme', ai: 'IA', license: 'Licence',
-        on: 'activée', off: 'désactivée', full: 'complète', restricted: 'restreinte',
+        on: 'activée', off: 'désactivée', full: 'complète', restricted: 'restreinte', plan: 'offre', covers: 'couvre',
       },
     },
     list: {
@@ -1396,6 +1396,8 @@ const fr: Resources = {
       fieldLogLevelHint: 'Une exécution lancée à la main peut en demander plus ou moins.',
       logLevel: { WARNING: 'Les problèmes seulement', INFO: 'Les étapes et leurs chiffres (habituel)', DEBUG: 'Tout, avec chaque instruction' },
       fieldTags: 'Étiquettes',
+      fieldApplications: 'Applications',
+      applicationsPlaceholder: 'Les applications sous licence dont il fait partie — vide : toujours proposé',
       tagsPlaceholder: 'Saisir une étiquette ou choisir une existante…',
       tagsNoMatch: 'Aucune étiquette correspondante.',
       tagsCreate: 'Ajouter',
@@ -2197,6 +2199,8 @@ const fr: Resources = {
         licensedLabel: 'nécessite une clé de licence',
         licensedAlways: 'nécessite une clé de licence (toujours, pour ce connecteur)',
         licensedHint: 'Le connecteur n\'est chargé que si l\'installation a une clé de licence valide.',
+        applications: 'Sert les applications',
+        applicationsHint: 'Les applications sous licence que ce connecteur sert : il est chargé quand la licence couvre l\'une d\'elles. Vide : il est indépendant.',
       },
       connection: {
         section: 'Connexion',

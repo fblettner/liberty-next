@@ -55,6 +55,11 @@ class ConnectorRegistry:
             {n: list(dict.fromkeys([c.pool, *c.pools])) for n, c in config.connectors.items() if isinstance(c, SqlConnectorConfig)},
         )
         self._http_client = http_client
+        #: the licensed applications the licence key does not cover (set by :func:`load_connectors`): nothing of
+        #: theirs is offered — see :func:`liberty.licensing.offered`. One may still be loaded, for another's data.
+        self.unlicensed: frozenset[str] = frozenset()
+        #: the connectors the licence left out of this registry (an application not covered, and its parts)
+        self.gated: frozenset[str] = frozenset()
         self._connectors: dict[str, Connector] = {}
         for name, conn_cfg in config.connectors.items():
             if isinstance(conn_cfg, SqlConnectorConfig):
@@ -176,11 +181,19 @@ def load_connectors(
     path = Path(path)
     dict_path = Path(dictionary_path) if dictionary_path else path.with_name("dictionary.toml")
     cfg = load_connectors_file(path, pools_path=pools_path)
-    gated = {
-        name for name, c in cfg.connectors.items()
-        if (getattr(c, "licensed", False) or name in ALWAYS_LICENSED_CONNECTORS)
-        and not (license is not None and license.covers(name))
-    }
+    # the licensed applications the key does not cover: nothing of theirs is offered (menu, pages, functions, jobs…)
+    licensed = {n for n, c in cfg.connectors.items() if getattr(c, "licensed", False)} | set(ALWAYS_LICENSED_CONNECTORS)
+    unlicensed = {n for n in licensed if not (license is not None and license.covers(n))}
+    # a connector that serves applications (`applications`) is loaded when one of them is offered: a part of an
+    # application follows it, and an application whose data another one reads stays loaded for that one
+    gated: set[str] = set()
+    for name, c in cfg.connectors.items():
+        serves_one = any(a not in unlicensed for a in getattr(c, "applications", None) or [] if a != name)
+        if name in licensed:
+            if name in unlicensed and not serves_one:
+                gated.add(name)
+        elif getattr(c, "applications", None) and not serves_one:
+            gated.add(name)
     if gated:
         _log.warning(
             "license: not loading licensed connector(s) %s — %s",
@@ -188,7 +201,7 @@ def load_connectors(
             "no valid license key" if license is None or not license.valid else "not covered by the license key",
         )
         cfg = cfg.model_copy(update={"connectors": {n: c for n, c in cfg.connectors.items() if n not in gated}})
-    return ConnectorRegistry(
+    registry = ConnectorRegistry(
         cfg,
         dictionary=load_dictionary(dict_path),
         http_client=http_client,
@@ -196,3 +209,6 @@ def load_connectors(
         default_language=default_language,
         oracle_thick=oracle_thick,
     )
+    registry.unlicensed = frozenset(unlicensed)
+    registry.gated = frozenset(gated)
+    return registry

@@ -351,6 +351,14 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
     return [...acc].sort((a, b) => a.localeCompare(b))
   }, [allJobs])
 
+  // the applications a job may belong to: the connectors loaded here, and those other jobs already name (an
+  // application the licence does not cover is not among the connectors)
+  const applicationNames = useMemo<string[]>(() => {
+    const acc = new Set<string>((connectors ?? []).map((c) => c.name))
+    for (const j of allJobs ?? []) for (const a of (j.applications ?? [])) acc.add(a)
+    return [...acc].sort((a, b) => a.localeCompare(b))
+  }, [allJobs, connectors])
+
   // Where this job sits in the list that is sent: a problem the server lists names it by that place.
   const jobIndex = allJobs ? (isNew ? allJobs.length : allJobs.findIndex((j) => j.id === id)) : -1
   // A check made here, as a problem the page shows like the server's.
@@ -500,6 +508,17 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
                   onChange={(next) => patch({ tags: next })}
                   placeholder={t('nomaflow.editor.tagsPlaceholder')}
                 />
+              </FieldWrap>
+              <FieldWrap>
+                <FieldLabel>{t('nomaflow.editor.fieldApplications')}</FieldLabel>
+                <div data-job-applications>
+                  <TagsField
+                    value={job.applications ?? []}
+                    allTags={applicationNames}
+                    onChange={(next) => patch({ applications: next.length ? next : undefined })}
+                    placeholder={t('nomaflow.editor.applicationsPlaceholder')}
+                  />
+                </div>
               </FieldWrap>
               <FieldWrap>
                 <FieldLabel>{t('nomaflow.editor.fieldTimeout')}</FieldLabel>

@@ -128,3 +128,101 @@ def test_load_connectors_keeps_licensed_when_covered(tmp_path, keypair) -> None:
     lic2 = verify_license(_make_token(priv, {"customer": "Acme", "apps": ["other"]}), public_key_pem=pub)
     reg2 = load_connectors(_write_connectors(tmp_path), license=lic2)
     assert set(reg2.names()) == {"free"}
+
+
+# ── one application or another: what a key that covers only some of them loads and offers ──
+_SUITE_TOML = """
+[pools.default]
+url = "sqlite+aiosqlite://"
+
+[connectors.free]
+type = "sql"
+pool = "default"
+
+[connectors.audit]
+type = "sql"
+pool = "default"
+licensed = true
+applications = ["admin"]      # admin reads its data: it stays loaded for it
+
+[connectors.admin]
+type = "sql"
+pool = "default"
+licensed = true
+
+[connectors.admin_services]
+type = "sql"
+pool = "default"
+applications = ["admin"]      # a part of admin: it follows it
+"""
+
+
+def _suite(tmp_path, keypair, apps):
+    from liberty.connectors import load_connectors
+    priv, pub = keypair
+    p = tmp_path / "connectors.toml"
+    p.write_text(_SUITE_TOML)
+    lic = verify_license(_make_token(priv, {"customer": "Acme", "plan": "x", **({} if apps is None else {"apps": apps})}), public_key_pem=pub)
+    return load_connectors(p, license=lic)
+
+
+def test_a_key_for_one_application_loads_its_parts_and_what_it_reads(tmp_path, keypair) -> None:
+    from liberty.licensing import offered
+
+    # admin only: its services follow it; audit stays loaded for its data, but is not offered
+    reg = _suite(tmp_path, keypair, ["admin"])
+    assert set(reg.names()) == {"free", "admin", "admin_services", "audit"}
+    assert reg.unlicensed >= {"audit"} and "admin" not in reg.unlicensed
+    assert offered(reg, "admin") and offered(reg, "free") and not offered(reg, "audit")
+    # audit only: admin and its services are left out
+    reg = _suite(tmp_path, keypair, ["audit"])
+    assert set(reg.names()) == {"free", "audit"} and reg.gated == {"admin", "admin_services"}
+    assert offered(reg, "audit") and not offered(reg, "admin")
+    # both, or a key that names no application: everything
+    for apps in (["audit", "admin"], None):
+        reg = _suite(tmp_path, keypair, apps)
+        assert set(reg.names()) == {"free", "admin", "admin_services", "audit"} and not ({"audit", "admin"} & reg.unlicensed)
+
+
+def test_without_a_key_a_part_of_a_licensed_application_is_not_loaded(tmp_path) -> None:
+    from liberty.connectors import load_connectors
+    p = tmp_path / "connectors.toml"
+    p.write_text(_SUITE_TOML)
+    reg = load_connectors(p)
+    assert set(reg.names()) == {"free"} and {"audit", "admin"} <= reg.unlicensed
+
+
+def test_a_job_follows_the_applications_it_names(tmp_path) -> None:
+    from liberty.jobs import load_jobs
+    p = tmp_path / "jobs.toml"
+    step = '[[jobs.steps]]\ntype = "sql_query"\nname = "s"\nconnector = "free"\nquery = "q"\n'
+    p.write_text("".join(f'[[jobs]]\nid = "{jid}"\n{apps}{step}\n' for jid, apps in (
+        ("alone", ""), ("audit-only", 'applications = ["audit"]\n'), ("shared", 'applications = ["audit", "admin"]\n'))))
+    assert {j.id for j in load_jobs(p).jobs()} == {"alone", "audit-only", "shared"}
+    assert {j.id for j in load_jobs(p, unlicensed=frozenset({"audit"})).jobs()} == {"alone", "shared"}
+    assert {j.id for j in load_jobs(p, unlicensed=frozenset({"audit", "admin"})).jobs()} == {"alone"}
+
+
+def test_a_menu_shows_nothing_of_an_application_the_key_does_not_cover() -> None:
+    from types import SimpleNamespace
+
+    from liberty.auth.principal import Principal
+    from liberty.dashboards.config import parse_dashboards
+    from liberty.menus import parse_menus
+    from liberty.web.menus import _keeper
+
+    menu = parse_menus({"menus": {"admin": {"label": "Admin", "items": [
+        {"id": "own", "label": "Own page", "type": "page", "target": "/app/admin/tasks"},
+        {"id": "theirs", "label": "A page of audit", "type": "page", "target": "/app/audit/sod?x=1"},
+        {"id": "svc", "label": "Service", "type": "endpoint", "connector": "left_out", "target": "status"},
+    ]}}}).menus["admin"]
+    who = Principal(id="1", username="u", permissions=("*",), is_superuser=True)
+
+    def seen(unlicensed, gated=()):
+        reg = SimpleNamespace(unlicensed=frozenset(unlicensed), gated=frozenset(gated))
+        keep = _keeper(who, parse_dashboards({}), "admin", charts=None, explorer=None, connectors=reg)
+        return [it.id for it in menu.items if keep(it, it.connector or "admin")]
+
+    assert seen(()) == ["own", "theirs", "svc"]
+    assert seen({"audit"}, {"left_out"}) == ["own"]          # another application's page, a connector left out
+    assert seen({"admin"}) == []                               # the application itself

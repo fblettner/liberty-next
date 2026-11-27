@@ -285,8 +285,10 @@ export default function ConnectorsBuilder() {
     // POOL_NAMES — every configured pool (Liberty Next → Administer → Pools). Drives the connector's ``pool``
     // (default) + ``pools`` (extra) fields so they're picked from a dropdown, not typed.
     base.POOL_NAMES = { label: 'Pools', values: pools.map((p) => ({ value: p, label: p, mono: p })) }
+    // CONNECTOR_NAMES — the other connectors: the applications this one serves (``applications``).
+    base.CONNECTOR_NAMES = { label: 'Connectors', values: Object.keys(conns ?? {}).filter((n) => n !== sel).sort().map((n) => ({ value: n, label: n, mono: n })) }
     return base
-  }, [schemas, dictionary, sel, menus, pools, roleNames])
+  }, [schemas, dictionary, sel, menus, pools, roleNames, conns])
 
   const update = (name: string, v: Record<string, unknown>) => setConns((p) => ({ ...(p ?? {}), [name]: { ...v, type: (p ?? {})[name]?.type } }))
   // Replace one section array (`tables` / `queries` / `sequences` / `lookups`) on a connector.
@@ -1255,8 +1257,8 @@ export default function ConnectorsBuilder() {
               {isSql && mode === 'settings' && selConn && selSchema && (() => {
                 const locked = sel != null && alwaysLicensed.has(sel)
                 const fieldKeys = locked
-                  ? ['pool', 'pools', 'show_in_switcher', 'home', 'home_by_role', 'max_rows', 'dd_prefix']
-                  : ['pool', 'pools', 'show_in_switcher', 'home', 'home_by_role', 'licensed', 'max_rows', 'dd_prefix']
+                  ? ['pool', 'pools', 'show_in_switcher', 'home', 'home_by_role', 'applications', 'max_rows', 'dd_prefix']
+                  : ['pool', 'pools', 'show_in_switcher', 'home', 'home_by_role', 'licensed', 'applications', 'max_rows', 'dd_prefix']
                 const settingsSchema = pickSchemaProperties(selSchema, fieldKeys)
                 return (
                   <SqlConnectorContext.Provider value={sel ?? undefined}>
