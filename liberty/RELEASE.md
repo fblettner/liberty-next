@@ -13,6 +13,10 @@
   their main database while an API connector with one server per environment called its own server — another
   environment when its `pool` was not that main database. It now calls the server of the SQL side's main
   database; the log says so at start when the two differ.
+- **A job has its environment.** The function, report and API steps of a job work on the step's own pool when it
+  names one, else on the job's (**Environment**, new on the job), else on the pool picked on the page the job was
+  started from; a scheduled run with none of these reads each connector's main database, as before. A job is
+  copied for a second environment by setting that one field, instead of each step's.
 - **The pool list names the main database.** The first choice read "Default" and the main database appeared a
   second time under its name; it is now listed once, under its name.
 - **An apps upgrade keeps a connector's databases.** *Database* and *Other databases* of a SQL connector are the

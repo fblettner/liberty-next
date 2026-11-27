@@ -363,7 +363,7 @@ class JobRunner:
                     })
                 else:
                     effective_step = step
-                step_result = await self._run_step_with_retry(run, idx, effective_step, job.retry, ctx)
+                step_result = await self._run_step_with_retry(run, idx, effective_step, job.retry, ctx, job_pool=job.pool)
                 if isinstance(step_result, str) and step.continue_on_failure:
                     # Recorded FAILED already; the job goes on and ends FAILED naming it.
                     _log.warning("nomaflow.runner step=%s FAILED — continuing (continue_on_failure): %s",
@@ -584,6 +584,7 @@ class JobRunner:
         step: Step,
         policy: JobRetry | None,
         ctx: RunContext,
+        job_pool: str | None = None,
     ) -> "StepResult | str":
         """Run *step* with retries per *policy*; return the StepResult on success,
         an error STRING (the last failed attempt's message) when all retries are
@@ -612,8 +613,10 @@ class JobRunner:
             # The step runs in its own task whose context carries the step's environment: an API
             # connector with per-pool targets (AIS per JDE environment) called from the step — a
             # python step's plugin, say — reaches that pool's server (no pool → the default one).
+            # The environment: the step's own, else the job's, else the one of whoever started the run — the pool
+            # picked on the page a user ran the job from (a scheduled run has none: the main database).
             step_context = contextvars.copy_context()
-            step_context.run(current_pool.set, step.pool)
+            step_context.run(current_pool.set, step.pool or job_pool or current_pool.get())
             try:
                 result = await asyncio.wait_for(
                     asyncio.get_running_loop().create_task(executor.execute(step, ctx), context=step_context),

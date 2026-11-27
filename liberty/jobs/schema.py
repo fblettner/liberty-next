@@ -484,6 +484,10 @@ class Job(BaseModel):
     # The licensed applications the job belongs to: it is offered (listed, scheduled, run) when the licence covers
     # one of them. Empty: the job stands alone — always offered.
     applications: list[str] = Field(default_factory=list)
+    # The environment (pool) the job works on: its function, report and API steps read that pool — the database of a
+    # connector that runs on several, the server of an API connector with one per environment — unless a step names
+    # its own. None: the pool picked on the page the run was started from, else each connector's main database.
+    pool: str | None = None
     retry: JobRetry | None = None
     alerts: JobAlerts | None = None
     steps: list[Step] = Field(..., min_length=1)

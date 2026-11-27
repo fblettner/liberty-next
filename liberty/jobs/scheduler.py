@@ -514,6 +514,11 @@ class JobScheduler:
         while the base job (or another preset) of the same job is running — one
         concurrent run per job, regardless of which trigger fired it.
         """
+        # a scheduled fire belongs to nobody's page: whatever environment the timer was armed under (a request that
+        # reloaded the jobs with a pool picked), the run starts with none — the job's own pool, else the main database
+        from liberty.connectors.api import current_pool
+
+        current_pool.set(None)
         # Look up the *current* job — registry may have been swapped via hot-reload
         # since the trigger was registered, and the latest steps/policy are what
         # should run.

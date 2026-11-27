@@ -196,3 +196,22 @@ def test_with_no_pool_picked_the_api_server_is_the_one_of_the_main_database(tmp_
                 assert server(registry) == expected
             finally:
                 current_pool.reset(token)
+
+
+# ── a job's environment: the step's, else the job's, else the page's ──
+async def test_a_step_runs_for_the_steps_pool_then_the_jobs_then_the_pages() -> None:
+    import contextvars
+
+    from liberty.connectors.api import current_pool
+    from liberty.jobs.schema import Job
+
+    def picked(step_pool: str | None, job_pool: str | None, page_pool: str | None) -> str | None:
+        """What the runner sets for a step (liberty.jobs.runner._run_step_with_retry)."""
+        ctx = contextvars.copy_context()
+        ctx.run(current_pool.set, page_pool)
+        return ctx.run(lambda: step_pool or job_pool or current_pool.get())
+
+    assert picked("step", "job", "page") == "step" and picked(None, "job", "page") == "job"
+    assert picked(None, None, "page") == "page" and picked(None, None, None) is None
+    job = Job.model_validate({"id": "j", "pool": "uf", "steps": [{"type": "sql_query", "name": "s", "connector": "c", "query": "q"}]})
+    assert job.pool == "uf" and Job.model_validate({"id": "j", "steps": [{"type": "sql_query", "name": "s", "connector": "c", "query": "q"}]}).pool is None

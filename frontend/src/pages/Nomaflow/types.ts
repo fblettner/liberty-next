@@ -97,6 +97,8 @@ export interface JobConfig {
   tags?: string[]
   /** The licensed applications the job belongs to: offered when the licence covers one of them. */
   applications?: string[]
+  /** The environment (pool) its function, report and API steps work on, unless a step names its own. */
+  pool?: string | null
   retry?: JobRetry | null
   alerts?: JobAlerts | null
   steps: StepConfig[]

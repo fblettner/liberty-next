@@ -351,6 +351,13 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
     return [...acc].sort((a, b) => a.localeCompare(b))
   }, [allJobs])
 
+  // the environments a job may be set on: the pools of the connectors that run on several databases
+  const environmentOptions = useMemo(() => {
+    const pools = new Set<string>()
+    for (const c of connectors ?? []) if (c.type === 'sql' && (c.pools?.length ?? 0) > 1) c.pools!.forEach((p) => pools.add(p))
+    return [...pools].sort((a, b) => a.localeCompare(b)).map((p) => ({ value: p, label: p }))
+  }, [connectors])
+
   // the applications a job may belong to: the connectors loaded here, and those other jobs already name (an
   // application the licence does not cover is not among the connectors)
   const applicationNames = useMemo<string[]>(() => {
@@ -520,6 +527,16 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
                   />
                 </div>
               </FieldWrap>
+              {(environmentOptions.length > 0 || !!job.pool) && (
+                <FieldWrap>
+                  <FieldLabel>{t('nomaflow.editor.fieldEnvironment')}</FieldLabel>
+                  <div data-job-pool>
+                    <SearchSelect value={job.pool ?? ''} onChange={(v) => patch({ pool: v || undefined })}
+                      options={environmentOptions} anyLabel={t('nomaflow.editor.environmentAny')} clearable allowCustom />
+                  </div>
+                  <FieldHint>{t('nomaflow.editor.fieldEnvironmentHint')}</FieldHint>
+                </FieldWrap>
+              )}
               <FieldWrap>
                 <FieldLabel>{t('nomaflow.editor.fieldTimeout')}</FieldLabel>
                 <Input type="number" min={1} value={job.timeout_seconds ?? ''} placeholder="14400"

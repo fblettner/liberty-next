@@ -14,6 +14,11 @@
   leur base principale alors qu'un connecteur API avec un serveur par environnement appelait son propre serveur —
   un autre environnement quand son `pool` n'était pas cette base principale. Il appelle maintenant le serveur de la
   base principale du côté SQL ; le journal le dit au démarrage quand les deux diffèrent.
+- **Un traitement a son environnement.** Les étapes de fonction, de rapport et d'API d'un traitement travaillent sur
+  le pool de l'étape quand elle en nomme un, sinon sur celui du traitement (**Environnement**, nouveau sur le
+  traitement), sinon sur le pool choisi sur la page d'où le traitement a été lancé ; une exécution planifiée sans
+  rien de cela lit la base principale de chaque connecteur, comme avant. Un traitement se copie pour un second
+  environnement en renseignant ce seul champ, au lieu de celui de chaque étape.
 - **La liste des pools nomme la base principale.** Le premier choix s'appelait « Défaut » et la base principale
   apparaissait une seconde fois sous son nom ; elle est maintenant listée une fois, sous son nom.
 - **Une mise à jour des applications garde les bases d'un connecteur.** *Base de données* et *Autres bases* d'un
