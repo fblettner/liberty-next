@@ -19,6 +19,7 @@
 // semantically (Connection / Authentication / Endpoints) so the operator sees only what's
 // useful. The Test tab here mirrors nomaubl's — pick the endpoint, parameters appear
 // automatically with each declared name/label/default, click Run.
+import { ParamLookupFields } from './ParamLookupFields'
 import { Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
@@ -78,7 +79,7 @@ export type Endpoint = {
   /** Where the server puts its warnings: reported with the answer, the call stands. */
   warning_fields?: string[] | null
   response_map?: Record<string, string>
-  params?: Array<{ name: string; label?: string | null; default?: string | null; help?: string | null; example?: string | null; choices?: string[] | null; required?: boolean }>
+  params?: Array<{ name: string; label?: string | null; default?: string | null; help?: string | null; example?: string | null; choices?: string[] | null; required?: boolean; lookup?: string | null; lookup_connector?: string | null; lookup_binds?: Record<string, string> | null }>
 }
 
 export type ApiConnector = {
@@ -1513,6 +1514,7 @@ export function EndpointEditor({ value, onChange, sourceLabel, onRefresh, onModi
                       if (clean.length !== (p.choices ?? []).length) change({ choices: clean.length ? clean : undefined })
                     }}
                   /></FieldRow>
+                <ParamLookupFields Row={FieldRow} value={{ lookup: p.lookup, lookup_connector: p.lookup_connector, lookup_binds: p.lookup_binds }} onChange={(next) => change(next)} />
                 <Checkbox checked={p.required === true} onChange={(v: boolean) => change({ required: v ? true : undefined })} label={t('settings.api.endpoint.paramRequired')} />
               </ParamBody>
             )}

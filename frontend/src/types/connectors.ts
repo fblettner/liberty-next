@@ -9,6 +9,23 @@ export interface ParamDef {
   example?: string | null    // an example value
   choices?: string[] | null  // the only values allowed → a dropdown
   required?: boolean         // a call without it is refused
+  lookup?: ParamLookup | null  // the dictionary lookup its value is picked in (resolved by the server)
+}
+
+/** A dictionary lookup as a parameter names it: the reference, how its list is shown, what narrows it. */
+export interface ParamLookup {
+  kind: 'lookup'
+  connector: string
+  query: string
+  value: string
+  label: string
+  title?: string
+  display_fields?: string[]
+  filter_fields?: string[]
+  hide_value?: boolean
+  sources?: { connector: string; query: string }[]
+  /** a :parameter of the lookup's query → another parameter's name (its value is sent) or a fixed value */
+  binds?: Record<string, string>
 }
 
 export interface SqlQueryMeta {

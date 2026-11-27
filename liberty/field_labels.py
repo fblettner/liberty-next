@@ -97,6 +97,9 @@ LABELS: dict[str, dict[str, Label]] = {
         "example": ("Example", "An example value, shown with the help."),
         "choices": ("Allowed values", "The only values allowed, offered as a dropdown."),
         "required": ("Required", "A call without this value is refused before anything is sent."),
+        "lookup": ("List to pick in", "A lookup of the dictionary: the value is picked in its list instead of typed."),
+        "lookup_connector": ("Connector of the lookup", "The connector the lookup belongs to, when it is not this one."),
+        "lookup_binds": ("What narrows the list", "A parameter of the lookup, set to another parameter here or to a value."),
     },
     "QueryDef": {
         "name": ("Name", "The query's name, unique in its application."),

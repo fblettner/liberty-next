@@ -1195,7 +1195,7 @@ class SQLConnector:
                 "dialects": q.dialects,
                 "params": [
                     {"name": p.name, "label": p.label, "default": p.default, "help": p.help, "example": p.example,
-                     "choices": list(p.choices)}
+                     "choices": list(p.choices), "lookup": self._dict.param_lookup(p, self.name)}
                     for p in q.params
                 ],
                 "bind_params": find_bind_params(q.default_sql),

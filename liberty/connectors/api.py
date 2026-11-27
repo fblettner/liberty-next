@@ -418,13 +418,18 @@ class APIConnector:
                     "response_map": e.response_map,
                     "params": [
                         {"name": p.name, "label": p.label, "default": p.default, "help": p.help, "example": p.example,
-                         "choices": list(p.choices), "required": True if p.required else None}
+                         "choices": list(p.choices), "required": True if p.required else None, "lookup": self._param_lookup(p)}
                         for p in e.params
                     ],
                 }
                 for e in self._endpoints.values()
             ],
         }
+
+    def _param_lookup(self, param: Any) -> dict[str, Any] | None:
+        """The dictionary lookup a parameter names, as the browser reads it (the registry's dictionary)."""
+        dictionary = getattr(getattr(self, "registry", None), "dictionary", None)
+        return dictionary.param_lookup(param, self.name) if dictionary is not None else None
 
     # -- url / params helpers --------------------------------------------- #
 

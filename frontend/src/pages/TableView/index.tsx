@@ -9,7 +9,7 @@ import { useLocation, useSearchParams } from 'react-router-dom'
 import { Table as TableIcon, Play, BarChart3, Network, LayoutList } from 'lucide-react'
 import { api, ApiError, streamNDJSON } from '../../api/client'
 import type { Column, ConnectorMeta, QueryResult, SqlQueryMeta } from '../../types/connectors'
-import { PageLayout, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, SearchSelect, SpinnerRing, useModals } from '../../common'
+import { PageLayout, Input, Field, Banner, Centered, Tag, Mono, Row, Stack, ParamInput, SpinnerRing, useModals } from '../../common'
 import { colors, radius, fontSize, fonts } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { findMenuLabel } from '../../services/menuLabels'
@@ -605,14 +605,10 @@ export default function TableView({ connector, query, screenApp, screenId, embed
               return (
                 <div key={name} style={{ minWidth: 160 }}>
                   <Field label={def?.label ?? name}>
-                    {def?.choices?.length ? (
-                      // a closed list of values: picked, not typed (blank = the parameter's default)
-                      <SearchSelect
-                        value={params[name] ?? ''}
-                        options={def.choices.map((c) => ({ value: c, label: c }))}
-                        onChange={(v: string | null) => setParams((p) => ({ ...p, [name]: v ?? '' }))}
-                        anyLabel={def.default ?? undefined}
-                      />
+                    {def && (def.lookup || def.choices?.length) ? (
+                      // a list of values (a dictionary lookup, or a few fixed choices): picked, not typed
+                      <ParamInput def={def} value={params[name] ?? ''} names={meta.params.map((p) => p.name)} values={params}
+                        onChange={(v) => setParams((p) => ({ ...p, [name]: v }))} />
                     ) : (
                       <Input
                         type="text"

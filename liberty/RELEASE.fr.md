@@ -2,6 +2,18 @@
 
 ## 7.0.91 — unreleased
 
+- **Listes : une longue s'ouvre en tableau, et un paramètre peut en avoir une.** Toute liste déroulante longue
+  (40 lignes ou plus) ou à plusieurs colonnes se termine par *Ouvrir en tableau* : une fenêtre avec le code, la
+  description et chaque colonne sous son en-tête, la même recherche et les mêmes filtres, et la place de lire — sur
+  chaque écran, formulaire, filtre et page d'application, sans rien configurer. Et un **paramètre** déclaré d'une
+  requête ou d'un point d'accès peut nommer un **lookup du dictionnaire** : là où le paramètre se remplit — le
+  formulaire de paramètres d'un écran, l'exécuteur HTTP, une étape de test — sa valeur se choisit dans cette liste au
+  lieu d'être saisie, avec les colonnes et les filtres du lookup. *Ce qui restreint la liste* relie un paramètre de la
+  requête du lookup à un autre paramètre (les UDO de la nature choisie, les colonnes de la table choisie) ou à une
+  valeur fixe ; la liste attend le paramètre dont elle dépend. Une valeur absente de la liste peut toujours être
+  saisie (une valeur capturée dans un test). Se règle dans la carte du paramètre de l'éditeur de point d'accès (*Liste
+  où choisir*, *Connecteur du lookup*, *Ce qui restreint la liste*), et sur les paramètres d'une requête.
+
 - **Rapport d'utilisation de la licence : une mise à jour ne ressemble plus à une nouvelle installation.** Quand les comptes
   sont tenus dans un fichier (le réglage par défaut), le rapport identifiait l'installation par son nom d'hôte — dans un
   conteneur, l'identifiant du conteneur, qui change à chaque recréation. L'outil de licence affichait donc un nouvel

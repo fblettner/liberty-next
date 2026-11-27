@@ -753,3 +753,30 @@ async def test_a_call_is_made_as_the_signed_in_user(tmp_path) -> None:
     finally:
         current_principal.reset(token)
         await bad.aclose()
+
+
+def test_a_parameter_names_a_dictionary_lookup() -> None:
+    """A declared parameter that names a lookup is described with it — the reference, how its list is shown, what
+    narrows it — for the browser to offer the list where the parameter is filled."""
+    from types import SimpleNamespace
+
+    from liberty.connectors.config import ParamDef
+    from liberty.connectors.dictionary import DictionaryFile
+
+    dictionary = DictionaryFile.model_validate({
+        "lookups": {"shared": {"connector": "jde", "query": "roles_get", "value": "ROLE", "label": "NAME"}},
+        "connectors": {"jde": {"lookups": {"udos": {"query": "udos_get", "value": "UDO", "label": "NAME", "display_fields": ["KIND"], "filter_fields": ["KIND"]}}}},
+    })
+    plain = ParamDef(name="WHO", lookup="shared")
+    assert dictionary.param_lookup(plain, "api_x") == {"kind": "lookup", "connector": "jde", "query": "roles_get", "value": "ROLE", "label": "NAME"}
+    scoped = ParamDef(name="UDO", lookup="udos", lookup_connector="jde", lookup_binds={"KIND": "CATEGORY"})
+    assert dictionary.param_lookup(scoped, "api_x") == {"kind": "lookup", "connector": "jde", "query": "udos_get", "value": "UDO", "label": "NAME",
+                                                        "display_fields": ["KIND"], "filter_fields": ["KIND"], "binds": {"KIND": "CATEGORY"}}
+    assert dictionary.param_lookup(ParamDef(name="X"), "api_x") is None
+    assert dictionary.param_lookup(ParamDef(name="X", lookup="unknown"), "api_x") is None      # a name the dictionary does not hold: typed, as before
+    # …and an API connector says it with each parameter
+    connector = APIConnector("api_x", ApiConnectorConfig.model_validate({"type": "api", "base_url": "http://x", "endpoints": [
+        {"name": "e", "path": "/e", "params": [{"name": "WHO", "lookup": "shared"}, {"name": "N"}]}]}))
+    connector.registry = SimpleNamespace(dictionary=dictionary)
+    params = connector.describe()["endpoints"][0]["params"]
+    assert params[0]["lookup"]["query"] == "roles_get" and params[1]["lookup"] is None

@@ -34,3 +34,40 @@ export function orderOptions<T extends Orderable & { group?: string }>(options: 
   if (sort) order.sort((a, b) => collator.compare(a, b))
   return [...base.filter((o) => !o.group), ...order.flatMap((g) => base.filter((o) => o.group === g))]
 }
+
+// ── narrowing a list: the search box and the filter chips, shared by the dropdown and its table dialog ──
+
+/** What a list is narrowed on: its text, its code and its extra columns. */
+export interface Searchable { value: string; label: string; mono?: string; cells?: string[] }
+
+/** The columns of a list that are filtered by chips (a LOOKUP's filter fields), each with its distinct values. */
+export function facetColumns<T extends Searchable>(
+  cellColumns: { label: string; filterable?: boolean }[] | undefined, options: T[],
+): { index: number; label: string; values: string[] }[] {
+  if (!cellColumns) return []
+  return cellColumns
+    .map((c, index) => ({ index, label: c.label, filterable: !!c.filterable }))
+    .filter((c) => c.filterable)
+    .map((c) => ({ index: c.index, label: c.label, values: Array.from(new Set(options.map((o) => (o.cells?.[c.index] ?? '').trim()).filter(Boolean))).sort() }))
+    .filter((c) => c.values.length > 0)
+}
+
+/** The options the text typed and the chips picked leave: for every column with a chip the cell equals it, and
+ *  the text is found in the label, the value, the code or a cell (case ignored). */
+export function filterOptions<T extends Searchable>(options: T[], text: string, facets: Record<number, string> = {}): T[] {
+  const needle = text.trim().toLowerCase()
+  const active = Object.entries(facets).filter(([, v]) => v)
+  if (!needle && !active.length) return options
+  return options.filter((o) => {
+    for (const [index, wanted] of active) if ((o.cells?.[Number(index)] ?? '').trim() !== wanted) return false
+    if (!needle) return true
+    return o.label.toLowerCase().includes(needle) || o.value.toLowerCase().includes(needle)
+      || (o.mono ?? '').toLowerCase().includes(needle) || (o.cells ?? []).some((c) => c.toLowerCase().includes(needle))
+  })
+}
+
+/** From how many lines a list is also offered as a table in a dialog (a list with extra columns always is). */
+export const BROWSE_FROM = 40
+export function browsable(options: Searchable[]): boolean {
+  return options.length >= BROWSE_FROM || options.some((o) => (o.cells?.length ?? 0) > 0)
+}

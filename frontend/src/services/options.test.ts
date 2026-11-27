@@ -47,3 +47,28 @@ describe('sortOptions — a line that shows a code', () => {
     expect(o.map((x) => x.value)).toEqual(['c', 'a', 'b'])
   })
 })
+
+describe('narrowing a list', () => {
+  const opts = [
+    { value: 'P0411', label: 'Voucher Entry', mono: 'P0411', cells: ['APPL', '04'] },
+    { value: 'R04423', label: 'Aging', mono: 'R04423', cells: ['UBE', '04'] },
+    { value: 'F0411', label: 'Accounts Payable Ledger', mono: 'F0411', cells: ['TBLE', '04'] },
+  ]
+  it('lists the columns filtered by chips with their values', async () => {
+    const { facetColumns } = await import('./options')
+    expect(facetColumns([{ label: 'Type', filterable: true }, { label: 'System' }], opts)).toEqual([{ index: 0, label: 'Type', values: ['APPL', 'TBLE', 'UBE'] }])
+    expect(facetColumns(undefined, opts)).toEqual([])
+  })
+  it('keeps what the text and the chips leave', async () => {
+    const { filterOptions } = await import('./options')
+    expect(filterOptions(opts, 'ledger').map((o) => o.value)).toEqual(['F0411'])
+    expect(filterOptions(opts, '04', { 0: 'UBE' }).map((o) => o.value)).toEqual(['R04423'])
+    expect(filterOptions(opts, '')).toBe(opts)
+  })
+  it('offers a long list, or one with columns, as a table', async () => {
+    const { browsable, BROWSE_FROM } = await import('./options')
+    expect(browsable(opts)).toBe(true)
+    expect(browsable([{ value: 'a', label: 'A' }])).toBe(false)
+    expect(browsable(Array.from({ length: BROWSE_FROM }, (_x, i) => ({ value: String(i), label: String(i) })))).toBe(true)
+  })
+})

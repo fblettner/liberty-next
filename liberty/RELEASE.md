@@ -2,6 +2,17 @@
 
 ## 7.0.91 — unreleased
 
+- **Lists: a long one opens as a table, and a parameter can have one.** Every dropdown whose list is long (40 lines
+  or more) or has several columns now ends with *Open as a table*: a dialog with the code, the description and each
+  column under its heading, the same search and filter chips, and room to read — on every screen, form, filter and
+  application page, with nothing to configure. And a declared **parameter** of a query or of an endpoint can name a
+  **lookup of the dictionary**: where the parameter is filled — a screen's parameter form, the HTTP runner, a test
+  step — its value is picked in that list instead of typed, with the lookup's columns and filters. *What narrows the
+  list* binds a parameter of the lookup's query to another parameter (the UDOs of the kind picked, the columns of the
+  table picked) or to a fixed value; the list waits for the parameter it depends on. A value that is not in the list
+  can still be typed (a captured value in a test). Set in the endpoint editor's parameter card (*List to pick in*,
+  *Connector of the lookup*, *What narrows the list*), and on a query's parameters.
+
 - **Licence usage report: an upgrade no longer looks like a new installation.** Where the accounts are kept in a file
   (the default), the report identified the installation by its host name — in a container, the container's id, which
   changes each time it is recreated. The licence tool therefore listed a new environment after every upgrade. The

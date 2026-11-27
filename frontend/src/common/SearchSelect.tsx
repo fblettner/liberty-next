@@ -19,14 +19,17 @@
 //    `sort`; ungrouped options first) — the Explorer's models per application, a scope rule's
 //    columns per connector.
 //  · `clearable` → an × on the trigger resets the value to ''; `size="sm"` → a 28px trigger.
+//  · a long list, or one with several columns, is also offered AS A TABLE in a dialog ("Open as a table", under
+//    the list): the same search and filter chips with room to read — LookupDialog; `title` heads it.
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { ChevronDown, Check, X } from 'lucide-react'
+import { ChevronDown, Check, Table2, X } from 'lucide-react'
 import { SpinnerRing } from './Spinner'
-import { orderOptions } from '../services/options'
+import { browsable, facetColumns, filterOptions, orderOptions } from '../services/options'
+import { LookupDialog } from './LookupDialog'
 import { colors, radius, fontSize, fonts, shadow } from '../theme'
 
 export interface SearchSelectOption {
@@ -149,7 +152,7 @@ export function matchOption<T extends { value: string }>(options: readonly T[], 
 }
 
 export function SearchSelect({
-  value, onChange, options: given, placeholder, anyLabel, loading, disabled, allowCustom, cellColumns, sort, clearable, size,
+  value, onChange, options: given, placeholder, anyLabel, loading, disabled, allowCustom, cellColumns, sort, clearable, size, title,
 }: {
   value: string
   onChange: (v: string) => void
@@ -174,12 +177,15 @@ export function SearchSelect({
   clearable?: boolean
   /** ``sm`` → a 28px trigger (toolbars, dense forms). */
   size?: 'sm' | 'md'
+  /** What the list is, as the heading of its table dialog (a field's label). */
+  title?: string
 }) {
   const { t } = useTranslation()
   // with groups: ungrouped first, then each group in the order met (sorted too with ``sort``)
   const options = useMemo(() => orderOptions(given, !!sort), [given, sort])
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
+  const [browsing, setBrowsing] = useState(false)
   // facet filters: cell-column index → the ONE selected value (single-select per column — pick a
   // value to see only its rows; click it again to clear). Across columns the selections AND.
   // Reset when the panel closes.
@@ -251,38 +257,15 @@ export function SearchSelect({
   // Exact, then trim-tolerant (see matchOption) — the trigger label.
   const current = matchOption(options, value)
   // Filterable cell columns + their distinct values (the facet chips). Computed once per options set.
-  const facetCols = useMemo(() => {
-    if (!cellColumns) return []
-    return cellColumns
-      .map((c, index) => ({ index, label: c.label, filterable: !!c.filterable }))
-      .filter((c) => c.filterable)
-      .map((c) => ({
-        ...c,
-        values: Array.from(new Set(options.map((o) => (o.cells?.[c.index] ?? '').trim()).filter(Boolean))).sort(),
-      }))
-      .filter((c) => c.values.length > 0)
-  }, [cellColumns, options])
+  const facetCols = useMemo(() => facetColumns(cellColumns, options), [cellColumns, options])
   const toggleFacet = (idx: number, v: string) => setFacets((prev) => {
     const next = { ...prev }
     if (next[idx] === v) delete next[idx]   // click the active chip → clear
     else next[idx] = v                      // single-select: replace any prior choice
     return next
   })
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase()
-    const activeFacets = Object.entries(facets).filter(([, v]) => v)
-    return options.filter((o) => {
-      // facet narrowing: for EVERY column with a selection, the option's cell must equal it.
-      for (const [idxStr, val] of activeFacets) {
-        if ((o.cells?.[Number(idxStr)] ?? '').trim() !== val) return false
-      }
-      if (!needle) return true
-      return o.label.toLowerCase().includes(needle)
-        || o.value.toLowerCase().includes(needle)
-        || (o.mono ?? '').toLowerCase().includes(needle)
-        || (o.cells ?? []).some((c) => c.toLowerCase().includes(needle))
-    })
-  }, [q, options, facets])
+  const filtered = useMemo(() => filterOptions(options, q, facets), [q, options, facets])
+  const canBrowse = useMemo(() => browsable(options), [options])
 
   const pick = (v: string) => { onChange(v); setOpen(false) }
   const commitCustom = () => {
@@ -416,6 +399,11 @@ export function SearchSelect({
           {t('common.useCustom')} <span className="mono">{q.trim()}</span>
         </CreateRow>
       )}
+      {canBrowse && (
+        <CreateRow type="button" data-open-table onClick={() => { setOpen(false); setBrowsing(true) }}>
+          <Table2 size={13} /> {t('lookupDialog.open')}
+        </CreateRow>
+      )}
     </Panel>
   ) : null
 
@@ -432,6 +420,9 @@ export function SearchSelect({
         {loading ? <SpinnerRing size={14} /> : <ChevronDown size={14} />}
       </Trigger>
       {panel && createPortal(panel, document.body)}
+      {browsing && createPortal(
+        <LookupDialog title={title} options={options} value={value} cellColumns={cellColumns}
+          onPick={(v) => { setBrowsing(false); onChange(v) }} onClose={() => setBrowsing(false)} />, document.body)}
     </Wrap>
   )
 }

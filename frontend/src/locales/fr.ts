@@ -306,6 +306,8 @@ const fr: Resources = {
     inherit: 'Hériter',
     pickLogger: 'Un module (liberty.jobs, nomasx1…)',
   },
+  lookupDialog: { title: 'Choisir dans la liste', open: 'Ouvrir en tableau', code: 'Code', label: 'Description', count: '{{n}} sur {{total}}' },
+  paramInput: { pickFirst: "choisissez d'abord {{name}}" },
   common: {
     callablePick: 'Choisir une fonction…',
     callableUnknown: 'absente des fonctions livrées par les applications : vérifiez le nom',
@@ -2393,6 +2395,9 @@ const fr: Resources = {
         paramHelp: "Aide — quoi y mettre",
         paramExample: "Exemple",
         paramChoices: "Valeurs autorisées (séparées par des virgules)",
+        paramLookup: "Liste où choisir (un lookup du dictionnaire)",
+        paramLookupConnector: "Connecteur du lookup",
+        paramLookupBinds: "Ce qui restreint la liste — paramètre du lookup = un autre paramètre ici, ou une valeur",
         paramRequired: 'Obligatoire',
         noMatch: 'Aucun point d’accès ne correspond à la recherche.',
         paramExampleIs: 'Exemple : {{v}}',

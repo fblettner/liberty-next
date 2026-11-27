@@ -494,6 +494,68 @@ class DictionaryFile(BaseModel):
         e = self.find_entry(key, connector=connector)
         return (e.label_for(language), e.format) if e is not None else (None, None)
 
+    def lookup_wire(self, lk: LookupDef, connector: str | None) -> dict[str, Any]:
+        """A lookup as the browser reads it — the reference (connector, query, value, label) and how its list is
+        shown. Shared by a column's LOOKUP rule and by a parameter that names a lookup (:meth:`param_lookup`)."""
+        wire: dict[str, Any] = {
+            "kind": "lookup",
+            "connector": lk.connector or connector,
+            "query": lk.query,
+            "value": lk.value,
+            "label": lk.label,
+        }
+        # The lookup's human description — used as the dropdown's empty-option label (see enum above).
+        if getattr(lk, "description", None):
+            wire["title"] = lk.description
+        # ``return_params`` — the columns this lookup can flow back. No longer auto-mapped by
+        # dd (v1's buggy behaviour); surfaced so a screen column's ``return_binds`` editor can
+        # offer them as the choices for an explicit return → target-column mapping.
+        if lk.return_params:
+            wire["return_params"] = list(lk.return_params)
+        # ``display_fields`` — extra result columns shown beside code + label in the dropdown.
+        if lk.display_fields:
+            wire["display_fields"] = list(lk.display_fields)
+        # ``hide_value`` — the value is an identifier nobody reads: the dropdown shows the label only.
+        if lk.hide_value:
+            wire["hide_value"] = True
+        # ``filter_fields`` — which of those get an in-dropdown facet-chip filter.
+        if lk.filter_fields:
+            wire["filter_fields"] = list(lk.filter_fields)
+        # ``key_columns`` disambiguate a non-unique ``value``: e.g. SECURITY_USERS has the same
+        # USR_ID across apps, so USR_ID is only unique per USR_APPS_ID. The grid uses these to
+        # resolve the right label per row (match the row's same-named column), so the operator
+        # doesn't have to add a ``filter_from`` to every lookup column.
+        if lk.key_columns:
+            wire["key_columns"] = list(lk.key_columns)
+        # ``union`` — extra query sources merged (UNION ALL) into this lookup, possibly on other
+        # connectors. Emit the full source list (primary first); the frontend fetches each on its
+        # own connector and concatenates. Only when there's a union — single-source lookups keep
+        # the plain ``connector`` / ``query`` path unchanged.
+        if lk.union:
+            primary_conn = lk.connector or connector
+            sources = [{"connector": primary_conn, "query": lk.query}]
+            for s in lk.union:
+                sources.append({"connector": s.connector or lk.connector or connector, "query": s.query})
+            wire["sources"] = sources
+        return wire
+
+    def param_lookup(self, param: Any, connector: str | None) -> dict[str, Any] | None:
+        """The lookup a declared parameter names (``ParamDef.lookup``), as the browser reads it, with ``binds`` — what
+        narrows it (a parameter of the lookup's query → another parameter's name, or a fixed value). ``None`` when the
+        parameter names none, or one that is not in the dictionary."""
+        name = str(getattr(param, "lookup", None) or "").strip()
+        if not name:
+            return None
+        scope = str(getattr(param, "lookup_connector", None) or "").strip() or connector
+        lk = self._find_lookup(name, connector=scope)
+        if lk is None:
+            return None
+        wire = self.lookup_wire(lk, scope)
+        binds = dict(getattr(param, "lookup_binds", None) or {})
+        if binds:
+            wire["binds"] = binds
+        return wire
+
     def resolve_rule(
         self, entry: DictionaryEntry, *, connector: str | None = None, language: str | None = None
     ) -> dict[str, Any] | None:
@@ -551,51 +613,12 @@ class DictionaryFile(BaseModel):
             lk = self._find_lookup(entry.rules_values or "", connector=connector)
             if lk is None:
                 return None
-            wire: dict[str, Any] = {
-                "kind": "lookup",
-                "connector": lk.connector or connector,
-                "query": lk.query,
-                "value": lk.value,
-                "label": lk.label,
-            }
-            # The lookup's human description — used as the dropdown's empty-option label (see enum above).
-            if getattr(lk, "description", None):
-                wire["title"] = lk.description
+            wire = self.lookup_wire(lk, connector)
             # Pass through the entry's static parameter bindings (v1's ly_dictionary_filters).
             # Without these the lookup query may return nothing (UDC queries need SY/RT to know
             # which UDC table to read).
             if entry.lookup_params:
                 wire["params"] = dict(entry.lookup_params)
-            # ``return_params`` — the columns this lookup can flow back. No longer auto-mapped by
-            # dd (v1's buggy behaviour); surfaced so a screen column's ``return_binds`` editor can
-            # offer them as the choices for an explicit return → target-column mapping.
-            if lk.return_params:
-                wire["return_params"] = list(lk.return_params)
-            # ``display_fields`` — extra result columns shown beside code + label in the dropdown.
-            if lk.display_fields:
-                wire["display_fields"] = list(lk.display_fields)
-            # ``hide_value`` — the value is an identifier nobody reads: the dropdown shows the label only.
-            if lk.hide_value:
-                wire["hide_value"] = True
-            # ``filter_fields`` — which of those get an in-dropdown facet-chip filter.
-            if lk.filter_fields:
-                wire["filter_fields"] = list(lk.filter_fields)
-            # ``key_columns`` disambiguate a non-unique ``value``: e.g. SECURITY_USERS has the same
-            # USR_ID across apps, so USR_ID is only unique per USR_APPS_ID. The grid uses these to
-            # resolve the right label per row (match the row's same-named column), so the operator
-            # doesn't have to add a ``filter_from`` to every lookup column.
-            if lk.key_columns:
-                wire["key_columns"] = list(lk.key_columns)
-            # ``union`` — extra query sources merged (UNION ALL) into this lookup, possibly on other
-            # connectors. Emit the full source list (primary first); the frontend fetches each on its
-            # own connector and concatenates. Only when there's a union — single-source lookups keep
-            # the plain ``connector`` / ``query`` path unchanged.
-            if lk.union:
-                primary_conn = lk.connector or connector
-                sources = [{"connector": primary_conn, "query": lk.query}]
-                for s in lk.union:
-                    sources.append({"connector": s.connector or lk.connector or connector, "query": s.query})
-                wire["sources"] = sources
             return wire
         # Form-layer auto-fill rules — v1's `dd_rules` shapes the dialog runtime can act on at
         # *open time* (add mode only). Each maps to a built-in source the frontend resolves

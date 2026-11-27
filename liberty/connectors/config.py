@@ -176,6 +176,9 @@ class ParamDef(BaseModel):
     example: str | None = Field(default=None, description="An example value (for a JSON parameter, an example of the JSON) — shown with the help and offered as a starting point.")
     choices: list[str] = Field(default_factory=list, description="The only values allowed, when there are a few (table, view) — a dropdown where the parameter is filled. For an endpoint the value is checked: another one is refused, and its letter case is corrected (VIEW → view).")
     required: bool = Field(default=False, description="A call without a value for it (and without a default) is refused before anything is sent — for a value the server would otherwise take as blank and act on (the key of the record a form changes).")
+    lookup: str | None = Field(default=None, description="A lookup of the dictionary: where the parameter is filled, its value is picked in that list — code, label, the lookup's display fields and its filters — instead of typed. Another value may still be typed (a `{{captured}}` value in a test).")
+    lookup_connector: str | None = Field(default=None, description="The connector the lookup belongs to (its dictionary scope, and where its query runs when the lookup names none). Blank: this parameter's own connector — to give for an API connector.", json_schema_extra={"x_enum_ref": "CONNECTOR_NAMES"})
+    lookup_binds: dict[str, str] = Field(default_factory=dict, description="What narrows the list: a `:parameter` of the lookup's query → the name of another parameter here (its current value is sent), or a fixed value.")
 
 
 class FilterDep(BaseModel):

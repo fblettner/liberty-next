@@ -304,6 +304,8 @@ const en = {
     inherit: 'Inherit',
     pickLogger: 'A module (liberty.jobs, nomasx1…)',
   },
+  lookupDialog: { title: 'Choose in the list', open: 'Open as a table', code: 'Code', label: 'Description', count: '{{n}} of {{total}}' },
+  paramInput: { pickFirst: 'pick {{name}} first' },
   common: {
     callablePick: 'Pick a function…',
     callableUnknown: 'not among the functions the applications ship: check the name',
@@ -2395,6 +2397,9 @@ const en = {
         paramHelp: "Help — what to put in it",
         paramExample: "Example",
         paramChoices: "Allowed values (separated by commas)",
+        paramLookup: "List to pick in (a dictionary lookup)",
+        paramLookupConnector: "Connector of the lookup",
+        paramLookupBinds: "What narrows the list — parameter of the lookup = another parameter here, or a value",
         paramRequired: 'Required',
         noMatch: 'No endpoint matches the search.',
         paramExampleIs: 'Example: {{v}}',

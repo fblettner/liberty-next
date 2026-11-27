@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from '@emotion/styled'
 import { Plus, X } from 'lucide-react'
-import { Input, SearchSelect, Textarea } from '../../common'
+import { Input, ParamInput, Textarea } from '../../common'
 import type { ParamDef } from '../../types/connectors'
 import { type Pair, formatPairs, pairValue, parsePairs, setPair } from '../../services/pairs'
 import { colors, fontSize, fonts, radius, media } from '../../theme'
@@ -77,19 +77,8 @@ export function PairsField({
           return (
             <Cell key={d.name} $wide={long}>
               <Name>{d.label || d.name}{d.required ? ' *' : ''}</Name>
-              {d.choices?.length ? (
-                <SearchSelect
-                  value={v} disabled={disabled} options={d.choices.map((c) => ({ value: c, label: c }))}
-                  onChange={(next: string | null) => emit(setPair(rows, d.name, next ?? ''))}
-                  anyLabel={d.default ?? t('common.none')}
-                />
-              ) : (
-                <Input
-                  type="text" value={v} disabled={disabled}
-                  placeholder={d.default != null && d.default !== '' ? t('table.defaultPrefix', { v: d.default }) : d.example ? t('table.examplePrefix', { v: d.example }) : ''}
-                  onChange={(e) => emit(setPair(rows, d.name, e.target.value))}
-                />
-              )}
+              <ParamInput def={d} value={v} disabled={disabled} names={defs.map((x) => x.name)} values={Object.fromEntries(rows.map((r) => [r.name, r.value]))}
+                onChange={(next) => emit(setPair(rows, d.name, next))} />
               {d.help && <Help>{d.help}</Help>}
             </Cell>
           )

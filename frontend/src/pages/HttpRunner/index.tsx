@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Globe, Play } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import type { ApiEndpointMeta, ApiResult, ConnectorMeta } from '../../types/connectors'
-import { PageLayout, Card, Button, Input, Field, Banner, SearchSelect, Centered, Tag, Mono, Row, Stack, Pre, SpinnerRing, FieldLabel } from '../../common'
+import { PageLayout, Card, Button, Input, Field, Banner, ParamInput, Centered, Tag, Mono, Row, Stack, Pre, SpinnerRing, FieldLabel } from '../../common'
 import { colors, fontSize, fonts } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import { findMenuLabel } from '../../services/menuLabels'
@@ -120,13 +120,9 @@ export default function HttpRunner({ connector, endpoint }: { connector: string;
             {meta.params.map((p) => (
               <div key={p.name} style={{ minWidth: 160 }}>
                 <Field label={p.label ?? p.name}>
-                  {p.choices?.length ? (
-                    <SearchSelect
-                      value={params[p.name] ?? ''}
-                      options={p.choices.map((c) => ({ value: c, label: c }))}
-                      onChange={(v) => setParams((s) => ({ ...s, [p.name]: v ?? '' }))}
-                      placeholder={p.default ?? ''}
-                    />
+                  {p.lookup || p.choices?.length ? (
+                    <ParamInput def={p} value={params[p.name] ?? ''} names={meta.params.map((x) => x.name)} values={params}
+                      onChange={(v) => setParams((s) => ({ ...s, [p.name]: v }))} />
                   ) : (
                   <Input
                     type="text"
