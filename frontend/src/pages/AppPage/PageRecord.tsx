@@ -65,7 +65,9 @@ export function PageRecord({ app, screen: screenId, mode = 'add', values, onClos
   return (
     <Suspense fallback={<Centered />}>
       <ScreenDialog open mode={mode} screen={screen} columns={columns} row={record} connector={screen.connector || app}
-        keyColumns={screen.key_columns ?? []} onClose={onClose} onSaved={() => onSaved?.()} />
+        // an addition keeps every dropdown, a pre-filled key included: the values a page hands over are to start from,
+        // not a parent's key to hold (the form shows a key it believes inherited as plain text)
+        keyColumns={mode === 'add' ? [] : (screen.key_columns ?? [])} onClose={onClose} onSaved={() => onSaved?.()} />
     </Suspense>
   )
 }
