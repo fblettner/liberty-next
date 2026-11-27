@@ -527,6 +527,32 @@ def _check_playbooks(state: Any, idx: _Index, out: list[Issue]) -> None:
             ))
 
 
+def _connectors_serving_or_tested(state: Any) -> set[str]:
+    """The API connectors in use without anything of the configuration naming them: one whose endpoint is SERVED here
+    (by a plugin function or a shared action — it is called from outside: a client, the tests), and one a test suite calls."""
+    used: set[str] = set()
+    registry = getattr(state, "connectors", None)
+    for name in registry.names() if registry is not None else []:
+        endpoints = getattr(getattr(registry.get(name), "config", None), "endpoints", None) or []
+        if any(getattr(e, "callable", None) or getattr(e, "action", None) for e in (endpoints.values() if isinstance(endpoints, dict) else endpoints)):
+            used.add(name)
+    settings = getattr(state, "settings", None)
+    if settings is not None:
+        from liberty.apptests import store
+
+        try:
+            names = store.suite_names(settings)
+        except Exception:  # noqa: BLE001 — no tests folder, or one that cannot be read: nothing is named
+            names = []
+        for suite_name in names:
+            try:
+                suite = store.read_suite(settings, suite_name)
+            except Exception:  # noqa: BLE001 — a suite that does not load is the tests page's matter
+                continue
+            used |= {c for c in (suite.connector, *(case.connector for case in suite.case)) if c}
+    return used
+
+
 def _check_unused_connectors(state: Any, idx: _Index, out: list[Issue]) -> None:
     """A connector referenced by nothing AND with no menu of its own is dead weight."""
     referenced: set[str] = set(idx.menu_items_by_app.keys())  # apps with a menu count as "used"
@@ -591,6 +617,7 @@ def _check_unused_connectors(state: Any, idx: _Index, out: list[Issue]) -> None:
     # jobs (a step's connector, a copy's source / target, a connector handed to a python step), the
     # Explorer models' entities, the notification rules' actions
     referenced |= connectors_named_outside(state)
+    referenced |= _connectors_serving_or_tested(state)
     for name in sorted(idx.conn_names - referenced):
         out.append(Issue("warning", "Unused connector",
                          f"connector '{name}' is referenced by nothing and has no menu", _connector_deep_link(name)))

@@ -639,6 +639,7 @@ const en = {
     checkingRules: 'Checking screen rules…',
     loadingLists: 'Loading the lists of values…',
     listUnavailable: 'the list of values could not be loaded',
+    noQueryForMode: '{{screen}} cannot do this (no insert or update for the chosen mode)',
     checkingDb: 'Checking against the database…',
     ruleError: 'rule',
     rowNum: 'Row {{n}}',

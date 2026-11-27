@@ -4,9 +4,9 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import * as XLSX from 'xlsx'
-import type { Column, QueryResult } from '../../types/connectors'
-import { loadLookup, lookupKey, type LookupData, type LookupSpec } from '../../services/lookups'
-import { activeRulesWhen } from './dialogHelpers'
+import type { QueryResult } from '../../types/connectors'
+import type { LookupData } from '../../services/lookups'
+import { headerMap, mapSheetRows, returnFill, validateRow, type SpecForRule } from './importRules'
 import type { DataRow } from './resultColumns'
 import type { useBatchEdit } from './useBatchEdit'
 
@@ -20,8 +20,7 @@ export function useImport({
   /** Result columns that identify a row — the import matches existing rows on them. */
   keyColumns?: string[]
   /** The grid's (rule, binds, row) → the lookup to fetch — the validation resolves each row's list with it. */
-  specForRule: (r: Column['rule'] | null | undefined, binds: { param: string; value?: string | null; source?: string | null }[] | undefined,
-    rowValues: Record<string, unknown>) => LookupSpec | null
+  specForRule: SpecForRule
   lookupMaps: Map<string, LookupData>
 } & Pick<BatchEdit, 'editMode' | 'setEditMode' | 'editsRef' | 'setDirtyRows' | 'setSaveErrors' | 'prependNewRows'>) {
   const { t } = useTranslation()
@@ -37,41 +36,8 @@ export function useImport({
   // resolution — loaded on demand (``loadLookup``, the session cache): a list the grid has not loaded
   // yet (the screen just opened, or no grid row uses this narrowing) is fetched, never skipped; one
   // that cannot be loaded makes the row an error rather than a silent pass.
-  const validateImportRow = useCallback(async (row: Record<string, unknown>): Promise<string[]> => {
-    const errs: string[] = []
-    for (const c of result.columns) {
-      const raw = row[c.name]
-      if (raw == null || String(raw).trim() === '') continue   // empty → DB defaults / nullability decide
-      const val = String(raw).trim()
-      const name = c.label || c.name
-      // The rule that ACTUALLY applies to this row (rules_when), not the base rule.
-      const aw = c.rules_when?.length ? activeRulesWhen(c.rules_when, row) : null
-      const rule = aw ? (aw.rule ?? null) : (c.rule ?? null)
-      if (rule?.kind === 'lookup') {
-        const spec = specForRule(rule, aw ? aw.lookup_param_binds : undefined, row)
-        if (!spec) continue
-        let codes: Set<string>
-        try {
-          codes = new Set([...(await loadLookup(spec)).map.keys()].map((k) => k.trim()))
-        } catch {
-          errs.push(`${name}: ${t('import.listUnavailable')}`)
-          continue
-        }
-        if (codes.size > 0 && !codes.has(val)) errs.push(`${name}: “${val}” is not a valid value`)
-      } else if (rule?.kind === 'enum') {
-        if (!rule.values.some((v) => v.value === val || v.value.trim() === val)) errs.push(`${name}: “${val}” is not an allowed value`)
-      } else if (rule?.kind === 'boolean') {
-        // Only a COMPLETE boolean (both tokens) is checkable — a one-sided flag can't be validated
-        // without false positives across JDE's mixed Y/N · 0/1 · blank conventions.
-        const tv = rule.true_value
-        const fv = rule.false_value
-        if (tv != null && fv != null && val !== String(tv).trim() && val !== String(fv).trim()) {
-          errs.push(`${name}: “${val}” must be ${tv} or ${fv}`)
-        }
-      }
-    }
-    return errs
-  }, [result.columns, specForRule, t])
+  const validateImportRow = useCallback((row: Record<string, unknown>): Promise<string[]> =>
+    validateRow(result.columns, row, specForRule, t('import.listUnavailable')), [result.columns, specForRule, t])
 
   // Import rows from an Excel/CSV file. Matching is by *header text*, not column position, so the
   // sheet's columns can be in any order and extra columns are ignored: we build `byHeader` =
@@ -87,54 +53,13 @@ export function useImport({
   // header-text → result column name, for round-tripping an export's headers (the column name, its
   // label, and the "(ID)"-suffixed forms a lookup/enum export emits). Shared by file import AND the
   // clipboard paste's header detection.
-  const importByHeader = useMemo(() => {
-    const idTag = t('table.idColumnSuffix')
-    const m = new Map<string, string>()
-    for (const c of result.columns) {
-      const add = (s: string | null | undefined) => { if (s) m.set(s.trim().toLowerCase(), c.name) }
-      add(c.name)
-      // A coded column (LOOKUP/ENUM) resolves by its CODE only — its description isn't unique and the
-      // code lives in the "(ID)" column the export emits. So map the code-bearing headers ("(ID)" +
-      // raw name), not the bare label (which holds the non-unique description).
-      if (c.rule?.kind !== 'lookup' && c.rule?.kind !== 'enum') add(c.label)
-      add(`${c.label ?? c.name} ${idTag}`); add(`${c.name} ${idTag}`)
-    }
-    return m
-  }, [result.columns, t])
+  const importByHeader = useMemo(() => headerMap(result.columns, t('table.idColumnSuffix')), [result.columns, t])
 
   // Resolve lookup ``return_binds`` on a set of mapped rows: a coded column (e.g. OBNM) with
   // return_binds fills its mapped target columns (e.g. SY) from the matching lookup row — same effect
   // as a dialog/grid pick, driven by the imported/pasted code. Fill-if-empty (an explicit value
   // wins); skips silently when the lookup data isn't loaded. Mutates the rows in place.
-  const applyReturnFill = useCallback((seeds: Record<string, unknown>[]) => {
-    const returnFillCols = result.columns.filter((c) => c.rule?.kind === 'lookup' && (c.return_binds?.length ?? 0) > 0)
-    if (returnFillCols.length === 0) return
-    for (const seed of seeds) {
-      for (const c of returnFillCols) {
-        const rule = c.rule
-        if (rule?.kind !== 'lookup') continue
-        const code = seed[c.name]
-        if (code == null || String(code).trim() === '') continue
-        const data = lookupMaps.get(lookupKey({ connector: rule.connector, query: rule.query, value: rule.value, label: rule.label, params: rule.params, sources: rule.sources }))
-        if (!data?.rows) continue
-        const valKey = rule.value
-        const want = String(code).trim()
-        const row = data.rows.find((r) => {
-          const rv = r[valKey] ?? r[valKey.toLowerCase()] ?? r[valKey.toUpperCase()]
-          return rv != null && String(rv).trim() === want
-        })
-        if (!row) continue
-        const lcRow = new Map(Object.entries(row).map(([k, v]) => [k.toLowerCase(), v]))
-        for (const b of c.return_binds ?? []) {
-          const target = result.columns.find((rc) => rc.name.toLowerCase() === b.column.toLowerCase())?.name ?? b.column
-          const cur = seed[target]
-          if (cur != null && String(cur).trim() !== '') continue  // explicit value wins
-          const v = lcRow.get(b.param.toLowerCase())
-          if (v !== undefined) seed[target] = v
-        }
-      }
-    }
-  }, [result.columns, lookupMaps])
+  const applyReturnFill = useCallback((seeds: Record<string, unknown>[]) => returnFill(result.columns, seeds, lookupMaps), [result.columns, lookupMaps])
 
   // Parse + header-map a sheet into rows keyed by column name (with return-fill) — shared by the
   // in-grid import and the validated Import dialog. Null when empty / no header matched (sets banner).
@@ -143,14 +68,7 @@ export function useImport({
     const ws = wb.Sheets[wb.SheetNames[0]]
     if (!ws) return null
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null })
-    const seeds = rows.map((r) => {
-      const out: Record<string, unknown> = {}
-      for (const [header, v] of Object.entries(r)) {
-        const col = importByHeader.get(header.trim().toLowerCase())
-        if (col) out[col] = v
-      }
-      return out
-    }).filter((s) => Object.keys(s).length > 0)  // skip rows whose headers matched nothing
+    const seeds = mapSheetRows(rows, importByHeader)   // rows whose headers matched nothing are left out
     if (seeds.length === 0) { setSaveErrors([t('table.importNoMatch', { file: file.name })]); return null }
     applyReturnFill(seeds)
     return seeds

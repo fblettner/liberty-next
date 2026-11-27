@@ -30,6 +30,16 @@
   lookups, its defaults, its save — without sending the user to the screen:
   `<Record app screen mode="add" values={…} onClose onSaved />`.
 
+- **Integrity: a connector that serves, or that the tests call, is not "unused".** An API connector nothing of the
+  configuration names was reported as unused even when one of its endpoints is served by a function or a shared action
+  (it is there to be called from outside) or when a test suite calls it. Both now count as a use.
+
+- **Application pages: the screens' import, an Excel workbook, the grid's own buttons** (page contract version 9).
+  `sdk.Import` opens the data screens' import dialog from a page, for one screen or several (a workbook with a sheet
+  per screen): same modes, same check against the rules then the database, each row saved through its screen.
+  `sdk.workbook(name, sheets)` gives the user an Excel file of several sheets. `sdk.Grid` gains `toolbarEnd` (buttons
+  at the end of its toolbar) and `noExport` (the page gives its own export).
+
 - **After an upgrade, a browser no longer keeps the old application.** The application's entry page was served without
   telling the browser to ask for it again, so a browser could go on running the previous version against the upgraded
   server for hours — a new button doing nothing, or doing what it did before. The entry page is now always re-checked;

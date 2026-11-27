@@ -641,6 +641,7 @@ const fr: Resources = {
     checkingRules: 'Vérification des règles de l’écran…',
     loadingLists: 'Chargement des listes de valeurs…',
     listUnavailable: 'la liste de valeurs n’a pas pu être chargée',
+    noQueryForMode: '{{screen}} ne peut pas le faire (pas d’insertion ou de mise à jour pour le mode choisi)',
     checkingDb: 'Vérification dans la base de données…',
     ruleError: 'règle',
     rowNum: 'Ligne {{n}}',

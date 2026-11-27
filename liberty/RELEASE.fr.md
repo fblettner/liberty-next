@@ -33,6 +33,17 @@
   règles selon les valeurs, ses recherches, ses valeurs par défaut, son enregistrement — sans renvoyer l'utilisateur
   vers l'écran : `<Record app screen mode="add" values={…} onClose onSaved />`.
 
+- **Intégrité : un connecteur qui sert, ou que les tests appellent, n'est pas « inutilisé ».** Un connecteur API que
+  rien dans la configuration ne nomme était signalé inutilisé même quand un de ses points d'accès est servi par une
+  fonction ou une action partagée (il est là pour être appelé de l'extérieur) ou qu'une suite de tests l'appelle. Les
+  deux comptent désormais comme une utilisation.
+
+- **Pages d'application : l'import des écrans, un classeur Excel, les boutons de la grille** (contrat de page
+  version 9). `sdk.Import` ouvre la fenêtre d'import des écrans depuis une page, pour un écran ou plusieurs (un classeur
+  avec une feuille par écran) : mêmes modes, même contrôle des règles puis de la base, chaque ligne enregistrée par son
+  écran. `sdk.workbook(nom, feuilles)` donne à l'utilisateur un fichier Excel de plusieurs feuilles. `sdk.Grid` gagne
+  `toolbarEnd` (des boutons au bout de sa barre) et `noExport` (la page fournit son propre export).
+
 - **Après une mise à jour, un navigateur ne garde plus l'ancienne application.** La page d'entrée de l'application était
   servie sans dire au navigateur de la redemander : un navigateur pouvait continuer à faire tourner la version
   précédente contre le serveur mis à jour pendant des heures — un nouveau bouton sans effet, ou faisant ce qu'il

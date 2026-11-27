@@ -85,6 +85,10 @@ export interface DataTableProps<T extends object> {
   toolbarAfterSearch?: React.ReactNode
   /** Controls rendered at the far right, just before the Filters/Columns/Export group (e.g. a Max-rows input). */
   toolbarRight?: React.ReactNode
+  /** Extra controls rendered at the very end of the toolbar, after Export (e.g. where the rows are loaded from). */
+  toolbarEnd?: React.ReactNode
+  /** No Export in the toolbar: the page gives its own (in `toolbarEnd`). */
+  noExport?: boolean
   exportFilename?: string
   initialPageSize?: number
   /** Columns hidden by default (e.g. from a `hidden` display hint) — a saved choice still wins. */
@@ -493,7 +497,7 @@ const colHeaderText = (col: { id: string; columnDef: { header?: unknown } }): st
 
 // ── component ───────────────────────────────────────────────────────────────
 export function DataTable<T extends object>({
-  columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, exportFilename = 'export', initialPageSize: initialPageSizeProp, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, rowMenuButton, onPasteRows, renderDetail, chromeless, getSubRows, onRowExpand, subRowCount, serverPaging,
+  columns, data, tableId, sharedViews, toolbar, toolbarAfterSearch, toolbarRight, toolbarEnd, noExport, exportFilename = 'export', initialPageSize: initialPageSizeProp, initialColumnVisibility, initialGrouping, rowClassName, onRowClick, onRowContextMenu, rowMenuButton, onPasteRows, renderDetail, chromeless, getSubRows, onRowExpand, subRowCount, serverPaging,
 }: DataTableProps<T>) {
   const { t } = useTranslation()
   // Phone-width window: the rows read as cards (the Table's media rule); what follows it here is the
@@ -1256,7 +1260,7 @@ export function DataTable<T extends object>({
                 })}
               </MenuPortal>
           </MenuWrap>
-          <MenuWrap ref={exportRef}>
+          {!noExport && <MenuWrap ref={exportRef}>
             <CtrlBtn onClick={() => setExportOpen((v) => !v)} title={t('table.export')}>
               <Download size={13} /> {!compact && t('table.export')} <ChevronDown size={11} />
             </CtrlBtn>
@@ -1267,7 +1271,8 @@ export function DataTable<T extends object>({
                 <DropdownItem onClick={() => exportCsv(exportAll)}><FileText size={13} /> CSV (.csv)</DropdownItem>
                 <DropdownItem onClick={() => exportExcel(exportAll)}><TableIcon size={13} /> Excel (.xlsx)</DropdownItem>
               </MenuPortal>
-          </MenuWrap>
+          </MenuWrap>}
+          {toolbarEnd}
         </ActionGroup>
       </ToolbarRow>
       )}

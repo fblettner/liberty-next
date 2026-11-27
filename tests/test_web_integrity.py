@@ -169,6 +169,19 @@ def test_connector_used_only_by_call_api_action_not_unused() -> None:
     assert not any("'ais'" in m for m in unused)
 
 
+def test_connector_serving_an_endpoint_or_called_by_a_test_suite_is_not_unused(tmp_path) -> None:
+    """A connector nothing of the configuration names is still in use when one of its endpoints is SERVED here (a plugin
+    function, a shared action: it is called from outside) or when a test suite calls it."""
+    state = _state(conns={"app": ["x_get"], "served": [], "tested": [], "idle": []},
+                   menus={"app": {"items": [{"id": "u", "label": "X", "type": "query", "target": "x_get"}]}})
+    state.connectors.get("served").config.endpoints = [SimpleNamespace(name="rights", callable="app.mod:j_rights", action=None)]
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "suite.toml").write_text('connector = "tested"\n[[case]]\nid = "one"\n', encoding="utf-8")
+    state.settings = SimpleNamespace(connectors=SimpleNamespace(config_path=str(tmp_path / "connectors.toml")))
+    unused = " ".join(i.message for i in check_integrity(state) if i.category == "Unused connector")
+    assert "'idle'" in unused and "'served'" not in unused and "'tested'" not in unused
+
+
 def test_nested_form_reference_marks_target_reachable_and_validates() -> None:
     """A screen embedded only via a reference-mode nested_form (``form_screen``) is reached — not an
     orphan; and a form_screen pointing at a missing screen is a broken reference."""

@@ -26,12 +26,14 @@ import { callableRef } from '../../tabs/pageTabs'
 import { PageGrid } from './PageGrid'
 import { Diagram } from '../../common/Diagram'
 import { PageRecord } from './PageRecord'
+import { PageImport } from './PageImport'
 import { can } from '../../services/permissions'
 import { pageFacts, setPageContext } from '../../services/aiContext'
 
 // 2: `Grid` (the shared grid) · 3: a row of the grid opens (`detail`) · 4: `useAssistantContext` · 5: `Diagram`
 // 8: `Record` (a screen's record form, opened from the page)
-export const PAGE_SDK_VERSION = 8
+// 9: `Grid` takes `toolbarEnd` / `noExport` · `Import` (the screens' import dialog) · `workbook` (an Excel file of sheets)
+export const PAGE_SDK_VERSION = 9
 
 export interface PageSdk {
   /** the contract's version (this file) */
@@ -63,6 +65,15 @@ export interface PageSdk {
    *  `<Record app="shop" screen="orders" mode="add" values={{ CUSTOMER: 'C1' }} onClose={…} onSaved={…} />`.
    *  `mode="edit"`: `values` are the record's key values, read through the screen. Since version 8. */
   Record: typeof PageRecord
+  /** The screens' own import dialog, opened from the page: an Excel file loaded through the SCREENS — their rules per
+   *  value, their lists, their insert and update, the same check then save:
+   *  `<Import screens={[{ app: 'shop', screen: 'orders' }]} onClose={…} onSaved={(n) => …} />`. Several screens: a
+   *  workbook with a sheet per screen, found by `sheet` (else the screen's id) — what `workbook` writes. Since version 9. */
+  Import: typeof PageImport
+  /** Give the user an Excel file of several sheets: `workbook('security-AP', [{ name: 'Orders', rows, columns? }])`.
+   *  `columns` = the headings, in order (default: the rows' keys). A sheet named as an `Import` screen's `sheet`, with
+   *  the screen's column names as headings, is what that import reads back. Since version 9. */
+  workbook: (name: string, sheets: { name: string; rows: Record<string, unknown>[]; columns?: string[] }[]) => Promise<void>
   /** a menu icon by its name ("search", "database"…), or null */
   icon: typeof iconFor
   /** the API client (get / post / put / delete on the server's routes, the session handled) */
@@ -118,6 +129,17 @@ export function buildSdk(app: string, page: string): PageSdk {
     Grid: PageGrid,
     Diagram,
     Record: PageRecord,
+    Import: PageImport,
+    workbook: async (name, sheets) => {
+      const XLSX = await import('xlsx')
+      const wb = XLSX.utils.book_new()
+      for (const sh of sheets) {
+        const heads = sh.columns ?? Array.from(new Set(sh.rows.flatMap((r) => Object.keys(r))))
+        const ws = XLSX.utils.json_to_sheet(sh.rows.map((r) => Object.fromEntries(heads.map((k) => [k, r[k] ?? null]))), { header: heads })
+        XLSX.utils.book_append_sheet(wb, ws, sh.name.slice(0, 31))
+      }
+      XLSX.writeFile(wb, name.endsWith('.xlsx') ? name : `${name}.xlsx`)
+    },
     theme: { colors, fontSize, fonts, radius, shadow },
     icon: iconFor,
     call: async <T,>(fn: string, params: Record<string, unknown> = {}) => {

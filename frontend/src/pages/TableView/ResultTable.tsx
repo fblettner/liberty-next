@@ -44,6 +44,7 @@ import { EditCell, type LookupOpt } from './EditCell'
 import { useRowMenu } from './useRowMenu'
 import { useBatchEdit } from './useBatchEdit'
 import { useImport } from './useImport'
+import { specForRule } from './importRules'
 import { useActionPrompt } from './useActionPrompt'
 import { bindsToQuery } from '../../services/bindQuery'
 
@@ -396,16 +397,6 @@ export function ResultTable({
   // parameterized rule (no binds) this is the single shared spec; for a parameterized one (e.g.
   // f00950 get_form_name narrowed by OBNM) the params vary per row, so the grid fetches it once per
   // distinct bind value and resolves each row against the matching spec. Returns null for non-lookups.
-  const specForRule = useCallback((
-    r: Column['rule'] | null | undefined,
-    binds: { param: string; value?: string | null; source?: string | null }[] | undefined,
-    rowValues: Record<string, unknown>,
-  ): LookupSpec | null => {
-    if (r?.kind !== 'lookup') return null
-    const dyn = binds && binds.length ? resolveBindList(binds, rowValues) : {}
-    return { connector: r.connector, query: r.query, value: r.value, label: r.label,
-             params: { ...(r.params ?? {}), ...dyn }, sources: r.sources }
-  }, [])
   const lookupSpecs = useMemo<LookupSpec[]>(() => {
     const out: LookupSpec[] = []
     const seen = new Set<string>()
@@ -431,7 +422,7 @@ export function ResultTable({
       }
     }
     return out
-  }, [result.columns, result.rows, specForRule])
+  }, [result.columns, result.rows])
   // ``useLookupTables`` returns the full :class:`LookupData` (value→label map *plus* raw rows).
   // Same module cache as the older ``useLookupBatch`` — no extra fetches. The raw rows feed the
   // lookup-pick return-fill (``return_binds``) in the grid + on import, and the dropdown extras.
@@ -450,7 +441,7 @@ export function ResultTable({
     const spec = specForRule(rule, aw ? aw.lookup_param_binds : undefined, vals)
     const key = spec ? lookupKey(spec) : undefined
     return { rule, data: key ? lookupMaps.get(key) : undefined, key }
-  }, [valuesOf, specForRule, lookupMaps])
+  }, [valuesOf, lookupMaps])
 
   // Filter options for a column with rules_when: the UNION across the base rule AND every conditional
   // branch (a column can mix boolean / enum / lookup per row, so filtering by only the base rule's
@@ -496,7 +487,7 @@ export function ResultTable({
     for (const e of all) if (e.rule?.kind === 'enum' || e.rule?.kind === 'lookup') addRule(e.rule, e.binds)
     for (const e of all) if (e.rule?.kind === 'boolean') addRule(e.rule)
     return { byCode: [...byCode.values()], byLabel: [...byLabel.values()] }
-  }, [lookupMaps, result.rows, specForRule, t])
+  }, [lookupMaps, result.rows, t])
 
   // The import (Excel / CSV file, the Import dialog, paste from Excel) — into the batch edit.
   const { fileRef, importOpen, setImportOpen, validateImportRow, parseImportFile, onPasteRows, importFile } = useImport({

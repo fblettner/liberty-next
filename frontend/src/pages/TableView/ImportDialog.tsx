@@ -18,10 +18,10 @@ import { Overlay, Modal, ModalHeader, ModalBody, ModalFooter, Button, Banner } f
 import { api, ApiError } from '../../api/client'
 import { colors, fontSize, fonts } from '../../theme'
 
-type ImportMode = 'upsert' | 'insert' | 'update'
+export type ImportMode = 'upsert' | 'insert' | 'update'
 
-interface RowResult { index: number; action: string | null; ok: boolean; error?: string; rowcount?: number }
-interface ImportResponse { committed: boolean; mode: string; valid: number; invalid: number; results: RowResult[] }
+export interface RowResult { index: number; action: string | null; ok: boolean; error?: string; rowcount?: number }
+export interface ImportResponse { committed: boolean; mode: string; valid: number; invalid: number; results: RowResult[] }
 
 const CHUNK = 50   // rows per server round-trip — keeps each request small + drives the progress bar
 
@@ -70,7 +70,7 @@ const ErrMsg = styled.div`
 `
 
 export function ImportDialog({
-  parseFile, validateRow, keyColumns, connector, insertQuery, updateQuery, screenApp, screenId, onClose, onCommitted,
+  parseFile, validateRow, keyColumns, connector, insertQuery, updateQuery, screenApp, screenId, onClose, onCommitted, send, labelOf,
 }: {
   /** Parse + header-map a chosen file into rows keyed by column name (with lookup return-fill). */
   parseFile: (file: File) => Promise<Record<string, unknown>[] | null>
@@ -87,6 +87,11 @@ export function ImportDialog({
   screenId?: string | null
   onClose: () => void
   onCommitted: (committed: number) => void
+  /** Send a batch of rows another way than to this one screen (a workbook whose sheets go to several screens): one
+   *  result per row, in the rows' order. `connector` and the queries then only say which modes are offered. */
+  send?: (commit: boolean, mode: ImportMode, rows: Record<string, unknown>[]) => Promise<ImportResponse>
+  /** How a row is named in the report, when not by its key columns. */
+  labelOf?: (row: Record<string, unknown>, index: number) => string
 }) {
   const { t } = useTranslation()
   const defaultMode: ImportMode = insertQuery && updateQuery ? 'upsert' : insertQuery ? 'insert' : 'update'
@@ -117,11 +122,11 @@ export function ImportDialog({
 
   const post = useCallback(
     (commit: boolean, sendRows: Record<string, unknown>[]) =>
-      api.post<ImportResponse>(`/api/sql/${encodeURIComponent(connector)}/_import`, {
+      send ? send(commit, mode, sendRows) : api.post<ImportResponse>(`/api/sql/${encodeURIComponent(connector)}/_import`, {
         mode, insert_query: insertQuery ?? null, update_query: updateQuery ?? null,
         rows: sendRows, commit, screen_app: screenApp ?? null, screen_id: screenId ?? null,
       }),
-    [connector, mode, insertQuery, updateQuery, screenApp, screenId],
+    [connector, mode, insertQuery, updateQuery, screenApp, screenId, send],
   )
 
   const check = useCallback(async () => {
@@ -193,6 +198,7 @@ export function ImportDialog({
 
   const rowLabel = (i: number) => {
     const r = rows?.[i] ?? {}
+    if (labelOf) return labelOf(r, i)
     const keys = keyColumns.filter((k) => r[k] != null && String(r[k]).trim() !== '')
     return keys.length ? keys.map((k) => `${k}=${r[k]}`).join(' ') : `#${i + 1}`
   }
