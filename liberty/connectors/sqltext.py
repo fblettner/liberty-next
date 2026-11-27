@@ -16,7 +16,7 @@ from liberty.connectors.base import ConnectorError, StatementNotAllowedError
 # COALESCE / NVL in the SQL by hand).
 _ORACLE_TARGET_RE = re.compile(
     r"\b(?:INSERT\s+INTO|UPDATE|MERGE\s+INTO|DELETE\s+FROM)\s+"
-    r'(?:"?(?P<owner>[A-Za-z_][\w$]*)"?\s*\.\s*)?'
+    r'(?:"?(?P<owner>[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)"?\s*\.\s*)?'      # SCHEMA, or SQL Server's DATABASE.SCHEMA
     r'"?(?P<table>[A-Za-z_][\w$]*)"?',
     re.IGNORECASE,
 )
@@ -235,6 +235,13 @@ def _build_filter_predicate(
             return f"{col_ref} = {pv}"
         if op == "notEquals":
             return f"{col_ref} <> {pv}"
+        if dialect == "mssql":
+            # SQL Server joins text with CONCAT, not ``||`` — the same three patterns, for it alone
+            if op == "startsWith":
+                return f"LOWER({col_ref}) LIKE LOWER(CONCAT({pv}, '%'))"
+            if op == "endsWith":
+                return f"LOWER({col_ref}) LIKE LOWER(CONCAT('%', {pv}))"
+            return f"LOWER({col_ref}) LIKE LOWER(CONCAT('%', {pv}, '%'))"
         if op == "startsWith":
             return f"LOWER({col_ref}) LIKE LOWER({pv} || '%')"
         if op == "endsWith":

@@ -9,6 +9,14 @@
   conserve la réponse d'une page — est listée avec les fonctions des applications, et n'est plus signalée « vérifiez
   le nom » une fois saisie.
 
+- **Écritures et filtres sur SQL Server et Db2.** Avant une écriture, les valeurs vides deviennent un blanc ou un
+  zéro pour les colonnes qui refusent NULL, et une valeur est complétée à la largeur d'une colonne fixe : les types
+  des colonnes étaient lus dans le catalogue d'Oracle quelle que soit la base, donc sur SQL Server ou Db2 cela était
+  ignoré avec un avertissement. Chaque base est maintenant interrogée par son propre catalogue (une table SQL Server
+  nommée avec sa base comprise) ; Oracle reçoit l'instruction qu'il a toujours reçue. Un filtre *contient* /
+  *commence par* / *finit par* sur une colonne s'écrit pour SQL Server à sa façon (il joint les textes par
+  `CONCAT`) ; rien ne change pour les autres bases.
+
 ## 7.0.91 — 2026-11-27
 
 - **Licence : une application, l'autre, ou toutes.** Une clé de licence peut nommer les applications qu'elle couvre

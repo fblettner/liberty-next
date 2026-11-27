@@ -8,6 +8,13 @@
 - **The function picker offers the framework's own function.** `liberty.kept:j_keep` — the job step that keeps a
   page's answer — is listed with the applications' functions, and no longer flagged "check the name" once typed.
 
+- **Writes and filters on SQL Server and Db2.** Before a write, empty values become a blank or a zero for the
+  columns that refuse NULL, and a value is padded to a fixed-width column: the column types were read from Oracle's
+  catalogue whatever the database, so on SQL Server or Db2 this was skipped with a warning. Each database is now
+  asked through its own catalogue (a SQL Server table named with its database included); Oracle is asked the very
+  statement it always was. A *contains* / *starts with* / *ends with* filter on a column is written for SQL Server
+  its own way (it joins text with `CONCAT`); nothing changes for the other databases.
+
 ## 7.0.91 — 2026-11-27
 
 - **Licence: one application, another, or all.** A licence key may name the applications it covers (its `apps`

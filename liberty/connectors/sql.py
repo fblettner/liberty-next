@@ -79,14 +79,36 @@ def reset_audit_table_cache() -> None:
 # Comparisons against a VARCHAR2 bind use non-blank-padded semantics, so a trimmed read value
 # bound back into a WHERE clause won't match its CHAR(N) source unless the bind is re-padded
 # to N spaces. ``_pad_char_binds`` does that under the ``trim_strings`` pool flag.
-_ORACLE_FIXED_CHAR_TYPES = {"CHAR", "NCHAR"}
+_ORACLE_FIXED_CHAR_TYPES = {"CHAR", "NCHAR", "CHARACTER", "GRAPHIC"}           # with SQL Server's and Db2's names for them
 # Variable-width / large character storage — never padded; padding a bind here would BREAK
 # the comparison (stored "JDE" ≠ bind "JDE       " under non-blank-padded VARCHAR2 semantics).
-_ORACLE_VAR_CHAR_TYPES = {"VARCHAR2", "NVARCHAR2", "VARCHAR", "CLOB", "NCLOB", "LONG"}
+_ORACLE_VAR_CHAR_TYPES = {"VARCHAR2", "NVARCHAR2", "VARCHAR", "CLOB", "NCLOB", "LONG", "NVARCHAR", "VARGRAPHIC", "VARG", "TEXT", "NTEXT", "DBCLOB"}
 # Union — used by the empty-bind coalesce path (every Oracle string column treats ``""`` as
 # NULL, so all of these need the single-space sentinel for NOT-NULL columns).
 _ORACLE_CHAR_TYPES = _ORACLE_FIXED_CHAR_TYPES | _ORACLE_VAR_CHAR_TYPES
-_ORACLE_NUMBER_TYPES = {"NUMBER", "FLOAT", "BINARY_FLOAT", "BINARY_DOUBLE", "INTEGER", "INT"}
+_ORACLE_NUMBER_TYPES = {"NUMBER", "FLOAT", "BINARY_FLOAT", "BINARY_DOUBLE", "INTEGER", "INT", "NUMERIC", "DECIMAL", "DOUBLE", "REAL", "BIGINT",
+                        "SMALLINT", "TINYINT", "MONEY", "DECFLOAT"}
+
+
+def _column_types_sql(dialect: str, owner: str) -> tuple[str, str] | None:
+    """Where a table's column types are read for the write-time bind hygiene — ``(statement, owner to bind)``, the
+    statement answering ``column_name`` / ``data_type`` / ``char_length`` — from the catalogue of the database of
+    *dialect*; ``None`` for a database whose catalogue is not known here (the hygiene is then skipped, as before).
+    Oracle's is the statement it has always been."""
+    if dialect == "oracle":
+        return "SELECT column_name, data_type, char_length FROM all_tab_columns WHERE owner = :o AND table_name = :t", owner
+    if dialect == "mssql":
+        # the catalogue is per database: a table named DATABASE.SCHEMA.TABLE is asked in its own
+        database, _, schema = owner.rpartition(".")
+        prefix = f"{database}." if re.fullmatch(r"[A-Za-z_][\w$]*", database or "") else ""
+        return (f"SELECT COLUMN_NAME AS column_name, DATA_TYPE AS data_type, CHARACTER_MAXIMUM_LENGTH AS char_length "
+                f"FROM {prefix}INFORMATION_SCHEMA.COLUMNS WHERE UPPER(TABLE_SCHEMA) = :o AND UPPER(TABLE_NAME) = :t"), schema
+    if dialect == "db2":
+        return "SELECT COLNAME AS column_name, TYPENAME AS data_type, LENGTH AS char_length FROM SYSCAT.COLUMNS WHERE TABSCHEMA = :o AND TABNAME = :t", owner
+    if dialect == "ibmi":
+        return ("SELECT COLUMN_NAME AS column_name, DATA_TYPE AS data_type, LENGTH AS char_length "
+                "FROM QSYS2.SYSCOLUMNS WHERE TABLE_SCHEMA = :o AND TABLE_NAME = :t"), owner
+    return None
 
 # ── write-time type coercion + form-rule resolution ────────────────────────────────────────
 # Frontend submits everything as strings (HTML form inputs); asyncpg / oracledb won't auto-coerce
@@ -2446,21 +2468,20 @@ class SQLConnector:
                 else:
                     key = (self.pool_name, owner, table)
                     col_types = _ORACLE_COL_TYPES_CACHE.get(key) or {}
-                    if not col_types:
+                    # each database's own catalogue (Oracle's, as always, for Oracle); none known: no hygiene
+                    asked = None if col_types else _column_types_sql(self._pools.dialect(self.pool_name), owner)
+                    if asked is not None:
                         try:
-                            introspect_sql = (
-                                "SELECT column_name, data_type, char_length "
-                                "FROM all_tab_columns "
-                                "WHERE owner = :o AND table_name = :t"
-                            )
+                            introspect_sql, owner_bind = asked
                             async with engine.connect() as introspect_conn:
                                 r = await introspect_conn.execute(
-                                    text(introspect_sql), {"o": owner, "t": table},
+                                    text(introspect_sql), {"o": owner_bind, "t": table},
                                 )
                                 col_types = {}
-                                for row in r.mappings():
-                                    cname = str(row.get("column_name") or "").upper()
-                                    dtype = str(row.get("data_type") or "").upper()
+                                for found in r.mappings():
+                                    row = {str(k).lower(): v for k, v in found.items()}      # Db2 answers the names in upper case
+                                    cname = str(row.get("column_name") or "").strip().upper()
+                                    dtype = str(row.get("data_type") or "").strip().upper()
                                     raw_len = row.get("char_length")
                                     try:
                                         clen: int | None = int(raw_len) if raw_len is not None else None
@@ -2479,7 +2500,7 @@ class SQLConnector:
                                 _ORACLE_COL_TYPES_CACHE[key] = col_types
                         except Exception as e:
                             _log.warning(
-                                "oracle column introspection failed for %s.%s on pool %r: %s — "
+                                "column introspection failed for %s.%s on pool %r: %s — "
                                 "writes proceed without bind hygiene",
                                 owner, table, self.pool_name, e,
                             )
