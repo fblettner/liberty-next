@@ -321,5 +321,5 @@ zopfli==0.4.3
 # ── not from pip-compile: the optional database drivers the image adds (extras `mssql`, `db2` —
 #    not in `all`; `db2` on amd64 only). Keep these lines when the lock is refreshed.
 pymssql==2.4.6
-ibm-db==3.2.9
+ibm-db==3.2.8
 ibm-db-sa==0.4.4

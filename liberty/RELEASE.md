@@ -79,6 +79,9 @@
   server for hours — a new button doing nothing, or doing what it did before. The entry page is now always re-checked;
   the build's own files keep their caching.
 
+- **Image: the Db2 driver is 3.2.8.** IBM's driver 3.2.9, which the image was built with, is no longer on PyPI; the
+  image now installs 3.2.8.
+
 ## 7.0.90 — 2026-11-25
 
 - **Pools: *Test connection* works on an LDAP directory.** The test answered *required argument is not an integer*

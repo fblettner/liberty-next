@@ -88,6 +88,9 @@
   faisait avant. La page d'entrée est maintenant toujours revérifiée ; les fichiers de la construction gardent leur
   mise en cache.
 
+- **Image : le pilote Db2 est le 3.2.8.** Le pilote IBM 3.2.9, avec lequel l'image était construite, n'est plus sur
+  PyPI ; l'image installe maintenant le 3.2.8.
+
 ## 7.0.90 — 2026-11-25
 
 - **Pools : *Tester la connexion* fonctionne sur un annuaire LDAP.** Le test répondait *required argument is not an
