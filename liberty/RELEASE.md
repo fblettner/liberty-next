@@ -1,6 +1,6 @@
 # Liberty Next — Release notes
 
-## 7.0.94 — unreleased
+## 7.0.94 — 2026-11-28
 
 - **An application's pages follow the pool picked.** A connector that runs on several databases (one per
   environment) was followed by the screens' queries and by the API connectors, not by the applications' functions:
@@ -16,7 +16,8 @@
 - **A job has its environment.** The function, report and API steps of a job work on the step's own pool when it
   names one, else on the job's (**Environment**, new on the job), else on the pool picked on the page the job was
   started from; a scheduled run with none of these reads each connector's main database, as before. A job is
-  copied for a second environment by setting that one field, instead of each step's.
+  copied for a second environment by setting that one field, instead of each step's. The run history says which
+  environment each run was for (in the list and in the run's detail).
 - **The pool list names the main database.** The first choice read "Default" and the main database appeared a
   second time under its name; it is now listed once, under its name.
 - **An apps upgrade keeps a connector's databases.** *Database* and *Other databases* of a SQL connector are the

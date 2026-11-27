@@ -404,6 +404,7 @@ class RunOut(_Open):
     state: str = Field(description="QUEUED / RUNNING / SUCCEEDED / FAILED / CANCELED / MISSED …")
     trigger_kind: str | None = None
     triggered_by: str | None = None
+    pool: str | None = Field(default=None, description="The environment the run was for; none = each connector's main database.")
     scheduled_at: str | None = None
     started_at: str | None = None
     finished_at: str | None = None

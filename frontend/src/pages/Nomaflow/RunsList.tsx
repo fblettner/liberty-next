@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { Activity, Clock, GitBranch, RefreshCw, Search, User } from 'lucide-react'
+import { Activity, Clock, Database, GitBranch, RefreshCw, Search, User } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { PageLayout, Button, Banner, Centered, Tag, Input, SearchSelect, type SearchSelectOption } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
@@ -121,11 +121,13 @@ export default function RunsList() {
     { value: '720', label: t('nomaflow.runsView.last30d') },
     { value: '', label: t('nomaflow.runsView.allTime') },
   ]
-  const trigger = (r: RunRow) => r.trigger_kind === 'scheduled'
+  const origin = (r: RunRow) => r.trigger_kind === 'scheduled'
     ? <><Clock size={13} /> {t('nomaflow.runsView.scheduled')}</>
     : (r.triggered_by ?? '').startsWith('call_job:')
       ? <><GitBranch size={13} /> {r.triggered_by!.slice('call_job:'.length).split('@')[0]}</>
       : <><User size={13} /> {r.triggered_by ?? t('nomaflow.runsView.manual')}</>
+  // who or what started it, and the environment it was for when it was not the main database
+  const trigger = (r: RunRow) => <>{origin(r)}{r.pool ? <span data-run-pool title={t('nomaflow.run.environment')}> · <Database size={12} /> {r.pool}</span> : null}</>
 
   return (
     <PageLayout icon={<Activity size={18} />} title={t('nomaflow.runsView.title')} description={t('nomaflow.runsView.subtitle')}>

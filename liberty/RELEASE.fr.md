@@ -1,6 +1,6 @@
 # Liberty Next — Notes de version
 
-## 7.0.94 — unreleased
+## 7.0.94 — 2026-11-28
 
 - **Les pages d'une application suivent le pool choisi.** Un connecteur qui travaille sur plusieurs bases (une par
   environnement) était suivi par les requêtes des écrans et par les connecteurs API, pas par les fonctions des
@@ -18,7 +18,8 @@
   le pool de l'étape quand elle en nomme un, sinon sur celui du traitement (**Environnement**, nouveau sur le
   traitement), sinon sur le pool choisi sur la page d'où le traitement a été lancé ; une exécution planifiée sans
   rien de cela lit la base principale de chaque connecteur, comme avant. Un traitement se copie pour un second
-  environnement en renseignant ce seul champ, au lieu de celui de chaque étape.
+  environnement en renseignant ce seul champ, au lieu de celui de chaque étape. L'historique des exécutions dit
+  pour quel environnement chaque exécution a tourné (dans la liste et dans le détail).
 - **La liste des pools nomme la base principale.** Le premier choix s'appelait « Défaut » et la base principale
   apparaissait une seconde fois sous son nom ; elle est maintenant listée une fois, sous son nom.
 - **Une mise à jour des applications garde les bases d'un connecteur.** *Base de données* et *Autres bases* d'un

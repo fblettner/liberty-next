@@ -218,6 +218,10 @@ export default function RunDetail({ runId: runIdProp }: { runId?: string } = {})
                 <FieldLabel>{t('nomaflow.run.trigger')}</FieldLabel>
                 <FieldValue>{data.run.trigger_kind}{data.run.triggered_by ? ` · ${data.run.triggered_by}` : ''}</FieldValue>
               </Field>
+              <Field data-run-pool>
+                <FieldLabel>{t('nomaflow.run.environment')}</FieldLabel>
+                <FieldValue>{data.run.pool ? <Mono>{data.run.pool}</Mono> : t('nomaflow.run.environmentMain')}</FieldValue>
+              </Field>
               <Field>
                 <FieldLabel>{t('nomaflow.run.started')}</FieldLabel>
                 <FieldValue>{fmt(data.run.started_at)}</FieldValue>

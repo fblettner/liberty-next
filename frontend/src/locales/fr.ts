@@ -1671,6 +1671,8 @@ const fr: Resources = {
       disabled: '(désactivé)',
     },
     run: {
+      environment: 'Environnement',
+      environmentMain: 'la base principale',
       attached: 'Joint : {{files}}',
       title: 'Détail de l\'exécution',
       live: 'en direct',

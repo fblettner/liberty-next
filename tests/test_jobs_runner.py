@@ -737,3 +737,55 @@ enabled = false
         ("security", RunState.SUCCEEDED.value, None),
         ("ldap", RunState.CANCELED.value, "skipped: turned off for this install"),
     ]
+
+
+# --------------------------------------------------------------------------- #
+# the environment a run is for
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_run_says_its_environment_and_its_steps_follow_it(jobs_db, tmp_path) -> None:
+    """The step's own pool, else the job's, else the one picked on the page the run was started from — kept on the
+    run so the history says which environment it was for; none of them: no pool (the main database)."""
+    from liberty.connectors.api import current_pool
+
+    seen: list[tuple[str, str | None]] = []
+
+    class Looking:
+        async def execute(self, step: Step, ctx: RunContext) -> StepResult:
+            seen.append((step.name, current_pool.get()))
+            return StepResult(rows_affected=0)
+
+    def job(extra: str):
+        return _make_job(tmp_path, f"""
+[[jobs]]
+id = "env"
+{extra}
+[[jobs.steps]]
+type = "sql_query"
+name = "plain"
+connector = "c"
+query = "q"
+
+[[jobs.steps]]
+type = "sql_query"
+name = "own"
+connector = "c"
+query = "q"
+pool = "step_pool"
+""")
+
+    runner = JobRunner(jobs_db, {StepType.SQL_QUERY: Looking()}, sleep=_noop_sleep)
+    run = await runner.run(job(""), ManualTrigger(triggered_by="alice"))
+    assert run.pool is None and seen == [("plain", None), ("own", "step_pool")]
+
+    seen.clear()
+    token = current_pool.set("page_pool")                      # started from a page with this pool picked
+    try:
+        run = await runner.run(job(""), ManualTrigger(triggered_by="alice"))
+        assert run.pool == "page_pool" and seen == [("plain", "page_pool"), ("own", "step_pool")]
+        seen.clear()
+        run = await runner.run(job('pool = "job_pool"'), ManualTrigger(triggered_by="alice"))
+        assert run.pool == "job_pool" and seen == [("plain", "job_pool"), ("own", "step_pool")]
+    finally:
+        current_pool.reset(token)

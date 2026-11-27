@@ -164,6 +164,8 @@ export interface RunInfo {
   state: RunState
   trigger_kind: string
   triggered_by: string | null
+  /** The environment (pool) the run was for; null = each connector's main database. */
+  pool?: string | null
   scheduled_at: string | null
   started_at: string | null
   finished_at: string | null

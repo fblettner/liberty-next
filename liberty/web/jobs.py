@@ -568,6 +568,7 @@ def _run_dict(run: Any) -> dict[str, Any]:
         "state": run.state,
         "trigger_kind": run.trigger_kind,
         "triggered_by": run.triggered_by,
+        "pool": getattr(run, "pool", None),
         "scheduled_at": run.scheduled_at.isoformat() if run.scheduled_at else None,
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,

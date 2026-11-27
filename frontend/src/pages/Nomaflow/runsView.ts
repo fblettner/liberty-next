@@ -8,6 +8,7 @@ export interface RunRow {
   state: RunState
   trigger_kind: string
   triggered_by: string | null
+  pool?: string | null
   scheduled_at: string | null
   started_at: string | null
   finished_at: string | null

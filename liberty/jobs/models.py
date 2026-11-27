@@ -66,6 +66,9 @@ class JobRun(Base):
     job_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     trigger_kind: Mapped[str] = mapped_column(String(16), nullable=False)
     triggered_by: Mapped[str | None] = mapped_column(String(128))
+    # the environment the run was for: the job's pool, else the one picked on the page it was started from; NULL = each
+    # connector's main database (a step that names its own pool still works on its own)
+    pool: Mapped[str | None] = mapped_column(String(128))
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow

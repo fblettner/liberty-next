@@ -363,7 +363,7 @@ class JobRunner:
                     })
                 else:
                     effective_step = step
-                step_result = await self._run_step_with_retry(run, idx, effective_step, job.retry, ctx, job_pool=job.pool)
+                step_result = await self._run_step_with_retry(run, idx, effective_step, job.retry, ctx, job_pool=job.pool or getattr(run, "pool", None))
                 if isinstance(step_result, str) and step.continue_on_failure:
                     # Recorded FAILED already; the job goes on and ends FAILED naming it.
                     _log.warning("nomaflow.runner step=%s FAILED — continuing (continue_on_failure): %s",
@@ -501,6 +501,7 @@ class JobRunner:
                 job_id=job.id,
                 trigger_kind=trigger.kind,
                 triggered_by=triggered_by,
+                pool=(job.pool or current_pool.get() or None),      # said in the run history; what its steps then follow
                 scheduled_at=scheduled_at,
                 state=RunState.QUEUED.value,
             )

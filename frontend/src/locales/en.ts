@@ -1669,6 +1669,8 @@ const en = {
       disabled: '(disabled)',
     },
     run: {
+      environment: 'Environment',
+      environmentMain: 'the main database',
       attached: 'Attached: {{files}}',
       title: 'Run detail',
       live: 'live',
