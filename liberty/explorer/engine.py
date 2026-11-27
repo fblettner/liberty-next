@@ -566,6 +566,10 @@ class _Builder:
             return f"{ref} = {pv}"
         if op == "notEquals":
             return f"{ref} <> {pv}"
+        if self.dialect == "mssql" and op in ("startsWith", "endsWith", "contains"):
+            # SQL Server joins text with CONCAT, not ``||`` — the same three patterns, for it alone
+            parts = {"startsWith": f"{pv}, '%'", "endsWith": f"'%', {pv}", "contains": f"'%', {pv}, '%'"}[op]
+            return f"LOWER({ref}) LIKE LOWER(CONCAT({parts}))"
         if op == "startsWith":
             return f"LOWER({ref}) LIKE LOWER({pv} || '%')"
         if op == "endsWith":
@@ -759,6 +763,11 @@ class _Builder:
         for k, d in sort:
             if k not in by_key:
                 raise ExplorerError(f"cannot sort on {k!r}: not among the columns")
+            if self.dialect == "mssql":
+                # SQL Server puts the empty values first where the others put them last (and last where they put
+                # them first): said explicitly, so that a page holds the same rows whatever the database
+                expr = self.ref(flds[by_key[k]])
+                order.append(f"CASE WHEN {expr} IS NULL THEN {0 if d == 'desc' else 1} ELSE {1 if d == 'desc' else 0} END")
             order.append(f"c{by_key[k]} {'DESC' if d == 'desc' else 'ASC'}")
         offset = (req.page - 1) * req.page_size
         paging = (f"LIMIT {req.page_size} OFFSET {offset}" if self.dialect == "sqlite"
@@ -795,7 +804,8 @@ class _Builder:
             raise ExplorerError(f"unknown calculated field {name!r}")
         self.lay_out([self.primary])
         sql = f"SELECT {render(node)} AS c0\n{await self.from_clause()}"
-        sql += "\nLIMIT 8" if self.dialect == "sqlite" else "\nFETCH FIRST 8 ROWS ONLY"
+        # eight values to look at: SQL Server has no such clause without an ORDER BY — the reading stops at eight there
+        sql += "\nLIMIT 8" if self.dialect == "sqlite" else "" if self.dialect == "mssql" else "\nFETCH FIRST 8 ROWS ONLY"
         _cols, raw, _t = await self.conn.run_select(sql, self.binds, max_rows=8)
         values = [_display(next(iter(r.values())), fld) for r in raw]
         out: dict[str, Any] = {"name": fld.name, "type": fld.type, "kind": fld.kind, "values": values}

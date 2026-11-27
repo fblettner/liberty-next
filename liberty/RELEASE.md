@@ -14,6 +14,14 @@
   asked through its own catalogue (a SQL Server table named with its database included); Oracle is asked the very
   statement it always was. A *contains* / *starts with* / *ends with* filter on a column is written for SQL Server
   its own way (it joins text with `CONCAT`); nothing changes for the other databases.
+- **The Data Explorer on SQL Server and Db2.** A model whose data is on SQL Server or Db2 failed on a text filter
+  (*contains*, *starts with*, *ends with*), on a calculated field that joins texts, counts days or reads the year,
+  month or day of a JD Edwards date, and on *Test* of a calculated field. Each is now written the way that
+  database takes it; on SQL Server a page of rows also puts the empty values where the other databases put them,
+  so a page holds the same rows everywhere. Oracle, PostgreSQL and SQLite are told exactly what they were. Two
+  things differ by nature: on SQL Server `length()` of a fixed-width column counts the text without its trailing
+  blanks (Oracle and Db2 count the column's width), and a JD Edwards date left blank is no date on SQL Server and
+  Db2, where Oracle refuses to read its year.
 
 ## 7.0.91 — 2026-11-27
 

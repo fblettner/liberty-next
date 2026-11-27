@@ -29,3 +29,41 @@ def test_a_text_filter_is_written_for_sql_server_its_own_way_only() -> None:
     assert "||" not in said and "CONCAT('%', CAST(:NAME AS VARCHAR(4000)), '%')" in said
     assert "||" not in _build_filter_predicate("NAME", None, "startsWith", "mssql") and "||" not in _build_filter_predicate("NAME", None, "endsWith", "mssql")
     assert _build_filter_predicate("NAME", None, "equals", "mssql") == _build_filter_predicate("NAME", None, "equals", "db2")
+
+
+# ── the Data Explorer's calculated fields, each database's own way ──
+def _compiled(dialect: str, expr: str) -> str:
+    from liberty.explorer.calc import Compiler, date_ref, render
+    from liberty.explorer.model import ExplorerField
+
+    fields = {"NAME": ExplorerField(key="t.NAME", entity="t", name="NAME", label="Name", type="string", kind="dimension"),
+              "KIND": ExplorerField(key="t.KIND", entity="t", name="KIND", label="Kind", type="string", kind="dimension"),
+              "FROM_DAY": ExplorerField(key="t.FROM_DAY", entity="t", name="FROM_DAY", label="From", type="date", kind="dimension", format="jdedate"),
+              "TO_DAY": ExplorerField(key="t.TO_DAY", entity="t", name="TO_DAY", label="To", type="date", kind="dimension", format="jdedate"),
+              "AMOUNT": ExplorerField(key="t.AMOUNT", entity="t", name="AMOUNT", label="Amount", type="number", kind="measure")}
+
+    def resolve(name: str) -> tuple[ExplorerField, str]:
+        fld = fields[name.split(".")[-1].upper()]
+        return fld, date_ref(fld, f"e.{fld.name}")
+
+    return render(Compiler(dialect, resolve).compile(expr))
+
+
+def test_oracle_is_told_what_it_always_was() -> None:
+    assert _compiled("oracle", "concat(NAME, ' / ', KIND)") == "(e.NAME || ' / ' || e.KIND)"
+    assert _compiled("oracle", "length(NAME)") == "LENGTH(e.NAME)" and _compiled("oracle", "round(AMOUNT)") == "ROUND(e.AMOUNT)"
+    assert _compiled("oracle", "year(FROM_DAY)") == "EXTRACT(YEAR FROM TO_DATE(TO_CHAR(1900 + TRUNC(e.FROM_DAY / 1000)) || LPAD(MOD(e.FROM_DAY, 1000), 3, '0'), 'YYYYDDD'))"
+    assert _compiled("oracle", "days(FROM_DAY, TO_DAY)").startswith("(TRUNC(TO_DATE(") and " - TRUNC(TO_DATE(" in _compiled("oracle", "days(FROM_DAY, TO_DAY)")
+
+
+def test_sql_server_and_db2_get_their_own_words() -> None:
+    assert _compiled("mssql", "concat(NAME, ' / ', KIND)") == "CONCAT(e.NAME, ' / ', e.KIND)"
+    assert _compiled("mssql", "length(NAME)") == "LEN(e.NAME)" and _compiled("mssql", "round(AMOUNT)") == "ROUND(e.AMOUNT, 0)"
+    year = _compiled("mssql", "year(FROM_DAY)")
+    assert year.startswith("DATEPART(year, CASE WHEN e.FROM_DAY > 0 THEN DATEADD(day,") and "DATEFROMPARTS" in year and "TO_DATE" not in year
+    assert _compiled("mssql", "days(FROM_DAY, TO_DAY)").startswith("DATEDIFF(day, CASE WHEN e.FROM_DAY > 0")
+    for dialect in ("db2", "ibmi"):
+        assert _compiled(dialect, "concat(NAME, ' / ', KIND)") == "(e.NAME || ' / ' || e.KIND)"
+        days = _compiled(dialect, "days(FROM_DAY, TO_DAY)")
+        assert days.startswith("(DAYS(CASE WHEN e.TO_DAY > 0 THEN DATE(DAYS(DATE(") and "TO_DATE" not in days and "AS TEXT" not in days
+        assert _compiled(dialect, "month(FROM_DAY)").startswith("EXTRACT(MONTH FROM CASE WHEN e.FROM_DAY > 0")

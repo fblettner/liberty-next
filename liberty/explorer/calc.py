@@ -32,6 +32,7 @@ from typing import Callable, Literal
 from liberty.explorer.model import ExplorerField
 
 Type = Literal["num", "str", "bool", "date"]
+_DB2 = ("db2", "ibm_db_sa", "ibmi")
 MAX_EXPR = 2000
 _NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,40}$")
 
@@ -308,6 +309,10 @@ class Compiler:
                 sql = f"CAST(julianday({b}) - julianday({a}) AS INTEGER)"
             elif self.dialect == "oracle":
                 sql = f"(TRUNC({b}) - TRUNC({a}))"
+            elif self.dialect == "mssql":
+                sql = f"DATEDIFF(day, {a}, {b})"
+            elif self.dialect in _DB2:
+                sql = f"(DAYS({b}) - DAYS({a}))"
             else:
                 sql = f"(CAST({b} AS DATE) - CAST({a} AS DATE))"
             return Node("num", sql, fields)
@@ -317,6 +322,8 @@ class Compiler:
             if len(args) == 2:
                 self._want(args[1], "num", "round", pos)
                 return Node("num", f"ROUND({args[0].sql}, {args[1].sql})", fields)
+            if self.dialect == "mssql":                       # SQL Server's ROUND always names its places
+                return Node("num", f"ROUND({args[0].sql}, 0)", fields)
             return Node("num", f"ROUND({args[0].sql})", fields)
         if name == "abs":
             arity(1)
@@ -335,7 +342,7 @@ class Compiler:
         if name == "length":
             arity(1)
             self._want(args[0], "str", name, pos)
-            return Node("num", f"LENGTH({args[0].sql})", fields)
+            return Node("num", f"{'LEN' if self.dialect == 'mssql' else 'LENGTH'}({args[0].sql})", fields)
         if name == "concat":
             arity(2, -1)
             for a in args:
@@ -349,6 +356,8 @@ class Compiler:
         return self._as_date(node) if node.type == "date" else node.sql
 
     def _concat(self, parts: list[Node]) -> str:
+        if self.dialect == "mssql":                           # SQL Server joins text with CONCAT, not ``||``
+            return "CONCAT(" + ", ".join(p.sql for p in parts) + ")"
         return "(" + " || ".join(p.sql for p in parts) + ")"
 
     def _want_date(self, node: Node, what: str, pos: int) -> None:
@@ -366,6 +375,14 @@ class Compiler:
                 return f"TO_DATE(TO_CHAR(1900 + TRUNC({d} / 1000)) || LPAD(MOD({d}, 1000), 3, '0'), 'YYYYDDD')"
             if self.dialect == "sqlite":
                 return f"date((1900 + ({d} / 1000)) || '-01-01', '+' || (({d} % 1000) - 1) || ' days')"
+            # SQL Server and Db2 keep JD Edwards' numbers as floating point: the Julian number is taken whole first.
+            # A date left blank (0) is no date there.
+            if self.dialect == "mssql":
+                return (f"CASE WHEN {d} > 0 THEN DATEADD(day, CAST({d} AS INT) % 1000 - 1, "
+                        f"DATEFROMPARTS(1900 + CAST({d} AS INT) / 1000, 1, 1)) END")
+            if self.dialect in _DB2:
+                return (f"CASE WHEN {d} > 0 THEN DATE(DAYS(DATE(RTRIM(CHAR(1900 + INT({d}) / 1000)) || '-01-01')) "
+                        f"+ MOD(INT({d}), 1000) - 1) END")
             return f"TO_DATE(CAST(1900 + FLOOR({d} / 1000) AS TEXT) || LPAD(CAST({d} % 1000 AS TEXT), 3, '0'), 'YYYYDDD')"
         return sql
 
@@ -373,6 +390,8 @@ class Compiler:
         if self.dialect == "sqlite":
             fmt = {"year": "%Y", "month": "%m", "day": "%d"}[part]
             return f"CAST(strftime('{fmt}', {d}) AS INTEGER)"
+        if self.dialect == "mssql":
+            return f"DATEPART({part}, {d})"
         return f"EXTRACT({part.upper()} FROM {d})"
 
 
