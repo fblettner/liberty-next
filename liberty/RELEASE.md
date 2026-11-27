@@ -1,6 +1,6 @@
 # Liberty Next — Release notes
 
-## 7.0.92 — unreleased
+## 7.0.92 — 2026-11-27
 
 - **A screen's heading is the screen's.** The title of a data screen came from the description of the query's table
   in the connector; it is now the screen's own description, in the user's language, and the query's only when the

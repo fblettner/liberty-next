@@ -1,6 +1,6 @@
 # Liberty Next — Notes de version
 
-## 7.0.92 — unreleased
+## 7.0.92 — 2026-11-27
 
 - **L'en-tête d'un écran est celui de l'écran.** Le titre d'un écran de données venait de la description de la table
   de la requête dans le connecteur ; c'est maintenant la description de l'écran lui-même, dans la langue de
