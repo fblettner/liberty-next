@@ -45,7 +45,13 @@ export function PageRecord({ app, screen: screenId, mode = 'add', values, onClos
         if (cancelled) return
         setScreen(detail)
         setColumns(res.columns)
-        setRecord(mode === 'edit' && res.rows.length === 1 ? res.rows[0] : given)
+        // the record among what the read gave: the one row, else the row holding every key value given (a screen
+        // whose key columns are not filters answers more than the record)
+        const same = (r: Record<string, unknown>) => Object.entries(given).every(([k, v]) => {
+          const hit = Object.keys(r).find((c) => c.toUpperCase() === k.toUpperCase())
+          return hit !== undefined && String(r[hit] ?? '').trim() === String(v ?? '').trim()
+        })
+        setRecord(mode === 'edit' ? (res.rows.find(same) ?? (res.rows.length === 1 ? res.rows[0] : given)) : given)
       } catch (e) {
         if (!cancelled) setError(e instanceof ApiError ? e.message : String(e))
       }
