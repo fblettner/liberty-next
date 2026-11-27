@@ -371,19 +371,20 @@ class Compiler:
         sql = node.sql
         if sql.startswith("#jde:"):
             d = sql[5:]
+            # A date left blank (0) is no date, on every database: without the test Oracle and PostgreSQL refuse the
+            # whole request (day 0 of a year), and SQLite answers the last day of 1899.
             if self.dialect == "oracle":
-                return f"TO_DATE(TO_CHAR(1900 + TRUNC({d} / 1000)) || LPAD(MOD({d}, 1000), 3, '0'), 'YYYYDDD')"
+                return f"CASE WHEN {d} > 0 THEN TO_DATE(TO_CHAR(1900 + TRUNC({d} / 1000)) || LPAD(MOD({d}, 1000), 3, '0'), 'YYYYDDD') END"
             if self.dialect == "sqlite":
-                return f"date((1900 + ({d} / 1000)) || '-01-01', '+' || (({d} % 1000) - 1) || ' days')"
+                return f"CASE WHEN {d} > 0 THEN date((1900 + ({d} / 1000)) || '-01-01', '+' || (({d} % 1000) - 1) || ' days') END"
             # SQL Server and Db2 keep JD Edwards' numbers as floating point: the Julian number is taken whole first.
-            # A date left blank (0) is no date there.
             if self.dialect == "mssql":
                 return (f"CASE WHEN {d} > 0 THEN DATEADD(day, CAST({d} AS INT) % 1000 - 1, "
                         f"DATEFROMPARTS(1900 + CAST({d} AS INT) / 1000, 1, 1)) END")
             if self.dialect in _DB2:
                 return (f"CASE WHEN {d} > 0 THEN DATE(DAYS(DATE(RTRIM(CHAR(1900 + INT({d}) / 1000)) || '-01-01')) "
                         f"+ MOD(INT({d}), 1000) - 1) END")
-            return f"TO_DATE(CAST(1900 + FLOOR({d} / 1000) AS TEXT) || LPAD(CAST({d} % 1000 AS TEXT), 3, '0'), 'YYYYDDD')"
+            return f"CASE WHEN {d} > 0 THEN TO_DATE(CAST(1900 + FLOOR({d} / 1000) AS TEXT) || LPAD(CAST({d} % 1000 AS TEXT), 3, '0'), 'YYYYDDD') END"
         return sql
 
     def _extract(self, part: str, d: str) -> str:

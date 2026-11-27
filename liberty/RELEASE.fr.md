@@ -20,11 +20,13 @@
   filtre de texte (*contient*, *commence par*, *finit par*), sur un champ calculé qui joint des textes, compte des
   jours ou lit l'année, le mois ou le jour d'une date JD Edwards, et sur *Tester* d'un champ calculé. Chacun s'écrit
   maintenant comme cette base le prend ; sur SQL Server une page de lignes place aussi les valeurs vides là où les
-  autres bases les placent, pour qu'une page contienne les mêmes lignes partout. Oracle, PostgreSQL et SQLite
-  reçoivent exactement ce qu'ils recevaient. Deux choses diffèrent par nature : sur SQL Server `length()` d'une
-  colonne à largeur fixe compte le texte sans ses blancs de fin (Oracle et Db2 comptent la largeur de la colonne),
-  et une date JD Edwards laissée vide n'est pas une date sur SQL Server et Db2, là où Oracle refuse d'en lire
-  l'année.
+  autres bases les placent, pour qu'une page contienne les mêmes lignes partout. Pour Oracle, PostgreSQL et SQLite
+  rien d'autre ne change que le point suivant. Une chose diffère par nature : sur SQL Server `length()` d'une
+  colonne à largeur fixe compte le texte sans ses blancs de fin (Oracle et Db2 comptent la largeur de la colonne).
+- **Une date JD Edwards laissée vide n'est pas une date.** Un champ calculé qui lisait l'année, le mois ou le jour
+  d'une date JD Edwards, ou comptait des jours à partir d'elle, faisait refuser toute la requête par Oracle (et
+  PostgreSQL) dès qu'une ligne avait la date vide (0). Sur toutes les bases, une telle ligne n'a maintenant
+  simplement pas de valeur à cet endroit.
 
 ## 7.0.91 — 2026-11-27
 

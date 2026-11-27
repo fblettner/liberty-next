@@ -52,8 +52,11 @@ def _compiled(dialect: str, expr: str) -> str:
 def test_oracle_is_told_what_it_always_was() -> None:
     assert _compiled("oracle", "concat(NAME, ' / ', KIND)") == "(e.NAME || ' / ' || e.KIND)"
     assert _compiled("oracle", "length(NAME)") == "LENGTH(e.NAME)" and _compiled("oracle", "round(AMOUNT)") == "ROUND(e.AMOUNT)"
-    assert _compiled("oracle", "year(FROM_DAY)") == "EXTRACT(YEAR FROM TO_DATE(TO_CHAR(1900 + TRUNC(e.FROM_DAY / 1000)) || LPAD(MOD(e.FROM_DAY, 1000), 3, '0'), 'YYYYDDD'))"
-    assert _compiled("oracle", "days(FROM_DAY, TO_DAY)").startswith("(TRUNC(TO_DATE(") and " - TRUNC(TO_DATE(" in _compiled("oracle", "days(FROM_DAY, TO_DAY)")
+    # a JD Edwards date: the same conversion as ever, behind the test that a date left blank (0) is no date
+    assert _compiled("oracle", "year(FROM_DAY)") == ("EXTRACT(YEAR FROM CASE WHEN e.FROM_DAY > 0 THEN "
+                                                     "TO_DATE(TO_CHAR(1900 + TRUNC(e.FROM_DAY / 1000)) || LPAD(MOD(e.FROM_DAY, 1000), 3, '0'), 'YYYYDDD') END)")
+    assert _compiled("oracle", "days(FROM_DAY, TO_DAY)").startswith("(TRUNC(CASE WHEN e.TO_DAY > 0 THEN TO_DATE(")
+    assert _compiled("postgresql", "month(FROM_DAY)").startswith("EXTRACT(MONTH FROM CASE WHEN e.FROM_DAY > 0 THEN TO_DATE(")
 
 
 def test_sql_server_and_db2_get_their_own_words() -> None:

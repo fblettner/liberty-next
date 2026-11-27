@@ -18,10 +18,12 @@
   (*contains*, *starts with*, *ends with*), on a calculated field that joins texts, counts days or reads the year,
   month or day of a JD Edwards date, and on *Test* of a calculated field. Each is now written the way that
   database takes it; on SQL Server a page of rows also puts the empty values where the other databases put them,
-  so a page holds the same rows everywhere. Oracle, PostgreSQL and SQLite are told exactly what they were. Two
-  things differ by nature: on SQL Server `length()` of a fixed-width column counts the text without its trailing
-  blanks (Oracle and Db2 count the column's width), and a JD Edwards date left blank is no date on SQL Server and
-  Db2, where Oracle refuses to read its year.
+  so a page holds the same rows everywhere. For Oracle, PostgreSQL and SQLite nothing else changes than the next
+  point. One thing differs by nature: on SQL Server `length()` of a fixed-width column counts the text without its
+  trailing blanks (Oracle and Db2 count the column's width).
+- **A JD Edwards date left blank is no date.** A calculated field that read the year, month or day of a JD Edwards
+  date, or counted days from one, made Oracle (and PostgreSQL) refuse the whole request as soon as one row had the
+  date blank (0). On every database such a row now simply has no value there.
 
 ## 7.0.91 — 2026-11-27
 
