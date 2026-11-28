@@ -2,17 +2,19 @@ import { describe, expect, it } from 'vitest'
 import type { JobSummary } from '../Nomaflow/types'
 import { pickJobs } from './jobsPick'
 
+const sched = (name: string, schedule: string, enabled = true, next_run: string | null = null) =>
+  ({ name, schedule, enabled, next_run, timezone: null, preset: null, pool: null })
 const job = (id: string, extra: Partial<JobSummary> = {}): JobSummary => ({
-  id, description: null, schedule: null, enabled: true, tags: [], next_run: null, last_run: null, in_flight: false, ...extra,
+  id, description: null, schedules: [], scheduled: false, tags: [], next_run: null, last_run: null, in_flight: false, ...extra,
 } as unknown as JobSummary)
 
 describe('pickJobs', () => {
   const all = [
     job('manual'),
-    job('later', { schedule: '0 6 * * *', next_run: '2026-10-29T06:00:00Z', tags: ['nomasx1'] }),
-    job('soon', { schedule: '0 3 * * *', next_run: '2026-10-29T03:00:00Z' }),
-    job('paused', { schedule: '0 1 * * *', enabled: false, next_run: null, tags: ['nomasx1'] }),
-    job('preset', { preset_schedules: [{ name: 'p', schedule: '0 2 * * *', enabled: true, next_run: '2026-10-29T02:00:00Z' }], next_run: '2026-10-29T02:00:00Z' } as Partial<JobSummary>),
+    job('later', { schedules: [sched('later', '0 6 * * *')], scheduled: true, next_run: '2026-10-29T06:00:00Z', tags: ['nomasx1'] }),
+    job('soon', { schedules: [sched('soon', '0 3 * * *')], scheduled: true, next_run: '2026-10-29T03:00:00Z' }),
+    job('paused', { schedules: [sched('paused', '0 1 * * *', false)], next_run: null, tags: ['nomasx1'] }),
+    job('preset', { schedules: [sched('p', '0 2 * * *', true, '2026-10-29T02:00:00Z')], scheduled: true, next_run: '2026-10-29T02:00:00Z' }),
   ]
   it('lists the scheduled jobs, soonest first, the paused ones last', () => {
     expect(pickJobs(all, {}).map((j) => j.id)).toEqual(['preset', 'soon', 'later', 'paused'])

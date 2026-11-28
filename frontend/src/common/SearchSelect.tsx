@@ -392,7 +392,10 @@ export function SearchSelect({
             )
           })}
         </div>
-        {filtered.length === 0 && <Empty>{t('table.noMatches')}</Empty>}
+        {/* opened before its list arrived: it is coming, not empty */}
+        {filtered.length === 0 && (loading
+          ? <Empty data-select-loading style={{ display: 'flex', alignItems: 'center', gap: 8 }}><SpinnerRing size={14} /> {t('common.loading')}</Empty>
+          : <Empty>{t('table.noMatches')}</Empty>)}
       </List>
       {showCreateRow && (
         <CreateRow type="button" onClick={commitCustom}>

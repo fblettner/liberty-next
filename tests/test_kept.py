@@ -85,6 +85,48 @@ async def test_job_step_runs_the_function_and_keeps_its_answer(store: KeptStore)
     assert await store.get("tests.test_kept:j_sample", {"apps_id": 3}) is None
 
 
+async def j_where(*, connectors: object = None, **_: object) -> dict:
+    from liberty.connectors.api import current_pool
+    if current_pool.get() == "jde_down":
+        raise RuntimeError("the database does not answer")
+    return {"read": current_pool.get() or "main"}
+
+
+async def test_job_step_keeps_one_answer_per_environment(store: KeptStore) -> None:
+    """A connector on several databases: the step keeps an answer for each, the main one as a page asks for it."""
+    from liberty.connectors.api import current_pool
+
+    conn = types.SimpleNamespace(pool_name="jde_main", allowed_pools=frozenset({"jde_main", "jde_other", "jde_down"}))
+    registry = types.SimpleNamespace(get=lambda name: conn)
+    state = types.SimpleNamespace(kept=store)
+    out = await j_keep(connectors=registry, app_state=state, function="tests.test_kept:j_where", every_pool_of="jdedwards")
+    assert out["answers"] == 2 and [k.get("pool") for k in out["kept"]] == [None, "jde_other"] and out["not_kept"][0].startswith("jde_down")
+    assert (await store.get("tests.test_kept:j_where", {}))["answer"] == {"read": "main"}          # nothing picked on the page
+    for pool, read in (("jde_other", "jde_other"), ("jde_down", None)):
+        token = current_pool.set(pool)
+        try:
+            hit = await store.get("tests.test_kept:j_where", {})
+            assert (hit and hit["answer"]["read"]) == read
+        finally:
+            current_pool.reset(token)
+    # a run that has its own environment keeps that one; the main database by its name is kept as the page asks for it
+    await store.forget("tests.test_kept:j_where")
+    for pool, kept_as in (("jde_other", "jde_other"), ("jde_main", None)):
+        token = current_pool.set(pool)
+        try:
+            one = await j_keep(connectors=registry, app_state=state, function="tests.test_kept:j_where", every_pool_of="jdedwards")
+        finally:
+            current_pool.reset(token)
+        assert one["answers"] == 1 and one["kept"][0].get("pool") == kept_as
+    assert (await store.get("tests.test_kept:j_where", {}))["answer"] == {"read": "main"}
+    with pytest.raises(RuntimeError, match="does not answer"):                                       # one environment, and it fails: the step fails
+        token = current_pool.set("jde_down")
+        try:
+            await j_keep(connectors=registry, app_state=state, function="tests.test_kept:j_where", every_pool_of="jdedwards")
+        finally:
+            current_pool.reset(token)
+
+
 async def test_job_step_says_when_there_is_no_store() -> None:
     with pytest.raises(RuntimeError, match="store is not available"):
         await j_keep(connectors=object(), app_state=types.SimpleNamespace(), function="tests.test_kept:j_sample", apps_id=1)

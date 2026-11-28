@@ -18,14 +18,17 @@ import { nomaflowAccess } from '../../services/permissions'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import type { JobSummary, JobsListResponse, JobsParsedResponse, StepConfig } from './types'
 import { STATE_TONE, relative, uploadJobFile } from './util'
+import { describeCron } from '../../services/cronText'
 import { applyPresetState } from './presetState'
 import { toMulti } from '../../services/multiChoice'
+import { byCategory, CLOSED_BY_DEFAULT, isKnownCategory, jobName, NO_CATEGORY } from '../../services/jobGroups'
 import { MultiChoice } from '../../common/MultiChoice'
 
 /** The tag that puts a job in the "Main jobs" group at the top of the list. */
 const MAIN_TAG = 'main'
 const MAIN_GROUP = '\u0000main'
 import { RetentionPanel } from './RetentionPanel'
+import ScheduleJobModal from './ScheduleJobModal'
 import { MissedPanel } from './MissedPanel'
 
 const Toolbar = styled.div`
@@ -48,16 +51,31 @@ const GroupHead = styled.button`
   background: ${colors.bg.input}; color: ${colors.text.primary}; font-family: ${fonts.sans}; font-size: ${fontSize.base}; font-weight: 600; text-align: left;
   & .n { color: ${colors.text.muted}; font-weight: 400; font-size: ${fontSize.sm}; }
 `
+// A category inside an application's group: a slim line that opens and closes its jobs.
+const CatHead = styled.button`
+  display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 12px 5px 22px; border: none; border-top: 1px solid ${colors.border}; cursor: pointer;
+  background: none; color: ${colors.text.secondary}; font-family: ${fonts.sans}; font-size: ${fontSize.sm}; font-weight: 600; text-align: left;
+  &:hover { color: ${colors.text.primary}; }
+  & .n { color: ${colors.text.muted}; font-weight: 400; }
+`
 const JobRow = styled.div`
-  display: grid; grid-template-columns: minmax(220px, 1.2fr) minmax(0, 2fr) 110px 150px 96px auto; align-items: center; gap: 12px;
+  display: grid; grid-template-columns: minmax(220px, 1.2fr) minmax(0, 2fr) 110px 200px auto; align-items: center; gap: 12px;
   padding: 7px 12px; border-top: 1px solid ${colors.border}; font-size: ${fontSize.sm}; color: ${colors.text.secondary};
   &:hover { background: var(--hover-subtle); }
   & .id { font-family: ${fonts.mono}; color: ${colors.text.primary}; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
   & .id:hover { color: ${colors.blue.main}; }
+  /* a job that has a name: the name, and its id under it */
+  & .named { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; padding-left: 14px; cursor: pointer; }
+  & .named .name { color: ${colors.text.primary}; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .named:hover .name { color: ${colors.blue.main}; }
+  & .named .sub { font-family: ${fonts.mono}; font-size: ${fontSize.micro}; color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   & .desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   & .when { display: flex; flex-direction: column; line-height: 1.25; font-size: ${fontSize.micro}; color: ${colors.text.muted}; }
   & .acts { display: flex; gap: 2px; justify-content: flex-end; }
-  @media (max-width: 1100px) { grid-template-columns: minmax(180px, 1fr) 110px 96px auto; & .desc, & .sched { display: none; } }
+  & .when.click { cursor: pointer; border-radius: ${radius.sm}; padding: 2px 4px; margin: -2px -4px; }
+  & .when.click:hover { background: ${colors.bg.input}; color: ${colors.blue.main}; }
+  & .when .off { text-decoration: line-through; }
+  @media (max-width: 1100px) { grid-template-columns: minmax(180px, 1fr) 110px auto; & .desc, & .sched { display: none; } }
 `
 const IconBtn = styled.button`
   display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; cursor: pointer;
@@ -88,15 +106,10 @@ const ParamRow = styled.label`
 `
 const ParamKey = styled.span`font-family: ${fonts.mono}; color: ${colors.text.secondary};`
 
-// A real toggle styled as a pill — clearly clickable, clearly stateful.
-const Toggle = styled.button<{ $on: boolean }>`
-  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px;
-  border-radius: ${radius.sm}; cursor: pointer; font-size: ${fontSize.sm}; font-family: ${fonts.mono};
-  border: 1px solid ${({ $on }) => ($on ? colors.green.border : colors.border)};
-  background: ${({ $on }) => ($on ? colors.green.bg : 'transparent')};
-  color: ${({ $on }) => ($on ? colors.green.main : colors.text.muted)};
-  &:disabled { opacity: 0.5; cursor: default; }
-`
+/** What makes a cell of a line open something: a click, or Enter / Space once it has the focus. Nothing without *go*. */
+const clickable = (go: (() => void) | undefined) => (go
+  ? { role: 'button', tabIndex: 0, onClick: go, onKeyDown: (e: { key: string; preventDefault: () => void }) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go() } } }
+  : {})
 
 // Compact step list — one row per step (vs the heavier ParamSection treatment
 // used for job-level params). Designed for jobs with 10+ steps: the list
@@ -153,7 +166,7 @@ const LinkLikeButton = styled.button`
 `
 
 export default function JobsList() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   // what this user may do here (the server checks again): follow, edit, run a job, the policies
   const { user } = useAuth()
@@ -281,19 +294,14 @@ export default function JobsList() {
     } finally { setBusyId(null) }
   }, [load])
 
-  // Enable/disable is a config edit: read jobs.toml, flip the one job's `enabled`,
-  // write it back, reload. Not a cheap flag — hence the spinner + the confirm-free
-  // but clearly-busy UX.
-  const toggleEnabled = useCallback(async (job: JobSummary) => {
-    setBusyId(job.id); setError(null)
-    try {
-      // the one job's ``enabled`` + its triggers, no full reload (POST /admin/jobs/{id}/enabled)
-      await api.post(`/admin/jobs/${encodeURIComponent(job.id)}/enabled`, { enabled: !job.enabled })
-      load()
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e))
-    } finally { setBusyId(null) }
-  }, [load])
+  // what the line says of when the job runs: by hand only, its one schedule in words, or how many it has
+  const whenSaid = useCallback((job: JobSummary): string => {
+    const list = job.schedules ?? []
+    if (list.length === 0) return t('nomaflow.scheduleJob.none')
+    if (list.length > 1) return t('nomaflow.scheduleJob.count', { count: list.length })
+    const d = describeCron(list[0].schedule, i18n.language)
+    return d ? t(d.key, d.values) : list[0].schedule
+  }, [t, i18n.language])
 
   const modals = useModals()
 
@@ -380,6 +388,9 @@ export default function JobsList() {
   const [appFilter, setAppFilter] = useState(saved.app ?? '')
   const [tagFilter, setTagFilter] = useState(saved.tag ?? '')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  // the categories the user opened or closed himself: maintenance and demo start closed, the others open
+  const [catToggled, setCatToggled] = useState<Set<string>>(new Set())
+  const [scheduling, setScheduling] = useState<{ jobId: string; create?: boolean } | null>(null)      // the job whose schedule is being set (create: a new one)
   useEffect(() => { try { localStorage.setItem(FILTER_KEY, JSON.stringify({ q, status, app: appFilter, tag: tagFilter })) } catch { /* ignore */ } }, [q, status, appFilter, tagFilter])
   const { connectors: wsConnectors } = useWorkspace()
   // The application a job belongs to: its first tag naming a connector (nomasx1, nomajde…), else
@@ -404,12 +415,11 @@ export default function JobsList() {
     return [...jobs].sort((a, b) => a.id.localeCompare(b.id)).filter((j) => {
       if (tagFilter && !j.tags.includes(tagFilter)) return false
       if (appFilter && appOf(j) !== appFilter) return false
-      if (status === 'enabled' && !j.enabled) return false
-      if (status === 'disabled' && j.enabled) return false
-      if (status === 'scheduled' && !(j.enabled && j.next_run)) return false
+      if (status === 'scheduled' && !j.scheduled) return false
+      if (status === 'manual' && (j.schedules?.length ?? 0) > 0) return false
       if (status === 'running' && !j.in_flight) return false
       if (status === 'failed' && j.last_run?.state !== 'FAILED') return false
-      if (needle && !`${j.id} ${j.description ?? ''} ${j.tags.join(' ')}`.toLowerCase().includes(needle)) return false
+      if (needle && !`${j.id} ${j.label ?? ''} ${j.description ?? ''} ${j.tags.join(' ')}`.toLowerCase().includes(needle)) return false
       return true
     })
   }, [jobs, q, status, appFilter, tagFilter, appOf])
@@ -462,7 +472,7 @@ export default function JobsList() {
         </div>
         <div style={{ width: 170 }}>
           <SearchSelect value={status} onChange={setStatus} anyLabel={t('nomaflow.jobs.anyStatus')} placeholder={t('nomaflow.jobs.anyStatus')}
-            options={['enabled', 'disabled', 'scheduled', 'running', 'failed'].map((v) => ({ value: v, label: t(`nomaflow.jobs.status.${v}`) }))} />
+            options={['scheduled', 'manual', 'running', 'failed'].map((v) => ({ value: v, label: t(`nomaflow.jobs.status.${v}`) }))} />
         </div>
         <div style={{ width: 170 }}>
           <SearchSelect value={tagFilter} onChange={setTagFilter} options={allTags.map((tg) => ({ value: tg, label: tg }))} anyLabel={t('nomaflow.jobs.anyTag')} placeholder={t('nomaflow.jobs.anyTag')} sort />
@@ -497,11 +507,25 @@ export default function JobsList() {
                   {app === MAIN_GROUP ? <><Star size={13} /> {t('nomaflow.jobs.mainJobs')}</> : app === 'framework' ? t('nomaflow.jobs.framework') : app}
                   <span className="n">{list.length}</span>
                 </GroupHead>
-                {open && list.map((job) => {
-                  const busy = busyId === job.id
+                {open && byCategory(list).map(({ category, jobs: inCategory }) => {
+                  const key = `${app}/${category}`
+                  // a search or a filter shows what it found, whatever is closed
+                  const catOpen = filtersOn || (CLOSED_BY_DEFAULT.includes(category) ? catToggled.has(key) : !catToggled.has(key))
                   return (
+                    <div key={key} data-job-category={category || 'other'}>
+                      <CatHead type="button" onClick={() => setCatToggled((c) => { const n = new Set(c); if (n.has(key)) n.delete(key); else n.add(key); return n })}>
+                        {catOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                        {category === NO_CATEGORY ? t('nomaflow.category.other') : isKnownCategory(category) ? t(`nomaflow.category.${category}`) : category}
+                        <span className="n">{inCategory.length}</span>
+                      </CatHead>
+                      {catOpen && inCategory.map((job) => {
+                        const busy = busyId === job.id
+                        return (
                     <JobRow key={job.id}>
-                      <span className="id" title={job.id} onClick={access.edit ? () => navigate(`/nomaflow/jobs/${encodeURIComponent(job.id)}`) : undefined}>{job.id}</span>
+                      <span className="named" title={job.id} data-job-name={job.id} {...clickable(access.edit ? () => navigate(`/nomaflow/jobs/${encodeURIComponent(job.id)}`) : undefined)}>
+                        <span className="name">{jobName(job)}</span>
+                        {jobName(job) !== job.id && <span className="sub">{job.id}</span>}
+                      </span>
                       <span className="desc" title={job.description ?? ''}>{job.description}</span>
                       <span>
                         {job.last_run ? (
@@ -510,19 +534,17 @@ export default function JobsList() {
                           </RunLink>
                         ) : <span style={{ color: colors.text.muted }}>—</span>}
                       </span>
-                      <span className="when sched" title={job.next_run ? new Date(job.next_run).toLocaleString() : ''}>
-                        <span><Clock size={11} style={{ verticalAlign: '-1px' }} /> {job.schedule ? <Mono>{job.schedule}</Mono> : t('nomaflow.jobs.manualOnly')}</span>
-                        {job.enabled && job.next_run && <span>{t('nomaflow.jobs.nextRun')} {relative(job.next_run)}</span>}
+                      <span className={`when sched${access.edit ? ' click' : ''}`} data-job-when={job.id} title={job.next_run ? new Date(job.next_run).toLocaleString() : ''}
+                        {...clickable(access.edit ? () => setScheduling({ jobId: job.id }) : undefined)}>
+                        <span className={job.schedules.length > 0 && !job.scheduled ? 'off' : ''}><Clock size={11} style={{ verticalAlign: '-1px' }} /> {whenSaid(job)}</span>
+                        {job.scheduled && job.next_run && <span>{t('nomaflow.jobs.nextRun')} {relative(job.next_run)}</span>}
                       </span>
-                      <Toggle $on={job.enabled} disabled={busy || !access.edit} onClick={() => toggleEnabled(job)} title={t(job.enabled ? 'nomaflow.jobs.disable' : 'nomaflow.jobs.enable')}>
-                        {busy ? <SpinnerRing size={12} thickness={2} /> : null}
-                        {job.enabled ? t('nomaflow.jobs.enabled') : t('nomaflow.jobs.disabled')}
-                      </Toggle>
                       <span className="acts">
                         {!access.run(job.id) ? null : job.in_flight
                           ? <IconBtn className="danger" type="button" disabled={busy} onClick={() => cancelRun(job)} title={t('nomaflow.jobs.cancel')}><Ban size={14} /></IconBtn>
                           : <IconBtn type="button" disabled={busy} onClick={() => runNow(job)} title={t('nomaflow.jobs.runNow')}>{busy ? <SpinnerRing size={12} thickness={2} /> : <Play size={14} />}</IconBtn>}
                         {access.edit && <>
+                          <IconBtn type="button" disabled={busy} data-job-schedule={job.id} onClick={() => setScheduling({ jobId: job.id, create: true })} title={t('nomaflow.scheduleJob.title')}><CalendarClock size={14} /></IconBtn>
                           <IconBtn type="button" disabled={busy} onClick={() => navigate(`/nomaflow/jobs/${encodeURIComponent(job.id)}`)} title={t('common.edit')}><Pencil size={14} /></IconBtn>
                           <IconBtn type="button" disabled={busy} onClick={() => duplicateJob(job)} title={t('nomaflow.jobs.duplicate')}><Copy size={14} /></IconBtn>
                         </>}
@@ -531,6 +553,9 @@ export default function JobsList() {
                         {access.edit && <IconBtn className="danger" type="button" disabled={busy} onClick={() => deleteJob(job)} title={t('nomaflow.jobs.delete')}><Trash2 size={14} /></IconBtn>}
                       </span>
                     </JobRow>
+                        )
+                      })}
+                    </div>
                   )
                 })}
               </Group>
@@ -543,6 +568,7 @@ export default function JobsList() {
   return (
     <>
       {header}
+      {scheduling && <ScheduleJobModal initial={scheduling} onClose={() => setScheduling(null)} onSaved={() => { setScheduling(null); load() }} />}
       {paramModalJob && (
         <RunWithParamsModal
           job={paramModalJob.job}
@@ -564,15 +590,8 @@ export default function JobsList() {
             const parsed = await api.get<JobsParsedResponse>('/admin/config/jobs/parsed')
             const updated = parsed.jobs.map((j) => {
               if (j.id !== paramModalJob.job.id) return j
-              // Preserve a schedule/timezone the operator attached in the editor — the modal
-              // only edits params/op_kwargs/log_level/step_enabled, so a same-name re-save
-              // must not drop the preset's cron.
-              const prior = (j.presets ?? []).find((p) => p.name === preset.name)
               const presets = (j.presets ?? []).filter((p) => p.name !== preset.name)
-              const kept = prior?.schedule
-                ? { ...preset, schedule: prior.schedule, timezone: prior.timezone ?? null }
-                : preset
-              return { ...j, presets: [...presets, kept] }
+              return { ...j, presets: [...presets, preset] }
             })
             await api.put('/admin/config/jobs/parsed', { jobs: updated })
             await api.post('/admin/jobs/reload')

@@ -392,6 +392,20 @@ async def test_named_params_and_missing_param_binds_null(pools: PoolRegistry) ->
 
 
 @pytest.mark.asyncio
+async def test_the_pool_bind_is_the_servers(pools: PoolRegistry) -> None:
+    """``:LIBERTY_POOL`` = the environment picked ('' for the main database); what the caller sends for it is ignored."""
+    from liberty.connectors.api import current_pool
+
+    conn = _connector(pools, QueryDef(name="where", sql="SELECT :LIBERTY_POOL AS env FROM item WHERE id = 1"))
+    assert (await conn.execute("where", {"LIBERTY_POOL": "forged"})).rows[0]["env"] == ""
+    token = current_pool.set("jde_test")
+    try:
+        assert (await conn.execute("where", {"liberty_pool": "forged"})).rows[0]["env"] == "jde_test"
+    finally:
+        current_pool.reset(token)
+
+
+@pytest.mark.asyncio
 async def test_param_default_applied(pools: PoolRegistry) -> None:
     conn = _connector(
         pools,

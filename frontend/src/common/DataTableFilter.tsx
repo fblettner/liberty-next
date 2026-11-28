@@ -240,6 +240,24 @@ function OpPicker({ kind, value, onChange }: { kind: 'text' | 'number' | 'date';
   )
 }
 
+/** The filter a column of the shared grid gets for its *kind*: its match function and what its control shows. */
+export const filterPropsFor = (
+  kind: FilterKind,
+  options?: { value: string; label: string; mono?: string; cells?: string[] }[],
+  align?: FilterMeta['align'],
+  cellColumns?: { label: string; filterable?: boolean }[],
+  wrap?: boolean,
+) =>
+  // enum / lookup compare a trimmed code against the (possibly CHAR-padded) raw value → trim-tolerant
+  // ``selectFilterFn``; an enum (a short list) picks several values and takes typed codes outside
+  // the list, a lookup (often thousands of rows, a virtualized table) stays single. Boolean keeps
+  // the built-in strict ``equals``.
+  kind === 'enum' || kind === 'lookup'
+    ? { filterFn: selectFilterFn, meta: { filter: { kind, options, cellColumns, multi: kind === 'enum', custom: kind === 'enum' }, align, wrap } as FilterMeta }
+    : kind === 'boolean'
+      ? { filterFn: 'equals' as const, meta: { filter: { kind, options }, align } as FilterMeta }
+      : { filterFn: genericFilterFn, meta: { filter: { kind }, align, wrap } as FilterMeta }
+
 /** Renders the right filter control for `column`, reading `column.columnDef.meta.filter`.
  *  The column is loosely typed so DataTable (generic over its row type) can pass it through. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

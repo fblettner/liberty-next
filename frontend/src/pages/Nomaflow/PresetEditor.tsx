@@ -1,16 +1,22 @@
-// One preset of a job, edited where the job is: its name, what it changes in a run — the log, the
-// shared values, the steps it runs or skips, a step's own values — and its schedule. A preset was
+// One preset of a job, edited where the job is: its name and what it changes in a run — the log, the
+// shared values, the steps it runs or skips, a step's own values. When it runs is a schedule's (JobScheduleConfig). A preset was
 // created from the Run window only, and could then be neither renamed, changed nor removed.
+import { useState } from 'react'
 import styled from '@emotion/styled'
-import { Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { Button, Checkbox, Input, SearchSelect, TimezoneSelect, type SearchSelectOption } from '../../common'
+import { Button, Input, SearchSelect, type SearchSelectOption } from '../../common'
 import type { ConnectorMeta } from '../../types/connectors'
 import { colors, fontSize, radius } from '../../theme'
-import ScheduleField from './ScheduleField'
 import { Field, FieldLabel, Grid, Hint, KeyValueEditor, JOB_PARAM_CATALOG, SubHead } from './stepFields'
 import type { JobPreset } from './types'
 
+// the preset folded: one line — its name and what it changes — that opens it
+const Fold = styled.button`
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: none; background: none; cursor: pointer; text-align: left;
+  font-family: inherit; font-size: ${fontSize.sm}; color: ${colors.text.secondary};
+  & .n { color: ${colors.text.primary}; font-weight: 600; } & .s { color: ${colors.text.muted}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+`
 const Card = styled.div`
   display: flex; flex-direction: column; gap: 10px;
   padding: 12px; border: 1px solid ${colors.border}; border-radius: ${radius.sm};
@@ -24,11 +30,10 @@ const StepLine = styled.div`
 
 export const LOG_LEVELS = ['WARNING', 'INFO', 'DEBUG'] as const
 
-export function PresetEditor({ preset, steps, jobTimezone, sqlConnectors, onChange, onDelete }: {
+export function PresetEditor({ preset, steps, sqlConnectors, onChange, onDelete }: {
   preset: JobPreset
   /** The job's steps, by name: what the preset may run, skip or give values to. */
   steps: string[]
-  jobTimezone: string | null
   sqlConnectors: ConnectorMeta[]
   onChange: (p: Partial<JobPreset>) => void
   onDelete: () => void
@@ -57,28 +62,37 @@ export function PresetEditor({ preset, steps, jobTimezone, sqlConnectors, onChan
   // has is still shown, so that it can be removed); another step is added from the list below them.
   const named = [...new Set([...Object.keys(enabled), ...Object.keys(kwargs)])]
   const others: SearchSelectOption[] = steps.filter((s) => !named.includes(s)).map((s) => ({ value: s, label: s }))
+  // folded unless it has no name yet (just made, or to fix)
+  const [open, setOpen] = useState(() => !preset.name.trim())
+  const values = Object.keys(preset.params ?? {}).length
+  const runs = Object.values(enabled).filter(Boolean).length, skips = Object.values(enabled).filter((v) => !v).length
+  const said = [
+    values ? t('nomaflow.editor.presetSum.values', { count: values }) : '',
+    runs ? t('nomaflow.editor.presetSum.run', { count: runs }) : '',
+    skips ? t('nomaflow.editor.presetSum.skip', { count: skips }) : '',
+    Object.keys(kwargs).length ? t('nomaflow.editor.presetSum.stepValues', { count: Object.keys(kwargs).length }) : '',
+    preset.log_level ? t(`nomaflow.editor.logLevel.${preset.log_level}`) : '',
+  ].filter(Boolean).join(' · ') || t('nomaflow.editor.presetSum.nothing')
+  if (!open) return (
+    <Card data-preset data-preset-folded>
+      <Fold type="button" onClick={() => setOpen(true)}>
+        <ChevronRight size={14} /><span className="n">{preset.name}</span><span className="s">{said}</span>
+      </Fold>
+    </Card>
+  )
   return (
     <Card data-preset>
+      <Fold type="button" onClick={() => setOpen(false)}><ChevronDown size={14} /><span className="n">{preset.name || t('nomaflow.editor.presetName')}</span></Fold>
       <Head>
         <Field style={{ flex: '1 1 220px' }}>
           <FieldLabel>{t('nomaflow.editor.presetName')}</FieldLabel>
           <Input data-preset-name value={preset.name} onChange={(e) => onChange({ name: e.target.value })} />
         </Field>
-        {preset.schedule && (
-          <Checkbox checked={preset.enabled ?? true} onChange={(checked) => onChange({ enabled: checked })} label={t('nomaflow.editor.presetEnabled')} />
-        )}
         <Button $variant="ghost" $size="sm" onClick={onDelete} style={{ color: colors.red.main }}>
           <Trash2 size={13} /> {t('nomaflow.editor.presetDelete')}
         </Button>
       </Head>
       <Grid>
-        <Field $span={3} as="div">
-          <ScheduleField value={preset.schedule ?? null} timezone={preset.timezone ?? jobTimezone} onChange={(schedule) => onChange({ schedule })} />
-        </Field>
-        <Field>
-          <FieldLabel>{t('nomaflow.editor.fieldTimezone')}</FieldLabel>
-          <TimezoneSelect value={preset.timezone ?? ''} onChange={(v) => onChange({ timezone: v || null })} placeholder={jobTimezone ?? 'Europe/Paris'} />
-        </Field>
         <Field $span={2}>
           <FieldLabel>{t('nomaflow.editor.fieldLogLevel')}</FieldLabel>
           <SearchSelect value={preset.log_level ?? ''} onChange={(v) => onChange({ log_level: (v || null) as JobPreset['log_level'] })}

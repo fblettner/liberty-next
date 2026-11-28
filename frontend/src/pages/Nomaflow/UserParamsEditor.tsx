@@ -45,6 +45,8 @@ export function UserParamsEditor({ value, onChange, steps, connectors }: {
     { value: 'query', label: t('nomaflow.editor.userParams.kindQuery') },
     { value: 'explorer_models', label: t('nomaflow.editor.userParams.kindModels') },
     { value: 'test_suites', label: t('nomaflow.editor.userParams.kindSuites') },
+    { value: 'pools', label: t('nomaflow.editor.userParams.kindPools') },
+    { value: 'connectors', label: t('nomaflow.editor.userParams.kindConnectors') },
   ]
 
   return (
@@ -60,6 +62,8 @@ export function UserParamsEditor({ value, onChange, steps, connectors }: {
           if (k === 'query') return from({ kind: 'query', connector: '', query: '', value: '', label: '' })
           if (k === 'explorer_models') return from({ kind: 'explorer_models', app: '' })
           if (k === 'test_suites') return from({ kind: 'test_suites', connector: '' })
+          if (k === 'pools') return from({ kind: 'pools', connector: '' })
+          if (k === 'connectors') return from({ kind: 'connectors', type: 'sql' })
           return set(i, { choices_from: null, choices: [] })
         }
         return (
@@ -119,6 +123,20 @@ export function UserParamsEditor({ value, onChange, steps, connectors }: {
                 <Cell as="div">
                   <Label>{t('nomaflow.editor.userParams.app')}</Label>
                   <SearchSelect sort value={src.app} onChange={(v) => from({ kind: 'explorer_models', app: v })} options={everyConnector} allowCustom placeholder={t('common.pick')} />
+                </Cell>
+              )}
+              {src.kind === 'pools' && (
+                <Cell as="div">
+                  <Label>{t('nomaflow.editor.userParams.poolsOf')}</Label>
+                  <SearchSelect sort value={src.connector} onChange={(v) => from({ kind: 'pools', connector: v })} options={everyConnector} allowCustom anyLabel={t('nomaflow.editor.userParams.everyPool')} placeholder={t('nomaflow.editor.userParams.everyPool')} />
+                </Cell>
+              )}
+              {src.kind === 'connectors' && (
+                <Cell as="div">
+                  <Label>{t('nomaflow.editor.userParams.connectorsType')}</Label>
+                  <SearchSelect value={src.type} onChange={(v) => from({ kind: 'connectors', type: (v as '' | 'sql' | 'api') })}
+                    options={[{ value: 'sql', label: t('nomaflow.editor.userParams.connectorsSql') }, { value: 'api', label: t('nomaflow.editor.userParams.connectorsApi') }]}
+                    anyLabel={t('nomaflow.editor.userParams.everyConnector')} placeholder={t('nomaflow.editor.userParams.everyConnector')} />
                 </Cell>
               )}
               {src.kind === 'test_suites' && (

@@ -468,7 +468,7 @@ def test_jobs_operator_fields_survive_a_product_change() -> None:
     merged, rep = merge_jobs(wheel, live, prev)
     j = merged["jobs"][0]
     assert [s["name"] for s in j["steps"]] == ["A", "B"]
-    assert j["enabled"] is True and j["schedule"] == "0 2 * * *" and j["presets"] == [{"name": "p", "step_enabled": {"A": False}}]
+    assert j["schedules"] == [{"name": "collect", "schedule": "0 2 * * *", "enabled": True}] and j["presets"] == [{"name": "p", "step_enabled": {"A": False}}]
     assert j["params"] == {"apps_id": 3, "lang": "fr"}
     assert merged["meta"] == {"retention": {"days": 7}}                    # the live policies win
     assert rep.refreshed == ["job: collect"] and any("kept your" in n for n in rep.notes)
@@ -493,7 +493,7 @@ def test_jobs_vendor_defaults_move_when_the_operator_never_touched_them() -> Non
     live = {"jobs": [_job("r", ["A"], schedule="0 6 1 * *")]}
     wheel = {"jobs": [_job("r", ["A"], schedule="0 7 1 * *")]}
     merged, _ = merge_jobs(wheel, live, prev)
-    assert merged["jobs"][0]["schedule"] == "0 7 1 * *"
+    assert merged["jobs"][0]["schedules"] == [{"name": "r", "schedule": "0 7 1 * *", "enabled": True}]
 
 
 def test_jobs_withdrawn_custom_override_and_edited_steps() -> None:
@@ -524,7 +524,7 @@ def test_jobs_without_a_previous_shipment_and_presets_of_removed_steps() -> None
     wheel = {"jobs": [_job("c", ["A", "B"])]}
     merged, rep = merge_jobs(wheel, live, None)
     c = merged["jobs"][0]
-    assert [s["name"] for s in c["steps"]] == ["A", "B"] and c["schedule"] == "0 1 * * *"
+    assert [s["name"] for s in c["steps"]] == ["A", "B"] and c["schedules"][0]["schedule"] == "0 1 * * *"
     assert c["presets"] == [{"name": "p", "step_enabled": {"A": True}}]
     assert rep.kept_custom == ["job: legacy"] and any("removed step" in n for n in rep.notes)
 
@@ -538,7 +538,7 @@ def test_jobs_file_merge_writes_and_snapshots(tmp_path: Path) -> None:
     rep = merge_jobs_file(wheel, {"jobs": [_job("c", ["A"], schedule="0 1 * * *")]}, dst, snap)
     doc = tomllib.loads(dst.read_text())
     JobsFile.model_validate(doc)
-    assert doc["jobs"][0]["schedule"] == "0 1 * * *" and snap.read_bytes() == wheel.read_bytes() and rep.refreshed
+    assert doc["jobs"][0]["schedules"][0]["schedule"] == "0 1 * * *" and snap.read_bytes() == wheel.read_bytes() and rep.refreshed
     dry = tmp_path / "dry" / "jobs.toml"
     merge_jobs_file(wheel, None, dry, tmp_path / "dry-snap.toml", dry_run=True)
     assert not dry.exists()
@@ -568,3 +568,25 @@ def test_a_sql_connectors_databases_are_the_installs() -> None:
         jde = merged["connectors"]["jde"]
         assert (jde["pool"], jde["pools"]) == ("jde_prd", ["jde_test"]), (previous is None, force)
         assert jde["queries"][0]["name"] == "new_get"
+
+
+def test_jobs_schedules_are_the_installations_whatever_shape_each_side_writes() -> None:
+    """An installation upgraded from before 7.0.95: its file writes a schedule on the job and on a preset, the new
+    shipment writes ``schedules``. The schedules the operator set are kept, in the shape of the moment; a job he
+    never scheduled takes the shipment's."""
+    from liberty.config_merge import merge_jobs
+    prev = {"jobs": [_job("report", ["A"], schedule="0 6 1 * *", enabled=False), _job("collect", ["A"], enabled=False)]}
+    live = {"jobs": [
+        _job("report", ["A"], schedule="0 6 1 * *", enabled=False),                                    # as shipped
+        _job("collect", ["A"], enabled=False, presets=[{"name": "Nightly", "schedule": "0 2 * * *", "params": {"apps_id": 2}}]),
+    ]}
+    wheel = {"jobs": [
+        _job("report", ["A"], label="Monthly report", schedules=[{"name": "Monthly", "schedule": "0 6 1 * *", "enabled": False}]),
+        _job("collect", ["A"], label="Collect everything"),
+    ]}
+    merged, _ = merge_jobs(wheel, live, prev)
+    by = {j["id"]: j for j in merged["jobs"]}
+    assert by["report"]["schedules"] == [{"name": "Monthly", "schedule": "0 6 1 * *", "enabled": False}]
+    assert by["collect"]["schedules"] == [{"name": "Nightly", "preset": "Nightly", "schedule": "0 2 * * *", "enabled": True}]
+    assert by["collect"]["presets"] == [{"name": "Nightly", "params": {"apps_id": 2}}]
+    assert "schedule" not in by["report"] and "enabled" not in by["collect"]

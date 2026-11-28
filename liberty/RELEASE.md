@@ -1,5 +1,48 @@
 # Liberty Next — Release notes
 
+## 7.0.95 — 2026-11-28
+
+- **Jobs: a name and a category.** A job was listed by its id followed by a long description, in one flat group per
+  application. A job now has a short **name** (per language) and a **category**: the Jobs page shows, inside each
+  application, the categories in order — Daily work, Data loads, Analyses, Reports, Monitoring, Tools,
+  Installation and maintenance, Demonstration — then each job by its name, its id under it. *Installation and
+  maintenance* and *Demonstration* open closed; a search or a filter shows what it finds whatever is closed. Both
+  fields are in the job editor (the category is picked from the list, or typed for one of your own; the name has
+  its translations); a job without a name is listed by its id, a job without a category under *Other*. The page a
+  user runs a job from shows the name too.
+- **Kept answers for every environment.** An answer is kept per environment since 7.0.94, but the job step that
+  prepares them (`liberty.kept:j_keep`) kept the one of its run only: a page opened on another database read
+  everything again. The step takes `every_pool_of = "<connector>"` and then keeps one answer for each database of
+  that connector; an environment that cannot be read is said and the others are kept. A run that has its own
+  environment keeps that one. The connector's main database is always kept as a page asks for it — a job whose
+  environment named the main database by its name used to keep an answer no page found.
+- **A schedule is a thing of its own.** A job ran on its own schedule (switched on by its *Enabled* tick) and on
+  the schedule of each of its presets: a preset was both a set of parameters and a schedule, and a second schedule
+  meant a preset or a copy of the job. A job now has **schedules**, each with a **name**, the **preset** it runs
+  with (or the job as it is), its own values of the job's **shared parameters**, its **environment**, when it runs
+  and whether it is **active** — as many as needed (*Production nightly*, *Test weekly*), no copy. A preset is only
+  a set of values and steps, picked by its name by hand, from a menu entry or by a schedule.
+  - **Schedule a job**, one dialog: from the Schedule page (each line opens its schedule), from the *when* column
+    of the Jobs page (its existing schedules), from the calendar button of each job line (a new one, the job
+    already picked), and from the job editor's new *Schedules* section. The job editor loses its Schedule and
+    Enabled fields; the Jobs page shows when each job runs instead of an Enabled switch.
+  - The presets of the job editor fold to one line each — the name and what it changes —, opened on a click.
+  - **Nothing to redo on an installation.** A jobs file written before is read as it was: a job's own schedule
+    becomes a schedule named after the job (switched off when the job was), a scheduled preset a schedule of the
+    same name that runs with it. The run history, the missed-schedule and deadline checks, the upgrade merge (the
+    schedules stay the installation's own) and a deployment package's import follow the schedules.
+- **`:LIBERTY_POOL` in a query.** An application that keeps rows of its own per environment of another connector
+  (a history of the system it reads) names this bind in its queries: the server sets it to the environment picked
+  on the page — blank for the main database — whatever the caller sends for it.
+- **A dropdown opened before its list arrived says it is loading.** The spinner was on the closed field only: opened
+  early, a long list showed an empty panel until it came, as if nothing would.
+- **"Open as a table" is a real table.** The list a dropdown opens as a table had the dropdown's own search and
+  chips, and nothing more. It is now drawn with the app's shared grid: a filter per column (a pick list of values
+  for a column the dropdown offers chips for), sorting by a heading, grouping, the columns shown, paging.
+- **A job's parameter can list the databases or the connectors.** Two more sources for the choices a user picks
+  from when running a job (job editor → *What the user may set when starting it*): **The databases** (every pool, or those a connector
+  runs on) and **The connectors** (every one, or only the SQL or the API ones).
+
 ## 7.0.94 — 2026-11-28
 
 - **An application's pages follow the pool picked.** A connector that runs on several databases (one per

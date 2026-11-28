@@ -26,12 +26,13 @@ def builtin_jobs(settings: Any) -> list[Job]:
     if license_ is not None and (license_.key or "").strip() and (license_.usage_url or "").strip():
         jobs.append(Job.model_validate({
             "id": USAGE_JOB_ID,
+            "label": "Licence usage report", "l": {"fr": "Rapport d'utilisation de la licence"}, "category": "maintenance",
             "description": (
                 "Licence usage report — once a day, tells the licence management tool which environment this is, "
                 "its version and its number of enabled accounts. Nothing else is sent; each run shows what was. "
                 "Pause it here, or blank [license] usage_url, to send nothing."
             ),
-            "schedule": "17 4 * * *",
+            "schedules": [{"name": "Every night", "schedule": "17 4 * * *"}],
             "tags": ["license", "maintenance"],
             "timeout_seconds": 120,
             "steps": [{"type": "python", "name": "send", "callable": "liberty.licensing.usage:send_usage_report"}],

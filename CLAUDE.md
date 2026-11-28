@@ -85,7 +85,7 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
   theme.py                theme.toml + GET /api/theme (operator branding)
   kept.py                 kept answers: what a page's function answered, stored (ly2_kept_answer, per function + parameters + data scope) so the
                           page opens at once — `kept: use | refresh` on POST /api/plugins/run, `sdk.callKept` (page contract version 7),
-                          prepared by the job step `liberty.kept:j_keep`
+                          prepared by the job step `liberty.kept:j_keep` (`every_pool_of = "<connector>"`: one answer per database of that connector)
   framework_enums.py      the widget / enum registries the builders render from
   coercion.py             kwargs coercion shared by python job steps and reports
   diagram.py              a diagram laid out ONCE on the server (model: tiers / hosts, cards with a state and `declared`, links with their
@@ -98,7 +98,7 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           pymssql, Db2, IBM i through ODBC: the extras `mssql` / `db2` / `ibmi`, not in `all` — runs in threads behind the same interface:
                           `driver_is_async`, the thick Oracle adapter of thick_engine.py), sql.py (SQLConnector: text() binds, filter / summary wraps,
                           form rules, SEQUENCE, audit mirror, Oracle quirks, NDJSON streaming,
-                          multi-pool; the pure SQL-text helpers — ORDER BY split, aggregate / filter wraps,
+                          multi-pool; `:LIBERTY_POOL` = the environment picked, set by the server, for an application's own per-environment tables; the pure SQL-text helpers — ORDER BY split, aggregate / filter wraps,
                           #SCHEMA# / #DBLINK# placeholders — in sqltext.py), api.py (APIConnector: httpx, 6 auth kinds — `user_jwt` makes each call AS THE SIGNED-IN USER: a short-lived token signed with the connector's key names him on the server (`acting_user` from a user attribute, `user_token`, `ApiAuthError`; made for JD Edwards AIS) —, templating — a value stays where its placeholder is: `substitute_path` / `_json` / `_form`, `file_part_path` for a user's values, `call(..., untrusted=True)`; a parameter's help / example / choices; `generators` = the editor's "Create from…", a plugin function run by `web/admin/api_test.py` `POST /admin/config/api/generate`),
                           an endpoint SERVED by a plugin function: `callable` + the body as its arguments, `_call_plugin`),
                           or by a SHARED ACTION: `action` → `_call_action` (screens/actions.run_chain on `registry.state`, the caller's
@@ -162,7 +162,7 @@ liberty/                  the framework (≈44k lines, 85 test files, 1280+ test
                           attachments.py (a file attached to a question: image / PDF as base64 blocks, xlsx / csv through the file_load reader and
                           text files as text; `POST /ai/attachments`, `[ai] attachment_max_mb`; the chat route accepts text / image / document parts only),
                           evals.py (the evaluation set: cases in TOML, played against a live server, checked on tools / texts / figures)
-  jobs/ (nomaflow)        schema.py (jobs.toml), registry (load_jobs adds builtin.py's jobs — the framework's own, e.g.
+  jobs/ (nomaflow)        schema.py (jobs.toml), a job's `schedules` (each named: cron, timezone, enabled, preset, pool, params — `with_schedules` reads the older `schedule` / `enabled` on the job and on a preset into it; the scheduler's trigger id is `<job>::schedule::<name>`), its `label` / `l` (its short name per language) and `category` (JOB_CATEGORIES, or the installation's own: the Jobs page groups by application then category — frontend services/jobGroups.ts, tested), registry (load_jobs adds builtin.py's jobs — the framework's own, e.g.
                           liberty-usage-report — unless jobs.toml has the id), runner (state machine, retries,
                           cancel), scheduler (APScheduler, single process), recovery, retention,
                           missed.py (missed-schedule check: expected cron instants vs the run
@@ -372,7 +372,7 @@ pages/Settings/        one *Builder per config section + the Visual Designer (Sc
                        services/themeDraft.ts, tested), TechnicalDashboard,
                        Package / ChangePackages / IntegrityBuilder (reached from nomaflow pages)
 pages/Nomaflow/        JobsList, JobEditor (+ UserParamsEditor: what a user may set when starting the job — services/jobParams.ts, tested),
-                       StepEditor (the step forms; what they share — field grid, Hint, name = value rows, schema picker — is stepFields.tsx; a form in its own file imports from there: FileLoadForm.tsx, its logic in services/fileLoad.ts, tested), RunDetail, Schedule, RetentionPanel
+                       ScheduleJobModal ("Schedule a job": one named schedule of a job — its preset, its own shared-parameter values, its `pool`, when, active —, opened from the Schedule page, the Jobs page's *when* column and the job editor's Schedules section; services/jobSchedules.ts, tested), StepEditor (the step forms; what they share — field grid, Hint, name = value rows, schema picker — is stepFields.tsx; a form in its own file imports from there: FileLoadForm.tsx, its logic in services/fileLoad.ts, tested), RunDetail, Schedule, RetentionPanel
 pages/Explorer/        the Data Explorer page: index (model, the AnalysisDefinition, runs, drill, views), FieldsPane
                        (+ calculated fields), Shelves (rows / measures / filters chips), PeriodBar, ResultTable, PivotView,
                        ChartView (bar / line / pie via TableView/ChartCanvas, KPI), CalcModal (Test before Save),

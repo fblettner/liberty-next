@@ -3,7 +3,7 @@
 // Moved verbatim from ResultTable.tsx.
 import type { CSSProperties } from 'react'
 import type { Column } from '../../types/connectors'
-import { genericFilterFn, selectFilterFn, type FilterKind, type FilterMeta } from '../../common/DataTableFilter'
+import type { FilterKind } from '../../common/DataTableFilter'
 
 export type DataRow = Record<string, unknown>
 export type Align = CSSProperties['textAlign']
@@ -48,22 +48,8 @@ export function editCtrlOf(c: Column): EditCtrl {
   if (isNumericish(fmt, typ)) return 'number'
   return 'text'
 }
-export const filterPropsFor = (
-  kind: FilterKind,
-  options?: { value: string; label: string; mono?: string; cells?: string[] }[],
-  align?: FilterMeta['align'],
-  cellColumns?: { label: string; filterable?: boolean }[],
-  wrap?: boolean,
-) =>
-  // enum / lookup compare a trimmed code against the (possibly CHAR-padded) raw value → trim-tolerant
-  // ``selectFilterFn``; an enum (a short list) picks several values and takes typed codes outside
-  // the list, a lookup (often thousands of rows, a virtualized table) stays single. Boolean keeps
-  // the built-in strict ``equals``.
-  kind === 'enum' || kind === 'lookup'
-    ? { filterFn: selectFilterFn, meta: { filter: { kind, options, cellColumns, multi: kind === 'enum', custom: kind === 'enum' }, align, wrap } as FilterMeta }
-    : kind === 'boolean'
-      ? { filterFn: 'equals' as const, meta: { filter: { kind, options }, align } as FilterMeta }
-      : { filterFn: genericFilterFn, meta: { filter: { kind }, align, wrap } as FilterMeta }
+// the column filter of a kind: what the shared grid's filter control and match need (common/DataTableFilter)
+export { filterPropsFor } from '../../common/DataTableFilter'
 
 export function columnVisibleNow(c: Column, activeFilters: Record<string, string>): boolean {
   const vw = c.visible_when

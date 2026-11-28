@@ -45,28 +45,24 @@ _BEFORE = timedelta(seconds=60)
 
 @dataclass(slots=True, frozen=True)
 class ActiveTrigger:
-    """One cron trigger the scheduler registers: the job's own schedule (``preset`` None) or a
-    schedulable preset's."""
+    """One cron trigger the scheduler registers: one schedule of a job, by its name."""
 
     job_id: str
-    preset: str | None
+    name: str
     schedule: str
     timezone: str | None
 
     @property
     def key(self) -> str:
-        return self.job_id if self.preset is None else f"{self.job_id}::preset::{self.preset}"
+        return f"{self.job_id}::schedule::{self.name}"
 
 
 def active_triggers(registry: JobRegistry) -> list[ActiveTrigger]:
     """The triggers :meth:`JobScheduler._add_apscheduler_job` registers, same filter."""
     out: list[ActiveTrigger] = []
     for job in registry.scheduled_jobs():
-        if job.enabled and job.schedule:
-            out.append(ActiveTrigger(job.id, None, job.schedule, job.timezone))
-        for p in job.presets:
-            if p.enabled and p.schedule:
-                out.append(ActiveTrigger(job.id, p.name, p.schedule, p.timezone or job.timezone))
+        for s in job.active_schedules():
+            out.append(ActiveTrigger(job.id, s.name, s.schedule, s.timezone or job.timezone))
     return out
 
 
@@ -206,10 +202,10 @@ async def check_missed(
             for inst in expected:
                 if is_covered(inst, runs, grace):
                     continue
-                label = f"preset {trig.preset!r} of job {trig.job_id!r}" if trig.preset else f"job {trig.job_id!r}"
+                label = f"schedule {trig.name!r} of job {trig.job_id!r}"
                 reason = f"missed: the fire of {label} expected at {inst.isoformat(timespec='minutes')} did not run (the server was down, or the previous run was still running)"
                 row = await record_missed(db, trig.job_id, inst, reason)
-                report.missed.append(MissedFire(trig.job_id, trig.preset, inst, row.id if row else None))
+                report.missed.append(MissedFire(trig.job_id, trig.name, inst, row.id if row else None))
                 if row is not None:
                     _log.warning("nomaflow.missed: %s", reason)
                     if on_missed is not None:

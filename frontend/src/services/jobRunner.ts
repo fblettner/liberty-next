@@ -6,7 +6,7 @@ import type { RunState } from '../pages/Nomaflow/types'
 
 export interface JobUpload { step: string; sheet: string | number | null }
 export interface JobParam { name: string; label: string; step: string; default: string | null; required: boolean; multiple?: boolean; choices: { value: string; label: string }[] }
-export interface UserJob { id: string; description: string | null; tags: string[]; uploads: JobUpload[]; params: JobParam[]; in_flight: boolean }
+export interface UserJob { id: string; label?: string | null; description: string | null; tags: string[]; uploads: JobUpload[]; params: JobParam[]; in_flight: boolean }
 export interface JobRunRow {
   id: string; job_id: string; state: RunState; trigger_kind: string; triggered_by: string | null
   started_at: string | null; finished_at: string | null; rows_affected: number | null; error_message: string | null

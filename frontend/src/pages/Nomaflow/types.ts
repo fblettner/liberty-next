@@ -19,32 +19,49 @@ export interface JobLastRun {
  *  flags + the last-run badge + the next scheduled fire. */
 export interface JobSummary {
   id: string
+  /** The job's short name in the reader's language (its id when it has none). */
+  label?: string | null
+  /** The category it is listed under (services/jobGroups.ts). */
+  category?: string | null
   description: string | null
-  schedule: string | null
   timezone: string | null
-  enabled: boolean
+  /** Whether at least one of its schedules fires (none: run by hand only). */
+  scheduled: boolean
+  /** Its schedules, each with its next fire. */
+  schedules: ScheduleSummary[]
   tags: string[]
   step_count: number
   registered_with_scheduler: boolean
   in_flight: boolean
   last_run: JobLastRun | null
-  /** Soonest fire across the job's own schedule AND any schedulable preset. */
+  /** Soonest fire across its schedules. */
   next_run: string | null
-  /** The job-level schedule's OWN next fire (null when it has no job-level cron). */
-  schedule_next_run?: string | null
-  /** Schedulable presets: each fires the job on its own cron with its own params. */
-  preset_schedules?: PresetSchedule[]
   /** The parameters the job declares a choice list for (`user_params`, resolved): the
    *  Run-with-parameters modal shows them as dropdowns. `step` null = a job-level parameter. */
   user_params?: { name: string; label: string; step: string | null; multiple?: boolean; choices: { value: string; label: string }[] }[]
 }
 
-export interface PresetSchedule {
+/** One schedule of a job as the list shows it. */
+export interface ScheduleSummary {
   name: string
   schedule: string
   timezone: string | null
   enabled: boolean
+  preset: string | null
+  pool: string | null
   next_run: string | null
+}
+
+/** One schedule of a job as the file holds it: when it runs, under a name, with a preset (or the job as it is),
+ *  its own values of the shared parameters and its environment. */
+export interface JobScheduleConfig {
+  name: string
+  schedule: string
+  timezone?: string | null
+  enabled?: boolean
+  preset?: string | null
+  pool?: string | null
+  params?: Record<string, unknown>
 }
 
 export interface JobsListResponse {
@@ -90,10 +107,15 @@ export interface StepConfig {
 /** The full job config — `GET/PUT /admin/config/jobs/parsed`. */
 export interface JobConfig {
   id: string
+  /** The short name the lists show in place of the id, and its translations. */
+  label?: string | null
+  l?: Record<string, string>
+  /** The category the job is listed under: one of the framework's, or a name of the installation's own. */
+  category?: string | null
   description?: string | null
-  schedule?: string | null
+  /** When it runs: its schedules (none: run by hand only). */
+  schedules?: JobScheduleConfig[]
   timezone?: string | null
-  enabled?: boolean
   tags?: string[]
   /** The licensed applications the job belongs to: offered when the licence covers one of them. */
   applications?: string[]
@@ -140,15 +162,6 @@ export interface JobPreset {
   params?: Record<string, unknown>
   op_kwargs?: Record<string, Record<string, unknown>>
   step_enabled?: Record<string, boolean>
-  /** Optional cron — when set, the scheduler fires THIS preset on its own schedule,
-   *  applying the preset's params/op_kwargs/log_level/step_enabled. One job → many
-   *  param'd schedules without cloning. */
-  schedule?: string | null
-  /** IANA timezone for `schedule`; null → inherit the job's timezone. */
-  timezone?: string | null
-  /** Whether this preset's `schedule` fires. Independent of the job's `enabled` —
-   *  an enabled preset fires even when the job is disabled. Default true. */
-  enabled?: boolean
 }
 
 export interface JobsParsedResponse {

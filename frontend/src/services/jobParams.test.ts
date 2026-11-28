@@ -10,6 +10,11 @@ describe("where a job parameter's choices come from", () => {
     expect(parseChoicesFrom('explorer_models:nomajde')).toEqual({ kind: 'explorer_models', app: 'nomajde' })
     expect(parseChoicesFrom('test_suites')).toEqual({ kind: 'test_suites', connector: '' })
     expect(parseChoicesFrom('test_suites:ais_connection')).toEqual({ kind: 'test_suites', connector: 'ais_connection' })
+    expect(parseChoicesFrom('pools:jdedwards')).toEqual({ kind: 'pools', connector: 'jdedwards' })
+    expect(composeChoicesFrom({ kind: 'pools', connector: '' })).toBe('pools')
+    expect(parseChoicesFrom('connectors:sql')).toEqual({ kind: 'connectors', type: 'sql' })
+    expect(composeChoicesFrom({ kind: 'connectors', type: '' })).toBe('connectors')
+    expect(parseChoicesFrom('connectors:other')).toEqual({ kind: 'other', text: 'connectors:other' })
   })
 
   it('writes back exactly what it read', () => {

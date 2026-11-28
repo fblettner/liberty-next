@@ -138,7 +138,7 @@ def build_instance_tools(state: Callable[[], Any], *, allowed: list[str] | None 
         if registry is not None and not app:
             out["jobs"] = [
                 {"id": j.id, **({"description": j.description} if j.description else {}),
-                 "schedule": j.schedule, "enabled": j.enabled, "steps": [s.name for s in j.steps]}
+                 "schedules": [{"name": s.name, "schedule": s.schedule, "enabled": s.enabled} for s in j.schedules], "steps": [s.name for s in j.steps]}
                 for j in registry.jobs() if may(f"job:{j.id}")     # the permission that runs it
             ]
         cfg = _ai_config()

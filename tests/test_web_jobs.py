@@ -65,6 +65,9 @@ sql = "SELECT 1 AS x"
 _JOBS_TOML = """
 [[jobs]]
 id = "ping"
+label = "Ping the database"
+l = { fr = "Tester la base" }
+category = "maintenance"
 description = "Trivial cron job"
 schedule = "*/30 * * * *"
 
@@ -301,6 +304,11 @@ def test_list_jobs_returns_catalogue_with_operational_flags(env) -> None:
         assert set(ids) == {"ping", "manual-only", "disabled", "echo-kwargs", "load-file", "pick-app", "per-app", "shared-params"}
         # Only the enabled+scheduled job is registered with the scheduler
         assert ids["ping"]["registered_with_scheduler"] is True
+        # a job's short name and its category; a job without a name is called by its id
+        assert (ids["ping"]["label"], ids["ping"]["category"]) == ("Ping the database", "maintenance")
+        assert (ids["manual-only"]["label"], ids["manual-only"]["category"]) == ("manual-only", None)
+        french = {j["id"]: j for j in client.get("/admin/jobs", headers={**_h(client, "admin"), "X-Liberty-Lang": "fr"}).json()["jobs"]}
+        assert french["ping"]["label"] == "Tester la base"
         assert ids["manual-only"]["registered_with_scheduler"] is False
         assert ids["disabled"]["registered_with_scheduler"] is False
         assert ids["echo-kwargs"]["registered_with_scheduler"] is False  # no schedule
@@ -509,7 +517,7 @@ def test_put_jobs_parsed_rewrites_only_the_changed_job(env, monkeypatch) -> None
         h = _h(client, "admin")
         jobs = client.get("/admin/config/jobs/parsed", headers=h).json()["jobs"]
         assert jobs[0]["steps"][0]["path"] == "/srv/one-server/items.xlsx"       # the builder sees them resolved
-        jobs[1]["schedule"] = "0 6 * * *"
+        jobs[1]["schedules"][0]["schedule"] = "0 6 * * *"
         r = client.put("/admin/config/jobs/parsed", json={"jobs": jobs}, headers=h)
         assert r.status_code == 200, r.text
     text = jobs_toml.read_text()
@@ -534,13 +542,13 @@ def test_put_jobs_parsed_saves_beside_a_job_that_carries_step_defaults(env) -> N
         h = _h(client, "admin")
         jobs = client.get("/admin/config/jobs/parsed", headers=h).json()["jobs"]
         assert jobs[0]["steps"][0]["continue_on_failure"] is True              # the defaults reach the step
-        jobs[1]["schedule"] = "0 6 * * *"
+        jobs[1]["schedules"][0]["schedule"] = "0 6 * * *"
         r = client.put("/admin/config/jobs/parsed", json={"jobs": jobs}, headers=h)
         assert r.status_code == 200, r.text
         again = client.get("/admin/config/jobs/parsed", headers=h).json()["jobs"]
     text = jobs_toml.read_text()
     assert "[jobs.step_defaults]" in text and 'schedule = "0 6 * * *"' in text    # kept as written; the edit landed
-    assert again[0]["steps"][0]["continue_on_failure"] is True and again[1]["schedule"] == "0 6 * * *"
+    assert again[0]["steps"][0]["continue_on_failure"] is True and again[1]["schedules"][0]["schedule"] == "0 6 * * *"
 
 
 def test_put_jobs_parsed_rejects_invalid(env) -> None:
@@ -1358,7 +1366,7 @@ def test_pause_and_resume_a_job(env) -> None:
         assert "enabled = false" in after and len(after.splitlines()) == len(before.splitlines()) + 1   # one line added
         assert 'description = "Trivial cron job"' in after                     # the rest of the file kept
         ping = next(j for j in client.get("/admin/jobs", headers=h).json()["jobs"] if j["id"] == "ping")
-        assert ping["enabled"] is False and not ping.get("next_run")
+        assert ping["scheduled"] is False and ping["schedules"][0]["enabled"] is False and not ping.get("next_run")
         r = client.post("/admin/jobs/ping/enabled", json={"enabled": True}, headers=h)
         assert r.status_code == 200 and r.json()["enabled"] is True and r.json()["next_run"]
         assert client.post("/admin/jobs/ping/enabled", json={"enabled": "no"}, headers=h).status_code == 422

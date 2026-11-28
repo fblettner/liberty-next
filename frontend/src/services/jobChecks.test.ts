@@ -45,11 +45,21 @@ describe('checkJob', () => {
     expect(checkJob({ id: 'j', steps: [report({ window_from: '2026-01-01', window_to: '2026-01-31' })] }, [])).toEqual([])
     expect(checkJob({ id: 'j', steps: [report({ window_from: '2026-01-01' })] }, [])).toEqual([{ code: 'stepWindow', step: 0 }])
   })
-  it('asks a preset for a name, and a scheduled one for its own', () => {
-    expect(checkJob({ id: 'j', steps: [], presets: [{ name: 'a' }, { name: 'a' }, { name: ' ' }] }, []))
+  it('asks a preset for a name of its own', () => {
+    expect(checkJob({ id: 'j', steps: [], presets: [{ name: 'a' }, { name: 'b' }, { name: ' ' }] }, []))
       .toEqual([{ code: 'presetName', preset: 2 }])
-    expect(checkJob({ id: 'j', steps: [], presets: [{ name: 'a', schedule: '0 2 * * *' }, { name: 'a', schedule: '0 3 * * *' }] }, []))
+    expect(checkJob({ id: 'j', steps: [], presets: [{ name: 'a' }, { name: 'a' }] }, []))
       .toEqual([{ code: 'presetDuplicate', preset: 1, name: 'a' }])
+  })
+  it('asks a schedule for its own name, a time and a preset the job has', () => {
+    const presets = [{ name: 'Usage only' }]
+    expect(checkJob({ id: 'j', steps: [], presets, schedules: [{ name: 'Nightly', schedule: '0 2 * * *', preset: 'Usage only' }] }, [])).toEqual([])
+    expect(checkJob({ id: 'j', steps: [], presets, schedules: [
+      { name: 'Nightly', schedule: '0 2 * * *' }, { name: 'Nightly', schedule: '0 3 * * *' }, { name: ' ', schedule: '' }, { name: 'Gone', schedule: '0 4 * * *', preset: 'Old' },
+    ] }, [])).toEqual([
+      { code: 'scheduleDuplicate', schedule: 1, name: 'Nightly' }, { code: 'scheduleName', schedule: 2 }, { code: 'scheduleWhen', schedule: 2 },
+      { code: 'schedulePreset', schedule: 3, name: 'Old' },
+    ])
   })
   it('knows the jobs a step may call', () => {
     const call = (target: string) => ({ type: 'call_job', name: 'next', target_job_id: target })

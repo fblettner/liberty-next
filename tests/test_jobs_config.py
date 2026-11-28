@@ -72,8 +72,8 @@ query = "select_one"
     assert len(jobs) == 1
     job = jobs[0]
     assert job.id == "ping"
-    assert job.schedule == "*/5 * * * *"
-    assert job.enabled is True
+    # written the older way (a schedule on the job itself): read as a schedule of its own, named after the job
+    assert [(s.name, s.schedule, s.enabled, s.preset) for s in job.schedules] == [("ping", "*/5 * * * *", True, None)]
     assert len(job.steps) == 1
     step = job.steps[0]
     assert step.type is StepType.SQL_QUERY
@@ -407,3 +407,26 @@ def test_unknown_job_lookup_raises(tmp_path: Path) -> None:
     with pytest.raises(UnknownJobError) as exc:
         registry.get("nope")
     assert "nope" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_a_parameter_picks_among_the_databases() -> None:
+    """``choices_from = "pools:<connector>"``: the databases a connector runs on, its main one first; ``"pools"``:
+    every pool of the installation; an unknown connector gives no choice (said in the log), never an error."""
+    from liberty.connectors.config import ConnectorsFile
+    from liberty.connectors.registry import ConnectorRegistry
+    from liberty.jobs.choices import param_choices
+    from liberty.jobs.schema import UserParam
+
+    reg = ConnectorRegistry(ConnectorsFile.model_validate({
+        "pools": {"jde_prd": {"url": "sqlite+aiosqlite://"}, "jde_test": {"url": "sqlite+aiosqlite://"}, "app": {"url": "sqlite+aiosqlite://"}},
+        "connectors": {"jdedwards": {"type": "sql", "pool": "jde_test", "pools": ["jde_prd"]}},
+    }))
+    try:
+        of = lambda src: param_choices(UserParam(name="pristine_pool", choices_from=src), connectors=reg)  # noqa: E731
+        assert [c["value"] for c in await of("pools:jdedwards")] == ["jde_test", "jde_prd"]
+        assert [c["value"] for c in await of("pools")] == ["app", "jde_prd", "jde_test"]
+        assert await of("pools:nowhere") == []
+        assert [c["value"] for c in await of("connectors:sql")] == ["jdedwards"] and await of("connectors:api") == []
+    finally:
+        await reg.aclose()

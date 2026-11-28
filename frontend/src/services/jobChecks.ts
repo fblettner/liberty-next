@@ -12,7 +12,8 @@ export interface CheckedStep {
 export interface CheckedJob {
   id: string
   steps: CheckedStep[]
-  presets?: { name?: string; schedule?: string | null }[]
+  presets?: { name?: string }[]
+  schedules?: { name?: string; schedule?: string | null; preset?: string | null }[]
 }
 
 export type JobIssueCode =
@@ -25,7 +26,11 @@ export type JobIssueCode =
   | 'stepUnknownJob'    // a call_job step names a job that does not exist
   | 'stepWindow'        // a report step has one of its two fixed dates only
   | 'presetName'        // a preset has no name
-  | 'presetDuplicate'   // two scheduled presets have the same name
+  | 'presetDuplicate'   // two presets have the same name (a schedule names the one it runs with)
+  | 'scheduleName'      // a schedule has no name
+  | 'scheduleDuplicate' // two schedules have the same name
+  | 'scheduleWhen'      // a schedule does not say when it runs
+  | 'schedulePreset'    // a schedule names a preset the job does not have
 
 export interface JobIssue {
   code: JobIssueCode
@@ -33,6 +38,8 @@ export interface JobIssue {
   step?: number
   /** The preset it is on (its place in the job). */
   preset?: number
+  /** The schedule it is on (its place in the job). */
+  schedule?: number
   /** The fields a step lacks, as the model names them. */
   fields?: string[]
   /** The name in question (a duplicated step name, an unknown job). */
@@ -89,14 +96,23 @@ export function checkJob(job: CheckedJob, otherIds: string[]): JobIssue[] {
     }
     if (step.type === 'report' && blank(step.window_from) !== blank(step.window_to)) issues.push({ code: 'stepWindow', step: index })
   })
-  // a preset is picked and scheduled by its name: it needs one, and a scheduled one's is its own
-  const scheduled = new Set<string>()
+  // a preset is picked by its name (a run, a menu entry, a schedule): it needs one of its own
+  const presets = new Set<string>()
   ;(job.presets ?? []).forEach((preset, index) => {
     const name = (preset.name ?? '').trim()
     if (!name) { issues.push({ code: 'presetName', preset: index }); return }
-    if (!(preset.schedule ?? '').trim()) return
-    if (scheduled.has(name)) issues.push({ code: 'presetDuplicate', preset: index, name })
-    scheduled.add(name)
+    if (presets.has(name)) issues.push({ code: 'presetDuplicate', preset: index, name })
+    presets.add(name)
+  })
+  // a schedule is fired by its name, says when, and runs with a preset the job has
+  const schedules = new Set<string>()
+  ;(job.schedules ?? []).forEach((s, index) => {
+    const name = (s.name ?? '').trim()
+    if (!name) issues.push({ code: 'scheduleName', schedule: index })
+    else if (schedules.has(name)) issues.push({ code: 'scheduleDuplicate', schedule: index, name })
+    schedules.add(name)
+    if (!(s.schedule ?? '').trim()) issues.push({ code: 'scheduleWhen', schedule: index })
+    if (s.preset && !presets.has(s.preset)) issues.push({ code: 'schedulePreset', schedule: index, name: s.preset })
   })
   return issues
 }

@@ -1,7 +1,7 @@
 // The nomaflow jobs with their controls (a `jobs` widget — superusers only, the server drops it
 // for anyone else): per job the next fire or "paused", the schedule in words, the last run's
 // state, and Run now / Pause / Resume. Reads GET /admin/jobs; Run fires with the saved
-// parameters; Pause / Resume flips the job's own schedule (POST /admin/jobs/{id}/enabled).
+// parameters; Pause / Resume switches all its schedules off or on (POST /admin/jobs/{id}/enabled).
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
@@ -62,9 +62,12 @@ export function JobsWidget({ widget, refreshKey = 0 }: { widget: JobsWidgetWire;
 
   const rows = jobs ? pickJobs(jobs, widget) : []
   const when = (j: JobSummary) => {
-    const cron = j.schedule ? describeCron(j.schedule, i18n.language) : null
-    const sched = j.schedule ? (cron ? t(cron.key, cron.values) : j.schedule) : t('nomaflow.jobs.manualOnly')
-    if (j.schedule && !j.enabled) return `${t('dashboard.jobs.paused')} · ${sched}`
+    const list = j.schedules ?? []
+    const cron = list.length === 1 ? describeCron(list[0].schedule, i18n.language) : null
+    const sched = list.length === 0 ? t('nomaflow.jobs.manualOnly')
+      : list.length > 1 ? t('nomaflow.scheduleJob.count', { count: list.length })
+      : cron ? t(cron.key, cron.values) : list[0].schedule
+    if (list.length > 0 && !j.scheduled) return `${t('dashboard.jobs.paused')} · ${sched}`
     return j.next_run ? `${t('nomaflow.jobs.nextRun')} ${relative(j.next_run)} · ${sched}` : sched
   }
   return (
@@ -81,13 +84,13 @@ export function JobsWidget({ widget, refreshKey = 0 }: { widget: JobsWidgetWire;
             {rows.map((j) => {
               const state = j.in_flight ? 'RUNNING' : j.last_run?.state
               const tone: Tone = state ? (TONE[state] ?? 'muted') : 'muted'
-              const paused = !!j.schedule && !j.enabled
+              const paused = (j.schedules?.length ?? 0) > 0 && !j.scheduled
               return (
                 <Line key={j.id}>
                   <Dot $tone={tone} />
                   <Main>
                     <div className="t">
-                      <Id onClick={() => navigate(`/nomaflow/jobs/${encodeURIComponent(j.id)}`)}>{j.id}</Id>
+                      <Id title={j.id} onClick={() => navigate(`/nomaflow/jobs/${encodeURIComponent(j.id)}`)}>{j.label || j.id}</Id>
                       {state && <Pill $tone={tone} style={{ marginTop: 0, marginLeft: 8, verticalAlign: 'middle' }}>{state}</Pill>}
                     </div>
                     <Muted>{when(j)}</Muted>
@@ -96,7 +99,7 @@ export function JobsWidget({ widget, refreshKey = 0 }: { widget: JobsWidgetWire;
                     <Btn type="button" title={t('nomaflow.jobs.runNow')} disabled={busy === j.id || j.in_flight} onClick={() => void act(j, 'run')}>
                       {busy === j.id ? <SpinnerRing size={12} thickness={2} /> : <Play size={14} />}
                     </Btn>
-                    {j.schedule && (
+                    {(j.schedules?.length ?? 0) > 0 && (
                       <Btn type="button" title={t(paused ? 'dashboard.jobs.resume' : 'dashboard.jobs.pause')} disabled={busy === j.id} onClick={() => void act(j, paused ? 'resume' : 'pause')}>
                         {paused ? <Play size={14} style={{ color: colors.green.main }} /> : <Pause size={14} />}
                       </Btn>

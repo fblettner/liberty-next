@@ -408,28 +408,21 @@ class JobPreset(BaseModel):
             "captured. Empty means 'run every step at its saved default'."
         ),
     )
-    schedule: str | None = Field(
-        default=None,
-        description=(
-            "Optional cron expression. When set, the scheduler fires THIS preset "
-            "on its own schedule, applying the preset's params / op_kwargs / "
-            "log_level / step_enabled — so one job can run on several schedules "
-            "with different parameters without cloning. None → manual-only preset."
-        ),
-    )
-    timezone: str | None = Field(
-        default=None,
-        description="IANA timezone for ``schedule``. None → inherit the job's timezone (then system tz).",
-    )
-    enabled: bool = Field(
-        default=True,
-        description=(
-            "Whether this preset's ``schedule`` fires. Independent of the job's own "
-            "``enabled`` flag: an enabled preset fires on its cron even when the job is "
-            "disabled (the job's ``enabled`` gates only the job's OWN schedule). Ignored "
-            "for a preset with no ``schedule`` (manual-only presets are always pickable)."
-        ),
-    )
+class JobSchedule(BaseModel):
+    """One schedule of a job: WHEN it runs, under a name, and with what — one of the job's presets (its
+    parameters and its selection of steps) or none, its own values of the job's shared parameters on top, and
+    the environment it runs on. A job has as many as it needs (``Production nightly``, ``Test weekly``): one job,
+    no copy. Each fires independently; ``enabled`` switches one off without removing it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, description="What the schedule is called (unique in its job).")
+    schedule: str = Field(..., min_length=1, description="The cron expression.")
+    timezone: str | None = Field(default=None, description="IANA timezone of the expression. None → the job's, then the system's.")
+    enabled: bool = Field(default=True, description="Whether it fires.")
+    preset: str | None = Field(default=None, description="The preset it runs with (its parameters, step values, steps run or skipped, log level). None → the job as it is.")
+    pool: str | None = Field(default=None, description="The environment (pool) it runs on. None → the job's.")
+    params: dict[str, Any] = Field(default_factory=dict, description="Its own values of the job's shared parameters, over the preset's.")
 
     @field_validator("timezone")
     @classmethod
@@ -441,6 +434,49 @@ class JobPreset(BaseModel):
         except ZoneInfoNotFoundError as exc:
             raise ValueError(f"unknown timezone {v!r}") from exc
         return v
+
+
+#: What a preset held before the schedules were things of their own (7.0.95): read, and moved to ``schedules``.
+_PRESET_SCHEDULE_KEYS = ("schedule", "timezone", "enabled", "pool")
+
+
+def with_schedules(job: Any) -> Any:
+    """A job as its file wrote it before 7.0.95, in the shape of the moment: the job's own ``schedule`` (gated by
+    its ``enabled``) becomes a schedule named after the job, and a preset that carried a ``schedule`` becomes a
+    schedule of the same name that runs with that preset. A job already written with ``schedules`` only is
+    handed back as it is. Pure, on the plain dict: the model's own reading and the upgrade merge both use it."""
+    if not isinstance(job, dict):
+        return job
+    presets = job.get("presets") if isinstance(job.get("presets"), list) else []
+    if not ("schedule" in job or "enabled" in job or any(isinstance(p, dict) and any(k in p for k in _PRESET_SCHEDULE_KEYS) for p in presets)):
+        return job
+    out = dict(job)
+    schedules = [dict(s) if isinstance(s, dict) else s for s in (out.get("schedules") or [])]
+    taken = {str(s.get("name")) for s in schedules if isinstance(s, dict)}
+    cron, enabled = out.pop("schedule", None), out.pop("enabled", True)
+    if cron and str(cron).strip():
+        name = str(out.get("label") or out.get("id") or "schedule")
+        if name not in taken:
+            schedules.append({"name": name, "schedule": cron, "enabled": bool(enabled)})
+            taken.add(name)
+    kept = []
+    for p in presets:
+        if not isinstance(p, dict):
+            kept.append(p)
+            continue
+        plain = {k: v for k, v in p.items() if k not in _PRESET_SCHEDULE_KEYS}
+        kept.append(plain)
+        if p.get("schedule") and str(p["schedule"]).strip() and str(p.get("name")) not in taken:
+            entry = {"name": p.get("name"), "preset": p.get("name"), "schedule": p["schedule"], "enabled": bool(p.get("enabled", True))}
+            entry.update({k: p[k] for k in ("timezone", "pool") if p.get(k)})
+            schedules.append(entry)
+            taken.add(str(p.get("name")))
+    if "presets" in out:
+        out["presets"] = kept
+    if schedules:
+        out["schedules"] = schedules
+    return out
+
 
 
 class UserParam(BaseModel):
@@ -461,7 +497,7 @@ class UserParam(BaseModel):
     default: str | None = Field(default=None, description="Pre-selected value.")
     required: bool = False
     choices: list[str] = Field(default_factory=list, description="Fixed choices (a dropdown).")
-    choices_from: str | None = Field(default=None, description="A dynamic choice list: ``explorer_models:<app>``, ``query:<connector>/<query>:<value>:<label>`` or ``test_suites[:<connector>]``.")
+    choices_from: str | None = Field(default=None, description="A dynamic choice list: ``explorer_models:<app>``, ``query:<connector>/<query>:<value>:<label>``, ``test_suites[:<connector>]``, ``pools[:<connector>]`` or ``connectors[:sql|api]``.")
     multiple: bool = Field(default=False, description="Several values may be picked (checkboxes, with All); the value is a list — with the job's ``for_each`` naming this parameter, one run per value.")
 
     def label_for(self, language: str | None) -> str:
@@ -470,16 +506,28 @@ class UserParam(BaseModel):
         return self.label or self.name
 
 
+#: The categories the framework knows (the jobs list orders and names them; ``maintenance`` opens closed).
+JOB_CATEGORIES = ("daily", "load", "analysis", "report", "monitoring", "tool", "maintenance", "demo")
+
+
 class Job(BaseModel):
     """One scheduled (or manual-only) unit of work."""
 
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(..., min_length=1)
+    # What the lists show in place of the id: a short name, per language (``l``). None → the id.
+    label: str | None = Field(default=None, description="The job's short name, shown in the lists (default: its id).")
+    l: dict[str, str] = Field(default_factory=dict, description="Per-language name overrides.")
+    # The group the job is listed under inside its application (:data:`JOB_CATEGORIES` are the framework's own,
+    # shown in the reader's language; any other text is a category of the installation's own). None → "Other".
+    category: str | None = Field(default=None, description="The category the job is listed under: one of the framework's (daily, load, analysis, report, monitoring, tool, maintenance, demo) or a name of your own.")
     description: str | None = None
-    schedule: str | None = None  # cron expression; None → manual-only
-    timezone: str | None = None  # IANA name (validated); None → system tz
-    enabled: bool = True
+    # When it runs: as many named schedules as it needs, each with its preset, its parameters and its
+    # environment (:class:`JobSchedule`). None → run by hand only. A file written before 7.0.95 (``schedule`` /
+    # ``enabled`` on the job, a ``schedule`` on a preset) is read into this (:func:`with_schedules`).
+    schedules: list[JobSchedule] = Field(default_factory=list)
+    timezone: str | None = None  # IANA name (validated): the timezone of its schedules that name none; None → system tz
     tags: list[str] = Field(default_factory=list)
     # The licensed applications the job belongs to: it is offered (listed, scheduled, run) when the licence covers
     # one of them. Empty: the job stands alone — always offered.
@@ -540,6 +588,12 @@ class Job(BaseModel):
     # only the operator's fields — enabled, schedule, presets, … — are kept).
     override: bool = False
 
+    def label_for(self, language: str | None) -> str:
+        """The job's name in *language*, else its ``label``, else its id."""
+        if language and self.l.get(language):
+            return self.l[language]
+        return self.label or self.id
+
     @field_validator("timezone")
     @classmethod
     def _validate_tz(cls, v: str | None) -> str | None:
@@ -563,18 +617,27 @@ class Job(BaseModel):
             )
         return v
 
+    @model_validator(mode="before")
+    @classmethod
+    def _older_shape(cls, data: Any) -> Any:
+        return with_schedules(data)
+
     @model_validator(mode="after")
-    def _unique_scheduled_preset_names(self) -> "Job":
-        # The scheduler registers one APScheduler trigger per *scheduled* preset, keyed by
-        # preset name — two scheduled presets sharing a name would collide (one silently
-        # replaces the other). Names of manual-only presets are free to repeat (harmless).
-        scheduled = [p.name for p in self.presets if p.schedule]
-        dupes = sorted({n for n in scheduled if scheduled.count(n) > 1})
+    def _unique_schedule_names(self) -> "Job":
+        # The scheduler registers one trigger per schedule, keyed by its name: two of the same name would
+        # collide (one silently replaces the other).
+        names = [s.name for s in self.schedules]
+        dupes = sorted({n for n in names if names.count(n) > 1})
         if dupes:
-            raise ValueError(
-                f"job {self.id!r}: scheduled presets must have unique names; duplicated: {dupes}"
-            )
+            raise ValueError(f"job {self.id!r}: its schedules must have unique names; duplicated: {dupes}")
         return self
+
+    def active_schedules(self) -> list[JobSchedule]:
+        """The schedules that fire."""
+        return [s for s in self.schedules if s.enabled and s.schedule.strip()]
+
+    def preset_named(self, name: str | None) -> JobPreset | None:
+        return next((p for p in self.presets if p.name == name), None) if name else None
 
     @model_validator(mode="after")
     def _for_each_names_a_param(self) -> "Job":

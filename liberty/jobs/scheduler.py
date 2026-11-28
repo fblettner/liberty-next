@@ -172,28 +172,25 @@ class JobScheduler:
     def add_job(self, job: Job) -> None:
         """Add a job to the live scheduler (chunk 3 hot-reload).
 
-        No-op for a job with no ACTIVE cron trigger — neither an enabled job-level
-        ``schedule`` nor any enabled schedulable preset — same filter as
-        :meth:`JobRegistry.scheduled_jobs`. (A disabled job can still register: its
-        enabled presets fire independently.)"""
-        if not ((job.enabled and job.schedule)
-                or any(p.enabled and p.schedule for p in job.presets)):
+        No-op for a job with no schedule that fires — same filter as
+        :meth:`JobRegistry.scheduled_jobs`."""
+        if not job.active_schedules():
             return
         self._add_apscheduler_job(job)
 
     def remove_job(self, job_id: str) -> None:
-        """Remove a job's triggers from the live scheduler (chunk 3 hot-reload) — the
-        base trigger AND every schedulable-preset trigger (id ``<job>::preset::<name>``)."""
-        prefix = self._preset_job_id(job_id, "")  # "<job_id>::preset::"
+        """Remove a job's triggers from the live scheduler (chunk 3 hot-reload): one per schedule
+        (id ``<job>::schedule::<name>``)."""
+        prefix = self.schedule_id(job_id, "")  # "<job_id>::schedule::"
         for sj in list(self._scheduler.get_jobs()):
-            if sj.id == job_id or sj.id.startswith(prefix):
+            if sj.id.startswith(prefix):
                 try:
                     self._scheduler.remove_job(sj.id)
                 except Exception:  # apscheduler raises JobLookupError; "remove if present"
                     pass
         # A re-added trigger (changed schedule) starts its missed-fire window afresh at the
         # next check, not at the old watermark.
-        for key in [k for k in self._missed_watermarks if k == job_id or k.startswith(prefix)]:
+        for key in [k for k in self._missed_watermarks if k.startswith(prefix)]:
             del self._missed_watermarks[key]
 
     async def fire_now(self, job: Job, *, triggered_by: str) -> None:
@@ -459,63 +456,47 @@ class JobScheduler:
 
     # -- internals ------------------------------------------------------ #
 
-    # Separator for a schedulable-preset's APScheduler id. ``::`` can't appear in a
-    # nomaflow Job.id (alnum + ``-``/``_`` only — see Job._validate_id), so a preset
-    # trigger id never collides with a base job-trigger id or another job's id.
-    _PRESET_SEP = "::preset::"
+    # Separator of a schedule's APScheduler id. ``::`` can't appear in a nomaflow Job.id (alnum + ``-``/``_``
+    # only — see Job._validate_id), so one job's trigger ids never collide with another's.
+    _SCHEDULE_SEP = "::schedule::"
 
     @classmethod
-    def _preset_job_id(cls, job_id: str, preset_name: str) -> str:
-        return f"{job_id}{cls._PRESET_SEP}{preset_name}"
+    def schedule_id(cls, job_id: str, name: str) -> str:
+        """The id of the trigger of the schedule *name* of *job_id* (what ``next_fire_times`` is keyed by)."""
+        return f"{job_id}{cls._SCHEDULE_SEP}{name}"
 
     def _add_apscheduler_job(self, job: Job) -> None:
-        """Register the ACTIVE cron trigger(s) that fire :meth:`_run_or_drop` for *job* — the
-        job's own ``schedule`` (base fire, no overrides; only when the job is enabled) plus
-        one trigger per enabled schedulable preset (fired with that preset's params /
-        op_kwargs / step toggles / log level). Preset triggers are independent of the job's
-        ``enabled`` — a disabled job can still have firing presets."""
+        """Register one cron trigger per schedule of *job* that fires; each calls :meth:`_run_or_drop` with
+        the schedule's name."""
         common = dict(
             replace_existing=True,
             misfire_grace_time=None,  # spec §6: catchup=False default
             coalesce=True,  # if multiple fires queue up, take only the latest
             max_instances=1,  # one concurrent run per job — drop policy below
         )
-        if job.enabled and job.schedule:
+        for s in job.active_schedules():
             self._scheduler.add_job(
                 self._run_or_drop,
-                trigger=CronTrigger.from_crontab(job.schedule, timezone=job.timezone),
-                id=job.id,
-                args=[job.id],
-                **common,
-            )
-        for preset in job.presets:
-            if not (preset.enabled and preset.schedule):
-                continue
-            tz = preset.timezone or job.timezone
-            self._scheduler.add_job(
-                self._run_or_drop,
-                trigger=CronTrigger.from_crontab(preset.schedule, timezone=tz),
-                id=self._preset_job_id(job.id, preset.name),
-                args=[job.id, preset.name],
+                trigger=CronTrigger.from_crontab(s.schedule, timezone=s.timezone or job.timezone),
+                id=self.schedule_id(job.id, s.name),
+                args=[job.id, s.name],
                 **common,
             )
 
-    async def _run_or_drop(self, job_id: str, preset_name: str | None = None) -> None:
-        """Coroutine APScheduler invokes on each cron fire.
+    async def _run_or_drop(self, job_id: str, schedule_name: str | None = None) -> None:
+        """Coroutine APScheduler invokes on each cron fire of the schedule *schedule_name* of the job.
 
-        ``preset_name`` is set when a schedulable preset's trigger fired — the run then
-        applies that preset's params / op_kwargs / step toggles / log level (same shape
-        as a manual "Run with parameters" fire). ``None`` is the plain job-level fire.
+        The run applies what the schedule says: its preset's parameters, step values, steps run or skipped and
+        log level (when it names one), its own parameter values over them, and its environment.
 
         Implements the "drop + alert" rule (spec §4): if a previous run of
         the same job is still in flight, drop this fire and notify via the
-        ``on_dropped_fire`` hook (Phase 9 ``/technical`` Socket.IO room — wired
-        in chunk 3). The in-flight key is the JOB id, so a preset fire is dropped
-        while the base job (or another preset) of the same job is running — one
-        concurrent run per job, regardless of which trigger fired it.
+        ``on_dropped_fire`` hook. The in-flight key is the JOB id: one concurrent run per job, whichever of
+        its schedules fired.
         """
         # a scheduled fire belongs to nobody's page: whatever environment the timer was armed under (a request that
-        # reloaded the jobs with a pool picked), the run starts with none — the job's own pool, else the main database
+        # reloaded the jobs with a pool picked), the run starts with none — the schedule's or the job's own pool,
+        # else the main database
         from liberty.connectors.api import current_pool
 
         current_pool.set(None)
@@ -528,20 +509,26 @@ class JobScheduler:
             _log.warning("nomaflow.scheduler fire for unknown job %r — dropped", job_id)
             return
 
-        # Resolve the preset fresh (a hot-reload may have renamed/removed it, or dropped
-        # its schedule) — a stale preset trigger fires into nothing rather than the wrong params.
-        preset = None
-        if preset_name is not None:
-            preset = next(
-                (p for p in job.presets if p.name == preset_name and p.schedule and p.enabled),
-                None,
-            )
-            if preset is None:
-                _log.warning(
-                    "nomaflow.scheduler fire for unknown/disabled/unscheduled preset %r on job %r — dropped",
-                    preset_name, job_id,
-                )
-                return
+        # The schedule, read fresh (a hot-reload may have renamed, removed or switched it off): a stale
+        # trigger fires into nothing rather than with the wrong parameters.
+        schedule = next((s for s in job.active_schedules() if s.name == schedule_name), None)
+        if schedule is None and schedule_name is not None:
+            _log.warning("nomaflow.scheduler fire for unknown / switched-off schedule %r of job %r — dropped", schedule_name, job_id)
+            return
+        # no schedule named (a fire made by hand of this coroutine): the job as it is
+        preset = job.preset_named(schedule.preset) if schedule else None
+        if schedule is not None and schedule.preset and preset is None:
+            _log.warning("nomaflow.scheduler schedule %r of job %r names the preset %r, which the job no longer has — run with the job's own values",
+                         schedule_name, job_id, schedule.preset)
+        if schedule is not None and schedule.pool:           # the schedule's own environment, in place of the job's
+            job = job.model_copy(update={"pool": schedule.pool})
+        params = {**(preset.params if preset else {}), **(schedule.params if schedule else {})} or None
+        overrides = {
+            "op_kwargs_overrides": (preset.op_kwargs or None) if preset else None,
+            "params_override": params,
+            "step_enabled_overrides": (preset.step_enabled or None) if preset else None,
+            "log_level": preset.log_level if preset else None,
+        }
 
         if job_id in self._in_flight:
             _log.warning(
@@ -555,7 +542,7 @@ class JobScheduler:
                     )
                 except Exception:  # broadcast failure shouldn't take the scheduler down
                     _log.exception("nomaflow.scheduler dropped-fire hook raised")
-            await self._record_dropped(job, preset_name)
+            await self._record_dropped(job, schedule_name)
             return
 
         self._in_flight.add(job_id)
@@ -564,31 +551,16 @@ class JobScheduler:
             # job (the "fired at" instant). For 3.x we recover it from datetime.now;
             # for sub-second precision we'd need to extract from the apscheduler
             # context, but daily/hourly crons don't need that.
-            trigger = ScheduledTrigger(
-                fired_at=datetime.now(timezone.utc), preset_name=preset_name,
-            )
-            values = await self._fan_out(job, preset.params if preset is not None else None)
+            trigger = ScheduledTrigger(fired_at=datetime.now(timezone.utc), schedule_name=schedule_name)
+            values = await self._fan_out(job, params)
             if values is not None:
                 if values:
                     first_run = await self._runner.create_run(job, trigger)
-                    await self._run_each(
-                        job, values, first=(trigger, first_run), triggered_by=f"schedule:{preset_name or job.id}",
-                        op_kwargs_overrides=(preset.op_kwargs or None) if preset else None,
-                        params_override=(preset.params or None) if preset else None,
-                        step_enabled_overrides=(preset.step_enabled or None) if preset else None,
-                        log_level=preset.log_level if preset else None,
-                    )
+                    await self._run_each(job, values, first=(trigger, first_run), triggered_by=f"schedule:{schedule_name or job.id}", **overrides)
                 else:
                     _log.warning("nomaflow.scheduler %r: for_each %r resolved to no value — nothing run", job_id, job.for_each)
-            elif preset is not None:
-                # Empty dicts → None so the runner's "no override" fast path is taken.
-                await self._runner.run(
-                    job, trigger,
-                    op_kwargs_overrides=preset.op_kwargs or None,
-                    params_override=preset.params or None,
-                    step_enabled_overrides=preset.step_enabled or None,
-                    log_level=preset.log_level,
-                )
+            elif any(v is not None for v in overrides.values()):
+                await self._runner.run(job, trigger, **overrides)
             else:
                 await self._runner.run(job, trigger)
         except asyncio.CancelledError:
@@ -600,10 +572,10 @@ class JobScheduler:
         finally:
             self._in_flight.discard(job_id)
 
-    async def _record_dropped(self, job: Job, preset_name: str | None) -> None:
+    async def _record_dropped(self, job: Job, schedule_name: str | None) -> None:
         """A dropped fire is a missed one: record the MISSED row for the instant (so the run
         history shows it and the periodic check does not report it again) and raise the hook."""
-        label = f"preset {preset_name!r} of job {job.id!r}" if preset_name else f"job {job.id!r}"
+        label = f"schedule {schedule_name!r} of job {job.id!r}" if schedule_name else f"job {job.id!r}"
         reason = f"missed: the fire of {label} was dropped because the previous run was still running"
         try:
             row = await record_missed(self._runner._db, job.id, datetime.now(timezone.utc), reason)  # noqa: SLF001
@@ -619,16 +591,25 @@ class JobScheduler:
     # -- introspection (for the future monitoring Screen + tests) ----- #
 
     @property
-    def scheduled_job_ids(self) -> list[str]:
-        """The ids APScheduler currently has triggers for — order isn't guaranteed.
-        Filters out internal nomaflow tasks (retention sweep, etc.) — callers want the
-        operator-defined jobs only; the internal id wouldn't match anything in the
-        registry anyway."""
+    def scheduled_trigger_ids(self) -> list[str]:
+        """The ids APScheduler currently has triggers for — one per schedule of a job that fires
+        (:meth:`schedule_id`); order isn't guaranteed. The internal nomaflow tasks (retention sweep, etc.)
+        are left out."""
         return [j.id for j in self._scheduler.get_jobs() if not j.id.startswith("__nomaflow.")]
 
     @property
+    def scheduled_job_ids(self) -> list[str]:
+        """The ids of the jobs that have at least one trigger registered, each once."""
+        seen: list[str] = []
+        for tid in self.scheduled_trigger_ids:
+            job_id = tid.split(self._SCHEDULE_SEP, 1)[0]
+            if job_id not in seen:
+                seen.append(job_id)
+        return seen
+
+    @property
     def next_fire_times(self) -> dict[str, datetime]:
-        """``{job_id: next_run_time}`` for every registered job APScheduler will fire.
+        """``{trigger id: next_run_time}`` for every schedule APScheduler will fire (:meth:`schedule_id`).
 
         Reads APScheduler's in-memory ``next_run_time`` — cheap, no I/O. A job whose
         ``next_run_time`` is None (paused, or never scheduled) is omitted. Powers the

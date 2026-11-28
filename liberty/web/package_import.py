@@ -369,12 +369,26 @@ def _same(a: Any, b: Any) -> bool:
     return json.dumps(_plain(a), sort_keys=True, default=str) == json.dumps(_plain(b), sort_keys=True, default=str)
 
 
+def _as_now(filename: str, current: Any) -> Any:
+    """What this install holds, as it is compared: a job in the shape of the moment (its schedules as a list of
+    their own, whatever the file still writes)."""
+    plain = _plain(current)
+    if filename == "jobs.toml":
+        from liberty.jobs.schema import with_schedules
+
+        return with_schedules(plain)
+    return plain
+
+
 def _job_for_target(pkg_job: dict[str, Any], target_job: dict[str, Any] | None) -> dict[str, Any]:
-    """The package's job as it lands here: this install's schedule / enabled / … kept; a new job
-    disabled (it shouldn't start running on the target before someone looks at it)."""
+    """The package's job as it lands here: this install's schedules / … kept; a new job with its schedules
+    switched off (it shouldn't start running on the target before someone looks at it)."""
+    from liberty.jobs.schema import with_schedules     # both sides in the shape of the moment
+
+    pkg_job = with_schedules(pkg_job)
     if target_job is None:
-        return {**pkg_job, "enabled": False}
-    target_job = _plain(target_job)
+        return {**pkg_job, **({"schedules": [{**s, "enabled": False} for s in pkg_job["schedules"]]} if pkg_job.get("schedules") else {})}
+    target_job = with_schedules(_plain(target_job))
     out = {k: v for k, v in pkg_job.items() if k not in JOB_OPERATOR_FIELDS}
     out.update({k: target_job[k] for k in JOB_OPERATOR_FIELDS if k in target_job})
     return out
@@ -424,15 +438,15 @@ def _apply_one(filename: str, pkg_data: dict[str, Any], target: Path, strategy: 
         elif strategy != "replace_all" and is_overridden(_plain(current)):
             entity.update(state="kept", detail="override = true here")
             report.preserved_overrides.append(label)
-        elif _same(current, incoming):
+        elif _same(_as_now(filename, current), incoming):
             entity["state"] = "identical"
         elif strategy == "merge":
-            entity.update(state="skipped", detail="exists here (merge keeps it)", diff=field_diff(_plain(current), incoming))
+            entity.update(state="skipped", detail="exists here (merge keeps it)", diff=field_diff(_as_now(filename, current), incoming))
             report.skipped.append(label)
         else:
-            entity.update(state="changed", diff=field_diff(_plain(current), incoming))
+            entity.update(state="changed", diff=field_diff(_as_now(filename, current), incoming))
             if filename == "jobs.toml":
-                entity["detail"] = "schedule, enabled and alerts kept from this instance"
+                entity["detail"] = "schedules and alerts kept from this instance"
             report.replaced.append(label)
             if strategy != "replace_all":
                 _set(doc, filename, kind, name, incoming)

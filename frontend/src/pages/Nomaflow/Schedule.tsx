@@ -1,18 +1,20 @@
 // nomaflow schedule landscape — "what runs when". Orchestration is within-job (no DAG), so this
-// is purely a scheduling view built from GET /admin/jobs: the upcoming fires grouped by day (a
-// job's own cron and each schedulable preset are separate entries), the schedules that exist but
+// is purely a scheduling view built from GET /admin/jobs: the upcoming fires grouped by day (each named
+// schedule of a job is an entry), the schedules that exist but
 // are switched off, and — folded away — the jobs that only run by hand.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { CalendarClock, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react'
+import { CalendarClock, ChevronDown, ChevronRight, Pencil, Plus, RefreshCw } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import { PageLayout, Button, Banner, Centered, Tag, Mono } from '../../common'
 import { colors, fontSize, fonts, radius } from '../../theme'
 import { describeCron } from '../../services/cronText'
 import type { JobSummary, JobsListResponse } from './types'
 import { STATE_TONE, relative } from './util'
+import ScheduleJobModal from './ScheduleJobModal'
+import { jobName } from '../../services/jobGroups'
 
 const Toolbar = styled.div`display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;`
 const Spacer = styled.div`flex: 1;`
@@ -50,13 +52,17 @@ const Chip = styled.button`
   font-family: ${fonts.mono}; font-size: ${fontSize.sm}; color: ${colors.text.secondary};
   &:hover { color: ${colors.blue.main}; border-color: ${colors.blue.border}; }
 `
+const IconLink = styled.button`
+  margin-left: 8px; padding: 0; border: none; background: none; cursor: pointer; color: ${colors.text.muted}; vertical-align: -1px;
+  &:hover { color: ${colors.blue.main}; }
+`
 const Empty = styled.div`color: ${colors.text.muted}; font-size: ${fontSize.sm}; padding: 10px 2px;`
 
-/** One scheduled thing = a job's own cron OR one of its schedulable presets. */
+/** One schedule of a job, by its name. */
 type SchedEntry = {
   key: string
   jobId: string
-  preset: string | null      // null = the job's own schedule; else the preset name
+  preset: string | null      // the schedule's name
   schedule: string | null    // cron; null = manual-only
   enabled: boolean           // whether this trigger fires
   nextRun: string | null
@@ -71,6 +77,8 @@ export default function Schedule() {
   const [jobs, setJobs] = useState<JobSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showManual, setShowManual] = useState(false)
+  // the schedule being set or changed (a row, a job run by hand only, or nothing picked yet)
+  const [editing, setEditing] = useState<{ jobId?: string; name?: string | null } | null>(null)
 
   const load = useCallback(() => {
     setError(null)
@@ -86,11 +94,10 @@ export default function Schedule() {
     const entries: SchedEntry[] = []
     const manualIds: string[] = []
     for (const j of jobs ?? []) {
-      if (j.schedule) entries.push({ key: j.id, jobId: j.id, preset: null, schedule: j.schedule, enabled: j.enabled, nextRun: j.schedule_next_run ?? null, job: j })
-      for (const ps of j.preset_schedules ?? []) {
-        entries.push({ key: `${j.id}::${ps.name}`, jobId: j.id, preset: ps.name, schedule: ps.schedule, enabled: ps.enabled, nextRun: ps.next_run, job: j })
+      for (const s of j.schedules ?? []) {
+        entries.push({ key: `${j.id}::${s.name}`, jobId: j.id, preset: s.name, schedule: s.schedule, enabled: s.enabled, nextRun: s.enabled ? s.next_run : null, job: j })
       }
-      if (!j.schedule && (j.preset_schedules?.length ?? 0) === 0) manualIds.push(j.id)
+      if ((j.schedules?.length ?? 0) === 0) manualIds.push(j.id)
     }
     return {
       upcoming: entries.filter((e) => e.nextRun != null).sort((a, b) => (a.nextRun! < b.nextRun! ? -1 : 1)),
@@ -122,6 +129,7 @@ export default function Schedule() {
   const next24h = upcoming.filter((e) => new Date(e.nextRun!).getTime() - Date.now() < 86_400_000).length
 
   const open = (jobId: string) => navigate(`/nomaflow/jobs/${encodeURIComponent(jobId)}`)
+  const nameOf = (jobId: string) => { const j = (jobs ?? []).find((x) => x.id === jobId); return j ? jobName(j) : jobId }
   const human = (cron: string | null) => {
     const d = describeCron(cron, i18n.language)
     return d ? t(d.key, d.values) : null
@@ -132,9 +140,12 @@ export default function Schedule() {
   const row = (e: SchedEntry, withTime: boolean) => {
     const h = human(e.schedule)
     return (
-      <Row key={e.key} onClick={() => open(e.jobId)} title={e.nextRun ? new Date(e.nextRun).toLocaleString() : undefined}>
+      <Row key={e.key} data-schedule-row={e.key} onClick={() => setEditing({ jobId: e.jobId, name: e.preset })} title={e.nextRun ? new Date(e.nextRun).toLocaleString() : undefined}>
         <span className="time">{withTime && e.nextRun ? new Date(e.nextRun).toLocaleTimeString(i18n.language, { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
-        <span className="id">{e.jobId}{e.preset && <PresetTag>{e.preset}</PresetTag>}</span>
+        <span className="id" title={e.jobId} style={{ fontFamily: 'inherit' }}>
+          {jobName(e.job)}{e.preset && <PresetTag>{e.preset}</PresetTag>}
+          <IconLink type="button" title={t('nomaflow.scheduleJob.openJob')} onClick={(ev) => { ev.stopPropagation(); open(e.jobId) }}><Pencil size={12} /></IconLink>
+        </span>
         <span className="sched">
           <span>{h ?? <Mono>{e.schedule}</Mono>}</span>
           {h && <span className="cron">{e.schedule}</span>}
@@ -157,6 +168,7 @@ export default function Schedule() {
           </>
         )}
         <Spacer />
+        <Button $size="sm" data-schedule-new onClick={() => setEditing({})}><Plus size={14} /> {t('nomaflow.scheduleJob.title')}</Button>
         <Button $variant="ghost" $size="sm" onClick={load}><RefreshCw size={14} /> {t('common.reload')}</Button>
       </Toolbar>
 
@@ -188,11 +200,12 @@ export default function Schedule() {
                 {showManual ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 {t('nomaflow.scheduleView.manual', { count: manual.length })}
               </SectionHead>
-              {showManual && <Chips>{manual.map((id) => <Chip key={id} type="button" onClick={() => open(id)}>{id}</Chip>)}</Chips>}
+              {showManual && <Chips>{manual.map((id) => <Chip key={id} type="button" title={id} onClick={() => setEditing({ jobId: id })} style={{ fontFamily: 'inherit' }}>{nameOf(id)}</Chip>)}</Chips>}
             </Section>
           )}
         </>
       )}
+      {editing && <ScheduleJobModal initial={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />}
     </PageLayout>
   )
 }

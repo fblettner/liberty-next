@@ -1077,6 +1077,9 @@ def flatten_query_metas(desc: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+#: The bind a query names to get the environment (pool) of the moment — set by the server (see ``_build_params``).
+POOL_BIND = "LIBERTY_POOL"
+
 class SQLConnector:
     """A connector exposing a fixed set of named queries against one pool."""
 
@@ -1285,6 +1288,13 @@ class SQLConnector:
         # in the SQL — the migration upper-cases binds, the editor may not).
         by_upper = {k.upper(): v for k, v in merged.items()}
         bound = {name: (merged[name] if name in merged else by_upper.get(name.upper())) for name in find_bind_params(sql_text)}
+        # ``:LIBERTY_POOL`` is the server's, never the caller's: the environment (pool) picked on the page or named
+        # by the job — '' for the main database. For an application's OWN tables that keep rows per environment
+        # of ANOTHER connector (a history of the JD Edwards read): ``WHERE environment = :LIBERTY_POOL``.
+        for name in bound:
+            if name.upper() == POOL_BIND:
+                from liberty.connectors.api import current_pool
+                bound[name] = current_pool.get() or ""
         # The dashboard period binds are dates by contract: asyncpg infers the parameter type from
         # the column it is compared with and refuses a string for a DATE, so the ISO text the
         # browser sends becomes a ``date`` here. A query on a text or JDE Julian column converts

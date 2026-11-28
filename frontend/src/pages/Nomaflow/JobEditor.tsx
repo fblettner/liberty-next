@@ -10,27 +10,40 @@ import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
 import styled from '@emotion/styled'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, Save, Workflow, Layers, X, Plus, Check } from 'lucide-react'
+import { ArrowLeft, Save, Workflow, Layers, X, Plus, Check, CalendarClock } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import {
   PageLayout, Button, Banner, Centered, Card, Input, Checkbox,
-  RecipientsField, SaveProblems, SearchSelect, SpinnerRing, Stack, TimezoneSelect, useModals,
+  LocalizedTexts, RecipientsField, SaveProblems, SearchSelect, SpinnerRing, Stack, TimezoneSelect, useModals, type SearchSelectOption,
 } from '../../common'
 import { failureOf, targetOf, type SaveFailure, type SaveProblem } from '../../services/saveProblems'
 import { checkJob, type JobIssue } from '../../services/jobChecks'
 import { UserParamsEditor } from './UserParamsEditor'
+import { categoryChoices, isKnownCategory } from '../../services/jobGroups'
+import type { Localized } from '../../services/localized'
 import { cleanUserParams, forEachCandidates } from '../../services/jobParams'
 import { colors, fontSize, fonts, radius, shadow } from '../../theme'
 import { useWorkspace } from '../../workspace/WorkspaceContext'
 import StepEditor from './StepEditor'
 import { KeyValueEditor, JOB_PARAM_CATALOG } from './stepFields'
-import ScheduleField from './ScheduleField'
+import ScheduleJobModal from './ScheduleJobModal'
+import { describeCron } from '../../services/cronText'
 import { LOG_LEVELS, PresetEditor } from './PresetEditor'
 import type { JobConfig, JobPreset, JobsParsedResponse } from './types'
 import { TabIdContext, useDirtyGuard } from '../../tabs/dirtyGuard'
 import { useTabs } from '../../tabs/TabsContext'
 
 const Section = styled(Card)`display: flex; flex-direction: column; gap: 12px;`
+// one schedule of the job: its name, when and with what it runs, whether it is active — a click opens it
+const ScheduleLine = styled.button`
+  display: grid; grid-template-columns: minmax(160px, 1fr) minmax(0, 2fr) auto; align-items: center; gap: 12px; width: 100%;
+  padding: 8px 10px; border: 1px solid ${colors.border}; border-radius: ${radius.sm}; background: ${colors.bg.input}; cursor: pointer;
+  font-family: ${fonts.sans}; font-size: ${fontSize.sm}; text-align: left; color: ${colors.text.secondary};
+  &:hover { border-color: ${colors.blue.border}; }
+  & .n { color: ${colors.text.primary}; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .a { color: ${colors.green.main}; } & .a.off { color: ${colors.text.muted}; }
+`
 const SectionTitle = styled.div`
   display: flex; align-items: center; gap: 7px;
   font-weight: 600; color: ${colors.text.primary}; font-size: ${fontSize.md};
@@ -288,12 +301,12 @@ function TagsField(
   )
 }
 
-const blankJob = (): JobConfig => ({ id: '', description: '', schedule: '', enabled: true, tags: [], steps: [] })
+const blankJob = (): JobConfig => ({ id: '', description: '', schedules: [], tags: [], steps: [] })
 
 /** The job editor — a tab of its own (one per job edited): *jobId* is the job, ``''`` a new one. Outside the
  *  tab host (a direct route) the id comes from the address, as before. */
 export default function JobEditor({ jobId }: { jobId?: string } = {}) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const modals = useModals()
   const { connectors } = useWorkspace()      // for the step forms' connector dropdowns
@@ -314,6 +327,7 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
   const [stepPick, setStepPick] = useState<{ index: number | null; tick: number } | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [editingSchedule, setEditingSchedule] = useState<string | null>(null)      // a schedule opened ('' = a new one)
 
   useEffect(() => {
     setError(null)
@@ -350,6 +364,10 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
     for (const j of allJobs) for (const tg of (j.tags ?? [])) acc.add(tg)
     return [...acc].sort((a, b) => a.localeCompare(b))
   }, [allJobs])
+  // the categories a job may be listed under: the framework's by their name, then those the other jobs name
+  const categoryOptions = useMemo<SearchSelectOption[]>(() => categoryChoices(allJobs ?? []).map((c) => ({
+    value: c, label: isKnownCategory(c) ? t(`nomaflow.category.${c}`) : c,
+  })), [allJobs, t])
 
   // the environments a job may be set on: the pools of the connectors that run on several databases
   const environmentOptions = useMemo(() => {
@@ -371,13 +389,15 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
   // A check made here, as a problem the page shows like the server's.
   const issueProblem = (issue: JobIssue): SaveProblem => {
     const step = issue.step === undefined ? undefined : job?.steps[issue.step]
-    const where = issue.preset !== undefined ? t('nomaflow.editor.checks.preset', { n: issue.preset + 1 })
+    const where = issue.schedule !== undefined ? t('nomaflow.editor.checks.schedule', { n: issue.schedule + 1 })
+      : issue.preset !== undefined ? t('nomaflow.editor.checks.preset', { n: issue.preset + 1 })
       : issue.step === undefined ? t('nomaflow.editor.checks.job')
       : step?.name?.trim() ? t('nomaflow.editor.checks.step', { n: issue.step + 1, name: step.name.trim() })
       : t('nomaflow.editor.checks.stepUnnamed', { n: issue.step + 1 })
     const fields = (issue.fields ?? []).map((f) => t(`nomaflow.editor.checks.field.${f}`)).join(', ')
     return {
-      path: issue.preset !== undefined ? ['jobs', jobIndex, 'presets', issue.preset]
+      path: issue.schedule !== undefined ? ['jobs', jobIndex, 'schedules', issue.schedule]
+        : issue.preset !== undefined ? ['jobs', jobIndex, 'presets', issue.preset]
         : issue.step === undefined ? ['jobs', jobIndex, 'id'] : ['jobs', jobIndex, 'steps', issue.step],
       where, message: t(`nomaflow.editor.checks.${issue.code}`, { name: issue.name ?? '', fields }), code: 'check',
     }
@@ -489,18 +509,29 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
                 />
                 {!isNew && <FieldHint>{t('nomaflow.editor.idImmutable')}</FieldHint>}
               </FieldWrap>
+              <FieldWrap>
+                <FieldLabel>{t('nomaflow.editor.fieldName')}</FieldLabel>
+                <Input data-job-label value={job.label ?? ''} onChange={(e) => patch({ label: e.target.value || undefined })} />
+                <FieldHint>{t('nomaflow.editor.fieldNameHint')}</FieldHint>
+              </FieldWrap>
+              <FieldWrap as="div">
+                <FieldLabel>{t('nomaflow.editor.fieldCategory')}</FieldLabel>
+                <div data-job-category>
+                  <SearchSelect value={job.category ?? ''} onChange={(v) => patch({ category: v || undefined })} options={categoryOptions} allowCustom clearable />
+                </div>
+                <FieldHint>{t('nomaflow.editor.fieldCategoryHint')}</FieldHint>
+              </FieldWrap>
+              <FieldWrap $full as="div">
+                <LocalizedTexts
+                  value={Object.fromEntries(Object.entries(job.l ?? {}).map(([lang, v]) => [lang, { label: v }])) as Localized}
+                  onChange={(l) => { const next = Object.fromEntries(Object.entries(l ?? {}).map(([lang, texts]) => [lang, String(texts.label ?? '')]).filter(([, v]) => v)); patch({ l: Object.keys(next).length ? next : undefined }) }}
+                  fields={[{ key: 'label', label: t('nomaflow.editor.fieldName'), base: job.label || job.id }]} />
+              </FieldWrap>
               <FieldWrap $full>
                 <FieldLabel>{t('nomaflow.editor.fieldDescription')}</FieldLabel>
                 <Input
                   value={job.description ?? ''}
                   onChange={(e) => patch({ description: e.target.value || null })}
-                />
-              </FieldWrap>
-              <FieldWrap $full as="div">
-                <ScheduleField
-                  value={job.schedule ?? null}
-                  timezone={job.timezone ?? null}
-                  onChange={(schedule) => patch({ schedule })}
                 />
               </FieldWrap>
               <FieldWrap>
@@ -549,13 +580,6 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
                   options={LOG_LEVELS.map((l) => ({ value: l, label: t(`nomaflow.editor.logLevel.${l}`) }))} />
                 <FieldHint>{t('nomaflow.editor.fieldLogLevelHint')}</FieldHint>
               </FieldWrap>
-              <FieldWrap>
-                <Checkbox
-                  checked={job.enabled ?? true}
-                  onChange={(checked) => patch({ enabled: checked })}
-                  label={t('nomaflow.editor.fieldEnabled')}
-                />
-              </FieldWrap>
               {/* what an installation and an upgrade do with this job */}
               <FieldWrap>
                 <FieldLabel>{t('nomaflow.editor.fieldInstallStep')}</FieldLabel>
@@ -574,7 +598,28 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
             </Grid>
           </Section>
 
-          {/* ── presets & schedules ─────────────────────────────────────────── */}
+          {/* ── schedules: when the job runs, each by its name ───────────────── */}
+          <Section data-job-schedules>
+            <SectionTitle><CalendarClock size={15} /> {t('nomaflow.editor.schedulesSection')}</SectionTitle>
+            <FieldHint>{t('nomaflow.scheduleJob.editorHint')}</FieldHint>
+            {(job.schedules ?? []).map((s) => {
+              const d = describeCron(s.schedule, i18n.language)
+              return (
+                <ScheduleLine key={s.name} type="button" data-job-schedule-line={s.name} onClick={() => setEditingSchedule(s.name)}>
+                  <span className="n">{s.name}</span>
+                  <span className="w">{d ? t(d.key, d.values) : s.schedule}{s.preset ? ` · ${s.preset}` : ''}{s.pool ? ` · ${s.pool}` : ''}</span>
+                  <span className={`a${s.enabled === false ? ' off' : ''}`}>{s.enabled === false ? t('nomaflow.jobs.disabled') : t('nomaflow.scheduleJob.active')}</span>
+                </ScheduleLine>
+              )
+            })}
+            <div><Button $variant="ghost" $size="sm" data-job-schedule-add onClick={() => setEditingSchedule('')}><Plus size={13} /> {t('nomaflow.scheduleJob.add')}</Button></div>
+            {editingSchedule != null && (
+              <ScheduleJobModal initial={{ jobId: job.id, name: editingSchedule || null }} inEditor={{ job, onApply: (next) => patch({ schedules: next.schedules }) }}
+                onClose={() => setEditingSchedule(null)} />
+            )}
+          </Section>
+
+          {/* ── presets ────────────────────────────────────────────────────── */}
           <Section>
             <SectionTitle><Layers size={15} /> {t('nomaflow.editor.presetsSection')}</SectionTitle>
             {(job.presets?.length ?? 0) === 0 ? (
@@ -588,7 +633,7 @@ export default function JobEditor({ jobId }: { jobId?: string } = {}) {
                 </FieldHint>
                 {/* a preset is renamed, changed and removed here (by its place: its name is being typed) */}
                 {(job.presets ?? []).map((p, i) => (
-                  <PresetEditor key={i} preset={p} steps={job.steps.map((s) => s.name).filter(Boolean)} jobTimezone={job.timezone ?? null}
+                  <PresetEditor key={i} preset={p} steps={job.steps.map((s) => s.name).filter(Boolean)}
                     sqlConnectors={(connectors ?? []).filter((c) => c.type === 'sql')}
                     onChange={(patchOf) => patchPreset(i, patchOf)}
                     onDelete={() => void removePreset(i)} />

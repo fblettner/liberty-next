@@ -63,7 +63,7 @@ def _config_versions_policy(st: Any) -> dict[str, Any]:
             if getattr(step, "callable", None) == CONFIG_PURGE_CALLABLE:
                 kw = {**job.params, **step.op_kwargs}
                 return {"max_versions": int(kw.get("max_versions", 20)), "max_age_days": int(kw.get("max_age_days", 90)),
-                        "job": job.id, "scheduled": bool(job.enabled and job.schedule), "schedule": job.schedule}
+                        "job": job.id, "scheduled": bool(job.active_schedules()), "schedule": next((s.schedule for s in job.active_schedules()), None)}
     return {"max_versions": 20, "max_age_days": 90, "job": None, "scheduled": False, "schedule": None}
 
 

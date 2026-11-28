@@ -407,7 +407,9 @@ def merge_file(
 # parameters) with what the operator sets from the Jobs page (whether and when it runs). Merging
 # the job as one entity would let a schedule block every product fix to its steps, so the merge is
 # per field: the vendor part is refreshed like any entity, the operator fields stay the operator's.
-JOB_OPERATOR_FIELDS = ("enabled", "schedule", "timezone", "presets", "alerts", "retry", "log_level", "timeout_seconds",
+# ``schedules``: when a job runs is the installation's own — a job written before 7.0.95 (``schedule`` / ``enabled``
+# on the job, a ``schedule`` on a preset) is first read into it (liberty.jobs.schema.with_schedules), on every side.
+JOB_OPERATOR_FIELDS = ("schedules", "timezone", "presets", "alerts", "retry", "log_level", "timeout_seconds",
                        "disabled_steps")
 
 
@@ -478,13 +480,17 @@ def merge_jobs(
     ``[meta]`` (retention / missed-run policies) is the operator's: the live one wins. The jobs
     come out in the wheel's order, the operator's own after them."""
     rep = FileMergeReport(file=filename, had_snapshot=bundled_prev is not None)
+    from liberty.jobs.schema import with_schedules      # every side in the shape of the moment (see JOB_OPERATOR_FIELDS)
+
+    wheel = {**wheel, "jobs": [with_schedules(j) for j in wheel.get("jobs") or []]}
     w_jobs = [j for j in wheel.get("jobs") or [] if isinstance(j, dict) and j.get("id")]
     if live is None:
         rep.added += [_label("job", j["id"]) for j in w_jobs]
         return json.loads(json.dumps(wheel, default=str)), rep
     live = json.loads(json.dumps(live, default=str))
+    live["jobs"] = [with_schedules(j) for j in live.get("jobs") or []]
     l_by = {j["id"]: j for j in live.get("jobs") or [] if isinstance(j, dict) and j.get("id")}
-    p_by = {j["id"]: j for j in (bundled_prev or {}).get("jobs") or [] if isinstance(j, dict) and j.get("id")}
+    p_by = {j["id"]: with_schedules(j) for j in (bundled_prev or {}).get("jobs") or [] if isinstance(j, dict) and j.get("id")}
     w_ids = {j["id"] for j in w_jobs}
     out_jobs: list[dict[str, Any]] = []
     for w in w_jobs:

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { orderOptions, sortOptions } from './options'
+import { lookupTable, orderOptions, sortOptions } from './options'
 
 describe('sortOptions', () => {
   it('sorts by label, numerically and case-insensitively, the empty value first, stable', () => {
@@ -70,5 +70,24 @@ describe('narrowing a list', () => {
     expect(browsable(opts)).toBe(true)
     expect(browsable([{ value: 'a', label: 'A' }])).toBe(false)
     expect(browsable(Array.from({ length: BROWSE_FROM }, (_x, i) => ({ value: String(i), label: String(i) })))).toBe(true)
+  })
+})
+
+describe('lookupTable', () => {
+  const words = { code: 'Code', label: 'Description' }
+  it('draws the code, the label and each cell under its heading, a filterable one with its values to pick', () => {
+    const t = lookupTable([
+      { value: 'P1', label: 'First', mono: 'P1', cells: ['Complete', 'Bug'] },
+      { value: 'P2', label: 'Second', mono: 'P2', cells: ['In Production', 'Bug'] },
+      { value: 'P3', label: 'Third', mono: 'P3', cells: ['Complete'] },
+    ], [{ label: 'Status', filterable: true }, { label: 'Type' }], words)
+    expect(t.columns).toEqual([
+      { key: 'code', label: 'Code', mono: true }, { key: 'label', label: 'Description' },
+      { key: 'c0', label: 'Status', choices: ['Complete', 'In Production'] }, { key: 'c1', label: 'Type' },
+    ])
+    expect(t.rows[2]).toEqual({ value: 'P3', code: 'P3', label: 'Third', c0: 'Complete', c1: '' })
+  })
+  it('has no code column when the lines show none', () => {
+    expect(lookupTable([{ value: 'a', label: 'a' }], undefined, words).columns).toEqual([{ key: 'label', label: 'Description' }])
   })
 })

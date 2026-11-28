@@ -1,18 +1,22 @@
 // What a user may set when starting a job from its menu page (`user_params` in jobs.toml): each
 // parameter's choices come from a fixed list, or are read when the page opens — the rows of a
-// query, the Explorer models of an application, the installation's test suites. That source is
+// query, the Explorer models of an application, the installation's test suites, its databases. That source is
 // one string in the file (`choices_from`); the job editor shows it as the fields an operator
 // knows. No React here.
 //
 //   query:<connector>/<query>:<value column>:<label column>
 //   explorer_models:<application>
 //   test_suites            test_suites:<connector>
+//   pools                  pools:<connector>          (every database, or those a connector runs on)
+//   connectors             connectors:sql | connectors:api
 
 export type ChoiceSource =
   | { kind: 'none' }
   | { kind: 'query'; connector: string; query: string; value: string; label: string }
   | { kind: 'explorer_models'; app: string }
   | { kind: 'test_suites'; connector: string }
+  | { kind: 'pools'; connector: string }
+  | { kind: 'connectors'; type: '' | 'sql' | 'api' }
   /** a source the editor does not know: kept exactly as written */
   | { kind: 'other'; text: string }
 
@@ -24,6 +28,8 @@ export function parseChoicesFrom(text: string | null | undefined): ChoiceSource 
   const arg = at < 0 ? '' : s.slice(at + 1)
   if (kind === 'explorer_models') return { kind, app: arg }
   if (kind === 'test_suites') return { kind, connector: arg }
+  if (kind === 'pools') return { kind, connector: arg }
+  if (kind === 'connectors' && (arg === '' || arg === 'sql' || arg === 'api')) return { kind, type: arg }
   if (kind === 'query') {
     const [target = '', value = '', label = '', ...more] = arg.split(':')
     const slash = target.indexOf('/')
@@ -38,6 +44,8 @@ export function composeChoicesFrom(src: ChoiceSource): string {
     case 'none': return ''
     case 'explorer_models': return `explorer_models:${src.app}`
     case 'test_suites': return src.connector ? `test_suites:${src.connector}` : 'test_suites'
+    case 'pools': return src.connector ? `pools:${src.connector}` : 'pools'
+    case 'connectors': return src.type ? `connectors:${src.type}` : 'connectors'
     case 'query': return `query:${src.connector}/${src.query}:${src.value}${src.label ? `:${src.label}` : ''}`
     case 'other': return src.text
   }

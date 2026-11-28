@@ -173,12 +173,15 @@ def analytics(t: Lang, ctx: dict[str, Any]) -> str:
 def operations(t: Lang, ctx: dict[str, Any]) -> str:
     state = ctx["state"]
     raw_jobs = _raw(state, "jobs.toml")
-    jobs = [j for j in raw_jobs.get("jobs") or [] if isinstance(j, dict)]
+    from liberty.jobs.schema import with_schedules
+
+    jobs = [with_schedules(j) for j in raw_jobs.get("jobs") or [] if isinstance(j, dict)]
+    active = lambda j: [s for s in j.get("schedules") or [] if isinstance(s, dict) and s.get("enabled", True)]  # noqa: E731
     rules = getattr(getattr(state, "notification_rules", None), "notifications", None) or {}
     actions = _raw(state, "actions.toml").get("actions") or {}
     out = [f"## 7. {t('Exploitation', 'Operations')}\n", f"### 7.1 {t('Tâches planifiées', 'Scheduled jobs')}\n"]
     out.append(table((t("Tâche", "Job"), t("Description", "Description"), t("Planification", "Schedule"), t("Active", "Enabled"), t("Étapes", "Steps"), t("Types d'étapes", "Step types")),
-                     [(code(j.get("id")), first_sentence(j.get("description"), 80), j.get("schedule") or t("manuelle", "manual"), bool(j.get("enabled", True)),
+                     [(code(j.get("id")), first_sentence(j.get("description"), 80), ", ".join(str(s.get("schedule")) for s in j.get("schedules") or [] if isinstance(s, dict)) or t("manuelle", "manual"), bool(active(j)),
                        len(j.get("steps") or []), sorted({str(s.get("type")) for s in j.get("steps") or [] if isinstance(s, dict)})) for j in jobs],
                      align_right=(4,)) or t("_Aucune._", "_None._") + "\n")
     retention = ((raw_jobs.get("meta") or {}).get("retention") or {})

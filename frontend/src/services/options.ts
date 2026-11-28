@@ -71,3 +71,27 @@ export const BROWSE_FROM = 40
 export function browsable(options: Searchable[]): boolean {
   return options.length >= BROWSE_FROM || options.some((o) => (o.cells?.length ?? 0) > 0)
 }
+
+/** A list as the "Open as a table" dialog draws it with the shared grid: one row per option (``value`` kept to pick
+ *  it), and its columns — the code when the lines show one, the label, each extra cell under its heading. A cell
+ *  column the dropdown offers chips for (``filterable``) is filtered by picking among its values (``choices``). */
+export interface LookupTableColumn { key: string; label: string; mono?: boolean; choices?: string[] }
+export function lookupTable(options: Searchable[], cellColumns: { label: string; filterable?: boolean }[] | undefined, words: { code: string; label: string }):
+  { columns: LookupTableColumn[]; rows: Record<string, string>[] } {
+  const coded = options.some((o) => o.mono && o.mono !== o.label)
+  const extra = options.reduce((n, o) => Math.max(n, o.cells?.length ?? 0), 0)
+  const columns: LookupTableColumn[] = [
+    ...(coded ? [{ key: 'code', label: words.code, mono: true }] : []),
+    { key: 'label', label: words.label },
+    ...Array.from({ length: extra }, (_x, i): LookupTableColumn => {
+      const filterable = !!cellColumns?.[i]?.filterable
+      const values = filterable ? [...new Set(options.map((o) => (o.cells?.[i] ?? '').trim()).filter(Boolean))].sort((a, b) => collator.compare(a, b)) : undefined
+      return { key: `c${i}`, label: cellColumns?.[i]?.label ?? '', ...(values ? { choices: values } : {}) }
+    }),
+  ]
+  const rows = options.map((o) => ({
+    value: o.value, ...(coded ? { code: o.mono ?? '' } : {}), label: o.label,
+    ...Object.fromEntries(Array.from({ length: extra }, (_x, i) => [`c${i}`, o.cells?.[i] ?? ''])),
+  }))
+  return { columns, rows }
+}

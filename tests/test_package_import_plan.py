@@ -166,8 +166,9 @@ def test_jobs_keep_the_target_schedule_and_arrive_disabled(tmp_path) -> None:
     text = (tmp_path / "jobs.toml").read_text()
     jobs = {j["id"]: j for j in tomllib.loads(text)["jobs"]}
     assert "# prod jobs" in text
-    assert jobs["load"]["schedule"] == "0 6 * * *" and jobs["load"]["enabled"] is True and jobs["load"]["steps"][0]["query"] == "new"
-    assert jobs["extra"]["enabled"] is False
+    # this install's schedule is kept (written as a schedule of its own); a new job's arrive switched off
+    assert jobs["load"]["schedules"] == [{"name": "load", "schedule": "0 6 * * *", "enabled": True}] and jobs["load"]["steps"][0]["query"] == "new"
+    assert jobs["extra"]["schedules"] == [{"name": "extra", "schedule": "0 1 * * *", "enabled": False}]
 
 
 def test_new_kinds_land_in_their_files(tmp_path) -> None:

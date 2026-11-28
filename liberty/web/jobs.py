@@ -114,14 +114,14 @@ def _job_summary(
     in_flight_ids: frozenset[str],
     last_run: dict[str, Any] | None,
     next_fires: dict[str, datetime],
+    language: str | None = None,
 ) -> dict[str, Any]:
     """Compact JSON representation of one Job — for ``GET /admin/jobs``.
 
     Carries what the Jobs list (NOMAFLOW-UI.md §3.1) renders: the catalogue fields,
     the operational flags, the last-run badge (``last_run``: latest run's state +
-    timestamps, or None if never run), the next scheduled fire (``next_run`` — the
-    soonest across the job's own schedule AND any schedulable preset), and
-    ``preset_schedules`` (per scheduled preset: its cron + next fire)."""
+    timestamps, or None if never run), ``schedules`` (each with its next fire) and
+    ``next_run`` (the soonest across them)."""
     # "in flight" must cover BOTH a scheduler-fired run (tracked in the scheduler's
     # _in_flight set) AND a manual "Run now" — which goes through fire_now → runner.run
     # directly and never touches that set. The reliable signal for either is the latest
@@ -130,44 +130,37 @@ def _job_summary(
     last_state = (last_run or {}).get("state")
     in_flight = job.id in in_flight_ids or last_state in ("RUNNING", "QUEUED")
 
-    # Schedulable presets: each has its own trigger id `<job>::preset::<name>`.
-    preset_schedules: list[dict[str, Any]] = []
-    preset_registered = False
-    base_next = next_fires.get(job.id)  # the job-level schedule's own next fire
-    candidates: list[datetime] = [base_next] if base_next is not None else []
-    for p in job.presets:
-        if not p.schedule:
-            continue
-        pid = JobScheduler._preset_job_id(job.id, p.name)  # noqa: SLF001 — same subsystem
-        if pid in scheduled_ids:
-            preset_registered = True
-        pn = next_fires.get(pid)
-        if pn is not None:
-            candidates.append(pn)
-        preset_schedules.append({
-            "name": p.name,
-            "schedule": p.schedule,
-            "timezone": p.timezone,
-            "enabled": p.enabled,
-            "next_run": pn.isoformat() if pn is not None else None,
+    # Its schedules: each has its own trigger (id ``<job>::schedule::<name>``) and its own next fire.
+    schedules: list[dict[str, Any]] = []
+    registered = False
+    candidates: list[datetime] = []
+    for s in job.schedules:
+        sid = JobScheduler.schedule_id(job.id, s.name)
+        registered = registered or sid in scheduled_ids
+        nxt = next_fires.get(sid)
+        if nxt is not None:
+            candidates.append(nxt)
+        schedules.append({
+            "name": s.name, "schedule": s.schedule, "timezone": s.timezone, "enabled": s.enabled, "preset": s.preset, "pool": s.pool,
+            "next_run": nxt.isoformat() if nxt is not None else None,
         })
     next_run = min(candidates) if candidates else None
 
     return {
         "id": job.id,
         "description": job.description,
-        "schedule": job.schedule,
         "timezone": job.timezone,
-        "enabled": job.enabled,
+        # whether at least one of its schedules fires (a job without one is run by hand only)
+        "scheduled": bool(job.active_schedules()),
+        "schedules": schedules,
         "tags": list(job.tags),
+        "label": job.label_for(language),
+        "category": (job.category or "").strip() or None,
         "step_count": len(job.steps),
-        "registered_with_scheduler": (job.id in scheduled_ids) or preset_registered,
+        "registered_with_scheduler": registered,
         "in_flight": in_flight,
         "last_run": last_run,
         "next_run": next_run.isoformat() if next_run is not None else None,
-        # The job-level schedule's OWN next fire (vs ``next_run`` = soonest across base + presets).
-        "schedule_next_run": base_next.isoformat() if base_next is not None else None,
-        "preset_schedules": preset_schedules,
     }
 
 
@@ -221,14 +214,15 @@ async def list_jobs(request: Request, _: Viewer) -> dict[str, Any]:
     scheduler: JobScheduler = comps.scheduler
     runner: JobRunner = comps.runner
 
-    scheduled_ids = set(scheduler.scheduled_job_ids)
+    scheduled_ids = set(scheduler.scheduled_trigger_ids)
     in_flight = scheduler.in_flight_job_ids
     next_fires = scheduler.next_fire_times
     last_runs = await _latest_runs_by_job(comps.db)
     cache: dict = {}
     jobs_out = []
     for j in registry.jobs():
-        summary = _job_summary(j, scheduled_ids=scheduled_ids, in_flight_ids=in_flight, last_run=last_runs.get(j.id), next_fires=next_fires)
+        summary = _job_summary(j, scheduled_ids=scheduled_ids, in_flight_ids=in_flight, last_run=last_runs.get(j.id), next_fires=next_fires,
+                               language=request.headers.get("x-liberty-lang"))
         if j.user_params:
             summary["user_params"] = await _user_params(request, j, request.headers.get("x-liberty-lang"), cache=cache)
         jobs_out.append(summary)
@@ -513,17 +507,26 @@ async def set_job_enabled(job_id: str, request: Request, principal: Editor, body
             doc["jobs"] = tomlkit.aot()
         doc["jobs"].append(tomlkit.item(job.model_dump(by_alias=True, exclude_defaults=True, exclude_none=True)))
         entry = doc["jobs"][-1]
-    entry["enabled"] = enabled
+    # every schedule of the job, in whichever shape the file holds them (the older one: on the job and on its presets)
+    for s in entry.get("schedules") or []:
+        s["enabled"] = enabled
+    if entry.get("schedule"):
+        entry["enabled"] = enabled
+    for p in entry.get("presets") or []:
+        if p.get("schedule"):
+            p["enabled"] = enabled
     new_text = tomlkit.dumps(doc)
     JobsFile.model_validate(tomllib.loads(new_text))
     _snapshot_config(request, path)
     path.write_text(new_text, encoding="utf-8")
-    updated = job.model_copy(update={"enabled": enabled})
+    updated = job.model_copy(update={"schedules": [s.model_copy(update={"enabled": enabled}) for s in job.schedules]})
     comps.registry.replace(updated)
     comps.scheduler.remove_job(job_id)
     comps.scheduler.add_job(updated)
     _log.info("nomaflow job %s %s by %s", job_id, "resumed" if enabled else "paused", principal.username)
-    nxt = comps.scheduler.next_fire_times.get(job_id)
+    fires = comps.scheduler.next_fire_times
+    upcoming = [fires[sid] for sid in (JobScheduler.schedule_id(job_id, s.name) for s in updated.schedules) if sid in fires]
+    nxt = min(upcoming) if upcoming else None
     return {"job_id": job_id, "enabled": enabled, "next_run": nxt.isoformat() if nxt else None}
 
 
@@ -984,7 +987,7 @@ async def user_get_job(job_id: str, request: Request, principal: CurrentPrincipa
     in_flight = job_id in comps.scheduler.in_flight_job_ids or any(r["state"] in ("RUNNING", "QUEUED") for r in runs)
     return {
         "job": {
-            "id": job.id, "description": job.description, "tags": list(job.tags), "uploads": _upload_steps(job), "in_flight": in_flight,
+            "id": job.id, "label": job.label_for(request.headers.get("x-liberty-lang")), "description": job.description, "tags": list(job.tags), "uploads": _upload_steps(job), "in_flight": in_flight,
             "params": await _user_params(request, job, request.headers.get("x-liberty-lang")),
         },
         "runs": runs,

@@ -40,7 +40,7 @@ def build_ops_tools(state: Callable[[], Any]) -> list[Tool]:
         from liberty.web.jobs import _job_summary, _latest_runs_by_job
 
         registry, scheduler = comps.registry, comps.scheduler
-        scheduled_ids = set(scheduler.scheduled_job_ids)
+        scheduled_ids = set(scheduler.scheduled_trigger_ids)
         in_flight = scheduler.in_flight_job_ids
         next_fires = scheduler.next_fire_times
         last_runs = await _latest_runs_by_job(comps.db)

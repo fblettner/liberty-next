@@ -1,7 +1,9 @@
 """The choices of a job's user parameter (``UserParam``): fixed ``choices``, an app's Explorer
 models (``choices_from = "explorer_models:<app>"``), the rows of a read query
 (``"query:<connector>/<query>:<value column>:<label column>"``) or the test suites
-(``"test_suites"`` / ``"test_suites:<connector>"``). Shared by the job pages (the
+(``"test_suites"`` / ``"test_suites:<connector>"``) the databases (``"pools"`` — every pool of the
+installation — / ``"pools:<connector>"`` — the databases a connector runs on, its main one first) or the connectors
+(``"connectors"`` / ``"connectors:sql"`` / ``"connectors:api"``). Shared by the job pages (the
 dropdowns / checkboxes) and the fan-out of a ``for_each`` job, where "all" means every choice."""
 
 from __future__ import annotations
@@ -62,6 +64,27 @@ async def param_choices(p: UserParam, *, connectors: Any, explorer: Any = None, 
                     suite = store.read_suite(settings, name)
                     if not arg or suite.connector == arg:
                         choices.append({"value": name, "label": f"{suite.label} ({name})" if suite.label else name})
+            except Exception as exc:  # noqa: BLE001 — a choice list never breaks the page
+                _log.warning("nomaflow job choices %s: %s", p.choices_from, exc)
+        elif kind == "pools":
+            # the databases: a connector's own (its main one, then its others), else every pool of the installation
+            try:
+                if arg:
+                    conn = connectors.get(arg)
+                    main = str(getattr(conn, "pool_name", "") or "")
+                    names = [main, *sorted(p for p in (getattr(conn, "allowed_pools", None) or ()) if p != main)]
+                else:
+                    names = sorted(connectors.pools.names())
+                choices.extend({"value": n, "label": n} for n in names if n)
+            except Exception as exc:  # noqa: BLE001 — a choice list never breaks the page
+                _log.warning("nomaflow job choices %s: %s", p.choices_from, exc)
+        elif kind == "connectors":
+            # the connectors of the installation, of one type when named (sql / api), by name
+            try:
+                for name in sorted(connectors.names()):
+                    conn = connectors.get(name)
+                    if not arg or str(getattr(getattr(conn, "config", None), "type", "") or "") == arg:
+                        choices.append({"value": name, "label": name})
             except Exception as exc:  # noqa: BLE001 — a choice list never breaks the page
                 _log.warning("nomaflow job choices %s: %s", p.choices_from, exc)
         elif kind == "query":

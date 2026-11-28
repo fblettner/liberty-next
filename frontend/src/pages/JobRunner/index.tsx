@@ -56,7 +56,7 @@ export default function JobRunner({ jobId: target }: { jobId: string }) {
   const [detail, setDetail] = useState<JobRunDetail | null>(null)
   const logRef = useRef<HTMLPreElement | null>(null)
 
-  const title = useMemo(() => findMenuLabel(menus, { kind: 'job', connector: '', target }) ?? (preset ? `${jobId} · ${preset}` : jobId), [menus, target, jobId, preset])
+  const title = useMemo(() => findMenuLabel(menus, { kind: 'job', connector: '', target }) ?? (preset ? `${job?.label || jobId} · ${preset}` : (job?.label || jobId)), [menus, target, jobId, preset, job?.label])
 
   // a link to this page may carry values (/job/<id>?name=value): filled in once per link, then the user's to change
   const location = useLocation()

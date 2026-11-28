@@ -1,5 +1,56 @@
 # Liberty Next — Notes de version
 
+## 7.0.95 — 2026-11-28
+
+- **Jobs : un nom et une catégorie.** Un job était listé par son identifiant suivi d'une longue description, dans
+  un seul groupe par application. Un job a maintenant un **nom** court (par langue) et une **catégorie** : la page
+  Jobs montre, dans chaque application, les catégories dans l'ordre — Travail courant, Chargements de données,
+  Analyses, Rapports, Supervision, Outils, Installation et maintenance, Démonstration — puis chaque job par son
+  nom, son identifiant en dessous. *Installation et maintenance* et *Démonstration* s'ouvrent fermées ; une
+  recherche ou un filtre montre ce qu'il trouve, fermé ou non. Les deux champs sont dans l'éditeur de job (la
+  catégorie se choisit dans la liste, ou se saisit pour une des vôtres ; le nom a ses traductions) ; un job sans
+  nom est listé par son identifiant, un job sans catégorie sous *Autres*. La page d'où un utilisateur lance un job
+  montre aussi le nom.
+- **Des réponses gardées pour chaque environnement.** Une réponse est gardée par environnement depuis 7.0.94, mais
+  l'étape de job qui les prépare (`liberty.kept:j_keep`) ne gardait que celle de son exécution : une page ouverte
+  sur une autre base relisait tout. L'étape accepte `every_pool_of = "<connecteur>"` et garde alors une réponse
+  pour chaque base de ce connecteur ; un environnement illisible est signalé et les autres sont gardés. Une
+  exécution qui a son propre environnement garde celui-là. La base principale du connecteur est toujours gardée
+  comme une page la demande — un job dont l'environnement nommait la base principale par son nom gardait une
+  réponse qu'aucune page ne trouvait.
+- **Une planification est une chose à part entière.** Un job se lançait sur sa propre planification (activée par sa
+  case *Activée*) et sur celle de chacun de ses préréglages : un préréglage était à la fois un jeu de paramètres et
+  une planification, et une deuxième planification demandait un préréglage ou une copie du job. Un job a maintenant
+  des **planifications**, chacune avec un **nom**, le **préréglage** avec lequel elle le lance (ou le job tel quel),
+  ses propres valeurs des **paramètres partagés** du job, son **environnement**, quand elle se lance et si elle est
+  **active** — autant que nécessaire (*Production chaque nuit*, *Test chaque semaine*), sans copie. Un préréglage
+  n'est plus qu'un jeu de valeurs et d'étapes, choisi par son nom à la main, depuis une entrée de menu ou par une
+  planification.
+  - **Planifier un job**, une seule fenêtre : depuis la page Planification (chaque ligne ouvre sa planification),
+    depuis la colonne *quand* de la page Jobs (ses planifications), depuis le bouton calendrier de chaque ligne de
+    job (une nouvelle, le job déjà choisi), et depuis la nouvelle section *Planifications* de l'éditeur de job.
+    L'éditeur de job perd ses champs Planification et Activée ; la page Jobs montre quand chaque job se lance au
+    lieu d'un interrupteur Activé.
+  - Les préréglages de l'éditeur de job se replient sur une ligne chacun — le nom et ce qu'il change —, ouverte
+    d'un clic.
+  - **Rien à refaire sur une installation.** Un fichier des jobs écrit avant est lu comme il était : la
+    planification propre d'un job devient une planification au nom du job (désactivée si le job l'était), un
+    préréglage planifié une planification du même nom qui le lance. L'historique des exécutions, les contrôles des
+    planifications manquées et des échéances, la fusion des mises à jour (les planifications restent celles de
+    l'installation) et l'import d'un paquet de déploiement suivent les planifications.
+- **`:LIBERTY_POOL` dans une requête.** Une application qui garde ses propres lignes par environnement d'un autre
+  connecteur (un historique du système qu'elle lit) nomme cette variable dans ses requêtes : le serveur lui donne
+  l'environnement choisi dans la page — vide pour la base principale — quoi qu'envoie l'appelant.
+- **Une liste déroulante ouverte avant l'arrivée de ses valeurs dit qu'elle charge.** L'indicateur n'était que sur
+  le champ fermé : ouverte tôt, une longue liste montrait un panneau vide jusqu'à son arrivée, comme si rien ne venait.
+- **« Ouvrir en tableau » est un vrai tableau.** La liste qu'une liste déroulante ouvre en tableau n'avait que la
+  recherche et les filtres de la liste déroulante. Elle est maintenant dessinée avec la grille commune de
+  l'application : un filtre par colonne (une liste de valeurs à choisir pour une colonne à filtres), le tri par
+  un en-tête, le regroupement, les colonnes affichées, la pagination.
+- **Un paramètre de job peut lister les bases ou les connecteurs.** Deux nouvelles sources pour les choix qu'un
+  utilisateur fait en lançant un job (éditeur de job → *Ce que l'utilisateur peut régler au lancement*) : **Les bases de
+  données** (toutes, ou celles d'un connecteur) et **Les connecteurs** (tous, ou seulement les SQL ou les API).
+
 ## 7.0.94 — 2026-11-28
 
 - **Les pages d'une application suivent le pool choisi.** Un connecteur qui travaille sur plusieurs bases (une par

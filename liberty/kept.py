@@ -165,14 +165,35 @@ def _iso(moment: datetime) -> str:
 _INJECTED = ("connectors", "ctx", "settings", "changesets", "app_state")
 
 
+def environments_of(connectors: Any, connector: str) -> list[str | None]:
+    """The environments of *connector* as an answer is kept under: ``None`` for its main database (what a page
+    sends when nothing else is picked), then the name of each of its other databases (pools)."""
+    from liberty.connectors.api import current_pool
+
+    token = current_pool.set(None)
+    try:
+        conn = connectors.get(connector)
+    finally:
+        current_pool.reset(token)
+    main = str(getattr(conn, "pool_name", "") or "")
+    return [None, *sorted(str(p) for p in (getattr(conn, "allowed_pools", None) or ()) if str(p) != main)]
+
+
 async def j_keep(*, connectors: Any, app_state: Any = None, settings: Any = None, ctx: Any = None, function: str, langs: str | None = None,
-                 **given: Any) -> dict[str, Any]:
+                 every_pool_of: str | None = None, **given: Any) -> dict[str, Any]:
     """Job step: run the page function *function* (``module:function``) and keep its answer, so the
     page opens at once. The function's parameters are the step's other values **that the function
     declares** — so the job's own parameters (``apps_id`` of a job run once per application) reach it
     and the rest is left out. They must be the ones the page sends: an answer is kept per parameters.
     ``langs = "en,fr"`` keeps one answer per language, passed as ``lang``. Kept as the unrestricted
     answer (a job has no data scope).
+
+    ``every_pool_of = "<connector>"``: that connector runs on several databases, one per environment, and a
+    page shows the one picked — an answer is kept per environment. The step then keeps one answer for EACH
+    database of the connector, so the page opens at once whichever is picked; an environment that cannot be
+    read is said and the others are kept (the step fails when none could be). A run that has its own
+    environment (the job's or the step's) keeps that one only. Either way the connector's main database is
+    kept as a page asks for it: under no environment's name.
 
     ``[[jobs.steps]] type = "python"``, ``callable = "liberty.kept:j_keep"``,
     ``op_kwargs = { function = "nomasx1.sod_review:j_review" }``."""
@@ -188,16 +209,38 @@ async def j_keep(*, connectors: Any, app_state: Any = None, settings: Any = None
     asked = {name: given[name] for name in declared if given.get(name) is not None}
     languages = [code.strip() for code in (langs or "").split(",") if code.strip()] if "lang" in declared else []
     who = str(getattr(getattr(ctx, "trigger", None), "triggered_by", "") or "") or "job"
+    from liberty.connectors.api import current_pool
+
+    # the environments to keep: the run's own, or every database of the connector named — the main one as None
+    pools: list[str | None] = [current_pool.get()]
+    if every_pool_of:
+        known = environments_of(connectors, every_pool_of)
+        pools = known if not pools[0] else [pools[0] if pools[0] in known else None]
     done: list[dict[str, Any]] = []
-    for lang in languages or [None]:
-        params = {**asked, **({"lang": lang} if lang else {})}
-        started = time.monotonic()
-        kwargs = build_kwargs(target, dict(params), injections=(("connectors", connectors), ("ctx", ctx), ("settings", settings)))
-        answer = normalise_result(await call_target(target, kwargs)).extras
-        if not isinstance(answer, dict) or not answer:
-            raise RuntimeError(f"kept answers: {function} did not answer an object — nothing to keep")
-        took = int((time.monotonic() - started) * 1000)
-        kept = await store.put(function, params, answer, by=who, duration_ms=took)
-        _log.info("kept answers: %s %s kept (%d ms)", function, params, took)
-        done.append({"params": params, "duration_ms": took, **kept})
-    return {"function": function, "kept": done, "answers": len(done)}
+    failed: list[str] = []
+    for pool in pools:
+        token = current_pool.set(pool)
+        try:
+            for lang in languages or [None]:
+                params = {**asked, **({"lang": lang} if lang else {})}
+                started = time.monotonic()
+                kwargs = build_kwargs(target, dict(params), injections=(("connectors", connectors), ("ctx", ctx), ("settings", settings)))
+                try:
+                    answer = normalise_result(await call_target(target, kwargs)).extras
+                    if not isinstance(answer, dict) or not answer:
+                        raise RuntimeError(f"kept answers: {function} did not answer an object — nothing to keep")
+                except Exception as exc:
+                    if len(pools) == 1:
+                        raise
+                    failed.append(f"{pool or 'main database'}: {str(exc).splitlines()[0][:200]}")
+                    _log.warning("kept answers: %s %s not kept for %s (%s)", function, params, pool or "the main database", str(exc).splitlines()[0][:300])
+                    continue
+                took = int((time.monotonic() - started) * 1000)
+                kept = await store.put(function, params, answer, by=who, duration_ms=took)
+                _log.info("kept answers: %s %s kept%s (%d ms)", function, params, f" for {pool}" if pool else "", took)
+                done.append({"params": params, **({"pool": pool} if pool else {}), "duration_ms": took, **kept})
+        finally:
+            current_pool.reset(token)
+    if failed and not done:
+        raise RuntimeError(f"kept answers: {function} could be read in no environment — " + "; ".join(failed))
+    return {"function": function, "kept": done, "answers": len(done), **({"not_kept": failed} if failed else {})}

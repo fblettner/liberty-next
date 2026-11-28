@@ -372,18 +372,18 @@ class LastRun(_Open):
 class JobSummary(_Open):
     """A job with its operational state (``user_params`` when it declares any)."""
     id: str
+    label: str | None = None
+    category: str | None = None
     description: str | None = None
-    schedule: str | None = None
     timezone: str | None = None
-    enabled: bool
+    scheduled: bool = Field(description="Whether at least one of its schedules fires (none: run by hand only).")
+    schedules: list[dict[str, Any]] = Field(description="Its schedules: name, cron, timezone, enabled, preset, pool, next_run.")
     tags: list[str]
     step_count: int
     registered_with_scheduler: bool
     in_flight: bool
     last_run: LastRun | None = None
-    next_run: str | None = Field(default=None, description="The soonest fire across the job's schedule and its scheduled presets.")
-    schedule_next_run: str | None = None
-    preset_schedules: list[dict[str, Any]]
+    next_run: str | None = Field(default=None, description="The soonest fire across its schedules.")
 
 
 class JobList(_Closed):

@@ -51,7 +51,7 @@ async def test_describe_instance_summarises_the_state() -> None:
     assert nomajde["label"] == "JDE administration" and nomajde["screens"] == [{"id": "f0092", "label": "Users", "read_query": "f0092_get"}]
     assert nomajde["menu"] == [{"id": "users", "label": "Users", "type": "screen", "target": "f0092"}, {"id": "sec", "label": "Security"}]
     assert out["dashboards"] == [{"id": "nomasx1.overview", "label": "Security Overview"}]
-    assert out["jobs"] == [{"id": "nightly", "description": "Collect", "schedule": "0 2 * * *", "enabled": True, "steps": ["collect"]}]
+    assert out["jobs"] == [{"id": "nightly", "description": "Collect", "schedules": [{"name": "nightly", "schedule": "0 2 * * *", "enabled": True}], "steps": ["collect"]}]
     assert [p["id"] for p in out["playbooks"]] == ["create_user", "dup_role", "sox"]
     assert "explorer_models" not in out
 

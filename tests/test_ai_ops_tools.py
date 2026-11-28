@@ -34,7 +34,7 @@ async def jobs_state(tmp_path):
         s.add_all([ok, bad])
         await s.commit()
     job = Job(id="nightly", description="Collect", schedule="0 2 * * *", steps=[Step(type=StepType.SQL_QUERY, name="collect", connector="nomasx1", query="q")])
-    scheduler = SimpleNamespace(scheduled_job_ids=["nightly"], in_flight_job_ids=frozenset(), next_fire_times={"nightly": t0 + timedelta(days=2)})
+    scheduler = SimpleNamespace(scheduled_trigger_ids=["nightly::schedule::nightly"], in_flight_job_ids=frozenset(), next_fire_times={"nightly::schedule::nightly": t0 + timedelta(days=2)})
     comps = SimpleNamespace(registry=SimpleNamespace(jobs=lambda: [job]), scheduler=scheduler, db=db)
     logs = LogRingBuffer(max_entries=50)
     for i, (lvl, name, msg) in enumerate([("INFO", "liberty.runtime", "config reloaded"), ("WARNING", "liberty.jobs.runner", "step collect: retry 1"),

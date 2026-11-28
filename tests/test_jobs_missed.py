@@ -99,7 +99,7 @@ async def test_check_records_gaps_once_and_raises_the_hook(jobs_db, tmp_path) ->
     rows = await _rows(jobs_db, "hourly")
     assert [r.state for r in rows] == ["SUCCEEDED", "MISSED", "MISSED"]
     assert rows[1].trigger_kind == TriggerKind.SCHEDULED.value and rows[1].finished_at is not None
-    assert marks["hourly"] == now - timedelta(minutes=10)
+    assert marks["hourly::schedule::hourly"] == now - timedelta(minutes=10)
 
     # same watermark, same instant: nothing new
     report2 = await check_missed(jobs_db, registry, MissedPolicy(), watermarks=marks, started_at=now, now=now, on_missed=on_missed)

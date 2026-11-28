@@ -69,7 +69,7 @@ def lms(monkeypatch):
 
 def test_the_job_exists_only_where_there_is_something_to_report(tmp_path) -> None:
     (job,) = builtin_jobs(_settings(tmp_path))
-    assert job.id == USAGE_JOB_ID and job.enabled and job.schedule == "17 4 * * *"
+    assert job.id == USAGE_JOB_ID and [(s.schedule, s.enabled) for s in job.schedules] == [("17 4 * * *", True)]
     assert job.steps[0].callable == "liberty.licensing.usage:send_usage_report"
     assert builtin_jobs(_settings(tmp_path, key="", seed=False)) == []      # the open framework: no key, no report, no job
     assert builtin_jobs(_settings(tmp_path, key="   ", seed=False)) == []
@@ -86,7 +86,7 @@ def test_load_jobs_adds_a_built_in_unless_the_file_has_it(tmp_path) -> None:
     path.write_text(path.read_text() + f'\n[[jobs]]\nid = "{USAGE_JOB_ID}"\nenabled = false\nschedule = "0 6 * * 1"\n'
                     '[[jobs.steps]]\ntype = "python"\nname = "send"\ncallable = "liberty.licensing.usage:send_usage_report"\n')
     mine = load_jobs(path, builtins=builtins).get(USAGE_JOB_ID)
-    assert mine.enabled is False and mine.schedule == "0 6 * * 1"
+    assert [(s.schedule, s.enabled) for s in mine.schedules] == [("0 6 * * 1", False)]
     assert [j.id for j in load_jobs(path, builtins=builtins).jobs()].count(USAGE_JOB_ID) == 1
     # no jobs.toml at all: the built-in alone
     assert [j.id for j in load_jobs(tmp_path / "none.toml", builtins=builtins).jobs()] == [USAGE_JOB_ID]
@@ -128,7 +128,7 @@ def test_the_job_sends_the_report_and_shows_it(tmp_path, lms, monkeypatch) -> No
     with TestClient(app) as client:
         h = _h(client, "admin")
         listed = {j["id"]: j for j in client.get("/admin/jobs", headers=h).json()["jobs"]}
-        assert USAGE_JOB_ID in listed and listed[USAGE_JOB_ID]["enabled"] is True                     # visible like any job
+        assert USAGE_JOB_ID in listed and listed[USAGE_JOB_ID]["scheduled"] is True                     # visible like any job
 
         run_id = client.post(f"/admin/jobs/{USAGE_JOB_ID}/run", headers=h, json={}).json()["run_id"]
         detail = _finished(client, h, run_id)
@@ -166,12 +166,12 @@ def test_pausing_the_built_in_job_writes_it_into_jobs_toml(tmp_path, lms) -> Non
         r = client.post(f"/admin/jobs/{USAGE_JOB_ID}/enabled", headers=h, json={"enabled": False})
         assert r.status_code == 200 and r.json() == {"job_id": USAGE_JOB_ID, "enabled": False, "next_run": None}
         written = {j["id"]: j for j in tomllib.loads(path.read_text())["jobs"]}
-        assert written[USAGE_JOB_ID]["enabled"] is False and written[USAGE_JOB_ID]["steps"][0]["callable"] == "liberty.licensing.usage:send_usage_report"
+        assert written[USAGE_JOB_ID]["schedules"][0]["enabled"] is False and written[USAGE_JOB_ID]["steps"][0]["callable"] == "liberty.licensing.usage:send_usage_report"
         assert len(written) == len(tomllib.loads(_JOBS_TOML)["jobs"]) + 1                              # the other jobs untouched
         # a reload reads the file's version: still paused, still listed once
         assert client.post("/admin/jobs/reload", headers=h).status_code == 200
         listed = [j for j in client.get("/admin/jobs", headers=h).json()["jobs"] if j["id"] == USAGE_JOB_ID]
-        assert len(listed) == 1 and listed[0]["enabled"] is False
+        assert len(listed) == 1 and listed[0]["scheduled"] is False
         assert client.post(f"/admin/jobs/{USAGE_JOB_ID}/enabled", headers=h, json={"enabled": True}).json()["enabled"] is True
         # a job that is neither in the file nor built in is still refused
         assert client.post("/admin/jobs/ghost/enabled", headers=h, json={"enabled": False}).status_code == 404
